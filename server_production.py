@@ -409,47 +409,35 @@ def get_status(task_id):
 
     Returns:
         {
-            'status': 'pending' | 'processing' | 'complete' | 'failed',
-            'progress': 0-100,
-            'message': str
+            'state': 'PENDING' | 'STARTED' | 'PROCESSING' | 'SUCCESS' | 'FAILURE',
+            'progress': str,
+            'result': { 'result_url': str } (if SUCCESS)
         }
     """
     from celery.result import AsyncResult
 
     task = AsyncResult(task_id, app=celery)
 
+    response = {
+        'state': task.state
+    }
+
     if task.state == 'PENDING':
-        response = {
-            'status': 'pending',
-            'progress': 0,
-            'message': 'Task is waiting in queue'
-        }
+        response['progress'] = 'Task is waiting in queue'
     elif task.state == 'STARTED':
         info = task.info or {}
-        response = {
-            'status': 'processing',
-            'progress': info.get('progress', 0),
-            'message': info.get('status', 'Processing')
-        }
+        response['progress'] = info.get('status', 'Processing')
     elif task.state == 'PROCESSING':
-        response = {
-            'status': 'processing',
-            'progress': task.info.get('progress', 0),
-            'message': task.info.get('status', 'Processing')
-        }
+        response['progress'] = task.info.get('status', 'Processing')
     elif task.state == 'SUCCESS':
-        response = {
-            'status': 'complete',
-            'progress': 100,
-            'message': 'Processing complete'
+        # task.result is the path returned from process_video_task
+        result_path = task.result
+        filename = os.path.basename(result_path)
+        response['result'] = {
+            'result_url': f'/results/{filename}'
         }
-    else:
-        # FAILURE or other error state
-        response = {
-            'status': 'failed',
-            'progress': 0,
-            'message': str(task.info)
-        }
+    elif task.state == 'FAILURE':
+        response['error'] = str(task.info)
 
     return jsonify(response)
 
@@ -696,6 +684,39 @@ def download_sora():
             'status': 'error',
             'message': str(e)
         }), 500
+
+
+@app.route('/api/process', methods=['POST'])
+def process_video():
+    """
+    Process video to remove watermarks
+
+    Request: { "task_id": "uuid-from-download" }
+    Response: { "status": "success", "task_id": "celery-task-id" }
+    """
+    try:
+        data = request.get_json()
+        task_id = data.get('task_id')
+
+        if not task_id:
+            return jsonify({'status': 'error', 'message': 'No task_id provided'}), 400
+
+        # Get video path from task_id
+        video_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
+
+        if not os.path.exists(video_path):
+            return jsonify({'status': 'error', 'message': 'Video not found'}), 404
+
+        # Queue processing task
+        task = process_video_task.delay(video_path)
+
+        return jsonify({
+            'status': 'success',
+            'task_id': task.id
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/uploads/<filename>')

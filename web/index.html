@@ -303,6 +303,10 @@
                     <div class="preview-container" id="previewContainer">
                         <img id="previewImage" class="preview-image" style="display: none;">
                         <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
+                        <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Remove Watermark</button>
+                        <div id="processingStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 8px; text-align: center;">
+                            <p id="statusText">Processing...</p>
+                        </div>
                     </div>
 
                     <div class="info-box">
@@ -429,8 +433,12 @@
                     const videoElem = document.getElementById('previewVideo');
                     videoElem.src = data.video_url;
                     videoElem.style.display = 'block';
+                    videoElem.dataset.taskId = data.task_id;
                     document.getElementById('previewImage').style.display = 'none';
                     previewContainer.classList.add('active');
+
+                    // Show process button
+                    document.getElementById('processBtn').style.display = 'block';
 
                     alert('Video loaded successfully! Ready to remove watermark.');
                 } else {
@@ -441,6 +449,76 @@
             } finally {
                 btn.textContent = 'Load from URL';
                 btn.disabled = false;
+            }
+        });
+
+        // Process video (remove watermark)
+        document.getElementById('processBtn').addEventListener('click', async () => {
+            const videoElem = document.getElementById('previewVideo');
+            const taskId = videoElem.dataset.taskId;
+
+            if (!taskId) {
+                alert('No video loaded');
+                return;
+            }
+
+            const btn = document.getElementById('processBtn');
+            const statusDiv = document.getElementById('processingStatus');
+            const statusText = document.getElementById('statusText');
+
+            btn.style.display = 'none';
+            statusDiv.style.display = 'block';
+            statusText.textContent = 'Processing video with AI...';
+
+            try {
+                // Start processing
+                const response = await fetch('/api/process', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    const processTaskId = data.task_id;
+
+                    // Poll for status
+                    const checkStatus = async () => {
+                        const statusResponse = await fetch(`/api/status/${processTaskId}`);
+                        const statusData = await statusResponse.json();
+
+                        if (statusData.state === 'SUCCESS') {
+                            statusText.textContent = '✅ Done! Downloading...';
+
+                            // Show download link
+                            const downloadLink = document.createElement('a');
+                            downloadLink.href = statusData.result.result_url;
+                            downloadLink.download = 'cleaned_video.mp4';
+                            downloadLink.textContent = 'Download Cleaned Video';
+                            downloadLink.style.cssText = 'display: block; margin-top: 1rem; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; text-align: center; font-weight: 600;';
+
+                            statusDiv.appendChild(downloadLink);
+
+                            // Update video preview
+                            videoElem.src = statusData.result.result_url;
+                        } else if (statusData.state === 'FAILURE') {
+                            statusText.textContent = '❌ Error: ' + (statusData.error || 'Processing failed');
+                            btn.style.display = 'block';
+                        } else {
+                            statusText.textContent = 'Processing... ' + (statusData.progress || '');
+                            setTimeout(checkStatus, 2000);
+                        }
+                    };
+
+                    checkStatus();
+                } else {
+                    statusText.textContent = '❌ Error: ' + (data.message || 'Failed to start processing');
+                    btn.style.display = 'block';
+                }
+            } catch (error) {
+                statusText.textContent = '❌ Error: ' + error.message;
+                btn.style.display = 'block';
             }
         });
     </script>
