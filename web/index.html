@@ -410,7 +410,7 @@
 
             try {
                 // Detect if it's a Sora URL
-                const isSora = url.includes('openai.com/sora') || url.includes('sora.com');
+                const isSora = url.includes('openai.com/sora') || url.includes('sora.chatgpt.com') || url.includes('sora.com');
                 const endpoint = isSora ? '/api/download-sora' : '/api/download-from-url';
 
                 console.log(`Using endpoint: ${endpoint} for URL: ${url}`);
