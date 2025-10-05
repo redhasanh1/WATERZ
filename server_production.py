@@ -653,7 +653,8 @@ def download_sora():
                 video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
 
                 if video_urls:
-                    video_src = video_urls[0]
+                    import html
+                    video_src = html.unescape(video_urls[0])  # Decode &amp; to &
                     print(f"✅ Found video URL in page content: {video_src}")
                 else:
                     browser.close()
@@ -680,29 +681,51 @@ def download_sora():
 
                 print(f"⬇️  Downloading video...")
 
-                # Download using Playwright's request context (preserves cookies/auth)
-                response = page.request.get(video_src)
+                # Download using Playwright's request context with retry logic
+                max_retries = 3
+                retry_delay = 3
 
-                if response.ok:
-                    with open(output_path, 'wb') as f:
-                        f.write(response.body())
+                for retry in range(max_retries):
+                    try:
+                        if retry > 0:
+                            print(f"🔄 Retry attempt {retry}/{max_retries-1}...")
+                            time.sleep(retry_delay)
+                        else:
+                            # Small delay before first attempt to avoid rate limiting
+                            time.sleep(1)
 
-                    file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
-                    print(f"✅ Downloaded successfully! Size: {file_size:.2f} MB")
+                        response = page.request.get(video_src)
 
-                    browser.close()
+                        if response.ok:
+                            with open(output_path, 'wb') as f:
+                                f.write(response.body())
 
-                    return jsonify({
-                        'status': 'success',
-                        'task_id': task_id,
-                        'video_url': f'/uploads/{task_id}.mp4'
-                    })
-                else:
-                    browser.close()
-                    return jsonify({
-                        'status': 'error',
-                        'message': f'Download failed: HTTP {response.status}'
-                    }), 500
+                            file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
+                            print(f"✅ Downloaded successfully! Size: {file_size:.2f} MB")
+
+                            browser.close()
+
+                            return jsonify({
+                                'status': 'success',
+                                'task_id': task_id,
+                                'video_url': f'/uploads/{task_id}.mp4'
+                            })
+                        else:
+                            print(f"⚠️  Download failed: HTTP {response.status}")
+                            if retry == max_retries - 1:
+                                browser.close()
+                                return jsonify({
+                                    'status': 'error',
+                                    'message': f'Download failed after {max_retries} attempts: HTTP {response.status}'
+                                }), 500
+                    except Exception as download_error:
+                        print(f"⚠️  Download error: {download_error}")
+                        if retry == max_retries - 1:
+                            browser.close()
+                            return jsonify({
+                                'status': 'error',
+                                'message': f'Download failed after {max_retries} attempts: {str(download_error)}'
+                            }), 500
             else:
                 browser.close()
                 return jsonify({

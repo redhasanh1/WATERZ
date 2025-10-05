@@ -64,39 +64,46 @@ def draw_rectangle(event, x, y, flags, param):
 
 print("\nInstructions:")
 print("1. Draw a box around the Sora watermark")
-print("2. Press 'Enter' to save and go to NEXT image")
+print("2. Press 'SPACEBAR' to save and go to NEXT image")
 print("3. Press 'S' to skip this image (no watermark)")
 print("4. Press 'R' to redraw current image")
 print("5. Press 'Q' to quit")
 print()
 
-cv2.namedWindow('Label Sora Watermark', cv2.WINDOW_NORMAL)
-cv2.resizeWindow('Label Sora Watermark', 1000, 700)
+cv2.namedWindow('Label Sora Watermark', cv2.WINDOW_AUTOSIZE)
 cv2.setMouseCallback('Label Sora Watermark', draw_rectangle)
 
 # Label each image
 labeled_count = 0
 
 for idx, img_path in enumerate(image_files):
-    print(f"\n[{idx+1}/{len(image_files)}] {os.path.basename(img_path)}")
+    img_name = os.path.basename(img_path)
+    label_name = os.path.splitext(img_name)[0] + '.txt'
+    label_path = os.path.join(labels_dir, label_name)
+
+    # Skip if already labeled
+    if os.path.exists(label_path):
+        print(f"\n[{idx+1}/{len(image_files)}] {img_name} - ✅ Already labeled, skipping...")
+        continue
+
+    print(f"\n[{idx+1}/{len(image_files)}] {img_name}")
 
     current_image = cv2.imread(img_path)
     if current_image is None:
         print("  ❌ Failed to load, skipping...")
         continue
 
-    h, w = current_image.shape[:2]
+    orig_h, orig_w = current_image.shape[:2]
 
-    # Resize to fit screen (max 1000 width)
-    max_width = 1000
-    scale = max_width / w
-    new_w = int(w * scale)
-    new_h = int(h * scale)
+    # Resize to fit screen (max 600 width to fit on screen)
+    max_width = 600
+    scale = max_width / orig_w
+    new_w = int(orig_w * scale)
+    new_h = int(orig_h * scale)
     display_image = cv2.resize(current_image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-    # Store original dimensions for YOLO labels
-    orig_h, orig_w = h, w
     h, w = display_image.shape[:2]
+    scale = w / orig_w  # Scale factor for converting bbox back to original
 
     bbox = None
     first_image = display_image.copy()
@@ -106,14 +113,22 @@ for idx, img_path in enumerate(image_files):
     while True:
         key = cv2.waitKey(1) & 0xFF
 
-        if key == 13:  # Enter - save and next
+        if key == 32:  # Spacebar - save and next
             if bbox:
-                # Convert bbox to YOLO format (use ORIGINAL image dimensions)
+                # Convert bbox from display coords to original coords, then YOLO format
                 x1, y1, x2, y2 = bbox
-                x_center = ((x1 + x2) / 2) / orig_w
-                y_center = ((y1 + y2) / 2) / orig_h
-                width_norm = (x2 - x1) / orig_w
-                height_norm = (y2 - y1) / orig_h
+
+                # Scale back to original image coordinates
+                x1_orig = x1 / scale
+                y1_orig = y1 / scale
+                x2_orig = x2 / scale
+                y2_orig = y2 / scale
+
+                # Convert to YOLO format (normalized 0-1)
+                x_center = ((x1_orig + x2_orig) / 2) / orig_w
+                y_center = ((y1_orig + y2_orig) / 2) / orig_h
+                width_norm = (x2_orig - x1_orig) / orig_w
+                height_norm = (y2_orig - y1_orig) / orig_h
 
                 # Save label
                 img_name = os.path.basename(img_path)

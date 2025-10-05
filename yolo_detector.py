@@ -25,6 +25,8 @@ class YOLOWatermarkDetector:
                 # Try to use TensorRT engine first (FAST!)
                 tensorrt_paths = [
                     'runs/detect/new_sora_watermark/weights/best.engine',  # NEW trained model
+                    '../runs/detect/new_sora_watermark/weights/best.engine',
+                    'D:/github/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.engine',
                     'runs/detect/sora_watermark/weights/best.engine',      # Old model
                     'yolov8n.engine',
                 ]
@@ -44,9 +46,13 @@ class YOLOWatermarkDetector:
                     print("⚠️  TensorRT engine not found, using .pt model (slower)")
 
                     # Try to use trained Sora watermark model first
-                    # Check multiple possible paths
+                    # Check multiple possible paths (prioritize new_sora_watermark)
                     possible_paths = [
-                        'runs/detect/sora_watermark/weights/best.pt',
+                        'runs/detect/new_sora_watermark/weights/best.pt',  # NEW trained model
+                        '../runs/detect/new_sora_watermark/weights/best.pt',
+                        'D:/github/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.pt',
+                        '/workspaces/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.pt',
+                        'runs/detect/sora_watermark/weights/best.pt',  # Old model fallback
                         '../runs/detect/sora_watermark/weights/best.pt',
                         'D:/github/RoomFinderAI/runs/detect/sora_watermark/weights/best.pt',
                         '/workspaces/RoomFinderAI/runs/detect/sora_watermark/weights/best.pt',
