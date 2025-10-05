@@ -618,17 +618,23 @@ def download_sora():
             page.goto(url, wait_until='networkidle', timeout=60000)
 
             print("⏳ Waiting for page to load...")
-            time.sleep(3)
+            time.sleep(5)
 
             # Check if Cloudflare challenge appears
             if "cloudflare" in page.content().lower() or "just a moment" in page.content().lower():
                 print("🔄 Cloudflare detected - waiting for it to resolve...")
-                time.sleep(5)
+                time.sleep(8)
 
             print("🔍 Looking for video element...")
 
-            # Find video tag
-            video_element = page.query_selector('video')
+            # Wait for video element to appear (try multiple times)
+            video_element = None
+            for attempt in range(10):
+                video_element = page.query_selector('video')
+                if video_element:
+                    break
+                print(f"⏳ Attempt {attempt + 1}/10 - waiting for video to load...")
+                time.sleep(2)
 
             if video_element:
                 video_src = video_element.get_attribute('src')
@@ -690,6 +696,18 @@ def download_sora():
             'status': 'error',
             'message': str(e)
         }), 500
+
+
+@app.route('/uploads/<filename>')
+def serve_upload(filename):
+    """Serve uploaded video files"""
+    return send_file(os.path.join(UPLOAD_DIR, filename))
+
+
+@app.route('/results/<filename>')
+def serve_result(filename):
+    """Serve processed result files"""
+    return send_file(os.path.join(RESULT_DIR, filename))
 
 
 @app.route('/api/stats', methods=['GET'])
