@@ -304,8 +304,12 @@
                         <img id="previewImage" class="preview-image" style="display: none;">
                         <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
                         <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Remove Watermark</button>
-                        <div id="processingStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 8px; text-align: center;">
-                            <p id="statusText">Processing...</p>
+                        <div id="processingStatus" style="display: none; margin-top: 1rem; padding: 1.5rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px; text-align: center;">
+                            <p id="statusText" style="margin-bottom: 1rem; font-weight: 600;">Processing...</p>
+                            <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden;">
+                                <div id="progressBar" style="width: 0%; height: 100%; background: var(--gradient-primary); transition: width 0.3s ease;"></div>
+                            </div>
+                            <p id="progressPercent" style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">0%</p>
                         </div>
                     </div>
 
@@ -465,10 +469,14 @@
             const btn = document.getElementById('processBtn');
             const statusDiv = document.getElementById('processingStatus');
             const statusText = document.getElementById('statusText');
+            const progressBar = document.getElementById('progressBar');
+            const progressPercent = document.getElementById('progressPercent');
 
             btn.style.display = 'none';
             statusDiv.style.display = 'block';
-            statusText.textContent = 'Processing video with AI...';
+            statusText.textContent = 'Starting AI processing...';
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
 
             try {
                 // Start processing
@@ -489,7 +497,9 @@
                         const statusData = await statusResponse.json();
 
                         if (statusData.state === 'SUCCESS') {
-                            statusText.textContent = '✅ Done! Downloading...';
+                            progressBar.style.width = '100%';
+                            progressPercent.textContent = '100%';
+                            statusText.textContent = '✅ Processing complete!';
 
                             // Show download link
                             const downloadLink = document.createElement('a');
@@ -506,7 +516,17 @@
                             statusText.textContent = '❌ Error: ' + (statusData.error || 'Processing failed');
                             btn.style.display = 'block';
                         } else {
-                            statusText.textContent = 'Processing... ' + (statusData.progress || '');
+                            // Extract progress percentage from status message
+                            const progressText = statusData.progress || '';
+                            statusText.textContent = progressText;
+
+                            // Try to extract percentage from backend state
+                            if (statusData.state === 'PROCESSING' && statusData.info) {
+                                const percent = statusData.info.progress || 0;
+                                progressBar.style.width = percent + '%';
+                                progressPercent.textContent = percent + '%';
+                            }
+
                             setTimeout(checkStatus, 2000);
                         }
                     };

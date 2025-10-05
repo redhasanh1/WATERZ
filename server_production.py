@@ -424,18 +424,28 @@ def get_status(task_id):
 
     if task.state == 'PENDING':
         response['progress'] = 'Task is waiting in queue'
+        response['info'] = {'progress': 0}
     elif task.state == 'STARTED':
         info = task.info or {}
         response['progress'] = info.get('status', 'Processing')
+        response['info'] = info
     elif task.state == 'PROCESSING':
-        response['progress'] = task.info.get('status', 'Processing')
+        info = task.info or {}
+        response['progress'] = info.get('status', 'Processing')
+        response['info'] = info
     elif task.state == 'SUCCESS':
-        # task.result is the path returned from process_video_task
-        result_path = task.result
+        # task.result is a dict with 'path' and 'metadata'
+        result_data = task.result
+        if isinstance(result_data, dict):
+            result_path = result_data.get('path', result_data)
+        else:
+            result_path = result_data
         filename = os.path.basename(result_path)
         response['result'] = {
             'result_url': f'/results/{filename}'
         }
+        if isinstance(result_data, dict) and 'metadata' in result_data:
+            response['metadata'] = result_data['metadata']
     elif task.state == 'FAILURE':
         response['error'] = str(task.info)
 
@@ -617,6 +627,8 @@ def download_sora():
 
             # Wait for video element to appear (try multiple times)
             video_element = None
+            video_src = None
+
             for attempt in range(10):
                 video_element = page.query_selector('video')
                 if video_element:
@@ -624,59 +636,76 @@ def download_sora():
                 print(f"⏳ Attempt {attempt + 1}/10 - waiting for video to load...")
                 time.sleep(2)
 
-            if video_element:
+            # If no video tag, try to intercept network requests for video URLs
+            if not video_element:
+                print("🔍 No video tag found, checking page content for video URLs...")
+
+                # Take screenshot for debugging
+                screenshot_path = os.path.join(TEMP_DIR, f'debug_{task_id}.png')
+                page.screenshot(path=screenshot_path)
+                print(f"📸 Screenshot saved to {screenshot_path}")
+
+                # Try to find video URLs in page content
+                content = page.content()
+                import re
+                video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+
+                if video_urls:
+                    video_src = video_urls[0]
+                    print(f"✅ Found video URL in page content: {video_src}")
+                else:
+                    browser.close()
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'No video element found. Screenshot saved to {screenshot_path}'
+                    }), 404
+            else:
                 video_src = video_element.get_attribute('src')
                 if not video_src:
                     source = page.query_selector('video source')
                     if source:
                         video_src = source.get_attribute('src')
 
-                if video_src:
-                    print(f"✅ Found video source: {video_src}")
+            if video_src:
+                print(f"✅ Found video source: {video_src}")
 
-                    # Make absolute URL if relative
-                    if video_src.startswith('//'):
-                        video_src = 'https:' + video_src
-                    elif video_src.startswith('/'):
-                        from urllib.parse import urljoin
-                        video_src = urljoin(url, video_src)
+                # Make absolute URL if relative
+                if video_src.startswith('//'):
+                    video_src = 'https:' + video_src
+                elif video_src.startswith('/'):
+                    from urllib.parse import urljoin
+                    video_src = urljoin(url, video_src)
 
-                    print(f"⬇️  Downloading video...")
+                print(f"⬇️  Downloading video...")
 
-                    # Download using Playwright's request context (preserves cookies/auth)
-                    response = page.request.get(video_src)
+                # Download using Playwright's request context (preserves cookies/auth)
+                response = page.request.get(video_src)
 
-                    if response.ok:
-                        with open(output_path, 'wb') as f:
-                            f.write(response.body())
+                if response.ok:
+                    with open(output_path, 'wb') as f:
+                        f.write(response.body())
 
-                        file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
-                        print(f"✅ Downloaded successfully! Size: {file_size:.2f} MB")
+                    file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
+                    print(f"✅ Downloaded successfully! Size: {file_size:.2f} MB")
 
-                        browser.close()
+                    browser.close()
 
-                        return jsonify({
-                            'status': 'success',
-                            'task_id': task_id,
-                            'video_url': f'/uploads/{task_id}.mp4'
-                        })
-                    else:
-                        browser.close()
-                        return jsonify({
-                            'status': 'error',
-                            'message': f'Download failed: HTTP {response.status}'
-                        }), 500
+                    return jsonify({
+                        'status': 'success',
+                        'task_id': task_id,
+                        'video_url': f'/uploads/{task_id}.mp4'
+                    })
                 else:
                     browser.close()
                     return jsonify({
                         'status': 'error',
-                        'message': 'Could not find video source URL'
-                    }), 404
+                        'message': f'Download failed: HTTP {response.status}'
+                    }), 500
             else:
                 browser.close()
                 return jsonify({
                     'status': 'error',
-                    'message': 'No video element found on page'
+                    'message': 'Could not find video source URL'
                 }), 404
 
     except Exception as e:
