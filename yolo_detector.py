@@ -1,0 +1,177 @@
+import sys
+sys.path.insert(0, 'python_packages')
+
+import cv2
+import numpy as np
+
+class YOLOWatermarkDetector:
+    def __init__(self, model_path=None):
+        """
+        Initialize YOLOv8 watermark detector
+
+        Args:
+            model_path: Path to custom YOLOv8 model, or None to use trained Sora model
+        """
+        try:
+            print("Loading YOLOv8 watermark detection model...")
+            from ultralytics import YOLO
+            import os
+
+            if model_path:
+                # Use custom model
+                self.model = YOLO(model_path)
+                print(f"✅ Loaded custom model: {model_path}")
+            else:
+                # Try to use trained Sora watermark model first
+                # Check multiple possible paths
+                possible_paths = [
+                    'runs/detect/sora_watermark/weights/best.pt',
+                    '../runs/detect/sora_watermark/weights/best.pt',
+                    'D:/github/RoomFinderAI/runs/detect/sora_watermark/weights/best.pt',
+                    '/workspaces/RoomFinderAI/runs/detect/sora_watermark/weights/best.pt',
+                ]
+
+                sora_model = None
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        sora_model = path
+                        break
+
+                if sora_model:
+                    print("Loading trained Sora watermark model...")
+                    self.model = YOLO(sora_model)
+                    print(f"✅ Loaded trained Sora model: {sora_model}")
+                else:
+                    print("⚠️  Trained Sora model not found!")
+                    print("Checked paths:")
+                    for p in possible_paths:
+                        print(f"  - {p}")
+                    print("\nRun TRAIN_YOLO.bat to train the model first")
+                    print("\nFalling back to generic watermark detector...")
+
+                    # Try to download from Hugging Face
+                    try:
+                        from huggingface_hub import hf_hub_download
+
+                        model_file = hf_hub_download(
+                            repo_id="qfisch/yolov8n-watermark-detection",
+                            filename="best.pt"
+                        )
+                        self.model = YOLO(model_file)
+                        print("✅ Loaded qfisch/yolov8n-watermark-detection model")
+
+                    except Exception as e:
+                        print(f"Could not download from HuggingFace: {e}")
+                        print("Falling back to YOLOv8n base model")
+                        self.model = YOLO('yolov8n.pt')
+
+            self.use_yolo = True
+            print("✅ YOLOv8 ready for watermark detection!")
+
+        except Exception as e:
+            print(f"❌ Could not load YOLOv8: {e}")
+            print("Will use fallback detection")
+            self.use_yolo = False
+
+    def detect(self, image, confidence_threshold=0.25, padding=30):
+        """
+        Detect watermarks in image
+
+        Args:
+            image: numpy array (H, W, 3) BGR
+            confidence_threshold: Minimum confidence for detections (0-1)
+            padding: Pixels to add around detected region
+
+        Returns:
+            List of bounding boxes [(x1, y1, x2, y2), ...] or empty list
+        """
+        if not self.use_yolo:
+            return []
+
+        h, w = image.shape[:2]
+
+        # Run YOLOv8 detection
+        results = self.model(image, conf=confidence_threshold, verbose=False)
+
+        bboxes = []
+
+        for result in results:
+            boxes = result.boxes
+
+            for box in boxes:
+                # Get bounding box coordinates
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+
+                # Add padding
+                x1 = max(0, int(x1) - padding)
+                y1 = max(0, int(y1) - padding)
+                x2 = min(w, int(x2) + padding)
+                y2 = min(h, int(y2) + padding)
+
+                conf = float(box.conf[0])
+
+                bboxes.append({
+                    'bbox': (x1, y1, x2, y2),
+                    'confidence': conf
+                })
+
+                print(f"  Detected watermark at ({x1},{y1})-({x2},{y2}) confidence: {conf:.2%}")
+
+        return bboxes
+
+    def create_mask(self, image, detections):
+        """
+        Create binary mask from detections
+
+        Args:
+            image: numpy array (H, W, 3)
+            detections: List of detection dicts from detect()
+
+        Returns:
+            Binary mask (H, W) uint8
+        """
+        h, w = image.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+
+        for det in detections:
+            x1, y1, x2, y2 = det['bbox']
+            mask[y1:y2, x1:x2] = 255
+
+        return mask
+
+
+# Test
+if __name__ == "__main__":
+    print("Testing YOLOv8 watermark detection...")
+
+    image = cv2.imread('test_frame.jpg')
+    if image is None:
+        print("Need test_frame.jpg!")
+        exit()
+
+    detector = YOLOWatermarkDetector()
+
+    print("\nDetecting watermarks...")
+    detections = detector.detect(image, confidence_threshold=0.3)
+
+    if not detections:
+        print("No watermarks detected!")
+    else:
+        print(f"\nFound {len(detections)} watermark(s)")
+
+        # Create mask
+        mask = detector.create_mask(image, detections)
+        cv2.imwrite('mask_yolo.png', mask)
+        print("Saved mask_yolo.png")
+
+        # Visualize detections
+        vis = image.copy()
+        for det in detections:
+            x1, y1, x2, y2 = det['bbox']
+            conf = det['confidence']
+            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 3)
+            cv2.putText(vis, f"{conf:.2%}", (x1, y1-10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+        cv2.imwrite('detection_yolo.jpg', vis)
+        print("Saved detection_yolo.jpg")

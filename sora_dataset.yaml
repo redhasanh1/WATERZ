@@ -1,0 +1,10 @@
+# YOLOv8 Dataset Config for Sora Watermark Detection
+
+# Paths (relative to this file)
+path: yolo_training  # dataset root dir
+train: images  # train images (relative to 'path')
+val: images    # val images (using same as train for small dataset)
+
+# Classes
+names:
+  0: sora_watermark

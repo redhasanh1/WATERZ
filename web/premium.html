@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WatermarkAI - Remove Watermarks in Seconds | #1 AI-Powered Tool</title>
+    <meta name="description" content="Remove watermarks from images and videos instantly with AI. Trusted by 500K+ creators. Start free - no credit card required.">
+
+    <!-- SEO & Social -->
+    <meta property="og:title" content="WatermarkAI - Remove Watermarks in Seconds">
+    <meta property="og:description" content="AI-powered watermark removal trusted by 500K+ creators worldwide">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5568d3;
+            --secondary: #764ba2;
+            --accent: #a78bfa;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --bg-dark: #0a0a14;
+            --bg-card: #1a1a2e;
+            --bg-glass: rgba(26, 26, 46, 0.8);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0c0;
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* Navigation */
+        .nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(10, 10, 20, 0.95);
+            backdrop-filter: blur(20px);
+            z-index: 1000;
+            border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: var(--text-primary);
+        }
+
+        .btn-nav {
+            padding: 0.6rem 1.5rem;
+            background: var(--gradient-primary);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-nav:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        /* Hero */
+        .hero {
+            position: relative;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 120px 0 60px;
+            overflow: hidden;
+        }
+
+        .hero-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(at 40% 20%, rgba(102, 126, 234, 0.4) 0px, transparent 50%),
+                        radial-gradient(at 80% 0%, rgba(118, 75, 162, 0.3) 0px, transparent 50%),
+                        radial-gradient(at 0% 50%, rgba(167, 139, 250, 0.25) 0px, transparent 50%);
+            opacity: 0.6;
+            z-index: 0;
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1.25rem;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid var(--success);
+            border-radius: 50px;
+            color: var(--success);
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .hero-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: clamp(3rem, 6vw, 5.5rem);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            animation: fadeInUp 0.8s ease-out;
+        }
+
+        .gradient-text {
+            background: var(--gradient-primary);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: gradient-shift 5s ease infinite;
+        }
+
+        @keyframes gradient-shift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .hero-subtitle {
+            font-size: clamp(1.2rem, 2.5vw, 1.5rem);
+            color: var(--text-secondary);
+            margin-bottom: 2.5rem;
+            animation: fadeInUp 0.8s ease-out 0.2s backwards;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .hero-cta {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 3rem;
+            animation: fadeInUp 0.8s ease-out 0.4s backwards;
+        }
+
+        .btn-primary, .btn-secondary {
+            padding: 1.25rem 3rem;
+            font-size: 1.15rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: var(--gradient-primary);
+            color: white;
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 20px 50px rgba(102, 126, 234, 0.5);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 2px solid rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(102, 126, 234, 0.1);
+            border-color: var(--primary);
+        }
+
+        .trust-signals {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            animation: fadeInUp 0.8s ease-out 0.6s backwards;
+        }
+
+        .trust-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .trust-number {
+            font-size: 2rem;
+            font-weight: 800;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .trust-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        /* Stats Section */
+        .stats-section {
+            padding: 80px 0;
+            background: linear-gradient(180deg, transparent, rgba(102, 126, 234, 0.03));
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 3rem;
+            text-align: center;
+        }
+
+        .stat-item h3 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-item p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        /* Pricing Section */
+        .pricing-section {
+            padding: 100px 0;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .section-title {
+            font-size: clamp(2.5rem, 4vw, 3.5rem);
+            font-weight: 800;
+            margin-bottom: 1rem;
+        }
+
+        .section-subtitle {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+
+        .pricing-card {
+            background: var(--bg-card);
+            border: 2px solid rgba(102, 126, 234, 0.15);
+            border-radius: 24px;
+            padding: 3rem 2.5rem;
+            position: relative;
+            transition: all 0.4s;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-10px);
+            border-color: var(--primary);
+            box-shadow: 0 30px 60px rgba(102, 126, 234, 0.3);
+        }
+
+        .pricing-card.popular {
+            border-color: var(--primary);
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+        }
+
+        .popular-badge {
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--gradient-primary);
+            padding: 0.5rem 1.5rem;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: white;
+        }
+
+        .pricing-header h3 {
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .pricing-price {
+            font-size: 3.5rem;
+            font-weight: 800;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 1rem 0;
+        }
+
+        .pricing-price span {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+        }
+
+        .pricing-features {
+            list-style: none;
+            margin: 2rem 0;
+        }
+
+        .pricing-features li {
+            padding: 0.75rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .pricing-features li::before {
+            content: "✓";
+            color: var(--success);
+            font-weight: 800;
+            font-size: 1.25rem;
+        }
+
+        .btn-pricing {
+            width: 100%;
+            padding: 1.25rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-pricing.primary {
+            background: var(--gradient-primary);
+            color: white;
+        }
+
+        .btn-pricing.secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 2px solid rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-pricing:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        /* Email Capture */
+        .email-section {
+            padding: 100px 0;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+        }
+
+        .email-card {
+            max-width: 700px;
+            margin: 0 auto;
+            text-align: center;
+            background: var(--bg-card);
+            padding: 4rem 3rem;
+            border-radius: 24px;
+            border: 1px solid rgba(102, 126, 234, 0.2);
+        }
+
+        .email-form {
+            display: flex;
+            gap: 1rem;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .email-input {
+            flex: 1;
+            min-width: 250px;
+            padding: 1.25rem 1.5rem;
+            background: rgba(102, 126, 234, 0.05);
+            border: 2px solid rgba(102, 126, 234, 0.2);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        .email-input:focus {
+            border-color: var(--primary);
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .email-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        /* Features */
+        .features-section {
+            padding: 100px 0;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 3rem;
+            margin-top: 4rem;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            padding: 3rem 2rem;
+            border-radius: 20px;
+            border: 1px solid rgba(102, 126, 234, 0.1);
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(102, 126, 234, 0.2);
+        }
+
+        .feature-icon {
+            width: 70px;
+            height: 70px;
+            background: var(--gradient-primary);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+            font-size: 2rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        /* API Section */
+        .api-section {
+            padding: 100px 0;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+        }
+
+        .api-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+        }
+
+        .code-block {
+            background: rgba(10, 10, 20, 0.9);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 16px;
+            padding: 2rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            color: #a78bfa;
+            overflow-x: auto;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 4rem 0 2rem;
+            border-top: 1px solid rgba(102, 126, 234, 0.1);
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-links {
+                gap: 1rem;
+            }
+
+            .nav-links a {
+                display: none;
+            }
+
+            .hero {
+                padding: 100px 0 40px;
+            }
+
+            .hero-title {
+                font-size: 2.5rem;
+            }
+
+            .hero-cta {
+                flex-direction: column;
+            }
+
+            .btn-primary, .btn-secondary {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .pricing-grid, .features-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .api-content {
+                grid-template-columns: 1fr;
+            }
+
+            .email-form {
+                flex-direction: column;
+            }
+
+            .email-input {
+                min-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <div class="logo">WatermarkAI</div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#pricing">Pricing</a>
+                <a href="#api">API</a>
+                <button class="btn-nav" onclick="scrollToPricing()">Start Free Trial</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-background"></div>
+        <div class="container">
+            <div class="hero-content">
+                <div class="badge">
+                    ✨ Trusted by 500,000+ creators worldwide
+                </div>
+
+                <h1 class="hero-title">
+                    Remove Watermarks in
+                    <span class="gradient-text">3 Seconds</span>
+                </h1>
+
+                <p class="hero-subtitle">
+                    AI-powered watermark removal for images and videos. No quality loss, no coding required.
+                    <br><strong>Start free - no credit card needed.</strong>
+                </p>
+
+                <div class="hero-cta">
+                    <button class="btn-primary" onclick="scrollToPricing()">
+                        Start Free Trial →
+                    </button>
+                    <button class="btn-secondary" onclick="document.getElementById('demoUpload').click()">
+                        Try Demo
+                    </button>
+                    <input type="file" id="demoUpload" accept="image/*,video/*" style="display: none;">
+                </div>
+
+                <div class="trust-signals">
+                    <div class="trust-item">
+                        <div class="trust-number">500K+</div>
+                        <div class="trust-label">Active Users</div>
+                    </div>
+                    <div class="trust-item">
+                        <div class="trust-number">10M+</div>
+                        <div class="trust-label">Files Processed</div>
+                    </div>
+                    <div class="trust-item">
+                        <div class="trust-number">99.9%</div>
+                        <div class="trust-label">Success Rate</div>
+                    </div>
+                    <div class="trust-item">
+                        <div class="trust-number">4.9/5</div>
+                        <div class="trust-label">User Rating</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="stats-section">
+        <div class="container">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <h3>3s</h3>
+                    <p>Average Processing Time</p>
+                </div>
+                <div class="stat-item">
+                    <h3>100%</h3>
+                    <p>Quality Preservation</p>
+                </div>
+                <div class="stat-item">
+                    <h3>24/7</h3>
+                    <p>API Uptime</p>
+                </div>
+                <div class="stat-item">
+                    <h3>150+</h3>
+                    <p>Countries Served</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section" id="features">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Powerful Features</h2>
+                <p class="section-subtitle">Everything you need to remove watermarks professionally</p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>AI-Powered Detection</h3>
+                    <p>Advanced YOLO-based detection automatically finds and isolates watermarks with 99.9% accuracy</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎨</div>
+                    <h3>Smart Inpainting</h3>
+                    <p>State-of-the-art LaMa technology fills watermarked areas seamlessly, preserving original quality</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Batch Processing</h3>
+                    <p>Process up to 1000 files simultaneously. Perfect for agencies and content creators</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎬</div>
+                    <h3>Video Support</h3>
+                    <p>Remove watermarks from videos up to 4K resolution. Supports MP4, MOV, AVI formats</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h3>Privacy First</h3>
+                    <p>Your files are processed securely and deleted immediately after processing. We never store your data</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🚀</div>
+                    <h3>API Access</h3>
+                    <p>Integrate watermark removal into your apps with our RESTful API. 99.9% uptime guaranteed</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section class="pricing-section" id="pricing">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Simple, Transparent Pricing</h2>
+                <p class="section-subtitle">Choose the perfect plan for your needs. Upgrade or downgrade anytime.</p>
+            </div>
+
+            <div class="pricing-grid">
+                <!-- Free Plan -->
+                <div class="pricing-card">
+                    <div class="pricing-header">
+                        <h3>Starter</h3>
+                        <div class="pricing-price">
+                            $0
+                            <span>/month</span>
+                        </div>
+                        <p style="color: var(--text-secondary);">Perfect for trying out</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>10 images per month</li>
+                        <li>2 videos per month (30s max)</li>
+                        <li>720p resolution</li>
+                        <li>Standard processing speed</li>
+                        <li>Email support</li>
+                    </ul>
+                    <button class="btn-pricing secondary" onclick="signUp('free')">Start Free</button>
+                </div>
+
+                <!-- Pro Plan (Popular) -->
+                <div class="pricing-card popular">
+                    <div class="popular-badge">⭐ MOST POPULAR</div>
+                    <div class="pricing-header">
+                        <h3>Professional</h3>
+                        <div class="pricing-price">
+                            $29
+                            <span>/month</span>
+                        </div>
+                        <p style="color: var(--text-secondary);">Best for creators</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>500 images</strong> per month</li>
+                        <li><strong>50 videos</strong> per month (10 min max)</li>
+                        <li>4K resolution support</li>
+                        <li>Priority processing (3x faster)</li>
+                        <li>Batch upload (up to 100 files)</li>
+                        <li>API access (1000 calls/month)</li>
+                        <li>Priority support</li>
+                        <li>Commercial license</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('pro')">Start Free Trial</button>
+                </div>
+
+                <!-- Enterprise Plan -->
+                <div class="pricing-card">
+                    <div class="pricing-header">
+                        <h3>Enterprise</h3>
+                        <div class="pricing-price">
+                            $299
+                            <span>/month</span>
+                        </div>
+                        <p style="color: var(--text-secondary);">For teams & agencies</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>Unlimited images</strong></li>
+                        <li><strong>Unlimited videos</strong></li>
+                        <li>8K resolution support</li>
+                        <li>Instant processing</li>
+                        <li>Unlimited batch upload</li>
+                        <li>Unlimited API calls</li>
+                        <li>White-label option</li>
+                        <li>Custom model training</li>
+                        <li>Dedicated support team</li>
+                        <li>SLA guarantee (99.9%)</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="contactSales()">Contact Sales</button>
+                </div>
+            </div>
+
+            <p style="text-align: center; margin-top: 3rem; color: var(--text-secondary);">
+                💳 All plans include 14-day free trial • Cancel anytime • No credit card required for free plan
+            </p>
+        </div>
+    </section>
+
+    <!-- Email Capture -->
+    <section class="email-section">
+        <div class="container">
+            <div class="email-card">
+                <h2 class="section-title" style="margin-bottom: 1rem;">Get 50% Off Your First Month</h2>
+                <p class="section-subtitle">Join our newsletter and get exclusive deals, tips, and early access to new features</p>
+
+                <form class="email-form" onsubmit="submitEmail(event)">
+                    <input type="email" class="email-input" placeholder="Enter your email address" required>
+                    <button type="submit" class="btn-primary">Get 50% Off</button>
+                </form>
+
+                <p style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-secondary);">
+                    By signing up, you agree to our Terms of Service and Privacy Policy
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- API Section -->
+    <section class="api-section" id="api">
+        <div class="container">
+            <div class="api-content">
+                <div>
+                    <h2 class="section-title">Developer-Friendly API</h2>
+                    <p class="section-subtitle" style="text-align: left; margin: 1.5rem 0;">
+                        Integrate watermark removal into your applications with our simple RESTful API.
+                    </p>
+                    <ul style="list-style: none; margin: 2rem 0;">
+                        <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
+                            <span style="color: var(--success);">✓</span>
+                            <span>99.9% uptime SLA</span>
+                        </li>
+                        <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
+                            <span style="color: var(--success);">✓</span>
+                            <span>Comprehensive documentation</span>
+                        </li>
+                        <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
+                            <span style="color: var(--success);">✓</span>
+                            <span>SDKs for Python, Node.js, PHP</span>
+                        </li>
+                        <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
+                            <span style="color: var(--success);">✓</span>
+                            <span>Webhook support</span>
+                        </li>
+                    </ul>
+                    <button class="btn-primary" onclick="window.location.href='#pricing'">Get API Access</button>
+                </div>
+
+                <div class="code-block">
+<pre style="margin: 0; color: #a78bfa;">
+<span style="color: #6b7280;">// Example API Request</span>
+<span style="color: #10b981;">const</span> response = <span style="color: #10b981;">await</span> <span style="color: #667eea;">fetch</span>(<span style="color: #f59e0b;">'https://api.watermarkai.com/v1/remove'</span>, {
+  <span style="color: #a78bfa;">method</span>: <span style="color: #f59e0b;">'POST'</span>,
+  <span style="color: #a78bfa;">headers</span>: {
+    <span style="color: #f59e0b;">'Authorization'</span>: <span style="color: #f59e0b;">'Bearer YOUR_API_KEY'</span>,
+    <span style="color: #f59e0b;">'Content-Type'</span>: <span style="color: #f59e0b;">'multipart/form-data'</span>
+  },
+  <span style="color: #a78bfa;">body</span>: formData
+});
+
+<span style="color: #10b981;">const</span> result = <span style="color: #10b981;">await</span> response.<span style="color: #667eea;">json</span>();
+<span style="color: #6b7280;">// Download processed file</span>
+</pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 WatermarkAI. All rights reserved.</p>
+            <p style="margin-top: 0.5rem;">
+                <a href="#" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Terms</a>
+                <a href="#" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Privacy</a>
+                <a href="#" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Contact</a>
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        function scrollToPricing() {
+            document.getElementById('pricing').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function signUp(plan) {
+            alert(`Starting your free trial for ${plan} plan!\n\nIn production, this would:\n1. Open signup modal\n2. Collect email\n3. Process payment (Pro/Enterprise)\n4. Grant immediate access`);
+        }
+
+        function contactSales() {
+            alert('Opening sales contact form...\n\nIn production, this would:\n1. Open contact form\n2. Collect business details\n3. Schedule demo call\n4. Send to sales team');
+        }
+
+        function submitEmail(e) {
+            e.preventDefault();
+            const email = e.target.querySelector('input').value;
+            alert(`Thank you! 50% discount code sent to ${email}\n\nIn production, this would:\n1. Save to email list\n2. Send welcome email with discount\n3. Trigger drip campaign\n4. Track conversion`);
+            e.target.reset();
+        }
+
+        // Demo upload handler
+        document.getElementById('demoUpload').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                alert(`Demo file selected: ${file.name}\n\nIn production, this would:\n1. Upload to server\n2. Process with AI\n3. Show before/after\n4. Prompt to sign up`);
+            }
+        });
+    </script>
+</body>
+</html>
