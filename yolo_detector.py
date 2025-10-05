@@ -24,8 +24,9 @@ class YOLOWatermarkDetector:
             else:
                 # Try to use TensorRT engine first (FAST!)
                 tensorrt_paths = [
+                    'runs/detect/new_sora_watermark/weights/best.engine',  # NEW trained model
+                    'runs/detect/sora_watermark/weights/best.engine',      # Old model
                     'yolov8n.engine',
-                    'runs/detect/sora_watermark/weights/best.engine',
                 ]
 
                 tensorrt_model = None
@@ -61,29 +62,29 @@ class YOLOWatermarkDetector:
                         print("Loading trained Sora watermark model...")
                         self.model = YOLO(sora_model)
                         print(f"✅ Loaded trained Sora model: {sora_model}")
-                else:
-                    print("⚠️  Trained Sora model not found!")
-                    print("Checked paths:")
-                    for p in possible_paths:
-                        print(f"  - {p}")
-                    print("\nRun TRAIN_YOLO.bat to train the model first")
-                    print("\nFalling back to generic watermark detector...")
+                    else:
+                        print("⚠️  Trained Sora model not found!")
+                        print("Checked paths:")
+                        for p in possible_paths:
+                            print(f"  - {p}")
+                        print("\nRun TRAIN_YOLO.bat to train the model first")
+                        print("\nFalling back to generic watermark detector...")
 
-                    # Try to download from Hugging Face
-                    try:
-                        from huggingface_hub import hf_hub_download
+                        # Try to download from Hugging Face
+                        try:
+                            from huggingface_hub import hf_hub_download
 
-                        model_file = hf_hub_download(
-                            repo_id="qfisch/yolov8n-watermark-detection",
-                            filename="best.pt"
-                        )
-                        self.model = YOLO(model_file)
-                        print("✅ Loaded qfisch/yolov8n-watermark-detection model")
+                            model_file = hf_hub_download(
+                                repo_id="qfisch/yolov8n-watermark-detection",
+                                filename="best.pt"
+                            )
+                            self.model = YOLO(model_file)
+                            print("✅ Loaded qfisch/yolov8n-watermark-detection model")
 
-                    except Exception as e:
-                        print(f"Could not download from HuggingFace: {e}")
-                        print("Falling back to YOLOv8n base model")
-                        self.model = YOLO('yolov8n.pt')
+                        except Exception as e:
+                            print(f"Could not download from HuggingFace: {e}")
+                            print("Falling back to YOLOv8n base model")
+                            self.model = YOLO('yolov8n.pt')
 
             self.use_yolo = True
             print("✅ YOLOv8 ready for watermark detection!")

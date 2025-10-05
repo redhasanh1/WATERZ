@@ -1,0 +1,8 @@
+# YOLOv8 Dataset Config for NEW Sora Watermark Training
+
+path: NEW_SORA_TRAINING
+train: images
+val: images
+
+names:
+  0: sora_watermark
