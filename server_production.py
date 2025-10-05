@@ -246,18 +246,13 @@ def process_video_task(self, video_path):
 
         # Setup output (D drive only!)
         filename = os.path.basename(video_path)
-        output_filename = filename.replace('.', '_processed.')
+        name, ext = os.path.splitext(filename)
+        output_filename = f'{name}_processed.avi'
         output_path = os.path.join(RESULT_DIR, output_filename)
 
-        # Try H.264 codec first (better compatibility), fallback to mp4v
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264
+        # Use XVID codec (built-in, works on Windows)
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-        # If H.264 fails, try mp4v
-        if not out.isOpened():
-            print("⚠️  H.264 codec not available, trying mp4v...")
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
         if not out.isOpened():
             raise Exception("Failed to create video writer")

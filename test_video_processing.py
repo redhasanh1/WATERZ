@@ -52,18 +52,12 @@ def process_video(video_path):
     print(f"Duration: {total_frames/fps:.2f} seconds\n")
 
     # Setup output
-    output_path = os.path.join('results', 'test_output.mp4')
+    output_path = os.path.join('results', 'test_output.avi')
     os.makedirs('results', exist_ok=True)
 
-    # Try H.264 codec first (better compatibility), fallback to mp4v
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264
+    # Use XVID codec (built-in, works on Windows)
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-    # If H.264 fails, try mp4v
-    if not out.isOpened():
-        print("⚠️  H.264 codec not available, trying mp4v...")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     if not out.isOpened():
         print("❌ Failed to create video writer!")
