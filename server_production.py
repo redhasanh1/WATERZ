@@ -43,6 +43,7 @@ import numpy as np
 import io
 import time
 import hashlib
+import uuid
 from datetime import datetime
 
 app = Flask(__name__, static_folder='web')
@@ -497,6 +498,198 @@ def get_result(task_id):
     except Exception as e:
         print(f"❌ Error retrieving result: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/download-from-url', methods=['POST'])
+def download_from_url():
+    """
+    Download video from URL (YouTube, TikTok, etc.)
+    Uses yt-dlp to download the video
+
+    Request: { "url": "https://youtube.com/..." }
+    Response: { "status": "success", "task_id": "...", "video_url": "/uploads/..." }
+    """
+    try:
+        data = request.get_json()
+        url = data.get('url')
+
+        if not url:
+            return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
+
+        # Generate unique filename
+        task_id = str(uuid.uuid4())
+        output_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
+
+        # Download using yt-dlp Python module
+        import yt_dlp
+
+        ydl_opts = {
+            'format': 'best[ext=mp4]/best',
+            'outtmpl': output_path,
+            'quiet': False,  # Show errors
+            'no_warnings': False,
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        return jsonify({
+            'status': 'success',
+            'task_id': task_id,
+            'video_url': f'/uploads/{task_id}.mp4'
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/download-sora', methods=['POST'])
+def download_sora():
+    """
+    Download Sora video from OpenAI using Playwright bypass + cookies
+    Bypasses Cloudflare protection using saved cookies
+
+    Request: { "url": "https://openai.com/sora/..." }
+    Response: { "status": "success", "task_id": "...", "video_url": "/uploads/..." }
+    """
+    try:
+        data = request.get_json()
+        url = data.get('url')
+
+        if not url:
+            return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
+
+        # Generate unique filename
+        task_id = str(uuid.uuid4())
+        output_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
+
+        # Import Playwright
+        from playwright.sync_api import sync_playwright
+        import time
+        import json
+
+        # Path to cookies file
+        cookies_file = os.path.join(SCRIPT_DIR, 'downz', 'cookies.json')
+
+        with sync_playwright() as p:
+            print("🚀 Launching browser for Sora download...")
+            browser = p.chromium.launch(
+                headless=True,  # Run headless in production
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process'
+                ]
+            )
+
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080},
+                locale='en-US',
+                timezone_id='America/New_York'
+            )
+
+            # Load cookies if they exist
+            if os.path.exists(cookies_file):
+                print(f"📂 Loading cookies from {cookies_file}...")
+                with open(cookies_file, 'r') as f:
+                    cookies = json.load(f)
+                    context.add_cookies(cookies)
+                print("✅ Cookies loaded!")
+            else:
+                browser.close()
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No cookies found. Run save_cookies.py first to authenticate.'
+                }), 400
+
+            page = context.new_page()
+
+            # Hide webdriver
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
+            print(f"🌐 Navigating to: {url}")
+            page.goto(url, wait_until='networkidle', timeout=60000)
+
+            print("⏳ Waiting for page to load...")
+            time.sleep(3)
+
+            # Check if Cloudflare challenge appears
+            if "cloudflare" in page.content().lower() or "just a moment" in page.content().lower():
+                print("🔄 Cloudflare detected - waiting for it to resolve...")
+                time.sleep(5)
+
+            print("🔍 Looking for video element...")
+
+            # Find video tag
+            video_element = page.query_selector('video')
+
+            if video_element:
+                video_src = video_element.get_attribute('src')
+                if not video_src:
+                    source = page.query_selector('video source')
+                    if source:
+                        video_src = source.get_attribute('src')
+
+                if video_src:
+                    print(f"✅ Found video source: {video_src}")
+
+                    # Make absolute URL if relative
+                    if video_src.startswith('//'):
+                        video_src = 'https:' + video_src
+                    elif video_src.startswith('/'):
+                        from urllib.parse import urljoin
+                        video_src = urljoin(url, video_src)
+
+                    print(f"⬇️  Downloading video...")
+
+                    # Download using Playwright's request context (preserves cookies/auth)
+                    response = page.request.get(video_src)
+
+                    if response.ok:
+                        with open(output_path, 'wb') as f:
+                            f.write(response.body())
+
+                        file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
+                        print(f"✅ Downloaded successfully! Size: {file_size:.2f} MB")
+
+                        browser.close()
+
+                        return jsonify({
+                            'status': 'success',
+                            'task_id': task_id,
+                            'video_url': f'/uploads/{task_id}.mp4'
+                        })
+                    else:
+                        browser.close()
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'Download failed: HTTP {response.status}'
+                        }), 500
+                else:
+                    browser.close()
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'Could not find video source URL'
+                    }), 404
+            else:
+                browser.close()
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No video element found on page'
+                }), 404
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 
 @app.route('/api/stats', methods=['GET'])

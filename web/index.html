@@ -285,16 +285,24 @@
 
                 <div class="demo-card">
                     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-                        <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                        <input type="file" id="fileInput" accept="image/*,video/*" style="display: none;">
                         <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                         </svg>
-                        <h3 class="upload-title">Drop your image here</h3>
+                        <h3 class="upload-title">Drop your file here</h3>
                         <p class="upload-description">or click to browse</p>
                     </div>
 
+                    <div style="text-align: center; margin: 2rem 0; color: var(--text-secondary);">
+                        <p style="margin-bottom: 1rem;">— OR —</p>
+                        <input type="text" id="videoUrl" placeholder="Paste video URL here (YouTube, TikTok, Instagram, etc.)"
+                               style="width: 100%; max-width: 500px; padding: 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
+                        <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Load from URL</button>
+                    </div>
+
                     <div class="preview-container" id="previewContainer">
-                        <img id="previewImage" class="preview-image">
+                        <img id="previewImage" class="preview-image" style="display: none;">
+                        <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
                     </div>
 
                     <div class="info-box">
@@ -374,11 +382,67 @@
         function displayPreview(file) {
             const reader = new FileReader();
             reader.onload = (e) => {
-                previewImage.src = e.target.result;
+                if (file.type.startsWith('image/')) {
+                    previewImage.src = e.target.result;
+                    previewImage.style.display = 'block';
+                    previewVideo.style.display = 'none';
+                } else if (file.type.startsWith('video/')) {
+                    previewVideo.src = e.target.result;
+                    previewVideo.style.display = 'block';
+                    previewImage.style.display = 'none';
+                }
                 previewContainer.classList.add('active');
             };
             reader.readAsDataURL(file);
         }
+
+        // URL loading functionality
+        document.getElementById('loadUrlBtn').addEventListener('click', async () => {
+            const url = document.getElementById('videoUrl').value.trim();
+            if (!url) {
+                alert('Please enter a valid URL');
+                return;
+            }
+
+            const btn = document.getElementById('loadUrlBtn');
+            btn.textContent = 'Loading...';
+            btn.disabled = true;
+
+            try {
+                // Detect if it's a Sora URL
+                const isSora = url.includes('openai.com/sora') || url.includes('sora.com');
+                const endpoint = isSora ? '/api/download-sora' : '/api/download-from-url';
+
+                console.log(`Using endpoint: ${endpoint} for URL: ${url}`);
+
+                // Send URL to backend for downloading
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    // Show preview
+                    const videoElem = document.getElementById('previewVideo');
+                    videoElem.src = data.video_url;
+                    videoElem.style.display = 'block';
+                    document.getElementById('previewImage').style.display = 'none';
+                    previewContainer.classList.add('active');
+
+                    alert('Video loaded successfully! Ready to remove watermark.');
+                } else {
+                    alert('Error: ' + (data.message || 'Failed to load video'));
+                }
+            } catch (error) {
+                alert('Error loading video: ' + error.message);
+            } finally {
+                btn.textContent = 'Load from URL';
+                btn.disabled = false;
+            }
+        });
     </script>
 </body>
 </html>
