@@ -375,33 +375,61 @@
             uploadZone.style.background = 'transparent';
 
             const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('image/')) {
-                displayPreview(file);
+            if (file && (file.type.startsWith('image/') || file.type.startsWith('video/'))) {
+                uploadFile(file);
             }
         });
 
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
-                displayPreview(file);
+                uploadFile(file);
             }
         });
 
-        function displayPreview(file) {
+        async function uploadFile(file) {
+            // Show preview immediately
             const reader = new FileReader();
             reader.onload = (e) => {
                 if (file.type.startsWith('image/')) {
                     previewImage.src = e.target.result;
                     previewImage.style.display = 'block';
-                    previewVideo.style.display = 'none';
+                    document.getElementById('previewVideo').style.display = 'none';
                 } else if (file.type.startsWith('video/')) {
-                    previewVideo.src = e.target.result;
-                    previewVideo.style.display = 'block';
+                    const videoElem = document.getElementById('previewVideo');
+                    videoElem.src = e.target.result;
+                    videoElem.style.display = 'block';
                     previewImage.style.display = 'none';
                 }
                 previewContainer.classList.add('active');
             };
             reader.readAsDataURL(file);
+
+            // Upload to server
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    // Store task_id for processing
+                    const videoElem = document.getElementById('previewVideo');
+                    videoElem.dataset.taskId = data.task_id;
+
+                    // Show process button
+                    document.getElementById('processBtn').style.display = 'block';
+                } else {
+                    alert('Upload failed: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Upload error: ' + error.message);
+            }
         }
 
         // URL loading functionality

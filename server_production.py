@@ -715,6 +715,43 @@ def download_sora():
         }), 500
 
 
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    """
+    Upload video/image file
+
+    Returns: { "status": "success", "task_id": "uuid" }
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+
+        file = request.files['file']
+
+        if file.filename == '':
+            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
+
+        # Generate unique task ID
+        task_id = str(uuid.uuid4())
+
+        # Get file extension
+        ext = os.path.splitext(file.filename)[1] or '.mp4'
+
+        # Save file
+        file_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+        file.save(file_path)
+
+        print(f"✅ File uploaded: {file_path}")
+
+        return jsonify({
+            'status': 'success',
+            'task_id': task_id
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/api/process', methods=['POST'])
 def process_video():
     """
@@ -730,10 +767,15 @@ def process_video():
         if not task_id:
             return jsonify({'status': 'error', 'message': 'No task_id provided'}), 400
 
-        # Get video path from task_id
-        video_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
+        # Find video file with any extension
+        video_path = None
+        for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+            test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+            if os.path.exists(test_path):
+                video_path = test_path
+                break
 
-        if not os.path.exists(video_path):
+        if not video_path:
             return jsonify({'status': 'error', 'message': 'Video not found'}), 404
 
         # Queue processing task
