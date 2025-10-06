@@ -1127,6 +1127,12 @@ def terms_of_service():
     return send_file(os.path.join(app.static_folder, 'terms.html'))
 
 
+@app.route('/ads.txt')
+def ads_txt():
+    """Serve ads.txt file for Google AdSense"""
+    return send_file(os.path.join(app.static_folder, 'ads.txt'), mimetype='text/plain')
+
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """
