@@ -8,25 +8,7 @@ import os
 
 app = Flask(__name__, static_folder='web')
 
-@app.route('/')
-def index():
-    return send_file('web/index.html')
-
-@app.route('/privacy')
-def privacy():
-    return send_file('web/privacy.html')
-
-@app.route('/terms')
-def terms():
-    return send_file('web/terms.html')
-
-@app.route('/ads.txt')
-def ads_txt():
-    """Serve ads.txt for Google AdSense"""
-    ads_file = os.path.join('web', 'ads.txt')
-    if os.path.exists(ads_file):
-        return send_file(ads_file, mimetype='text/plain')
-    return "google.com, pub-5884276468441861, DIRECT, f08c47fec0942fa0", 200, {'Content-Type': 'text/plain'}
+# IMPORTANT: Specific routes MUST come before catch-all routes
 
 @app.route('/tunnel_url.txt')
 def tunnel_url():
@@ -46,6 +28,26 @@ def tunnel_url():
             mimetype='text/plain',
             status=500
         )
+
+@app.route('/ads.txt')
+def ads_txt():
+    """Serve ads.txt for Google AdSense"""
+    ads_file = os.path.join('web', 'ads.txt')
+    if os.path.exists(ads_file):
+        return send_file(ads_file, mimetype='text/plain')
+    return "google.com, pub-5884276468441861, DIRECT, f08c47fec0942fa0", 200, {'Content-Type': 'text/plain'}
+
+@app.route('/')
+def index():
+    return send_file('web/index.html')
+
+@app.route('/privacy')
+def privacy():
+    return send_file('web/privacy.html')
+
+@app.route('/terms')
+def terms():
+    return send_file('web/terms.html')
 
 @app.route('/web/<path:path>')
 def serve_static(path):
