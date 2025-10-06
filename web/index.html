@@ -309,14 +309,21 @@
                         <img id="previewImage" class="preview-image" style="display: none;">
                         <div style="position: relative; display: inline-block;">
                             <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
-                            <div id="downloadHint" style="display: none; position: absolute; top: 10px; right: 10px; background: rgba(102, 126, 234, 0.95); color: white; padding: 1rem 1.5rem; border-radius: 12px; font-weight: 600; font-size: 1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: pulse 2s ease-in-out infinite; z-index: 10;">
-                                <div style="display: flex; align-items: center; gap: 0.8rem;">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                                        <path d="M7 10l5 5 5-5" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <path d="M12 3v12" stroke-linecap="round"/>
-                                    </svg>
-                                    <span>Click ⋮ to Download</span>
-                                </div>
+                            <!-- Curved Arrow SVG pointing to bottom-right -->
+                            <svg id="downloadHint" style="display: none; position: absolute; top: 0; right: -80px; width: 200px; height: 100%; pointer-events: none; z-index: 10;" viewBox="0 0 200 400" preserveAspectRatio="none">
+                                <!-- Curved arrow path -->
+                                <defs>
+                                    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                                        <polygon points="0 0, 10 3, 0 6" fill="#667eea" />
+                                    </marker>
+                                </defs>
+                                <path d="M 50 20 Q 150 200, 50 380" stroke="#667eea" stroke-width="6" fill="none" marker-end="url(#arrowhead)" stroke-dasharray="10,5">
+                                    <animate attributeName="stroke-dashoffset" from="0" to="-15" dur="1s" repeatCount="indefinite"/>
+                                </path>
+                            </svg>
+                            <!-- Text label next to arrow -->
+                            <div id="downloadText" style="display: none; position: absolute; bottom: 10px; right: -250px; background: rgba(102, 126, 234, 0.95); color: white; padding: 0.8rem 1.2rem; border-radius: 12px; font-weight: 600; font-size: 1.1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: pulse 2s ease-in-out infinite; white-space: nowrap; z-index: 10;">
+                                Click ⋮ to Download
                             </div>
                         </div>
                         <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Remove Watermark</button>
@@ -412,12 +419,14 @@
                     previewImage.style.display = 'block';
                     document.getElementById('previewVideo').style.display = 'none';
                     document.getElementById('downloadHint').style.display = 'none';
+                    document.getElementById('downloadText').style.display = 'none';
                 } else if (file.type.startsWith('video/')) {
                     const videoElem = document.getElementById('previewVideo');
                     videoElem.src = e.target.result;
                     videoElem.style.display = 'block';
                     previewImage.style.display = 'none';
                     document.getElementById('downloadHint').style.display = 'block';
+                    document.getElementById('downloadText').style.display = 'block';
                 }
                 previewContainer.classList.add('active');
             };
@@ -492,6 +501,7 @@
 
                     // Show download hint
                     document.getElementById('downloadHint').style.display = 'block';
+                    document.getElementById('downloadText').style.display = 'block';
 
                     alert('Video loaded successfully! Ready to remove watermark.');
                 } else {
@@ -564,6 +574,7 @@
 
                             // Show download hint on video
                             document.getElementById('downloadHint').style.display = 'block';
+                            document.getElementById('downloadText').style.display = 'block';
                         } else if (statusData.state === 'FAILURE') {
                             statusText.textContent = '❌ Error: ' + (statusData.error || 'Processing failed');
                             btn.style.display = 'block';
