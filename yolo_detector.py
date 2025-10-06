@@ -142,7 +142,8 @@ class YOLOWatermarkDetector:
                     'confidence': conf
                 })
 
-                print(f"  Detected watermark at ({x1},{y1})-({x2},{y2}) confidence: {conf:.2%}")
+                # Removed confidence logging - progress shown via task updates instead
+                pass
 
         return bboxes
 

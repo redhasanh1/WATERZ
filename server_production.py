@@ -45,6 +45,10 @@ import time
 import hashlib
 import uuid
 from datetime import datetime
+import redis
+import threading
+import secrets
+import hmac
 
 app = Flask(__name__, static_folder='web')
 CORS(app)
@@ -53,14 +57,21 @@ CORS(app)
 # Configuration - ALL ON D DRIVE
 # ============================================================================
 
-# Redis configuration (for queue + caching)
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+# Security - Generate secret key for session encryption
+SECRET_KEY = os.getenv('SECRET_KEY', secrets.token_hex(32))
+app.config['SECRET_KEY'] = SECRET_KEY
+
+# Redis configuration (for queue + caching) - with password protection
+REDIS_URL = os.getenv('REDIS_URL', 'redis://:watermarkz_secure_2024@localhost:6379/0')
 
 app.config['broker_url'] = REDIS_URL
-app.config['result_backend'] = 'rpc://'  # Use RPC instead of Redis for results
+app.config['result_backend'] = REDIS_URL  # Store results in Redis
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 app.config['UPLOAD_FOLDER'] = UPLOAD_DIR  # D drive only!
 app.config['TEMP_FOLDER'] = TEMP_DIR  # D drive only!
+
+# Rate limiting - prevent abuse
+UPLOAD_RATE_LIMIT = {}  # IP -> (count, timestamp)
 
 # Initialize Celery
 celery = Celery(app.name, broker=app.config['broker_url'], backend=app.config['result_backend'])
@@ -90,6 +101,35 @@ celery.conf.update(
 # Global model instances (lazy loaded)
 detector = None
 inpainter = None
+
+# File cleanup - delete files older than 1 hour
+def cleanup_old_files():
+    """Delete uploaded and processed files older than 1 hour"""
+    import time
+    current_time = time.time()
+    max_age = 3600  # 1 hour
+
+    for directory in [UPLOAD_DIR, RESULT_DIR]:
+        try:
+            for filename in os.listdir(directory):
+                file_path = os.path.join(directory, filename)
+                if os.path.isfile(file_path):
+                    file_age = current_time - os.path.getmtime(file_path)
+                    if file_age > max_age:
+                        os.remove(file_path)
+                        print(f"🗑️  Cleaned up old file: {filename} (age: {file_age/60:.1f} min)")
+        except Exception as e:
+            print(f"⚠️  Cleanup error in {directory}: {e}")
+
+# Schedule cleanup to run every 10 minutes
+import threading
+def schedule_cleanup():
+    cleanup_old_files()
+    threading.Timer(600, schedule_cleanup).start()  # Run every 10 minutes
+
+# Start cleanup scheduler
+threading.Thread(target=schedule_cleanup, daemon=True).start()
+print("🗑️  File cleanup scheduler started (runs every 10 minutes)")
 
 # ============================================================================
 # Model Loading (Shared across workers)
@@ -727,14 +767,44 @@ def download_sora():
         }), 500
 
 
+def check_rate_limit(ip):
+    """Check if IP has exceeded rate limit (10 uploads per hour)"""
+    current_time = time.time()
+
+    if ip in UPLOAD_RATE_LIMIT:
+        count, first_upload_time = UPLOAD_RATE_LIMIT[ip]
+
+        # Reset if hour has passed
+        if current_time - first_upload_time > 3600:
+            UPLOAD_RATE_LIMIT[ip] = (1, current_time)
+            return True
+
+        # Check limit
+        if count >= 10:
+            return False
+
+        UPLOAD_RATE_LIMIT[ip] = (count + 1, first_upload_time)
+        return True
+    else:
+        UPLOAD_RATE_LIMIT[ip] = (1, current_time)
+        return True
+
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
     """
-    Upload video/image file
+    Upload video/image file (rate limited to 10/hour per IP)
 
     Returns: { "status": "success", "task_id": "uuid" }
     """
     try:
+        # Rate limiting
+        client_ip = request.remote_addr
+        if not check_rate_limit(client_ip):
+            return jsonify({
+                'status': 'error',
+                'message': 'Rate limit exceeded. Maximum 10 uploads per hour.'
+            }), 429
+
         if 'file' not in request.files:
             return jsonify({'status': 'error', 'message': 'No file provided'}), 400
 
@@ -793,28 +863,55 @@ def process_video():
         # Queue processing task
         print(f"📤 Queuing video processing task for: {video_path}")
 
-        # Queue task with timeout to prevent hanging
+        # Try direct Redis queue instead of apply_async
+        print("🔄 Attempting to queue task via direct Redis push...")
+
         try:
-            print("🔄 Attempting to queue task...")
+            # Use send_task instead of apply_async - it's non-blocking
+            import json as json_lib
+            import kombu
+            from kombu import Connection
 
-            # Use apply_async with timeout instead of .delay()
-            task = process_video_task.apply_async(
-                args=[video_path],
-                expires=600,  # Task expires after 10 minutes
-                retry=False   # Don't retry on failure
-            )
+            # Create direct connection to Redis
+            with Connection(REDIS_URL, connect_timeout=2) as conn:
+                # Generate task ID
+                task_id = str(uuid.uuid4())
 
-            print(f"✅ Task queued with ID: {task.id}")
+                # Create Celery-compatible message
+                message = {
+                    'id': task_id,
+                    'task': 'watermark.remove_video',  # Must match @celery.task(name=...)
+                    'args': [video_path],
+                    'kwargs': {},
+                    'retries': 0,
+                    'eta': None,
+                    'expires': None,
+                }
 
-            return jsonify({
-                'status': 'success',
-                'task_id': task.id
-            })
-        except Exception as queue_error:
-            print(f"❌ Failed to queue task: {queue_error}")
+                # Send to queue
+                producer = conn.Producer(serializer='json')
+                producer.publish(
+                    json_lib.dumps(message),
+                    exchange='',
+                    routing_key='celery',
+                    content_type='application/json',
+                    content_encoding='utf-8',
+                )
+
+                print(f"✅ Task queued with ID: {task_id}")
+                return jsonify({
+                    'status': 'success',
+                    'task_id': task_id
+                })
+
+        except Exception as e:
+            print(f"❌ Failed to queue task: {e}")
             import traceback
             traceback.print_exc()
-            return jsonify({'status': 'error', 'message': f'Failed to queue task: {str(queue_error)}'}), 500
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to connect to Redis: {str(e)}'
+            }), 500
 
     except Exception as e:
         print(f"❌ Process endpoint error: {e}")
@@ -829,8 +926,44 @@ def serve_upload(filename):
 
 @app.route('/results/<filename>')
 def serve_result(filename):
-    """Serve processed result files"""
-    return send_file(os.path.join(RESULT_DIR, filename))
+    """Serve processed result files and delete after sending"""
+    file_path = os.path.join(RESULT_DIR, filename)
+
+    # Send file with as_attachment to trigger download
+    response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
+
+    # Schedule file deletion after response is sent
+    @response.call_on_close
+    def delete_files():
+        try:
+            # Delete the result file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"🗑️  Deleted result: {filename}")
+
+            # Delete corresponding upload file
+            # Extract original task_id from processed filename
+            original_name = filename.replace('_processed.avi', '.mp4')
+            upload_path = os.path.join(UPLOAD_DIR, original_name)
+            if os.path.exists(upload_path):
+                os.remove(upload_path)
+                print(f"🗑️  Deleted upload: {original_name}")
+        except Exception as e:
+            print(f"⚠️  Error deleting files: {e}")
+
+    return response
+
+
+@app.route('/privacy')
+def privacy_policy():
+    """Serve Privacy Policy page"""
+    return send_file(os.path.join(app.static_folder, 'privacy.html'))
+
+
+@app.route('/terms')
+def terms_of_service():
+    """Serve Terms of Service page"""
+    return send_file(os.path.join(app.static_folder, 'terms.html'))
 
 
 @app.route('/api/stats', methods=['GET'])

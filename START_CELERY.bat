@@ -11,8 +11,11 @@ set XDG_CACHE_HOME=%~dp0cache
 set OPENCV_TEMP_PATH=%~dp0temp
 set PYTHONPATH=%~dp0python_packages
 
+REM Add TensorRT DLLs to PATH
+set PATH=%~dp0python_packages;%PATH%
+
 echo Starting Celery worker (GPU processing)...
 echo Using packages from: %PYTHONPATH%
 echo.
-python -m celery -A server_production.celery worker --loglevel=info --concurrency=2
+python -m celery -A server_production.celery worker --loglevel=info --pool=solo
 pause 
