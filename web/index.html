@@ -408,11 +408,11 @@
         <div class="container">
             <div class="hero-content">
                 <h1 class="hero-title">
-                    Remove <span class="gradient-text">Sora Watermarks</span>
+                    Remove <span class="gradient-text">Watermarks</span>
                     <br>Instantly
                 </h1>
                 <p class="hero-subtitle">
-                    Specialized AI for removing OpenAI Sora watermarks from videos and images.
+                    Advanced AI for removing watermarks from videos and images.
                     <br>High quality results. Fast processing. Professional output.
                 </p>
 
@@ -446,7 +446,7 @@
                     </div>
 
                     <div id="uploadSection" style="opacity: 0.5; pointer-events: none; transition: opacity 0.3s ease;">
-                        <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Sora URL Here</h3>
+                        <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Video URL Here</h3>
 
                         <div style="text-align: center; margin-bottom: 2rem;">
                             <input type="text" id="videoUrl" placeholder="Paste video link"
@@ -517,8 +517,8 @@
                 </div> <!-- End demo-card -->
 
                     <div class="info-box">
-                        <h3>Sora AI Watermark Removal</h3>
-                        <p><strong>Specialized for:</strong> OpenAI Sora watermarks • Works on videos and images</p>
+                        <h3>AI Watermark Removal</h3>
+                        <p><strong>Works on:</strong> Video and image watermarks • All types supported</p>
                         <p style="margin-top: 0.5rem;"><strong>Processing:</strong> Real-time progress updates • High-quality results • Fast processing</p>
                         <p id="systemStatus" style="margin-top: 0.8rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 0.9rem;">
                             <strong>System Status:</strong> <span id="statusIndicator">Checking...</span>
@@ -705,9 +705,8 @@
             progressDiv.style.display = 'block';
 
             try {
-                // Detect if it's a Sora URL
-                const isSora = url.includes('openai.com/sora') || url.includes('sora.chatgpt.com') || url.includes('sora.com');
-                const endpoint = isSora ? '/api/download-sora' : '/api/download-from-url';
+                // Use the download endpoint
+                const endpoint = '/api/download-from-url';
 
                 console.log(`Using endpoint: ${endpoint} for URL: ${url}`);
 
