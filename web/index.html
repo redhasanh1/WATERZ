@@ -354,14 +354,9 @@
                     </div>
 
                     <div class="info-box">
-                        <h3>🎯 Demo Features</h3>
-                        <p>This is a UI demonstration of the AI Watermark Remover interface. The full backend processing requires running the Python Flask/Gradio server with YOLO and LaMa models.</p>
-                        <p style="margin-top: 1rem;"><strong>To use the full application:</strong></p>
-                        <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
-                            <li>Run the Python backend from the watermarkz directory</li>
-                            <li>Access at http://localhost:5000 or http://localhost:7860</li>
-                            <li>Upload images/videos for AI-powered watermark removal</li>
-                        </ul>
+                        <h3>🚀 AI-Powered Watermark Removal</h3>
+                        <p><strong>Technology:</strong> TensorRT YOLO Detection + Optimized LaMa Inpainting (1.5-2x faster with FP16 + CUDA)</p>
+                        <p style="margin-top: 0.5rem;"><strong>Processing:</strong> Real-time progress updates • GPU accelerated • Production-grade speed</p>
                     </div>
                 </div>
 
@@ -600,18 +595,33 @@
                             statusText.textContent = '❌ Error: ' + (statusData.error || 'Processing failed');
                             btn.style.display = 'block';
                         } else {
-                            // Extract progress percentage from status message
-                            const progressText = statusData.progress || '';
-                            statusText.textContent = progressText;
+                            // Update progress with detailed info
+                            if (statusData.info) {
+                                const info = statusData.info;
+                                const percent = info.progress || 0;
+                                const status = info.status || 'Processing...';
 
-                            // Try to extract percentage from backend state
-                            if (statusData.state === 'PROCESSING' && statusData.info) {
-                                const percent = statusData.info.progress || 0;
+                                // Update progress bar
                                 progressBar.style.width = percent + '%';
                                 progressPercent.textContent = percent + '%';
+
+                                // Show detailed status for users
+                                if (status.includes('frame')) {
+                                    statusText.textContent = `🎬 ${status}`;
+                                } else if (status.includes('Loading')) {
+                                    statusText.textContent = `⏳ ${status}`;
+                                } else if (status.includes('Opening')) {
+                                    statusText.textContent = `📂 ${status}`;
+                                } else if (status.includes('Detecting')) {
+                                    statusText.textContent = `🔍 ${status}`;
+                                } else if (status.includes('Removing')) {
+                                    statusText.textContent = `✨ ${status}`;
+                                } else {
+                                    statusText.textContent = `⚙️ ${status}`;
+                                }
                             }
 
-                            setTimeout(checkStatus, 2000);
+                            setTimeout(checkStatus, 1000);
                         }
                     };
 
