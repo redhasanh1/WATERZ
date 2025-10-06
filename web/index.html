@@ -1129,8 +1129,25 @@
         };
 
         // Attach event listeners to both process buttons
-        document.getElementById('processBtn').addEventListener('click', processVideo);
-        document.getElementById('removeWatermarkBtn').addEventListener('click', processVideo);
+        const processBtnElem = document.getElementById('processBtn');
+        const removeWatermarkBtnElem = document.getElementById('removeWatermarkBtn');
+
+        console.log('processBtn element:', processBtnElem);
+        console.log('removeWatermarkBtn element:', removeWatermarkBtnElem);
+
+        if (processBtnElem) {
+            processBtnElem.addEventListener('click', processVideo);
+            console.log('✅ Event listener attached to processBtn');
+        } else {
+            console.error('❌ processBtn not found!');
+        }
+
+        if (removeWatermarkBtnElem) {
+            removeWatermarkBtnElem.addEventListener('click', processVideo);
+            console.log('✅ Event listener attached to removeWatermarkBtn');
+        } else {
+            console.error('❌ removeWatermarkBtn not found!');
+        }
     </script>
 </body>
 </html>
