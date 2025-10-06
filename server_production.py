@@ -808,9 +808,22 @@ def download_from_url():
 
             print("🔍 Extracting video URL...")
 
+            # Collect network requests for video URLs
+            video_urls = []
+
+            def handle_response(response):
+                if '.mp4' in response.url or 'video' in response.headers.get('content-type', ''):
+                    video_urls.append(response.url)
+
+            page.on('response', handle_response)
+
+            # Wait for network activity
+            time.sleep(2)
+
             # Find video URL in page content
             content = page.content()
-            video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+            content_video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+            video_urls.extend(content_video_urls)
 
             if not video_urls:
                 # Try to find video element
@@ -819,8 +832,15 @@ def download_from_url():
                     video_src = video_element.get_attribute('src')
                     if video_src:
                         video_urls = [video_src]
-                except:
-                    pass
+                    else:
+                        # Try source elements
+                        sources = page.locator('video source').all()
+                        for source in sources:
+                            src = source.get_attribute('src')
+                            if src:
+                                video_urls.append(src)
+                except Exception as e:
+                    print(f"⚠️  Error checking video element: {e}")
 
             if video_urls:
                 video_src = html.unescape(video_urls[0])
@@ -844,10 +864,25 @@ def download_from_url():
                     'video_url': f'/uploads/{task_id}.mp4'
                 })
             else:
+                # Save debug screenshot
+                screenshot_path = os.path.join(TEMP_DIR, f'debug_{task_id}.png')
+                page.screenshot(path=screenshot_path)
+                print(f"📸 Debug screenshot saved: {screenshot_path}")
+
+                # Save page HTML for debugging
+                debug_html_path = os.path.join(TEMP_DIR, f'debug_{task_id}.html')
+                with open(debug_html_path, 'w', encoding='utf-8') as f:
+                    f.write(page.content())
+                print(f"📄 Debug HTML saved: {debug_html_path}")
+
                 browser.close()
                 return jsonify({
                     'status': 'error',
-                    'message': 'Could not find video source URL'
+                    'message': 'Could not find video source URL. Debug files saved.',
+                    'debug': {
+                        'screenshot': f'/temp/debug_{task_id}.png',
+                        'html': f'/temp/debug_{task_id}.html'
+                    }
                 }), 404
 
     except Exception as e:
