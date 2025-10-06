@@ -436,22 +436,49 @@ def process_video_task(self, video_path):
             # -c:a aac: encode audio with aac
             # -shortest: match shortest stream duration
 
-            cmd = [
-                'ffmpeg',
-                '-y',  # Overwrite output file
-                '-i', output_path,  # Processed video (no audio)
-                '-i', video_path,   # Original video (with audio)
-                '-map', '0:v',      # Video from processed
-                '-map', '1:a?',     # Audio from original (? = optional, won't fail if no audio)
-                '-c:v', 'libx264',  # Video codec
-                '-preset', 'fast',  # Encoding speed
-                '-crf', '23',       # Quality (lower = better, 23 is good)
-                '-c:a', 'aac',      # Audio codec
-                '-b:a', '192k',     # Audio bitrate
-                '-shortest',        # Match duration to shortest stream
-                final_output
+            # First check if original video has audio
+            check_audio_cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'a:0',
+                '-show_entries', 'stream=codec_type',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
             ]
 
+            has_audio_check = subprocess.run(check_audio_cmd, capture_output=True, text=True, timeout=10)
+            has_audio = 'audio' in has_audio_check.stdout
+
+            if has_audio:
+                print(f"✅ Original video has audio - merging...")
+                cmd = [
+                    'ffmpeg',
+                    '-y',  # Overwrite output file
+                    '-i', output_path,  # Processed video (no audio)
+                    '-i', video_path,   # Original video (with audio)
+                    '-map', '0:v:0',    # Video from processed (explicit stream)
+                    '-map', '1:a:0',    # Audio from original (explicit stream)
+                    '-c:v', 'libx264',  # Video codec
+                    '-preset', 'ultrafast',  # Faster encoding
+                    '-crf', '18',       # Better quality
+                    '-c:a', 'aac',      # Audio codec
+                    '-b:a', '192k',     # Audio bitrate
+                    '-strict', 'experimental',  # Allow experimental AAC encoder
+                    final_output
+                ]
+            else:
+                print(f"⚠️  Original video has no audio - encoding without audio...")
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', output_path,
+                    '-c:v', 'libx264',
+                    '-preset', 'ultrafast',
+                    '-crf', '18',
+                    final_output
+                ]
+
+            print(f"Running FFmpeg command: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
             if result.returncode == 0:
