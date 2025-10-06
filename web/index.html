@@ -1001,10 +1001,17 @@
             progressDiv.style.display = 'block';
 
             try {
-                // Use the download endpoint
-                const endpoint = `${API_BASE_URL}/api/download-from-url`;
+                // Detect if it's a Sora URL and use appropriate endpoint
+                const isSoraUrl = url.includes('sora.chatgpt.com') ||
+                                  url.includes('backend/project_y') ||
+                                  url.includes('/p/s_') ||
+                                  url.startsWith('/backend');
 
-                console.log(`Using endpoint: ${endpoint} for URL: ${url}`);
+                const endpoint = isSoraUrl
+                    ? `${API_BASE_URL}/api/download-sora`
+                    : `${API_BASE_URL}/api/download-from-url`;
+
+                console.log(`Using endpoint: ${endpoint} for URL: ${url} (Sora: ${isSoraUrl})`);
 
                 // Send URL to backend for downloading
                 const response = await fetch(endpoint, {

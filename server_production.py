@@ -758,6 +758,18 @@ def download_from_url():
         if not url:
             return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
 
+        # Normalize URL - handle partial URLs from ChatGPT Sora
+        url = url.strip()
+
+        # If URL starts with /backend or is a path, prepend Sora domain
+        if url.startswith('/') or not url.startswith('http'):
+            if 'sora' in url or 'backend/project_y' in url:
+                url = 'https://sora.chatgpt.com' + (url if url.startswith('/') else '/' + url)
+            else:
+                return jsonify({'status': 'error', 'message': 'URL must start with http:// or https://'}), 400
+
+        print(f"📋 Normalized URL: {url}")
+
         # Validate URL to prevent SSRF attacks
         if not validate_url(url):
             return jsonify({'status': 'error', 'message': 'Invalid or unsafe URL'}), 400
@@ -901,7 +913,7 @@ def download_sora():
     Download Sora video from OpenAI using Playwright bypass + cookies
     Bypasses Cloudflare protection using saved cookies
 
-    Request: { "url": "https://openai.com/sora/..." }
+    Request: { "url": "https://sora.chatgpt.com/..." or "/backend/project_y/..." }
     Response: { "status": "success", "task_id": "...", "video_url": "/uploads/..." }
     """
     try:
@@ -910,6 +922,15 @@ def download_sora():
 
         if not url:
             return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
+
+        # Normalize URL - handle partial URLs from ChatGPT Sora
+        url = url.strip()
+
+        # If URL starts with /backend or is a path, prepend Sora domain
+        if url.startswith('/') or not url.startswith('http'):
+            url = 'https://sora.chatgpt.com' + (url if url.startswith('/') else '/' + url)
+
+        print(f"📋 Normalized Sora URL: {url}")
 
         # Validate URL to prevent SSRF attacks
         if not validate_url(url):
