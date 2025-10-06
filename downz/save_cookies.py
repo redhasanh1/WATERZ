@@ -66,6 +66,11 @@ if __name__ == "__main__":
     print("Cookie Saver - Login Once, Use Forever")
     print("=" * 60)
 
-    url = input("\nEnter website URL to login: ").strip()
+    url = input("\nEnter website URL to login (default: https://sora.chatgpt.com): ").strip()
+
+    # Default to Sora if empty
+    if not url:
+        url = "https://sora.chatgpt.com"
+        print(f"Using default: {url}")
 
     save_cookies_after_login(url)
