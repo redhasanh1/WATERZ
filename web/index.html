@@ -982,11 +982,10 @@
                 const data = await response.json();
 
                 if (data.status === 'success') {
-                    // Open video in new tab instead of embedding
+                    // Show video in media player
                     const videoUrl = `${API_BASE_URL}${data.video_url}`;
-                    window.open(videoUrl, '_blank');
 
-                    // Still show preview for processing
+                    // Show preview for processing
                     const videoElem = document.getElementById('previewVideo');
                     videoElem.src = videoUrl;
                     videoElem.style.display = 'block';
