@@ -965,6 +965,8 @@ def download_sora():
 
         # Path to cookies file
         cookies_file = os.path.join(SCRIPT_DIR, 'downz', 'cookies.json')
+        print(f"🔍 Looking for cookies at: {cookies_file}")
+        print(f"🔍 SCRIPT_DIR is: {SCRIPT_DIR}")
 
         with sync_playwright() as p:
             print("🚀 Launching browser for Sora download...")

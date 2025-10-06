@@ -10,11 +10,16 @@ def save_cookies_after_login(website_url, cookies_file="cookies.json"):
         website_url: URL to login to
         cookies_file: Where to save cookies
     """
+    import os
+
+    # Make path absolute
+    cookies_file = os.path.abspath(cookies_file)
 
     with sync_playwright() as p:
         print("🚀 Launching browser...")
         print("⚠️  Browser will open - please login manually")
-        print("⚠️  After logging in, press ENTER in this terminal to save cookies\n")
+        print("⚠️  After logging in, press ENTER in this terminal to save cookies")
+        print(f"📁 Cookies will be saved to: {cookies_file}\n")
 
         browser = p.chromium.launch(
             headless=False,
