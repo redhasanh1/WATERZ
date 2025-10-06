@@ -538,10 +538,10 @@ def get_result(task_id):
 @app.route('/api/download-from-url', methods=['POST'])
 def download_from_url():
     """
-    Download video from URL (YouTube, TikTok, etc.)
-    Uses yt-dlp to download the video
+    Download video from URL using Playwright (bypasses Cloudflare)
+    Works for most video sites with anti-bot protection
 
-    Request: { "url": "https://youtube.com/..." }
+    Request: { "url": "https://..." }
     Response: { "status": "success", "task_id": "...", "video_url": "/uploads/..." }
     """
     try:
@@ -555,34 +555,94 @@ def download_from_url():
         task_id = str(uuid.uuid4())
         output_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
 
-        # Download using yt-dlp Python module with Cloudflare bypass
-        import yt_dlp
+        # Use Playwright for better Cloudflare bypass
+        from playwright.sync_api import sync_playwright
+        import time
+        import re
+        import html
 
-        ydl_opts = {
-            'format': 'best[ext=mp4]/best',
-            'outtmpl': output_path,
-            'quiet': False,  # Show errors
-            'no_warnings': False,
-            # Cloudflare bypass settings
-            'extractor_args': {'generic': {'impersonate': 'chrome'}},
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Sec-Fetch-Mode': 'navigate',
-            },
-        }
+        with sync_playwright() as p:
+            print("🚀 Launching browser for video download...")
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process'
+                ]
+            )
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                viewport={'width': 1920, 'height': 1080}
+            )
 
-        return jsonify({
-            'status': 'success',
-            'task_id': task_id,
-            'video_url': f'/uploads/{task_id}.mp4'
-        })
+            page = context.new_page()
+
+            # Hide webdriver
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
+            print(f"🌐 Navigating to: {url}")
+            page.goto(url, wait_until='networkidle', timeout=60000)
+
+            time.sleep(3)
+
+            # Check for Cloudflare
+            if "cloudflare" in page.content().lower() or "just a moment" in page.content().lower():
+                print("🔄 Cloudflare detected - waiting...")
+                time.sleep(8)
+
+            print("🔍 Extracting video URL...")
+
+            # Find video URL in page content
+            content = page.content()
+            video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+
+            if not video_urls:
+                # Try to find video element
+                try:
+                    video_element = page.locator('video').first
+                    video_src = video_element.get_attribute('src')
+                    if video_src:
+                        video_urls = [video_src]
+                except:
+                    pass
+
+            if video_urls:
+                video_src = html.unescape(video_urls[0])
+                print(f"✅ Found video URL: {video_src}")
+
+                # Download the video
+                import requests
+                response = requests.get(video_src, stream=True, timeout=300)
+                response.raise_for_status()
+
+                with open(output_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+                browser.close()
+                print(f"✅ Video downloaded: {output_path}")
+
+                return jsonify({
+                    'status': 'success',
+                    'task_id': task_id,
+                    'video_url': f'/uploads/{task_id}.mp4'
+                })
+            else:
+                browser.close()
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Could not find video source URL'
+                }), 404
 
     except Exception as e:
+        print(f"❌ Download error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'status': 'error',
             'message': str(e)
