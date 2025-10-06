@@ -625,49 +625,41 @@ def download_sora():
                 print("🔄 Cloudflare detected - waiting for it to resolve...")
                 time.sleep(8)
 
-            print("🔍 Looking for video element...")
+            print("🔍 Extracting video URL from page content...")
 
-            # Wait for video element to appear (try multiple times)
-            video_element = None
             video_src = None
 
-            for attempt in range(3):
+            # Try to find video URLs in page content (works for Sora)
+            content = page.content()
+            import re
+            video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+
+            if video_urls:
+                import html
+                video_src = html.unescape(video_urls[0])  # Decode &amp; to &
+                print(f"✅ Found video URL in page content: {video_src}")
+            else:
+                # Fallback: try video element
+                print("⏳ No .mp4 URL found, trying video element...")
                 video_element = page.query_selector('video')
                 if video_element:
-                    break
-                print(f"⏳ Attempt {attempt + 1}/3 - waiting for video to load...")
-                time.sleep(2)
+                    video_src = video_element.get_attribute('src')
+                    if not video_src:
+                        source = page.query_selector('video source')
+                        if source:
+                            video_src = source.get_attribute('src')
 
-            # If no video tag, try to intercept network requests for video URLs
-            if not video_element:
-                print("🔍 No video tag found, checking page content for video URLs...")
+                if not video_src:
+                    # Take screenshot for debugging
+                    screenshot_path = os.path.join(TEMP_DIR, f'debug_{task_id}.png')
+                    page.screenshot(path=screenshot_path)
+                    print(f"📸 Screenshot saved to {screenshot_path}")
 
-                # Take screenshot for debugging
-                screenshot_path = os.path.join(TEMP_DIR, f'debug_{task_id}.png')
-                page.screenshot(path=screenshot_path)
-                print(f"📸 Screenshot saved to {screenshot_path}")
-
-                # Try to find video URLs in page content
-                content = page.content()
-                import re
-                video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
-
-                if video_urls:
-                    import html
-                    video_src = html.unescape(video_urls[0])  # Decode &amp; to &
-                    print(f"✅ Found video URL in page content: {video_src}")
-                else:
                     browser.close()
                     return jsonify({
                         'status': 'error',
-                        'message': f'No video element found. Screenshot saved to {screenshot_path}'
+                        'message': f'No video URL found. Screenshot saved to {screenshot_path}'
                     }), 404
-            else:
-                video_src = video_element.get_attribute('src')
-                if not video_src:
-                    source = page.query_selector('video source')
-                    if source:
-                        video_src = source.get_attribute('src')
 
             if video_src:
                 print(f"✅ Found video source: {video_src}")
