@@ -1,6 +1,5 @@
 // API Configuration
 // Your PC's API via ngrok
-const API_BASE_URL = 'https://YOUR-NGROK-URL.ngrok-free.app';  // REPLACE WITH YOUR NGROK URL!
+const API_BASE_URL = 'https://diphase-karleen-ungrindable.ngrok-free.dev';
 
-// Example: const API_BASE_URL = 'https://abc-123-xyz.ngrok-free.app';
-// After running: ngrok http 9000
+// ngrok tunnel to local server on port 9000
