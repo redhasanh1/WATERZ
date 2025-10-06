@@ -102,10 +102,18 @@ total_inpaint_time = 0
 start_time = time.time()
 
 # Process frames
+print(f"\n📊 Video writer status: {'OPEN' if out.isOpened() else 'CLOSED'}")
+print(f"   Output path: {temp_video_no_audio}")
+print(f"   Codec: {fourcc}")
+print(f"   Resolution: {width}x{height}")
+print(f"   FPS: {fps}")
+print()
+
 for frame_num in tqdm(range(total_frames), desc="Processing frames"):
     ret, frame = cap.read()
 
     if not ret:
+        print(f"\n⚠️  Failed to read frame {frame_num}")
         break
 
     # Detect watermark
@@ -126,12 +134,23 @@ for frame_num in tqdm(range(total_frames), desc="Processing frames"):
         inpaint_time = time.time() - inpaint_start
         total_inpaint_time += inpaint_time
 
-        out.write(result)
+        # Verify result is valid before writing
+        if result is not None and result.shape == frame.shape:
+            success = out.write(result)
+            if not success:
+                print(f"\n❌ Failed to write frame {frame_num} (with watermark)")
+        else:
+            print(f"\n⚠️  Invalid result for frame {frame_num}, writing original")
+            out.write(frame)
     else:
         # No watermark, write original
-        out.write(frame)
+        success = out.write(frame)
+        if not success and frame_num < 5:  # Only warn for first few frames
+            print(f"\n❌ Failed to write frame {frame_num} (clean)")
 
     frames_processed += 1
+
+print(f"\n✅ Wrote {frames_processed} frames")
 
 # Cleanup
 cap.release()
