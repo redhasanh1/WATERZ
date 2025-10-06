@@ -800,9 +800,13 @@
                 const data = await response.json();
 
                 if (data.status === 'success') {
-                    // Show preview
+                    // Open video in new tab instead of embedding
+                    const videoUrl = `${API_BASE_URL}${data.video_url}`;
+                    window.open(videoUrl, '_blank');
+
+                    // Still show preview for processing
                     const videoElem = document.getElementById('previewVideo');
-                    videoElem.src = `${API_BASE_URL}${data.video_url}`;
+                    videoElem.src = videoUrl;
                     videoElem.style.display = 'block';
                     videoElem.dataset.taskId = data.task_id;
                     document.getElementById('previewImage').style.display = 'none';
