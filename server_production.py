@@ -413,21 +413,23 @@ def get_status(task_id):
 
     task = AsyncResult(task_id, app=celery)
 
+    print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
+
     response = {
         'state': task.state
     }
 
     if task.state == 'PENDING':
-        response['progress'] = 'Task is waiting in queue'
-        response['info'] = {'progress': 0}
+        response['progress'] = 'Task is waiting in queue...'
+        response['info'] = {'progress': 0, 'status': 'Waiting in queue...'}
     elif task.state == 'STARTED':
         info = task.info or {}
-        response['progress'] = info.get('status', 'Processing')
-        response['info'] = info
+        response['progress'] = info.get('status', 'Starting...')
+        response['info'] = {'progress': info.get('progress', 5), 'status': info.get('status', 'Starting...')}
     elif task.state == 'PROCESSING':
         info = task.info or {}
-        response['progress'] = info.get('status', 'Processing')
-        response['info'] = info
+        response['progress'] = info.get('status', 'Processing...')
+        response['info'] = {'progress': info.get('progress', 50), 'status': info.get('status', 'Processing...')}
     elif task.state == 'SUCCESS':
         # task.result is a dict with 'path' and 'metadata'
         result_data = task.result
@@ -443,6 +445,7 @@ def get_status(task_id):
             response['metadata'] = result_data['metadata']
     elif task.state == 'FAILURE':
         response['error'] = str(task.info)
+        print(f"❌ Task failed: {task.info}")
 
     return jsonify(response)
 
@@ -838,6 +841,27 @@ def get_stats():
         'queue_length': scheduled_count,
         'active_tasks': active_count,
         'timestamp': datetime.utcnow().isoformat()
+    })
+
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Check if Celery worker is connected"""
+    from celery.task.control import inspect
+
+    i = inspect(app=celery)
+    stats = i.stats()
+    active_workers = i.active()
+
+    worker_status = "offline"
+    if stats:
+        worker_status = "online"
+
+    return jsonify({
+        'server': 'online',
+        'celery_worker': worker_status,
+        'workers': list(stats.keys()) if stats else [],
+        'redis': 'connected' if worker_status == 'online' else 'check connection'
     })
 
 
