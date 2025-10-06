@@ -483,18 +483,48 @@ def process_video_task(self, video_path):
 
             if result.returncode == 0:
                 print(f"✅ Audio merged successfully")
-                # Delete the temporary AVI file without audio
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-                output_path = final_output
+
+                # Verify output actually has audio
+                verify_cmd = [
+                    'ffprobe',
+                    '-v', 'error',
+                    '-select_streams', 'a:0',
+                    '-show_entries', 'stream=codec_type',
+                    '-of', 'default=noprint_wrappers=1:nokey=1',
+                    final_output
+                ]
+                verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=5)
+
+                if 'audio' in verify.stdout:
+                    print(f"✅ VERIFIED: Output has audio track")
+                    # Delete the temporary AVI file without audio
+                    if os.path.exists(output_path):
+                        os.remove(output_path)
+                    output_path = final_output
+                else:
+                    print(f"⚠️  WARNING: FFmpeg succeeded but output has NO audio!")
+                    print(f"   This shouldn't happen. Check FFmpeg installation.")
+                    print(f"   Stdout: {result.stdout}")
+                    print(f"   Stderr: {result.stderr}")
             else:
-                print(f"⚠️  FFmpeg audio merge failed: {result.stderr}")
-                print(f"   Returning video without audio")
-        except FileNotFoundError:
-            print("⚠️  FFmpeg not found - returning video without audio")
-            print("   Install FFmpeg: https://ffmpeg.org/download.html")
+                print(f"⚠️  FFmpeg audio merge FAILED!")
+                print(f"   Return code: {result.returncode}")
+                print(f"   Command: {' '.join(cmd)}")
+                print(f"   Stderr: {result.stderr}")
+                print(f"   Stdout: {result.stdout}")
+                print(f"   Returning video without audio: {output_path}")
+        except FileNotFoundError as e:
+            print(f"⚠️  FFmpeg not found - returning video without audio")
+            print(f"   Error: {e}")
+            print(f"   Install FFmpeg: https://ffmpeg.org/download.html")
+        except subprocess.TimeoutExpired:
+            print(f"⚠️  FFmpeg timeout - audio merge took too long")
+            print(f"   Returning video without audio")
         except Exception as e:
             print(f"⚠️  Error merging audio: {e}")
+            print(f"   Exception type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
             print(f"   Returning video without audio")
 
         return {
