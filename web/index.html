@@ -468,7 +468,6 @@
                             <input type="checkbox" id="agreeTerms" style="width: 20px; height: 20px; margin-right: 0.75rem; cursor: pointer;">
                             <span>I acknowledge and agree to the above terms. I confirm this is my personal content or I have permission to modify it.</span>
                         </label>
-                        <a href="https://diphase-karleen-ungrindable.ngrok-free.dev" target="_blank" id="ngrokActivateLink" style="display: none;"></a>
                     </div>
 
                     <div id="uploadSection" style="opacity: 0.5; pointer-events: none; transition: opacity 0.3s ease;">
@@ -655,11 +654,6 @@
 
         agreeTerms.addEventListener('change', function() {
             if (this.checked) {
-                // Activate ngrok on first agreement
-                if (!localStorage.getItem('ngrokEnabled')) {
-                    document.getElementById('ngrokActivateLink').click();
-                    localStorage.setItem('ngrokEnabled', 'true');
-                }
                 uploadSection.style.opacity = '1';
                 uploadSection.style.pointerEvents = 'auto';
             } else {

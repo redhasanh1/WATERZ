@@ -350,10 +350,18 @@ def process_video_task(self, video_path):
 
         # Open video
         self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Opening video'})
+
+        # Check if file exists
+        if not os.path.exists(video_path):
+            raise Exception(f"Video file not found: {video_path}")
+
+        print(f"Opening video: {video_path}")
+        print(f"File size: {os.path.getsize(video_path) / (1024*1024):.2f} MB")
+
         cap = cv2.VideoCapture(video_path)
 
         if not cap.isOpened():
-            raise Exception("Failed to open video")
+            raise Exception(f"Failed to open video: {video_path}. OpenCV could not decode the file.")
 
         # Get video properties
         fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -549,6 +557,16 @@ def process_video_task(self, video_path):
 def ads_txt():
     """Serve ads.txt file for Google AdSense"""
     return send_file(os.path.join(app.static_folder, 'ads.txt'), mimetype='text/plain')
+
+
+@app.route('/tunnel_url.txt')
+def tunnel_url():
+    """Serve tunnel URL for frontend auto-detection"""
+    tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
+    if os.path.exists(tunnel_file):
+        return send_file(tunnel_file, mimetype='text/plain')
+    else:
+        return "http://localhost:9000", 200, {'Content-Type': 'text/plain'}
 
 
 @app.route('/')
@@ -1277,7 +1295,7 @@ if __name__ == '__main__':
     print("=" * 60)
     print("WatermarkAI Production Server")
     print("=" * 60)
-    print("Starting Flask server on http://0.0.0.0:5000")
+    print("Starting Flask server on http://0.0.0.0:9000")
     print("")
     print("To start Celery worker (in separate terminal):")
     print("  celery -A server_production.celery worker --loglevel=info --concurrency=2")
@@ -1289,7 +1307,7 @@ if __name__ == '__main__':
 
     # Run Flask app
     app.run(
-        host='0.0.0.0',  # Listen on all interfaces for ngrok
+        host='0.0.0.0',  # Listen on all interfaces for tunnel
         port=9000,
         debug=False,  # Set to False for production
         threaded=True
