@@ -63,7 +63,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_DIR  # D drive only!
 app.config['TEMP_FOLDER'] = TEMP_DIR  # D drive only!
 
 # Initialize Celery
-celery = Celery(app.name, broker=app.config['broker_url'])
+celery = Celery(app.name, broker=app.config['broker_url'], backend=app.config['result_backend'])
 celery.conf.update(app.config)
 
 # Celery configuration for production
@@ -79,6 +79,12 @@ celery.conf.update(
     worker_max_tasks_per_child=100,  # Restart worker after 100 tasks (prevent memory leaks)
     result_expires=3600,  # Results expire after 1 hour
     broker_connection_retry_on_startup=True,
+    # Fix connection hanging
+    broker_pool_limit=1,  # Limit connection pool
+    broker_connection_timeout=3,  # 3 second timeout for broker connection
+    result_backend_transport_options={'socket_connect_timeout': 3},
+    task_ignore_result=False,  # We need results for status tracking
+    task_acks_late=True,
 )
 
 # Global model instances (lazy loaded)
