@@ -442,31 +442,13 @@
                 </p>
 
                 <div class="demo-card">
-                    <!-- Terms Agreement -->
-                    <div id="termsAgreement" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem;">
-                        <h3 style="color: #ef4444; margin-bottom: 1rem; font-size: 1.2rem;">
-                            <svg style="width: 24px; height: 24px; display: inline-block; vertical-align: middle; margin-right: 0.5rem;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                                <line x1="12" y1="9" x2="12" y2="13"></line>
-                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                            </svg>
-                            Legal Agreement Required
-                        </h3>
-                        <div style="max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; line-height: 1.6;">
-                            <p><strong>By using this service, you confirm that:</strong></p>
-                            <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
-                                <li>You own the video/image or have explicit permission from the copyright holder</li>
-                                <li>You are solely responsible for any content you upload</li>
-                                <li>You will not use this service to infringe on intellectual property rights</li>
-                                <li>You understand that removing watermarks from copyrighted content without permission may be illegal in your jurisdiction</li>
-                                <li>You will comply with all applicable local, state, national, and international laws</li>
-                                <li>The service provider is not liable for your use or misuse of this tool</li>
-                                <li>You have read and agree to our <a href="/privacy" style="color: #667eea; text-decoration: underline;">Privacy Policy</a> and <a href="/terms" style="color: #667eea; text-decoration: underline;">Terms of Service</a></li>
-                            </ul>
-                        </div>
-                        <label style="display: flex; align-items: center; cursor: pointer; font-weight: 600;">
-                            <input type="checkbox" id="agreeTerms" style="width: 20px; height: 20px; margin-right: 0.75rem; cursor: pointer;">
-                            <span>I acknowledge and agree to the above terms. I confirm this is my personal content or I have permission to modify it.</span>
+                    <!-- Terms Agreement - Minimal -->
+                    <div id="termsAgreement" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(102, 126, 234, 0.2); border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem;">
+                        <label style="display: flex; align-items: center; cursor: pointer; gap: 0.75rem;">
+                            <input type="checkbox" id="agreeTerms" style="width: 22px; height: 22px; cursor: pointer; accent-color: #667eea; flex-shrink: 0;">
+                            <span style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.4;">
+                                I confirm I own this content or have permission to modify it. I agree to the <a href="/terms" style="color: #667eea; text-decoration: none;">Terms</a> and <a href="/privacy" style="color: #667eea; text-decoration: none;">Privacy Policy</a>.
+                            </span>
                         </label>
                     </div>
 
