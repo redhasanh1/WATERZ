@@ -37,13 +37,21 @@ class YOLOWatermarkDetector:
                         tensorrt_model = path
                         break
 
+                tensorrt_loaded = False
                 if tensorrt_model:
-                    print(f"🚀 Loading TensorRT engine: {tensorrt_model}")
-                    self.model = YOLO(tensorrt_model, task='detect')
-                    print(f"✅ TensorRT engine loaded! (20-35 fps on GTX 1660 Ti)")
-                else:
+                    try:
+                        print(f"🚀 Loading TensorRT engine: {tensorrt_model}")
+                        self.model = YOLO(tensorrt_model, task='detect')
+                        print(f"✅ TensorRT engine loaded! (20-35 fps on GTX 1660 Ti)")
+                        tensorrt_loaded = True
+                    except Exception as e:
+                        print(f"⚠️  TensorRT failed to load: {e}")
+                        print(f"   Missing nvinfer_10.dll? Falling back to PyTorch model...")
+                        tensorrt_loaded = False
+
+                if not tensorrt_loaded:
                     # Fallback to .pt model
-                    print("⚠️  TensorRT engine not found, using .pt model (slower)")
+                    print("⚠️  Using .pt model (10-15 fps, slower than TensorRT)")
 
                     # Try to use trained Sora watermark model first
                     # Check multiple possible paths (prioritize new_sora_watermark)
