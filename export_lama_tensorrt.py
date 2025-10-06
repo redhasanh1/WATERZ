@@ -48,19 +48,20 @@ if not torch.cuda.is_available():
 
 print(f"\n✅ CUDA available: {torch.cuda.get_device_name(0)}")
 
-# Load LAMA model
+# Load LAMA model directly (bypass IOPaint wrapper to avoid import issues)
 print("\nLoading LAMA model...")
-from iopaint.model.lama import LaMa
+
+# Download and load LAMA model directly
+from iopaint.helper import get_cache_path_by_url, load_jit_model
+
+LAMA_MODEL_URL = "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt"
+LAMA_MODEL_MD5 = "e3aa4aaa15225a33ec84f9f4bc47e500"
 
 device = torch.device('cuda')
-lama = LaMa(device)
+model = load_jit_model(LAMA_MODEL_URL, device, LAMA_MODEL_MD5).eval()
 
-print("✅ LAMA model loaded")
-
-# Get the actual PyTorch model (TorchScript JIT model)
-model = lama.model
-
-print(f"\nModel type: {type(model)}")
+print("✅ LAMA model loaded directly")
+print(f"Model type: {type(model)}")
 print(f"Model device: {next(model.parameters()).device}")
 
 # Create dummy input for tracing

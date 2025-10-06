@@ -159,6 +159,11 @@
             50% { transform: translateY(-10px); }
         }
 
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.9; }
+        }
+
         .upload-title {
             font-size: 1.5rem;
             font-weight: 600;
@@ -302,7 +307,18 @@
 
                     <div class="preview-container" id="previewContainer">
                         <img id="previewImage" class="preview-image" style="display: none;">
-                        <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
+                        <div style="position: relative; display: inline-block;">
+                            <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
+                            <div id="downloadHint" style="display: none; position: absolute; top: 10px; right: 10px; background: rgba(102, 126, 234, 0.95); color: white; padding: 1rem 1.5rem; border-radius: 12px; font-weight: 600; font-size: 1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: pulse 2s ease-in-out infinite; z-index: 10;">
+                                <div style="display: flex; align-items: center; gap: 0.8rem;">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                        <path d="M7 10l5 5 5-5" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M12 3v12" stroke-linecap="round"/>
+                                    </svg>
+                                    <span>Click ⋮ to Download</span>
+                                </div>
+                            </div>
+                        </div>
                         <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Remove Watermark</button>
                         <div id="processingStatus" style="display: none; margin-top: 1rem; padding: 1.5rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px; text-align: center;">
                             <p id="statusText" style="margin-bottom: 1rem; font-weight: 600;">Processing...</p>
@@ -395,11 +411,13 @@
                     previewImage.src = e.target.result;
                     previewImage.style.display = 'block';
                     document.getElementById('previewVideo').style.display = 'none';
+                    document.getElementById('downloadHint').style.display = 'none';
                 } else if (file.type.startsWith('video/')) {
                     const videoElem = document.getElementById('previewVideo');
                     videoElem.src = e.target.result;
                     videoElem.style.display = 'block';
                     previewImage.style.display = 'none';
+                    document.getElementById('downloadHint').style.display = 'block';
                 }
                 previewContainer.classList.add('active');
             };
@@ -472,6 +490,9 @@
                     // Show process button
                     document.getElementById('processBtn').style.display = 'block';
 
+                    // Show download hint
+                    document.getElementById('downloadHint').style.display = 'block';
+
                     alert('Video loaded successfully! Ready to remove watermark.');
                 } else {
                     alert('Error: ' + (data.message || 'Failed to load video'));
@@ -540,6 +561,9 @@
 
                             // Update video preview
                             videoElem.src = statusData.result.result_url;
+
+                            // Show download hint on video
+                            document.getElementById('downloadHint').style.display = 'block';
                         } else if (statusData.state === 'FAILURE') {
                             statusText.textContent = '❌ Error: ' + (statusData.error || 'Processing failed');
                             btn.style.display = 'block';
