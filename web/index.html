@@ -474,8 +474,15 @@
                         <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Video URL Here</h3>
 
                         <div style="text-align: center; margin-bottom: 2rem;">
-                            <input type="text" id="videoUrl" placeholder="Paste video link"
-                                   style="width: 100%; max-width: 600px; padding: 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
+                            <div style="position: relative; display: inline-block; width: 100%; max-width: 600px;">
+                                <input type="text" id="videoUrl" placeholder="Paste video link or click here"
+                                       style="width: 100%; padding: 1rem 3.5rem 1rem 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
+                                <button id="pasteBtn" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; padding: 0.5rem; display: flex; align-items: center; justify-content: center;" title="Paste from clipboard">
+                                    <svg style="width: 24px; height: 24px; stroke: var(--primary);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                                    </svg>
+                                </button>
+                            </div>
                             <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Download from URL</button>
                         <div id="urlLoadingProgress" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px;">
                             <p style="margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">Downloading video...</p>
@@ -638,9 +645,9 @@
                 Drag the slider to compare watermarked vs clean video
             </p>
 
-            <div style="max-width: 600px; margin: 0 auto;">
+            <div style="max-width: 300px; margin: 0 auto;">
                 <!-- Video Comparison Container -->
-                <div id="comparison-container" style="position: relative; width: 100%; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+                <div id="comparison-container" style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
                     <!-- Before Video (Background - WITH watermark) -->
                     <video id="before-video" style="width: 100%; display: block;" muted loop playsinline>
                         <source src="/demos/before.mp4" type="video/mp4">
@@ -648,41 +655,41 @@
 
                     <!-- After Video (Overlay - WITHOUT watermark, clipped by slider) -->
                     <div id="after-container" style="position: absolute; top: 0; right: 0; width: 50%; height: 100%; overflow: hidden;">
-                        <video id="after-video" style="position: absolute; top: 0; right: 0; width: 600px; height: 100%; object-fit: cover;" muted loop playsinline>
+                        <video id="after-video" style="position: absolute; top: 0; right: 0; width: 300px; height: 100%; object-fit: cover;" muted loop playsinline>
                             <source src="/demos/after.mp4" type="video/mp4">
                         </video>
                     </div>
 
                     <!-- Slider Handle -->
-                    <div id="slider-handle" style="position: absolute; top: 0; left: 50%; width: 4px; height: 100%; background: white; cursor: ew-resize; z-index: 10; box-shadow: 0 0 20px rgba(255,255,255,0.5);">
+                    <div id="slider-handle" style="position: absolute; top: 0; left: 50%; width: 3px; height: 100%; background: white; cursor: ew-resize; z-index: 10; box-shadow: 0 0 10px rgba(255,255,255,0.5);">
                         <!-- Handle Circle -->
-                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 48px; height: 48px; background: white; border-radius: 50%; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
-                            <svg style="width: 24px; height: 24px; color: #667eea;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 32px; background: white; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
+                            <svg style="width: 16px; height: 16px; color: #667eea;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
                             </svg>
                         </div>
                     </div>
 
                     <!-- Before/After Labels -->
-                    <div style="position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 8px; color: white; font-weight: 600; font-size: 0.9rem; z-index: 5;">
+                    <div style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 6px; color: white; font-weight: 600; font-size: 0.7rem; z-index: 5;">
                         BEFORE
                     </div>
-                    <div style="position: absolute; top: 20px; right: 20px; background: rgba(102,126,234,0.9); padding: 8px 16px; border-radius: 8px; color: white; font-weight: 600; font-size: 0.9rem; z-index: 5;">
+                    <div style="position: absolute; top: 10px; right: 10px; background: rgba(102,126,234,0.9); padding: 4px 8px; border-radius: 6px; color: white; font-weight: 600; font-size: 0.7rem; z-index: 5;">
                         AFTER
                     </div>
 
                 </div>
 
                 <!-- Video Controls -->
-                <div style="margin-top: 1.5rem; display: flex; align-items: center; gap: 1rem;">
-                    <button id="play-pause-btn" style="padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 12px; color: white; font-weight: 600; cursor: pointer; transition: transform 0.2s ease;">
-                        <svg id="btn-play-icon" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px;" fill="currentColor" viewBox="0 0 24 24">
+                <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <button id="play-pause-btn" style="padding: 0.6rem 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; transition: transform 0.2s ease; font-size: 0.9rem;">
+                        <svg id="btn-play-icon" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 6px;" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M8 5v14l11-7z"></path>
                         </svg>
                         <span id="btn-text">Play</span>
                     </button>
-                    <input type="range" id="video-scrubber" min="0" max="100" value="0" style="flex: 1; height: 8px; border-radius: 4px; background: rgba(102,126,234,0.3); outline: none; cursor: pointer;">
-                    <span id="time-display" style="color: var(--text-secondary); font-size: 0.9rem; min-width: 80px; text-align: right;">0:00 / 0:00</span>
+                    <input type="range" id="video-scrubber" min="0" max="100" value="0" style="flex: 1; height: 6px; border-radius: 3px; background: rgba(102,126,234,0.3); outline: none; cursor: pointer;">
+                    <span id="time-display" style="color: var(--text-secondary); font-size: 0.75rem; min-width: 60px; text-align: right;">0:00 / 0:00</span>
                 </div>
             </div>
         </div>
@@ -947,6 +954,36 @@
                 alert('Upload error: ' + error.message);
             }
         }
+
+        // Auto-paste functionality
+        const videoUrlInput = document.getElementById('videoUrl');
+        const pasteBtn = document.getElementById('pasteBtn');
+
+        // Auto-paste when input is focused/clicked
+        videoUrlInput.addEventListener('focus', async () => {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text && text.trim()) {
+                    videoUrlInput.value = text.trim();
+                }
+            } catch (err) {
+                // Clipboard access denied or not available
+                console.log('Clipboard access not available');
+            }
+        });
+
+        // Manual paste button click
+        pasteBtn.addEventListener('click', async () => {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text && text.trim()) {
+                    videoUrlInput.value = text.trim();
+                    videoUrlInput.focus();
+                }
+            } catch (err) {
+                alert('Unable to access clipboard. Please paste manually.');
+            }
+        });
 
         // URL loading functionality
         document.getElementById('loadUrlBtn').addEventListener('click', async () => {
