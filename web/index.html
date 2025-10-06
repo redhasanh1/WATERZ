@@ -164,6 +164,11 @@
             50% { transform: scale(1.05); opacity: 0.9; }
         }
 
+        @keyframes loading {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
         .upload-title {
             font-size: 1.5rem;
             font-weight: 600;
@@ -292,9 +297,15 @@
                     <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Sora URL Here</h3>
 
                     <div style="text-align: center; margin-bottom: 2rem;">
-                        <input type="text" id="videoUrl" placeholder="Paste video URL here (YouTube, TikTok, Instagram, Sora, etc.)"
+                        <input type="text" id="videoUrl" placeholder="Paste video link"
                                style="width: 100%; max-width: 600px; padding: 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
-                        <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Load from URL</button>
+                        <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Download from URL</button>
+                        <div id="urlLoadingProgress" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px;">
+                            <p style="margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">Downloading video...</p>
+                            <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.2); border-radius: 3px; overflow: hidden;">
+                                <div style="width: 100%; height: 100%; background: var(--gradient-primary); animation: loading 1.5s ease-in-out infinite;"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <div style="text-align: center; margin: 2rem 0; color: var(--text-secondary);">
@@ -314,20 +325,23 @@
                         <img id="previewImage" class="preview-image" style="display: none;">
                         <div style="position: relative; display: inline-block;">
                             <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
-                            <!-- Curved Arrow SVG pointing to bottom-right -->
+                            <!-- Premium curved arrow pointing to bottom-right -->
                             <svg id="downloadHint" style="display: none; position: absolute; top: 0; right: -180px; width: 200px; height: 100%; pointer-events: none; z-index: 10;" viewBox="0 0 200 400" preserveAspectRatio="none">
-                                <!-- Curved arrow path -->
                                 <defs>
-                                    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-                                        <polygon points="0 0, 10 3, 0 6" fill="#667eea" />
+                                    <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+                                        <polygon points="0 0, 12 6, 0 12" fill="#667eea" />
                                     </marker>
+                                    <linearGradient id="arrowGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                        <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                                        <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                                    </linearGradient>
                                 </defs>
-                                <path d="M 50 20 Q 150 200, 50 380" stroke="#667eea" stroke-width="6" fill="none" marker-end="url(#arrowhead)" stroke-dasharray="10,5">
-                                    <animate attributeName="stroke-dashoffset" from="0" to="-15" dur="1s" repeatCount="indefinite"/>
+                                <path d="M 50 20 Q 150 180, 50 370" stroke="url(#arrowGradient)" stroke-width="4" fill="none" marker-end="url(#arrowhead)" stroke-dasharray="8,4" stroke-linecap="round">
+                                    <animate attributeName="stroke-dashoffset" from="0" to="-12" dur="0.8s" repeatCount="indefinite"/>
                                 </path>
                             </svg>
                             <!-- Text label next to arrow -->
-                            <div id="downloadText" style="display: none; position: absolute; bottom: 10px; right: -350px; background: rgba(102, 126, 234, 0.95); color: white; padding: 0.8rem 1.2rem; border-radius: 12px; font-weight: 600; font-size: 1.1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: pulse 2s ease-in-out infinite; white-space: nowrap; z-index: 10;">
+                            <div id="downloadText" style="display: none; position: absolute; bottom: 18px; right: -350px; background: rgba(102, 126, 234, 0.95); color: white; padding: 0.8rem 1.2rem; border-radius: 12px; font-weight: 600; font-size: 1.1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: pulse 2s ease-in-out infinite; white-space: nowrap; z-index: 10;">
                                 Click ⋮ to Download
                             </div>
                         </div>
@@ -473,8 +487,11 @@
             }
 
             const btn = document.getElementById('loadUrlBtn');
+            const progressDiv = document.getElementById('urlLoadingProgress');
+
             btn.textContent = 'Loading...';
             btn.disabled = true;
+            progressDiv.style.display = 'block';
 
             try {
                 // Detect if it's a Sora URL
@@ -515,8 +532,9 @@
             } catch (error) {
                 alert('Error loading video: ' + error.message);
             } finally {
-                btn.textContent = 'Load from URL';
+                btn.textContent = 'Download from URL';
                 btn.disabled = false;
+                progressDiv.style.display = 'none';
             }
         });
 
