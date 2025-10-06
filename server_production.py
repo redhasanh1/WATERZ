@@ -809,14 +809,32 @@ def download_from_url():
             """)
 
             print(f"🌐 Navigating to: {url}")
-            page.goto(url, wait_until='networkidle', timeout=60000)
+
+            # Try with longer timeout and fallback to domcontentloaded
+            try:
+                page.goto(url, wait_until='domcontentloaded', timeout=90000)
+                print("✅ Page loaded (DOM ready)")
+            except Exception as nav_error:
+                print(f"⚠️  Navigation warning: {nav_error}")
+                # Try to continue anyway - page might have partially loaded
+                try:
+                    page.wait_for_timeout(3000)
+                except:
+                    pass
 
             time.sleep(3)
 
             # Check for Cloudflare
-            if "cloudflare" in page.content().lower() or "just a moment" in page.content().lower():
+            content_lower = page.content().lower()
+            if "cloudflare" in content_lower or "just a moment" in content_lower or "checking your browser" in content_lower:
                 print("🔄 Cloudflare detected - waiting...")
-                time.sleep(8)
+                time.sleep(10)
+
+                # Check again
+                content_lower = page.content().lower()
+                if "cloudflare" in content_lower or "just a moment" in content_lower:
+                    print("⚠️  Cloudflare still active - attempting anyway...")
+                    time.sleep(10)
 
             print("🔍 Extracting video URL...")
 
@@ -973,11 +991,13 @@ def download_sora():
                     context.add_cookies(cookies)
                 print("✅ Cookies loaded!")
             else:
+                print(f"⚠️  No cookies found at: {cookies_file}")
                 browser.close()
                 return jsonify({
                     'status': 'error',
-                    'message': 'No cookies found. Run save_cookies.py first to authenticate.'
-                }), 400
+                    'message': 'Authentication required for Sora videos. Please contact administrator to set up cookies.',
+                    'hint': 'Sora videos require login cookies from ChatGPT.'
+                }), 401
 
             page = context.new_page()
 
@@ -989,15 +1009,33 @@ def download_sora():
             """)
 
             print(f"🌐 Navigating to: {url}")
-            page.goto(url, wait_until='networkidle', timeout=60000)
+
+            # Try with longer timeout and fallback to domcontentloaded
+            try:
+                page.goto(url, wait_until='domcontentloaded', timeout=90000)
+                print("✅ Page loaded (DOM ready)")
+            except Exception as nav_error:
+                print(f"⚠️  Navigation warning: {nav_error}")
+                # Try to continue anyway - page might have partially loaded
+                try:
+                    page.wait_for_timeout(5000)
+                except:
+                    pass
 
             print("⏳ Waiting for page to load...")
             time.sleep(5)
 
             # Check if Cloudflare challenge appears
-            if "cloudflare" in page.content().lower() or "just a moment" in page.content().lower():
+            content_lower = page.content().lower()
+            if "cloudflare" in content_lower or "just a moment" in content_lower or "checking your browser" in content_lower:
                 print("🔄 Cloudflare detected - waiting for it to resolve...")
-                time.sleep(8)
+                time.sleep(10)
+
+                # Check again after waiting
+                content_lower = page.content().lower()
+                if "cloudflare" in content_lower or "just a moment" in content_lower:
+                    print("⚠️  Cloudflare still active - may need cookies or longer wait")
+                    time.sleep(10)
 
             print("🔍 Extracting video URL from page content...")
 
