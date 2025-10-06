@@ -631,6 +631,7 @@
         </script>
     </div>
 
+    <script src="config.js"></script>
     <script>
         const fileInput = document.getElementById('fileInput');
         const uploadZone = document.getElementById('uploadZone');
@@ -654,7 +655,7 @@
         // Check system health on load
         async function checkSystemHealth() {
             try {
-                const response = await fetch('/api/health');
+                const response = await fetch(`${API_BASE_URL}/api/health`);
                 const data = await response.json();
                 const indicator = document.getElementById('statusIndicator');
 
@@ -731,7 +732,7 @@
             formData.append('file', file);
 
             try {
-                const response = await fetch('/api/upload', {
+                const response = await fetch(`${API_BASE_URL}/api/upload`, {
                     method: 'POST',
                     body: formData
                 });
@@ -770,7 +771,7 @@
 
             try {
                 // Use the download endpoint
-                const endpoint = '/api/download-from-url';
+                const endpoint = `${API_BASE_URL}/api/download-from-url`;
 
                 console.log(`Using endpoint: ${endpoint} for URL: ${url}`);
 
@@ -842,7 +843,7 @@
 
             try {
                 // Start processing
-                const response = await fetch('/api/process', {
+                const response = await fetch(`${API_BASE_URL}/api/process`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ task_id: taskId })
