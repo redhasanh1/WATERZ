@@ -419,13 +419,65 @@ def process_video_task(self, video_path):
 
         print(f"✅ Video processed: {frames_processed} frames, {frames_with_watermark} with watermarks")
 
+        # Merge audio from original video using FFmpeg
+        self.update_state(state='PROCESSING', meta={'progress': 95, 'status': 'Adding audio'})
+
+        final_output = output_path.replace('.avi', '_with_audio.mp4')
+
+        try:
+            import subprocess
+
+            # Use FFmpeg to copy audio from original and merge with processed video
+            # -i input1: processed video (no audio)
+            # -i input2: original video (with audio)
+            # -map 0:v: take video from first input (processed)
+            # -map 1:a: take audio from second input (original)
+            # -c:v libx264: encode video with h264
+            # -c:a aac: encode audio with aac
+            # -shortest: match shortest stream duration
+
+            cmd = [
+                'ffmpeg',
+                '-y',  # Overwrite output file
+                '-i', output_path,  # Processed video (no audio)
+                '-i', video_path,   # Original video (with audio)
+                '-map', '0:v',      # Video from processed
+                '-map', '1:a?',     # Audio from original (? = optional, won't fail if no audio)
+                '-c:v', 'libx264',  # Video codec
+                '-preset', 'fast',  # Encoding speed
+                '-crf', '23',       # Quality (lower = better, 23 is good)
+                '-c:a', 'aac',      # Audio codec
+                '-b:a', '192k',     # Audio bitrate
+                '-shortest',        # Match duration to shortest stream
+                final_output
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+            if result.returncode == 0:
+                print(f"✅ Audio merged successfully")
+                # Delete the temporary AVI file without audio
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                output_path = final_output
+            else:
+                print(f"⚠️  FFmpeg audio merge failed: {result.stderr}")
+                print(f"   Returning video without audio")
+        except FileNotFoundError:
+            print("⚠️  FFmpeg not found - returning video without audio")
+            print("   Install FFmpeg: https://ffmpeg.org/download.html")
+        except Exception as e:
+            print(f"⚠️  Error merging audio: {e}")
+            print(f"   Returning video without audio")
+
         return {
             'path': output_path,
             'metadata': {
                 'frames_processed': frames_processed,
                 'frames_with_watermark': frames_with_watermark,
                 'fps': fps,
-                'resolution': f"{width}x{height}"
+                'resolution': f"{width}x{height}",
+                'has_audio': os.path.exists(final_output)
             }
         }
 
