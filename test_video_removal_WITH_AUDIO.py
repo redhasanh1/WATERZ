@@ -17,7 +17,7 @@ print("=" * 60)
 
 # Use test video
 input_video = 'uploads/test_video.mp4'
-temp_video_no_audio = 'temp_no_audio.avi'
+temp_video_no_audio = 'temp_no_audio.mp4'  # Using mp4v codec for better compatibility
 output_video = 'OUTPUT_WITH_AUDIO.mp4'
 
 if not os.path.exists(input_video):
@@ -55,7 +55,9 @@ print(f"Total frames: {total_frames}")
 print(f"Duration: {total_frames/fps:.1f}s")
 
 # Setup video writer (temporary AVI without audio)
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
+# Use mp4v codec instead of XVID (more compatible)
+temp_video_no_audio = 'temp_no_audio.mp4'  # Change to .mp4
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 out = cv2.VideoWriter(temp_video_no_audio, fourcc, fps, (width, height))
 
 if not out.isOpened():

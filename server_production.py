@@ -366,11 +366,11 @@ def process_video_task(self, video_path):
         # Setup output (D drive only!)
         filename = os.path.basename(video_path)
         name, ext = os.path.splitext(filename)
-        output_filename = f'{name}_processed.avi'
+        output_filename = f'{name}_processed.mp4'
         output_path = os.path.join(RESULT_DIR, output_filename)
 
-        # Use XVID codec (built-in, works on Windows)
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        # Use mp4v codec (better compatibility than XVID)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
         if not out.isOpened():
@@ -422,7 +422,7 @@ def process_video_task(self, video_path):
         # Merge audio from original video using FFmpeg
         self.update_state(state='PROCESSING', meta={'progress': 95, 'status': 'Adding audio'})
 
-        final_output = output_path.replace('.avi', '_with_audio.mp4')
+        final_output = output_path.replace('.mp4', '_with_audio.mp4')
 
         try:
             import subprocess
