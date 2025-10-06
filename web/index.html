@@ -878,7 +878,9 @@
 
                     // Poll for status
                     const checkStatus = async () => {
-                        const statusResponse = await fetch(`/api/status/${processTaskId}`);
+                        const statusResponse = await fetch(`${API_BASE_URL}/api/status/${processTaskId}`, {
+                            headers: { 'ngrok-skip-browser-warning': 'true' }
+                        });
                         const statusData = await statusResponse.json();
 
                         if (statusData.state === 'SUCCESS') {
@@ -887,17 +889,24 @@
                             statusText.textContent = 'Processing complete';
                             statusText.style.color = '#10b981';
 
+                            // Build full result URL
+                            const resultUrl = `${API_BASE_URL}${statusData.result.result_url}`;
+
+                            // Open result in new tab
+                            window.open(resultUrl, '_blank');
+
                             // Show download link
                             const downloadLink = document.createElement('a');
-                            downloadLink.href = statusData.result.result_url;
+                            downloadLink.href = resultUrl;
                             downloadLink.download = 'cleaned_video.mp4';
                             downloadLink.textContent = 'Download Cleaned Video';
                             downloadLink.style.cssText = 'display: block; margin-top: 1rem; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; text-align: center; font-weight: 600;';
+                            downloadLink.target = '_blank';
 
                             statusDiv.appendChild(downloadLink);
 
                             // Update video preview
-                            videoElem.src = statusData.result.result_url;
+                            videoElem.src = resultUrl;
 
                             // Show download hint on video
                             document.getElementById('downloadHint').style.display = 'block';
