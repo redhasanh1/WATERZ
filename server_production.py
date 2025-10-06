@@ -631,11 +631,11 @@ def download_sora():
             video_element = None
             video_src = None
 
-            for attempt in range(10):
+            for attempt in range(3):
                 video_element = page.query_selector('video')
                 if video_element:
                     break
-                print(f"⏳ Attempt {attempt + 1}/10 - waiting for video to load...")
+                print(f"⏳ Attempt {attempt + 1}/3 - waiting for video to load...")
                 time.sleep(2)
 
             # If no video tag, try to intercept network requests for video URLs
