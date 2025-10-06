@@ -54,14 +54,34 @@ print(f"FPS: {fps}")
 print(f"Total frames: {total_frames}")
 print(f"Duration: {total_frames/fps:.1f}s")
 
-# Setup video writer (temporary AVI without audio)
-# Use mp4v codec instead of XVID (more compatible)
-temp_video_no_audio = 'temp_no_audio.mp4'  # Change to .mp4
-fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-out = cv2.VideoWriter(temp_video_no_audio, fourcc, fps, (width, height))
+# Setup video writer (temporary file without audio)
+# Try multiple codecs until one works
+temp_video_no_audio = None
+out = None
 
-if not out.isOpened():
-    print("❌ Failed to create video writer!")
+codecs_to_try = [
+    ('mp4v', 'temp_no_audio.mp4'),
+    ('XVID', 'temp_no_audio.avi'),
+    ('MJPG', 'temp_no_audio.avi'),
+    ('X264', 'temp_no_audio.mp4'),
+]
+
+for codec, filename in codecs_to_try:
+    try:
+        fourcc = cv2.VideoWriter_fourcc(*codec)
+        test_out = cv2.VideoWriter(filename, fourcc, fps, (width, height))
+        if test_out.isOpened():
+            out = test_out
+            temp_video_no_audio = filename
+            print(f"✅ Using codec: {codec} -> {filename}")
+            break
+        else:
+            test_out.release()
+    except Exception as e:
+        print(f"⚠️  Codec {codec} failed: {e}")
+
+if out is None or temp_video_no_audio is None:
+    print("❌ Failed to create video writer with any codec!")
     exit()
 
 print("\n" + "=" * 60)
@@ -116,6 +136,22 @@ for frame_num in tqdm(range(total_frames), desc="Processing frames"):
 # Cleanup
 cap.release()
 out.release()
+
+# Important: Make sure file is fully written
+import time
+time.sleep(0.5)
+
+# Verify temp file was created and has content
+if not os.path.exists(temp_video_no_audio):
+    print(f"\n❌ ERROR: Output file not created: {temp_video_no_audio}")
+    exit()
+
+file_size = os.path.getsize(temp_video_no_audio)
+if file_size == 0:
+    print(f"\n❌ ERROR: Output file is empty: {temp_video_no_audio}")
+    exit()
+
+print(f"\n✅ Temp video created: {temp_video_no_audio} ({file_size/1024/1024:.2f} MB)")
 
 total_time = time.time() - start_time
 
