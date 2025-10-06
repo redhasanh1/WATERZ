@@ -655,7 +655,9 @@
         // Check system health on load
         async function checkSystemHealth() {
             try {
-                const response = await fetch(`${API_BASE_URL}/api/health`);
+                const response = await fetch(`${API_BASE_URL}/api/health`, {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
                 const data = await response.json();
                 const indicator = document.getElementById('statusIndicator');
 
@@ -734,6 +736,7 @@
             try {
                 const response = await fetch(`${API_BASE_URL}/api/upload`, {
                     method: 'POST',
+                    headers: { 'ngrok-skip-browser-warning': 'true' },
                     body: formData
                 });
 
@@ -778,7 +781,10 @@
                 // Send URL to backend for downloading
                 const response = await fetch(endpoint, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'ngrok-skip-browser-warning': 'true'
+                    },
                     body: JSON.stringify({ url: url })
                 });
 
@@ -845,7 +851,10 @@
                 // Start processing
                 const response = await fetch(`${API_BASE_URL}/api/process`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'ngrok-skip-browser-warning': 'true'
+                    },
                     body: JSON.stringify({ task_id: taskId })
                 });
 
