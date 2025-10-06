@@ -57,7 +57,7 @@ CORS(app)
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 
 app.config['broker_url'] = REDIS_URL
-app.config['result_backend'] = REDIS_URL
+app.config['result_backend'] = 'rpc://'  # Use RPC instead of Redis for results
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 app.config['UPLOAD_FOLDER'] = UPLOAD_DIR  # D drive only!
 app.config['TEMP_FOLDER'] = TEMP_DIR  # D drive only!
