@@ -562,11 +562,18 @@ def ads_txt():
 @app.route('/tunnel_url.txt')
 def tunnel_url():
     """Serve tunnel URL for frontend auto-detection"""
+    # Check environment variable first (for Railway deployment)
+    env_url = os.getenv('TUNNEL_URL')
+    if env_url:
+        return env_url, 200, {'Content-Type': 'text/plain'}
+
+    # Check file (for local development with localtunnel)
     tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
     if os.path.exists(tunnel_file):
         return send_file(tunnel_file, mimetype='text/plain')
-    else:
-        return "http://localhost:9000", 200, {'Content-Type': 'text/plain'}
+
+    # Fallback to localhost
+    return "http://localhost:9000", 200, {'Content-Type': 'text/plain'}
 
 
 @app.route('/')
