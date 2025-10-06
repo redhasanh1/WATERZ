@@ -1,1 +1,1 @@
-web: python static_server.py
+web: python server_production.py
