@@ -787,7 +787,7 @@
                 if (data.status === 'success') {
                     // Show preview
                     const videoElem = document.getElementById('previewVideo');
-                    videoElem.src = data.video_url;
+                    videoElem.src = `${API_BASE_URL}${data.video_url}`;
                     videoElem.style.display = 'block';
                     videoElem.dataset.taskId = data.task_id;
                     document.getElementById('previewImage').style.display = 'none';
