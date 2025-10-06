@@ -77,6 +77,8 @@ celery.conf.update(
     task_time_limit=600,  # 10 minute timeout
     worker_prefetch_multiplier=1,  # Process one task at a time
     worker_max_tasks_per_child=100,  # Restart worker after 100 tasks (prevent memory leaks)
+    result_expires=3600,  # Results expire after 1 hour
+    broker_connection_retry_on_startup=True,
 )
 
 # Global model instances (lazy loaded)
@@ -849,19 +851,28 @@ def health_check():
     """Check if Celery worker is connected"""
     from celery.task.control import inspect
 
-    i = inspect(app=celery)
-    stats = i.stats()
-    active_workers = i.active()
+    i = inspect(app=celery, timeout=1.0)
 
     worker_status = "offline"
-    if stats:
-        worker_status = "online"
+    workers_list = []
+
+    try:
+        stats = i.stats()
+        if stats and len(stats) > 0:
+            worker_status = "online"
+            workers_list = list(stats.keys())
+            print(f"✅ Celery workers detected: {workers_list}")
+        else:
+            print("⚠️ No Celery workers responding to stats()")
+    except Exception as e:
+        print(f"❌ Error checking Celery: {e}")
 
     return jsonify({
         'server': 'online',
         'celery_worker': worker_status,
-        'workers': list(stats.keys()) if stats else [],
-        'redis': 'connected' if worker_status == 'online' else 'check connection'
+        'workers': workers_list,
+        'redis': 'connected' if worker_status == 'online' else 'check connection',
+        'debug': 'If offline, restart Celery worker'
     })
 
 
