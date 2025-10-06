@@ -386,80 +386,9 @@
             }
         }
 
-        /* ngrok Modal */
-        .ngrok-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.9);
-            z-index: 10000;
-            justify-content: center;
-            align-items: center;
-        }
-        .ngrok-modal.active {
-            display: flex;
-        }
-        .ngrok-modal-content {
-            background: var(--bg-card);
-            padding: 40px;
-            border-radius: 20px;
-            max-width: 500px;
-            text-align: center;
-            border: 2px solid var(--primary);
-        }
-        .ngrok-modal-content h2 {
-            margin-bottom: 20px;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .ngrok-modal-content p {
-            margin-bottom: 30px;
-            color: var(--text-secondary);
-        }
-        .ngrok-enable-btn {
-            background: var(--gradient-primary);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-        }
-        .ngrok-enable-btn:hover {
-            opacity: 0.9;
-        }
     </style>
 </head>
 <body>
-    <!-- ngrok Activation Modal -->
-    <div class="ngrok-modal" id="ngrokModal">
-        <div class="ngrok-modal-content">
-            <h2>⚠️ Legal Notice & Service Activation</h2>
-            <p style="text-align: left; font-size: 14px; margin-bottom: 20px;">
-                This tool is provided for educational and personal use only. By using this service, you agree that:
-            </p>
-            <ul style="text-align: left; font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.8;">
-                <li>You will not use this service to infringe on copyrights or intellectual property rights</li>
-                <li>You are solely responsible for ensuring you have the right to modify the content you upload</li>
-                <li>This service is not liable for any misuse or illegal use of the watermark removal technology</li>
-                <li>You agree to comply with all applicable laws and regulations</li>
-            </ul>
-            <label style="display: flex; align-items: center; justify-content: center; margin-bottom: 25px; cursor: pointer;">
-                <input type="checkbox" id="legalCheckbox" style="width: 18px; height: 18px; margin-right: 10px; cursor: pointer;">
-                <span style="font-size: 14px;">I understand and agree to the terms above</span>
-            </label>
-            <a href="https://diphase-karleen-ungrindable.ngrok-free.dev" target="_blank" class="ngrok-enable-btn" id="enableBtn" style="opacity: 0.5; pointer-events: none;" onclick="if(document.getElementById('legalCheckbox').checked) { localStorage.setItem('ngrokEnabled', 'true'); document.getElementById('ngrokModal').classList.remove('active'); } return document.getElementById('legalCheckbox').checked;">
-                Enable Service
-            </a>
-        </div>
-    </div>
     <!-- Top Banner Ad -->
     <div class="ad-banner-top">
         <ins class="adsbygoogle"
@@ -539,6 +468,7 @@
                             <input type="checkbox" id="agreeTerms" style="width: 20px; height: 20px; margin-right: 0.75rem; cursor: pointer;">
                             <span>I acknowledge and agree to the above terms. I confirm this is my personal content or I have permission to modify it.</span>
                         </label>
+                        <a href="https://diphase-karleen-ungrindable.ngrok-free.dev" target="_blank" id="ngrokActivateLink" style="display: none;"></a>
                     </div>
 
                     <div id="uploadSection" style="opacity: 0.5; pointer-events: none; transition: opacity 0.3s ease;">
@@ -716,6 +646,11 @@
 
         agreeTerms.addEventListener('change', function() {
             if (this.checked) {
+                // Activate ngrok on first agreement
+                if (!localStorage.getItem('ngrokEnabled')) {
+                    document.getElementById('ngrokActivateLink').click();
+                    localStorage.setItem('ngrokEnabled', 'true');
+                }
                 uploadSection.style.opacity = '1';
                 uploadSection.style.pointerEvents = 'auto';
             } else {
@@ -749,25 +684,7 @@
         // Check health on page load
         checkSystemHealth();
 
-        // Show ngrok modal on first visit
-        if (!localStorage.getItem('ngrokEnabled')) {
-            document.getElementById('ngrokModal').classList.add('active');
-        }
 
-        // Enable button only when checkbox is checked
-        const legalCheckbox = document.getElementById('legalCheckbox');
-        const enableBtn = document.getElementById('enableBtn');
-        if (legalCheckbox) {
-            legalCheckbox.addEventListener('change', function() {
-                if (this.checked) {
-                    enableBtn.style.opacity = '1';
-                    enableBtn.style.pointerEvents = 'auto';
-                } else {
-                    enableBtn.style.opacity = '0.5';
-                    enableBtn.style.pointerEvents = 'none';
-                }
-            });
-        }
 
         // Drag and drop
         uploadZone.addEventListener('dragover', (e) => {
