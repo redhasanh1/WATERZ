@@ -1,1 +1,3 @@
+# Lightweight dependencies for Railway static server
+# Only serves HTML/CSS/JS frontend + tunnel URL endpoint
 flask==3.0.0
