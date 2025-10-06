@@ -638,17 +638,17 @@
                 Drag the slider to compare watermarked vs clean video
             </p>
 
-            <div style="max-width: 900px; margin: 0 auto;">
+            <div style="max-width: 600px; margin: 0 auto;">
                 <!-- Video Comparison Container -->
-                <div id="comparison-container" style="position: relative; width: 100%; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); cursor: pointer;">
-                    <!-- Before Video (Full width) -->
+                <div id="comparison-container" style="position: relative; width: 100%; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+                    <!-- Before Video (Background - WITH watermark) -->
                     <video id="before-video" style="width: 100%; display: block;" muted loop playsinline>
                         <source src="/demos/before.mp4" type="video/mp4">
                     </video>
 
-                    <!-- After Video (Clipped by slider) -->
-                    <div id="after-container" style="position: absolute; top: 0; left: 0; width: 50%; height: 100%; overflow: hidden;">
-                        <video id="after-video" style="width: 100%; position: absolute; top: 0; left: 0;" muted loop playsinline>
+                    <!-- After Video (Overlay - WITHOUT watermark, clipped by slider) -->
+                    <div id="after-container" style="position: absolute; top: 0; right: 0; width: 50%; height: 100%; overflow: hidden;">
+                        <video id="after-video" style="position: absolute; top: 0; right: 0; width: 600px; height: 100%; object-fit: cover;" muted loop playsinline>
                             <source src="/demos/after.mp4" type="video/mp4">
                         </video>
                     </div>
@@ -671,15 +671,6 @@
                         AFTER
                     </div>
 
-                    <!-- Play/Pause Overlay -->
-                    <div id="play-overlay" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80px; height: 80px; background: rgba(102,126,234,0.9); border-radius: 50%; display: flex; align-items: center; justify-content: center; pointer-events: none; opacity: 0; transition: opacity 0.3s ease; z-index: 20;">
-                        <svg id="play-icon" style="width: 40px; height: 40px; color: white; margin-left: 4px;" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M8 5v14l11-7z"></path>
-                        </svg>
-                        <svg id="pause-icon" style="width: 40px; height: 40px; color: white; display: none;" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M6 4h4v16H6zM14 4h4v16h-4z"></path>
-                        </svg>
-                    </div>
                 </div>
 
                 <!-- Video Controls -->
@@ -724,9 +715,6 @@
             const btnPlayIcon = document.getElementById('btn-play-icon');
             const videoScrubber = document.getElementById('video-scrubber');
             const timeDisplay = document.getElementById('time-display');
-            const playOverlay = document.getElementById('play-overlay');
-            const playIcon = document.getElementById('play-icon');
-            const pauseIcon = document.getElementById('pause-icon');
 
             let isDragging = false;
             let isPlaying = false;
@@ -736,13 +724,14 @@
                 afterVideo.currentTime = beforeVideo.currentTime;
             }
 
-            // Update slider position
+            // Update slider position - after video slides from RIGHT to LEFT
             function updateSlider(clientX) {
                 const rect = comparisonContainer.getBoundingClientRect();
                 const x = clientX - rect.left;
                 const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
 
-                afterContainer.style.width = percentage + '%';
+                // After video is on the RIGHT, so we show (100 - percentage) of it
+                afterContainer.style.width = (100 - percentage) + '%';
                 sliderHandle.style.left = percentage + '%';
             }
 
@@ -769,23 +758,13 @@
                     afterVideo.pause();
                     btnText.textContent = 'Play';
                     btnPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"></path>';
-                    playIcon.style.display = 'block';
-                    pauseIcon.style.display = 'none';
                 } else {
                     beforeVideo.play();
                     afterVideo.play();
                     btnText.textContent = 'Pause';
                     btnPlayIcon.innerHTML = '<path d="M6 4h4v16H6zM14 4h4v16h-4z"></path>';
-                    playIcon.style.display = 'none';
-                    pauseIcon.style.display = 'block';
                 }
                 isPlaying = !isPlaying;
-
-                // Show overlay briefly
-                playOverlay.style.opacity = '1';
-                setTimeout(() => {
-                    playOverlay.style.opacity = '0';
-                }, 500);
             }
 
             // Mouse/Touch drag events for slider
@@ -853,9 +832,8 @@
             // Auto-sync after videos in case they drift
             setInterval(syncVideos, 100);
 
-            // Initial load - set after video width to match before video
-            beforeVideo.addEventListener('loadedmetadata', () => {
-                const width = beforeVideo.videoWidth;
+            // Initial load - set after video width to fill container from right
+            window.addEventListener('load', () => {
                 afterVideo.style.width = comparisonContainer.offsetWidth + 'px';
             });
         })();
