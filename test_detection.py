@@ -4,17 +4,25 @@ sys.path.insert(0, 'python_packages')
 import cv2
 from yolo_detector import YOLOWatermarkDetector
 
-# Find latest video in videostotrain folder
+# Find all videos in videostotrain folder
 import glob
+import random
 video_files = glob.glob('videostotrain/*.mp4')
 if not video_files:
     print("No videos found in videostotrain folder!")
     exit()
 
-video_path = sorted(video_files)[-1]  # Use newest
+# Pick random video
+video_path = random.choice(video_files)
 print(f"Testing on: {video_path}\n")
 
+# Pick random frame from the video
 cap = cv2.VideoCapture(video_path)
+total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+random_frame_num = random.randint(0, max(0, total_frames - 1))
+cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_num)
+print(f"Using random frame {random_frame_num}/{total_frames}\n")
+
 ret, frame = cap.read()
 cap.release()
 
@@ -29,8 +37,8 @@ print(f"\nModel type: {type(detector.model)}")
 print(f"Model info: {detector.model}")
 
 print("\nDetecting watermarks with NEW trained model (.pt, not TensorRT yet)...")
-print("Testing with confidence threshold 0.25...")
-detections = detector.detect(frame, confidence_threshold=0.25, padding=30)
+print("Testing with confidence threshold 0.25 and 5px padding...")
+detections = detector.detect(frame, confidence_threshold=0.25, padding=5)
 
 if not detections:
     print("\n❌ No watermarks detected!")
