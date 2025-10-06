@@ -628,6 +628,75 @@
         </div>
     </section>
 
+    <!-- Before/After Comparison Section -->
+    <section style="background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(17, 17, 35, 0.98) 100%); padding: 4rem 2rem; margin: 2rem 0;">
+        <div class="container">
+            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                See the Difference
+            </h2>
+            <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 3rem;">
+                Drag the slider to compare watermarked vs clean video
+            </p>
+
+            <div style="max-width: 900px; margin: 0 auto;">
+                <!-- Video Comparison Container -->
+                <div id="comparison-container" style="position: relative; width: 100%; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); cursor: pointer;">
+                    <!-- Before Video (Full width) -->
+                    <video id="before-video" style="width: 100%; display: block;" muted loop playsinline>
+                        <source src="/demos/before.mp4" type="video/mp4">
+                    </video>
+
+                    <!-- After Video (Clipped by slider) -->
+                    <div id="after-container" style="position: absolute; top: 0; left: 0; width: 50%; height: 100%; overflow: hidden;">
+                        <video id="after-video" style="width: 100%; position: absolute; top: 0; left: 0;" muted loop playsinline>
+                            <source src="/demos/after.mp4" type="video/mp4">
+                        </video>
+                    </div>
+
+                    <!-- Slider Handle -->
+                    <div id="slider-handle" style="position: absolute; top: 0; left: 50%; width: 4px; height: 100%; background: white; cursor: ew-resize; z-index: 10; box-shadow: 0 0 20px rgba(255,255,255,0.5);">
+                        <!-- Handle Circle -->
+                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 48px; height: 48px; background: white; border-radius: 50%; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
+                            <svg style="width: 24px; height: 24px; color: #667eea;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
+                            </svg>
+                        </div>
+                    </div>
+
+                    <!-- Before/After Labels -->
+                    <div style="position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 8px; color: white; font-weight: 600; font-size: 0.9rem; z-index: 5;">
+                        BEFORE
+                    </div>
+                    <div style="position: absolute; top: 20px; right: 20px; background: rgba(102,126,234,0.9); padding: 8px 16px; border-radius: 8px; color: white; font-weight: 600; font-size: 0.9rem; z-index: 5;">
+                        AFTER
+                    </div>
+
+                    <!-- Play/Pause Overlay -->
+                    <div id="play-overlay" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80px; height: 80px; background: rgba(102,126,234,0.9); border-radius: 50%; display: flex; align-items: center; justify-content: center; pointer-events: none; opacity: 0; transition: opacity 0.3s ease; z-index: 20;">
+                        <svg id="play-icon" style="width: 40px; height: 40px; color: white; margin-left: 4px;" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z"></path>
+                        </svg>
+                        <svg id="pause-icon" style="width: 40px; height: 40px; color: white; display: none;" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M6 4h4v16H6zM14 4h4v16h-4z"></path>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Video Controls -->
+                <div style="margin-top: 1.5rem; display: flex; align-items: center; gap: 1rem;">
+                    <button id="play-pause-btn" style="padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 12px; color: white; font-weight: 600; cursor: pointer; transition: transform 0.2s ease;">
+                        <svg id="btn-play-icon" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px;" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z"></path>
+                        </svg>
+                        <span id="btn-text">Play</span>
+                    </button>
+                    <input type="range" id="video-scrubber" min="0" max="100" value="0" style="flex: 1; height: 8px; border-radius: 4px; background: rgba(102,126,234,0.3); outline: none; cursor: pointer;">
+                    <span id="time-display" style="color: var(--text-secondary); font-size: 0.9rem; min-width: 80px; text-align: right;">0:00 / 0:00</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Bottom Banner Ad -->
     <div class="ad-banner-bottom">
         <ins class="adsbygoogle"
@@ -643,6 +712,154 @@
 
     <script src="config.js"></script>
     <script>
+        // Before/After Video Comparison Slider
+        (function() {
+            const beforeVideo = document.getElementById('before-video');
+            const afterVideo = document.getElementById('after-video');
+            const afterContainer = document.getElementById('after-container');
+            const sliderHandle = document.getElementById('slider-handle');
+            const comparisonContainer = document.getElementById('comparison-container');
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            const btnText = document.getElementById('btn-text');
+            const btnPlayIcon = document.getElementById('btn-play-icon');
+            const videoScrubber = document.getElementById('video-scrubber');
+            const timeDisplay = document.getElementById('time-display');
+            const playOverlay = document.getElementById('play-overlay');
+            const playIcon = document.getElementById('play-icon');
+            const pauseIcon = document.getElementById('pause-icon');
+
+            let isDragging = false;
+            let isPlaying = false;
+
+            // Sync videos
+            function syncVideos() {
+                afterVideo.currentTime = beforeVideo.currentTime;
+            }
+
+            // Update slider position
+            function updateSlider(clientX) {
+                const rect = comparisonContainer.getBoundingClientRect();
+                const x = clientX - rect.left;
+                const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+
+                afterContainer.style.width = percentage + '%';
+                sliderHandle.style.left = percentage + '%';
+            }
+
+            // Format time display
+            function formatTime(seconds) {
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            // Update scrubber and time display
+            function updateScrubber() {
+                if (!isDragging && beforeVideo.duration) {
+                    const percentage = (beforeVideo.currentTime / beforeVideo.duration) * 100;
+                    videoScrubber.value = percentage;
+                    timeDisplay.textContent = `${formatTime(beforeVideo.currentTime)} / ${formatTime(beforeVideo.duration)}`;
+                }
+            }
+
+            // Play/Pause function
+            function togglePlayPause() {
+                if (isPlaying) {
+                    beforeVideo.pause();
+                    afterVideo.pause();
+                    btnText.textContent = 'Play';
+                    btnPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"></path>';
+                    playIcon.style.display = 'block';
+                    pauseIcon.style.display = 'none';
+                } else {
+                    beforeVideo.play();
+                    afterVideo.play();
+                    btnText.textContent = 'Pause';
+                    btnPlayIcon.innerHTML = '<path d="M6 4h4v16H6zM14 4h4v16h-4z"></path>';
+                    playIcon.style.display = 'none';
+                    pauseIcon.style.display = 'block';
+                }
+                isPlaying = !isPlaying;
+
+                // Show overlay briefly
+                playOverlay.style.opacity = '1';
+                setTimeout(() => {
+                    playOverlay.style.opacity = '0';
+                }, 500);
+            }
+
+            // Mouse/Touch drag events for slider
+            sliderHandle.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                e.preventDefault();
+            });
+
+            sliderHandle.addEventListener('touchstart', (e) => {
+                isDragging = true;
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    updateSlider(e.clientX);
+                }
+            });
+
+            document.addEventListener('touchmove', (e) => {
+                if (isDragging) {
+                    updateSlider(e.touches[0].clientX);
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            document.addEventListener('touchend', () => {
+                isDragging = false;
+            });
+
+            // Click on video to play/pause
+            comparisonContainer.addEventListener('click', (e) => {
+                if (e.target !== sliderHandle && !sliderHandle.contains(e.target)) {
+                    togglePlayPause();
+                }
+            });
+
+            // Play/Pause button
+            playPauseBtn.addEventListener('click', togglePlayPause);
+
+            // Video scrubber
+            videoScrubber.addEventListener('input', (e) => {
+                if (beforeVideo.duration) {
+                    const time = (e.target.value / 100) * beforeVideo.duration;
+                    beforeVideo.currentTime = time;
+                    afterVideo.currentTime = time;
+                }
+            });
+
+            // Sync videos on timeupdate
+            beforeVideo.addEventListener('timeupdate', () => {
+                syncVideos();
+                updateScrubber();
+            });
+
+            // Load video metadata
+            beforeVideo.addEventListener('loadedmetadata', () => {
+                afterVideo.currentTime = beforeVideo.currentTime;
+                updateScrubber();
+            });
+
+            // Auto-sync after videos in case they drift
+            setInterval(syncVideos, 100);
+
+            // Initial load - set after video width to match before video
+            beforeVideo.addEventListener('loadedmetadata', () => {
+                const width = beforeVideo.videoWidth;
+                afterVideo.style.width = comparisonContainer.offsetWidth + 'px';
+            });
+        })();
+
         const fileInput = document.getElementById('fileInput');
         const uploadZone = document.getElementById('uploadZone');
         const previewContainer = document.getElementById('previewContainer');
