@@ -17,8 +17,8 @@ print("=" * 60)
 
 # Use test video
 input_video = 'uploads/test_video.mp4'
-temp_video_no_audio = 'results/temp_no_audio.avi'
-output_video = 'results/test_video_removal_WITH_AUDIO.mp4'
+temp_video_no_audio = 'temp_no_audio.avi'
+output_video = 'OUTPUT_WITH_AUDIO.mp4'
 
 if not os.path.exists(input_video):
     print(f"❌ ERROR: {input_video} not found!")
@@ -55,7 +55,6 @@ print(f"Total frames: {total_frames}")
 print(f"Duration: {total_frames/fps:.1f}s")
 
 # Setup video writer (temporary AVI without audio)
-os.makedirs('results', exist_ok=True)
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
 out = cv2.VideoWriter(temp_video_no_audio, fourcc, fps, (width, height))
 

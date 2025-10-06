@@ -41,10 +41,21 @@ echo ================================================================
 echo TEST COMPLETE
 echo ================================================================
 echo.
-echo Output: results\test_video_removal_WITH_AUDIO.mp4
+echo Output file: OUTPUT_WITH_AUDIO.mp4
+echo Location: %CD%\OUTPUT_WITH_AUDIO.mp4
 echo.
-echo Play this video to verify:
-echo   1. Watermark is removed
-echo   2. Audio is preserved
+if exist OUTPUT_WITH_AUDIO.mp4 (
+    echo [SUCCESS] File created!
+    echo.
+    echo Opening folder...
+    start explorer /select,"%CD%\OUTPUT_WITH_AUDIO.mp4"
+    echo.
+    echo Play OUTPUT_WITH_AUDIO.mp4 to verify:
+    echo   1. Watermark is removed
+    echo   2. Audio is preserved
+) else (
+    echo [ERROR] File not found!
+    echo Check the output above for errors.
+)
 echo.
 pause
