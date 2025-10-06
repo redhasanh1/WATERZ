@@ -289,6 +289,18 @@
                 </p>
 
                 <div class="demo-card">
+                    <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Sora URL Here</h3>
+
+                    <div style="text-align: center; margin-bottom: 2rem;">
+                        <input type="text" id="videoUrl" placeholder="Paste video URL here (YouTube, TikTok, Instagram, Sora, etc.)"
+                               style="width: 100%; max-width: 600px; padding: 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
+                        <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Load from URL</button>
+                    </div>
+
+                    <div style="text-align: center; margin: 2rem 0; color: var(--text-secondary);">
+                        <p style="margin-bottom: 1rem;">— OR —</p>
+                    </div>
+
                     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                         <input type="file" id="fileInput" accept="image/*,video/*" style="display: none;">
                         <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -296,13 +308,6 @@
                         </svg>
                         <h3 class="upload-title">Drop your file here</h3>
                         <p class="upload-description">or click to browse</p>
-                    </div>
-
-                    <div style="text-align: center; margin: 2rem 0; color: var(--text-secondary);">
-                        <p style="margin-bottom: 1rem;">— OR —</p>
-                        <input type="text" id="videoUrl" placeholder="Paste video URL here (YouTube, TikTok, Instagram, etc.)"
-                               style="width: 100%; max-width: 500px; padding: 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
-                        <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Load from URL</button>
                     </div>
 
                     <div class="preview-container" id="previewContainer">
