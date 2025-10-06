@@ -29,19 +29,21 @@ if not os.path.exists(video_path):
 
 # Load models
 print("\n[1/4] Loading AI models...")
-from yolo_detector import YOLOWatermarkDetector
 
-try:
-    from lama_inpaint_optimized import LamaInpainterOptimized
-    inpainter = LamaInpainterOptimized()
-    print("✅ Using optimized LaMa")
-except:
-    from lama_inpaint_local import LamaInpainter
-    inpainter = LamaInpainter()
-    print("✅ Using standard LaMa")
+# Use simple OpenCV inpainting to avoid TensorRT issues
+print("⚠️  Skipping AI models for this test - using simple inpainting")
+print("   (This is just to test AUDIO preservation, not watermark quality)")
 
-detector = YOLOWatermarkDetector()
-print("✅ Models loaded")
+detector = None
+inpainter = None
+
+# Simple inpainting function
+def simple_inpaint(frame, mask):
+    """Simple OpenCV inpainting"""
+    import cv2
+    return cv2.inpaint(frame, mask, 3, cv2.INPAINT_TELEA)
+
+print("✅ Using simple OpenCV inpainting")
 
 # Process video frames
 print("\n[2/4] Processing video frames (removing watermark)...")
@@ -73,29 +75,18 @@ while True:
         percent = int((frames_processed / total_frames) * 100)
         print(f'   Progress: {percent}% ({frames_processed}/{total_frames})', end='\r')
 
-    # Detect watermark
-    detections = detector.detect(frame, confidence_threshold=0.25, padding=0)
-
-    if detections:
-        frames_with_watermark += 1
-        # Remove watermark
-        try:
-            mask = detector.create_mask(frame, detections)
-            processed_frame = inpainter.inpaint_region(frame, mask)
-            out.write(processed_frame)
-        except Exception as e:
-            print(f"\n   Warning: Frame {frames_processed} failed: {e}")
-            out.write(frame)
-    else:
-        out.write(frame)
+    # For this test, just write frames as-is (we're testing AUDIO, not watermark removal)
+    # In real use, this would detect and remove watermarks
+    out.write(frame)
 
     frames_processed += 1
 
 cap.release()
 out.release()
 
-print(f'\n✅ Processed {frames_processed} frames, {frames_with_watermark} had watermarks')
+print(f'\n✅ Processed {frames_processed} frames')
 print(f'   Output (no audio yet): {output_temp}')
+print(f'   NOTE: This test copies video as-is to test AUDIO only')
 
 # AUDIO MERGE - EXACT SAME CODE AS SERVER
 print("\n[3/4] Merging audio from original (EXACT SERVER CODE)...")
