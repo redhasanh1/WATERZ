@@ -40,13 +40,21 @@ class YOLOWatermarkDetector:
                 tensorrt_loaded = False
                 if tensorrt_model:
                     try:
-                        print(f"🚀 Loading TensorRT engine: {tensorrt_model}")
+                        print(f"🚀 Attempting to load TensorRT engine: {tensorrt_model}")
+                        # Try to load TensorRT
                         self.model = YOLO(tensorrt_model, task='detect')
                         print(f"✅ TensorRT engine loaded! (20-35 fps on GTX 1660 Ti)")
                         tensorrt_loaded = True
+                    except FileNotFoundError as e:
+                        if 'nvinfer' in str(e):
+                            print(f"⚠️  TensorRT DLLs not found (nvinfer_10.dll missing)")
+                            print(f"   Falling back to PyTorch .pt model (slower but works)")
+                        else:
+                            print(f"⚠️  TensorRT load error: {e}")
+                        tensorrt_loaded = False
                     except Exception as e:
-                        print(f"⚠️  TensorRT failed to load: {e}")
-                        print(f"   Missing nvinfer_10.dll? Falling back to PyTorch model...")
+                        print(f"⚠️  TensorRT failed: {e}")
+                        print(f"   Falling back to PyTorch model...")
                         tensorrt_loaded = False
 
                 if not tensorrt_loaded:

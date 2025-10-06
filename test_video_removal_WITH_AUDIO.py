@@ -55,34 +55,31 @@ print(f"Total frames: {total_frames}")
 print(f"Duration: {total_frames/fps:.1f}s")
 
 # Setup video writer (temporary file without audio)
-# Try multiple codecs until one works
-temp_video_no_audio = None
-out = None
+# Use MJPG codec - most reliable on Windows, native to OpenCV
+temp_video_no_audio = 'temp_no_audio.avi'
+fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+out = cv2.VideoWriter(temp_video_no_audio, fourcc, fps, (width, height))
 
-codecs_to_try = [
-    ('mp4v', 'temp_no_audio.mp4'),
-    ('XVID', 'temp_no_audio.avi'),
-    ('MJPG', 'temp_no_audio.avi'),
-    ('X264', 'temp_no_audio.mp4'),
-]
+if not out.isOpened():
+    print("❌ Failed to create video writer with MJPG codec!")
+    print("   Trying fallback codecs...")
 
-for codec, filename in codecs_to_try:
-    try:
+    # Try other codecs as fallback
+    for codec, ext in [('XVID', '.avi'), ('mp4v', '.mp4')]:
+        temp_video_no_audio = f'temp_no_audio{ext}'
         fourcc = cv2.VideoWriter_fourcc(*codec)
-        test_out = cv2.VideoWriter(filename, fourcc, fps, (width, height))
-        if test_out.isOpened():
-            out = test_out
-            temp_video_no_audio = filename
-            print(f"✅ Using codec: {codec} -> {filename}")
+        out = cv2.VideoWriter(temp_video_no_audio, fourcc, fps, (width, height))
+        if out.isOpened():
+            print(f"✅ Using fallback codec: {codec} -> {temp_video_no_audio}")
             break
         else:
-            test_out.release()
-    except Exception as e:
-        print(f"⚠️  Codec {codec} failed: {e}")
+            out.release()
 
-if out is None or temp_video_no_audio is None:
-    print("❌ Failed to create video writer with any codec!")
-    exit()
+    if not out.isOpened():
+        print("❌ All codecs failed!")
+        exit()
+else:
+    print(f"✅ Using MJPG codec -> {temp_video_no_audio}")
 
 print("\n" + "=" * 60)
 print("PROCESSING VIDEO")
@@ -134,19 +131,10 @@ for frame_num in tqdm(range(total_frames), desc="Processing frames"):
         inpaint_time = time.time() - inpaint_start
         total_inpaint_time += inpaint_time
 
-        # Verify result is valid before writing
-        if result is not None and result.shape == frame.shape:
-            success = out.write(result)
-            if not success:
-                print(f"\n❌ Failed to write frame {frame_num} (with watermark)")
-        else:
-            print(f"\n⚠️  Invalid result for frame {frame_num}, writing original")
-            out.write(frame)
+        out.write(result)
     else:
         # No watermark, write original
-        success = out.write(frame)
-        if not success and frame_num < 5:  # Only warn for first few frames
-            print(f"\n❌ Failed to write frame {frame_num} (clean)")
+        out.write(frame)
 
     frames_processed += 1
 

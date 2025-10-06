@@ -1,4 +1,10 @@
 @echo off
+cd /d "%~dp0"
+
+REM CRITICAL: Add TensorRT DLLs to PATH (same as working test)
+set PYTHONPATH=%~dp0python_packages
+set PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%~dp0TensorRT-10.7.0.23\lib;%PATH%
+
 echo ================================================================
 echo WATERMARK REMOVAL TEST
 echo TensorRT + CUDA + LaMa + AUDIO PRESERVATION

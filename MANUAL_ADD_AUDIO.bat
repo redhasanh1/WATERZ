@@ -7,8 +7,14 @@ echo This will manually merge audio from original video
 echo into the processed video (temp_no_audio.avi)
 echo.
 
-if not exist temp_no_audio.mp4 (
-    echo [ERROR] temp_no_audio.mp4 not found!
+REM Check for temp file (could be .avi or .mp4)
+set TEMP_FILE=
+if exist temp_no_audio.avi set TEMP_FILE=temp_no_audio.avi
+if exist temp_no_audio.mp4 set TEMP_FILE=temp_no_audio.mp4
+
+if "%TEMP_FILE%"=="" (
+    echo [ERROR] Temp video not found!
+    echo Looking for: temp_no_audio.avi or temp_no_audio.mp4
     echo Run the test first to generate the video.
     pause
     exit /b 1
@@ -20,14 +26,14 @@ if not exist uploads\test_video.mp4 (
     exit /b 1
 )
 
-echo [OK] Found temp_no_audio.mp4
+echo [OK] Found %TEMP_FILE%
 echo [OK] Found uploads\test_video.mp4
 echo.
 
 echo Running FFmpeg to merge audio...
 echo.
 
-ffmpeg -y -i temp_no_audio.mp4 -i uploads\test_video.mp4 -map 0:v:0 -map 1:a:0 -c:v libx264 -preset ultrafast -crf 18 -c:a aac -b:a 192k OUTPUT_WITH_AUDIO.mp4
+ffmpeg -y -i %TEMP_FILE% -i uploads\test_video.mp4 -map 0:v:0 -map 1:a:0 -c:v libx264 -preset ultrafast -crf 18 -c:a aac -b:a 192k OUTPUT_WITH_AUDIO.mp4
 
 if %ERRORLEVEL% EQU 0 (
     echo.
