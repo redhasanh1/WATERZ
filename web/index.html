@@ -456,15 +456,8 @@
                         <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Video URL Here</h3>
 
                         <div style="text-align: center; margin-bottom: 2rem;">
-                            <div style="position: relative; display: inline-block; width: 100%; max-width: 600px;">
-                                <input type="text" id="videoUrl" placeholder="Paste video link or click here"
-                                       style="width: 100%; padding: 1rem 3.5rem 1rem 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
-                                <button id="pasteBtn" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; padding: 0.5rem; display: flex; align-items: center; justify-content: center;" title="Paste from clipboard">
-                                    <svg style="width: 24px; height: 24px; stroke: var(--primary);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                                    </svg>
-                                </button>
-                            </div>
+                            <input type="text" id="videoUrl" placeholder="Paste video link here"
+                                   style="width: 100%; max-width: 600px; padding: 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
                             <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Download from URL</button>
                         <div id="urlLoadingProgress" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px;">
                             <p style="margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">Downloading video...</p>
@@ -936,36 +929,6 @@
                 alert('Upload error: ' + error.message);
             }
         }
-
-        // Auto-paste functionality
-        const videoUrlInput = document.getElementById('videoUrl');
-        const pasteBtn = document.getElementById('pasteBtn');
-
-        // Auto-paste when input is focused/clicked
-        videoUrlInput.addEventListener('focus', async () => {
-            try {
-                const text = await navigator.clipboard.readText();
-                if (text && text.trim()) {
-                    videoUrlInput.value = text.trim();
-                }
-            } catch (err) {
-                // Clipboard access denied or not available
-                console.log('Clipboard access not available');
-            }
-        });
-
-        // Manual paste button click
-        pasteBtn.addEventListener('click', async () => {
-            try {
-                const text = await navigator.clipboard.readText();
-                if (text && text.trim()) {
-                    videoUrlInput.value = text.trim();
-                    videoUrlInput.focus();
-                }
-            } catch (err) {
-                alert('Unable to access clipboard. Please paste manually.');
-            }
-        });
 
         // URL loading functionality
         document.getElementById('loadUrlBtn').addEventListener('click', async () => {
