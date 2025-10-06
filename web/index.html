@@ -441,9 +441,21 @@
     <!-- ngrok Activation Modal -->
     <div class="ngrok-modal" id="ngrokModal">
         <div class="ngrok-modal-content">
-            <h2>🚀 Enable AI Processing</h2>
-            <p>Click the button below to activate the AI watermark removal service. You only need to do this once.</p>
-            <a href="https://diphase-karleen-ungrindable.ngrok-free.dev" target="_blank" class="ngrok-enable-btn" onclick="localStorage.setItem('ngrokEnabled', 'true'); document.getElementById('ngrokModal').classList.remove('active');">
+            <h2>⚠️ Legal Notice & Service Activation</h2>
+            <p style="text-align: left; font-size: 14px; margin-bottom: 20px;">
+                This tool is provided for educational and personal use only. By using this service, you agree that:
+            </p>
+            <ul style="text-align: left; font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.8;">
+                <li>You will not use this service to infringe on copyrights or intellectual property rights</li>
+                <li>You are solely responsible for ensuring you have the right to modify the content you upload</li>
+                <li>This service is not liable for any misuse or illegal use of the watermark removal technology</li>
+                <li>You agree to comply with all applicable laws and regulations</li>
+            </ul>
+            <label style="display: flex; align-items: center; justify-content: center; margin-bottom: 25px; cursor: pointer;">
+                <input type="checkbox" id="legalCheckbox" style="width: 18px; height: 18px; margin-right: 10px; cursor: pointer;">
+                <span style="font-size: 14px;">I understand and agree to the terms above</span>
+            </label>
+            <a href="https://diphase-karleen-ungrindable.ngrok-free.dev" target="_blank" class="ngrok-enable-btn" id="enableBtn" style="opacity: 0.5; pointer-events: none;" onclick="if(document.getElementById('legalCheckbox').checked) { localStorage.setItem('ngrokEnabled', 'true'); document.getElementById('ngrokModal').classList.remove('active'); } return document.getElementById('legalCheckbox').checked;">
                 Enable Service
             </a>
         </div>
@@ -740,6 +752,21 @@
         // Show ngrok modal on first visit
         if (!localStorage.getItem('ngrokEnabled')) {
             document.getElementById('ngrokModal').classList.add('active');
+        }
+
+        // Enable button only when checkbox is checked
+        const legalCheckbox = document.getElementById('legalCheckbox');
+        const enableBtn = document.getElementById('enableBtn');
+        if (legalCheckbox) {
+            legalCheckbox.addEventListener('change', function() {
+                if (this.checked) {
+                    enableBtn.style.opacity = '1';
+                    enableBtn.style.pointerEvents = 'auto';
+                } else {
+                    enableBtn.style.opacity = '0.5';
+                    enableBtn.style.pointerEvents = 'none';
+                }
+            });
         }
 
         // Drag and drop
