@@ -335,15 +335,6 @@ def serve_web(path):
     return send_file(f'web/{path}')
 
 
-@app.route('/api/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'ok',
-        'timestamp': datetime.utcnow().isoformat(),
-        'models_loaded': detector is not None and inpainter is not None
-    })
-
 
 @app.route('/api/remove-watermark', methods=['POST'])
 def remove_watermark():
@@ -794,14 +785,33 @@ def process_video():
             return jsonify({'status': 'error', 'message': 'Video not found'}), 404
 
         # Queue processing task
-        task = process_video_task.delay(video_path)
+        print(f"📤 Queuing video processing task for: {video_path}")
 
-        return jsonify({
-            'status': 'success',
-            'task_id': task.id
-        })
+        # Queue task with timeout to prevent hanging
+        try:
+            print("🔄 Attempting to queue task...")
+
+            # Use apply_async with timeout instead of .delay()
+            task = process_video_task.apply_async(
+                args=[video_path],
+                expires=600,  # Task expires after 10 minutes
+                retry=False   # Don't retry on failure
+            )
+
+            print(f"✅ Task queued with ID: {task.id}")
+
+            return jsonify({
+                'status': 'success',
+                'task_id': task.id
+            })
+        except Exception as queue_error:
+            print(f"❌ Failed to queue task: {queue_error}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'status': 'error', 'message': f'Failed to queue task: {str(queue_error)}'}), 500
 
     except Exception as e:
+        print(f"❌ Process endpoint error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -849,30 +859,31 @@ def get_stats():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Check if Celery worker is connected"""
-    from celery.task.control import inspect
-
-    i = inspect(app=celery, timeout=1.0)
-
     worker_status = "offline"
     workers_list = []
 
     try:
-        stats = i.stats()
-        if stats and len(stats) > 0:
+        # Quick timeout to avoid hanging
+        i = celery.control.inspect(timeout=0.5)
+
+        # Try ping
+        pong = i.ping()
+        if pong and len(pong) > 0:
             worker_status = "online"
-            workers_list = list(stats.keys())
+            workers_list = list(pong.keys())
             print(f"✅ Celery workers detected: {workers_list}")
         else:
-            print("⚠️ No Celery workers responding to stats()")
+            print("⚠️ No Celery workers responding to ping()")
     except Exception as e:
         print(f"❌ Error checking Celery: {e}")
+        # Don't print full traceback, just the error
 
     return jsonify({
         'server': 'online',
         'celery_worker': worker_status,
         'workers': workers_list,
         'redis': 'connected' if worker_status == 'online' else 'check connection',
-        'debug': 'If offline, restart Celery worker'
+        'debug': 'Celery inspect failed - workers may not be connected to same Redis'
     })
 
 

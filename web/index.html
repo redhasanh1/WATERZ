@@ -559,13 +559,19 @@
 
         // Process video (remove watermark)
         document.getElementById('processBtn').addEventListener('click', async () => {
+            console.log('Remove Watermark button clicked');
             const videoElem = document.getElementById('previewVideo');
             const taskId = videoElem.dataset.taskId;
 
+            console.log('Task ID:', taskId);
+
             if (!taskId) {
-                alert('No video loaded');
+                alert('No video loaded - task_id missing');
+                console.error('No task_id found on video element');
                 return;
             }
+
+            console.log('Starting processing for task:', taskId);
 
             const btn = document.getElementById('processBtn');
             const statusDiv = document.getElementById('processingStatus');
