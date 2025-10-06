@@ -17,5 +17,9 @@ set PATH=%~dp0python_packages;%PATH%
 echo Starting Celery worker (GPU processing)...
 echo Using packages from: %PYTHONPATH%
 echo.
-python -m celery -A server_production.celery worker --loglevel=info --pool=solo
+
+REM Disable Python output buffering to prevent hanging
+set PYTHONUNBUFFERED=1
+
+python -u -m celery -A server_production.celery worker --loglevel=info --pool=solo
 pause 
