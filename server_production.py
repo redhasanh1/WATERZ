@@ -555,7 +555,7 @@ def download_from_url():
         task_id = str(uuid.uuid4())
         output_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
 
-        # Download using yt-dlp Python module
+        # Download using yt-dlp Python module with Cloudflare bypass
         import yt_dlp
 
         ydl_opts = {
@@ -563,6 +563,14 @@ def download_from_url():
             'outtmpl': output_path,
             'quiet': False,  # Show errors
             'no_warnings': False,
+            # Cloudflare bypass settings
+            'extractor_args': {'generic': {'impersonate': 'chrome'}},
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            },
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

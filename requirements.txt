@@ -1,0 +1,11 @@
+flask
+flask-cors
+celery
+redis
+opencv-python
+numpy
+torch
+ultralytics
+yt-dlp
+curl-cffi
+playwright
