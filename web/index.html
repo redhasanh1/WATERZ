@@ -310,12 +310,12 @@
                         <p class="upload-description">or click to browse</p>
                     </div>
 
-                    <div class="preview-container" id="previewContainer">
+                    <div class="preview-container" id="previewContainer" style="text-align: left;">
                         <img id="previewImage" class="preview-image" style="display: none;">
                         <div style="position: relative; display: inline-block;">
                             <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
                             <!-- Curved Arrow SVG pointing to bottom-right -->
-                            <svg id="downloadHint" style="display: none; position: absolute; top: 0; right: -80px; width: 200px; height: 100%; pointer-events: none; z-index: 10;" viewBox="0 0 200 400" preserveAspectRatio="none">
+                            <svg id="downloadHint" style="display: none; position: absolute; top: 0; right: -180px; width: 200px; height: 100%; pointer-events: none; z-index: 10;" viewBox="0 0 200 400" preserveAspectRatio="none">
                                 <!-- Curved arrow path -->
                                 <defs>
                                     <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
@@ -327,7 +327,7 @@
                                 </path>
                             </svg>
                             <!-- Text label next to arrow -->
-                            <div id="downloadText" style="display: none; position: absolute; bottom: 10px; right: -250px; background: rgba(102, 126, 234, 0.95); color: white; padding: 0.8rem 1.2rem; border-radius: 12px; font-weight: 600; font-size: 1.1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: pulse 2s ease-in-out infinite; white-space: nowrap; z-index: 10;">
+                            <div id="downloadText" style="display: none; position: absolute; bottom: 10px; right: -350px; background: rgba(102, 126, 234, 0.95); color: white; padding: 0.8rem 1.2rem; border-radius: 12px; font-weight: 600; font-size: 1.1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: pulse 2s ease-in-out infinite; white-space: nowrap; z-index: 10;">
                                 Click ⋮ to Download
                             </div>
                         </div>
