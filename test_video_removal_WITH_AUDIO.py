@@ -185,7 +185,12 @@ try:
         ]
 
     print(f"\nRunning FFmpeg...")
+    print(f"Command: {' '.join(cmd)}")
+    print(f"\nThis may take a moment...")
+
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+    print(f"\nFFmpeg return code: {result.returncode}")
 
     if result.returncode == 0:
         print(f"✅ FFmpeg succeeded")
@@ -212,9 +217,13 @@ try:
             print(f"   FFmpeg stdout: {result.stdout}")
             print(f"   FFmpeg stderr: {result.stderr}")
     else:
-        print(f"❌ FFmpeg FAILED!")
+        print(f"\n❌ FFmpeg FAILED!")
         print(f"   Return code: {result.returncode}")
-        print(f"   Stderr: {result.stderr}")
+        print(f"\n   STDERR OUTPUT:")
+        print(f"   {result.stderr}")
+        print(f"\n   STDOUT OUTPUT:")
+        print(f"   {result.stdout}")
+        print(f"\n   Video saved WITHOUT audio: {temp_video_no_audio}")
 
 except FileNotFoundError as e:
     print(f"❌ FFmpeg not found: {e}")
