@@ -53,6 +53,24 @@ import hmac
 app = Flask(__name__, static_folder='web')
 CORS(app)
 
+# Security headers middleware
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to all responses"""
+    # Prevent clickjacking
+    response.headers['X-Frame-Options'] = 'DENY'
+    # Prevent MIME sniffing
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    # XSS protection
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    # Referrer policy
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # Content Security Policy
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https:; frame-src https://pagead2.googlesyndication.com;"
+    # Remove server header
+    response.headers.pop('Server', None)
+    return response
+
 # ============================================================================
 # Configuration - ALL ON D DRIVE
 # ============================================================================
@@ -72,6 +90,59 @@ app.config['TEMP_FOLDER'] = TEMP_DIR  # D drive only!
 
 # Rate limiting - prevent abuse
 UPLOAD_RATE_LIMIT = {}  # IP -> (count, timestamp)
+
+# Input validation
+def sanitize_filename(filename):
+    """Remove dangerous characters from filenames"""
+    import re
+    # Remove path traversal attempts
+    filename = os.path.basename(filename)
+    # Only allow alphanumeric, dots, dashes, underscores
+    filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
+    return filename
+
+def validate_url(url):
+    """Validate and sanitize URLs to prevent SSRF attacks"""
+    from urllib.parse import urlparse
+
+    if not url or not isinstance(url, str):
+        return False
+
+    # Basic length check
+    if len(url) > 2048:
+        return False
+
+    try:
+        parsed = urlparse(url)
+
+        # Must have scheme and netloc
+        if not parsed.scheme or not parsed.netloc:
+            return False
+
+        # Only allow http/https
+        if parsed.scheme not in ['http', 'https']:
+            return False
+
+        # Block localhost/internal IPs to prevent SSRF
+        blocked_hosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
+        if any(blocked in parsed.netloc.lower() for blocked in blocked_hosts):
+            return False
+
+        # Block private IP ranges
+        import ipaddress
+        try:
+            # Extract hostname without port
+            hostname = parsed.netloc.split(':')[0]
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                return False
+        except ValueError:
+            # Not an IP address, that's fine (it's a domain)
+            pass
+
+        return True
+    except Exception:
+        return False
 
 # Initialize Celery
 celery = Celery(app.name, broker=app.config['broker_url'], backend=app.config['result_backend'])
@@ -551,6 +622,10 @@ def download_from_url():
         if not url:
             return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
 
+        # Validate URL to prevent SSRF attacks
+        if not validate_url(url):
+            return jsonify({'status': 'error', 'message': 'Invalid or unsafe URL'}), 400
+
         # Generate unique filename
         task_id = str(uuid.uuid4())
         output_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
@@ -664,6 +739,10 @@ def download_sora():
 
         if not url:
             return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
+
+        # Validate URL to prevent SSRF attacks
+        if not validate_url(url):
+            return jsonify({'status': 'error', 'message': 'Invalid or unsafe URL'}), 400
 
         # Generate unique filename
         task_id = str(uuid.uuid4())
@@ -989,13 +1068,27 @@ def process_video():
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
     """Serve uploaded video files"""
-    return send_file(os.path.join(UPLOAD_DIR, filename))
+    # Sanitize filename to prevent path traversal
+    filename = sanitize_filename(filename)
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    # Verify file exists and is within upload directory
+    if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR)):
+        return jsonify({'error': 'File not found'}), 404
+
+    return send_file(file_path)
 
 
 @app.route('/results/<filename>')
 def serve_result(filename):
     """Serve processed result files and delete after sending"""
+    # Sanitize filename to prevent path traversal
+    filename = sanitize_filename(filename)
     file_path = os.path.join(RESULT_DIR, filename)
+
+    # Verify file exists and is within result directory
+    if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(RESULT_DIR)):
+        return jsonify({'error': 'File not found'}), 404
 
     # Send file with as_attachment to trigger download
     response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
@@ -1063,35 +1156,6 @@ def get_stats():
     })
 
 
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Check if Celery worker is connected"""
-    worker_status = "offline"
-    workers_list = []
-
-    try:
-        # Quick timeout to avoid hanging
-        i = celery.control.inspect(timeout=0.5)
-
-        # Try ping
-        pong = i.ping()
-        if pong and len(pong) > 0:
-            worker_status = "online"
-            workers_list = list(pong.keys())
-            print(f"✅ Celery workers detected: {workers_list}")
-        else:
-            print("⚠️ No Celery workers responding to ping()")
-    except Exception as e:
-        print(f"❌ Error checking Celery: {e}")
-        # Don't print full traceback, just the error
-
-    return jsonify({
-        'server': 'online',
-        'celery_worker': worker_status,
-        'workers': workers_list,
-        'redis': 'connected' if worker_status == 'online' else 'check connection',
-        'debug': 'Celery inspect failed - workers may not be connected to same Redis'
-    })
 
 
 # ============================================================================
@@ -1114,7 +1178,7 @@ if __name__ == '__main__':
 
     # Run Flask app
     app.run(
-        host='127.0.0.1',
+        host='0.0.0.0',  # Listen on all interfaces for ngrok
         port=9000,
         debug=False,  # Set to False for production
         threaded=True
