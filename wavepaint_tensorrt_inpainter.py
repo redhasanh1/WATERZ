@@ -102,7 +102,14 @@ class WavePaintTensorRTInpainter:
         result_256 = result_256.transpose(1, 2, 0)  # CHW -> HWC
         result_256 = (result_256 * 255).clip(0, 255).astype(np.uint8)
 
-        # Resize back to original frame size
-        result = cv2.resize(result_256, (w, h))
+        # Resize back to original frame size using CUBIC for better quality
+        result_full = cv2.resize(result_256, (w, h), interpolation=cv2.INTER_CUBIC)
+
+        # CRITICAL: Only replace the masked region to preserve original quality!
+        # The entire frame was resized 1920x1080 -> 256x256 -> 1920x1080 which kills quality
+        # So we keep the original frame and only paste the inpainted watermark region
+        result = image.copy()
+        mask_bool = mask > 127
+        result[mask_bool] = result_full[mask_bool]
 
         return result
