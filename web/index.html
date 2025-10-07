@@ -99,8 +99,32 @@
             background-size: 200% 200%;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            -moz-background-clip: text;
+            -moz-text-fill-color: transparent;
             background-clip: text;
+            display: inline-block;
             animation: gradient-shift 5s ease infinite;
+        }
+
+        /* Mobile-specific: use solid color instead of gradient to fix Brave rendering */
+        @media screen and (max-width: 768px) {
+            .gradient-text {
+                background: none;
+                background-clip: unset;
+                -webkit-background-clip: unset;
+                -webkit-text-fill-color: #667eea;
+                color: #667eea;
+                animation: none;
+            }
+        }
+
+        /* Fallback for browsers that don't support background-clip: text */
+        @supports not (background-clip: text) and not (-webkit-background-clip: text) {
+            .gradient-text {
+                color: #667eea;
+                background: none;
+                -webkit-text-fill-color: #667eea;
+            }
         }
 
         @keyframes gradient-shift {
@@ -272,9 +296,116 @@
             box-shadow: 0 15px 40px rgba(102, 126, 234, 0.4);
         }
 
+        /* Navigation Header */
+        .nav-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(15, 15, 30, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+            z-index: 1000;
+            padding: 1rem 0;
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1.25rem;
+        }
+
+        .nav-logo img {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+        }
+
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-menu a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .nav-menu a:hover {
+            color: var(--primary);
+        }
+
+        .nav-menu a::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--gradient-primary);
+            transition: width 0.3s ease;
+        }
+
+        .nav-menu a:hover::after {
+            width: 100%;
+        }
+
+        .nav-cta {
+            padding: 0.6rem 1.5rem;
+            background: var(--gradient-primary);
+            border-radius: 8px;
+            color: white !important;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .nav-cta:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .nav-cta::after {
+            display: none;
+        }
+
+        .mobile-menu-toggle {
+            display: none;
+            flex-direction: column;
+            gap: 4px;
+            cursor: pointer;
+            padding: 8px;
+        }
+
+        .mobile-menu-toggle span {
+            width: 24px;
+            height: 2px;
+            background: var(--text-primary);
+            border-radius: 2px;
+            transition: all 0.3s ease;
+        }
+
         @media (max-width: 768px) {
             .hero {
-                padding: 60px 0 40px;
+                padding: 100px 0 40px;
                 min-height: 60vh;
             }
 
@@ -285,6 +416,50 @@
             .upload-zone {
                 padding: 2rem 1rem;
                 min-height: 250px;
+            }
+
+            .mobile-menu-toggle {
+                display: flex;
+            }
+
+            .nav-menu {
+                position: fixed;
+                top: 65px;
+                left: 0;
+                right: 0;
+                flex-direction: column;
+                gap: 0;
+                background: rgba(15, 15, 30, 0.98);
+                backdrop-filter: blur(20px);
+                padding: 1rem 0;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+                transform: translateY(-100%);
+                opacity: 0;
+                pointer-events: none;
+                transition: all 0.3s ease;
+            }
+
+            .nav-menu.active {
+                transform: translateY(0);
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+            .nav-menu li {
+                width: 100%;
+                text-align: center;
+                padding: 1rem 0;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.05);
+            }
+
+            .nav-menu a {
+                display: block;
+                width: 100%;
+                padding: 0.5rem 0;
+            }
+
+            .nav-cta {
+                margin: 0.5rem 1rem;
             }
         }
         /* Ad zones */
@@ -394,6 +569,30 @@
     </style>
 </head>
 <body>
+    <!-- Navigation Header -->
+    <nav class="nav-header">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">
+                <img src="/emblem.png" alt="Logo">
+                <span>Watermark Remover</span>
+            </a>
+
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="#remove-watermark">Remove Watermark</a></li>
+                <li><a href="#how-to">How To Use</a></li>
+                <li><a href="#pricing">Pricing</a></li>
+                <li><a href="#comparison">See Results</a></li>
+                <li><a href="/premium.html" class="nav-cta">Go Premium</a></li>
+            </ul>
+
+            <div class="mobile-menu-toggle" id="mobileMenuToggle">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
     <!-- Top Banner Ad -->
     <div class="ad-banner-top">
         <ins class="adsbygoogle"
@@ -433,7 +632,7 @@
         </script>
     </div>
 
-    <section class="hero">
+    <section class="hero" id="remove-watermark">
         <div class="hero-background"></div>
         <div class="container">
             <div class="hero-content">
@@ -573,7 +772,7 @@
                     </script>
                 </div>
 
-                <div class="feature-grid">
+                <div class="feature-grid" id="how-to">
                     <div class="feature-card">
                         <div class="feature-number">1</div>
                         <h3>Upload File</h3>
@@ -615,8 +814,52 @@
         </div>
     </section>
 
+    <!-- Pricing Section -->
+    <section id="pricing" style="padding: 4rem 2rem; background: var(--bg-dark);">
+        <div class="container">
+            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                Simple Pricing
+            </h2>
+            <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 3rem;">
+                Choose the plan that works for you
+            </p>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; max-width: 900px; margin: 0 auto;">
+                <!-- Free Plan -->
+                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.1); border-radius: 16px; padding: 2rem; text-align: center;">
+                    <h3 style="font-size: 1.5rem; margin-bottom: 1rem;">Free</h3>
+                    <div style="font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem;">$0</div>
+                    <p style="color: var(--text-secondary); margin-bottom: 2rem;">Perfect for trying out</p>
+                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
+                        <li style="padding: 0.5rem 0; color: var(--text-secondary);">✓ 3 videos per day</li>
+                        <li style="padding: 0.5rem 0; color: var(--text-secondary);">✓ Standard quality</li>
+                        <li style="padding: 0.5rem 0; color: var(--text-secondary);">✓ AI detection</li>
+                        <li style="padding: 0.5rem 0; color: var(--text-secondary);">✓ Ads supported</li>
+                    </ul>
+                    <a href="#remove-watermark" style="display: block; padding: 0.8rem 2rem; background: rgba(102, 126, 234, 0.2); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600;">Get Started</a>
+                </div>
+
+                <!-- Premium Plan -->
+                <div style="background: var(--bg-card); border: 2px solid var(--primary); border-radius: 16px; padding: 2rem; text-align: center; position: relative; box-shadow: 0 0 40px rgba(102, 126, 234, 0.3);">
+                    <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gradient-primary); padding: 0.3rem 1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">POPULAR</div>
+                    <h3 style="font-size: 1.5rem; margin-bottom: 1rem;">Premium</h3>
+                    <div style="font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem;">$9.99<span style="font-size: 1rem; color: var(--text-secondary);">/mo</span></div>
+                    <p style="color: var(--text-secondary); margin-bottom: 2rem;">For professionals</p>
+                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
+                        <li style="padding: 0.5rem 0; color: var(--text-primary);">✓ Unlimited videos</li>
+                        <li style="padding: 0.5rem 0; color: var(--text-primary);">✓ High quality output</li>
+                        <li style="padding: 0.5rem 0; color: var(--text-primary);">✓ Priority processing</li>
+                        <li style="padding: 0.5rem 0; color: var(--text-primary);">✓ No ads</li>
+                        <li style="padding: 0.5rem 0; color: var(--text-primary);">✓ Batch processing</li>
+                    </ul>
+                    <a href="/premium.html" style="display: block; padding: 0.8rem 2rem; background: var(--gradient-primary); border-radius: 8px; color: white; text-decoration: none; font-weight: 600;">Go Premium</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Before/After Comparison Section -->
-    <section style="background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(17, 17, 35, 0.98) 100%); padding: 4rem 2rem; margin: 2rem 0;">
+    <section id="comparison" style="background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(17, 17, 35, 0.98) 100%); padding: 4rem 2rem; margin: 2rem 0;">
         <div class="container">
             <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
                 See the Difference
@@ -690,6 +933,37 @@
 
     <script src="config.js"></script>
     <script>
+        // Mobile Menu Toggle
+        const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+        const navMenu = document.getElementById('navMenu');
+
+        mobileMenuToggle.addEventListener('click', () => {
+            navMenu.classList.toggle('active');
+        });
+
+        // Close mobile menu when clicking a link
+        document.querySelectorAll('.nav-menu a').forEach(link => {
+            link.addEventListener('click', () => {
+                navMenu.classList.remove('active');
+            });
+        });
+
+        // Smooth scroll for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    const offset = 80; // Account for fixed header
+                    const targetPosition = target.offsetTop - offset;
+                    window.scrollTo({
+                        top: targetPosition,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+
         // Before/After Video Comparison Slider
         (function() {
             const beforeVideo = document.getElementById('before-video');
