@@ -60,30 +60,62 @@ class WavePaintTensorRTInpainter:
             traceback.print_exc()
             raise
 
-    def inpaint_region(self, image, mask):
+    def inpaint_region(self, image, mask, crop_size=512):
         """
-        Remove watermark using WavePaint TensorRT - Processes FULL FRAME for context!
+        Remove watermark using WavePaint TensorRT with HIGH QUALITY crop-based processing!
 
         Args:
             image: numpy array (H, W, 3) BGR
             mask: numpy array (H, W) where 255 = area to inpaint
+            crop_size: Size of crop region around watermark (default 512 for 2x downscale vs 8x full frame)
 
         Returns:
             numpy array (H, W, 3) BGR with watermark removed
         """
         h, w = image.shape[:2]
 
-        # Resize ENTIRE frame to 256x256 (same as test_wavepaint_only.py)
-        # This gives the model full context!
-        img_256 = cv2.resize(image, (256, 256))
-        mask_256 = cv2.resize(mask, (256, 256))
+        # Find bounding box of mask
+        mask_coords = np.where(mask > 127)
+        if len(mask_coords[0]) == 0:
+            # No mask, return original
+            return image
+
+        y_min, y_max = mask_coords[0].min(), mask_coords[0].max()
+        x_min, x_max = mask_coords[1].min(), mask_coords[1].max()
+
+        # Calculate center of watermark
+        center_y = (y_min + y_max) // 2
+        center_x = (x_min + x_max) // 2
+
+        # Create square crop centered on watermark with extra context
+        half_crop = crop_size // 2
+        crop_y1 = max(0, center_y - half_crop)
+        crop_y2 = min(h, center_y + half_crop)
+        crop_x1 = max(0, center_x - half_crop)
+        crop_x2 = min(w, center_x + half_crop)
+
+        # Ensure crop is square (adjust if hit boundaries)
+        crop_h = crop_y2 - crop_y1
+        crop_w = crop_x2 - crop_x1
+        if crop_h != crop_w:
+            target_size = min(crop_h, crop_w)
+            crop_y2 = crop_y1 + target_size
+            crop_x2 = crop_x1 + target_size
+
+        # Extract crop and crop mask
+        img_crop = image[crop_y1:crop_y2, crop_x1:crop_x2]
+        mask_crop = mask[crop_y1:crop_y2, crop_x1:crop_x2]
+
+        # Resize crop to 256x256 (much better than 1920→256!)
+        # Downscale ratio: 512→256 (2x) vs 1920→256 (8x) = 4x better quality!
+        img_256 = cv2.resize(img_crop, (256, 256))
+        mask_256 = cv2.resize(mask_crop, (256, 256))
 
         # Convert to float and normalize
         img_float = img_256.astype(np.float32) / 255.0
         mask_float = mask_256.astype(np.float32) / 255.0
 
         # CelebHQ model expects pre-masked image (black out watermark area)
-        # This matches what test_wavepaint_only.py does (line 177)
         masked_img = img_float * (1 - mask_float[:, :, np.newaxis])
 
         # Convert to tensors (CHW format)
@@ -102,14 +134,13 @@ class WavePaintTensorRTInpainter:
         result_256 = result_256.transpose(1, 2, 0)  # CHW -> HWC
         result_256 = (result_256 * 255).clip(0, 255).astype(np.uint8)
 
-        # Resize back to original frame size using CUBIC for better quality
-        result_full = cv2.resize(result_256, (w, h), interpolation=cv2.INTER_CUBIC)
+        # Resize back to crop size using CUBIC for best quality
+        crop_h_actual = crop_y2 - crop_y1
+        crop_w_actual = crop_x2 - crop_x1
+        result_crop = cv2.resize(result_256, (crop_w_actual, crop_h_actual), interpolation=cv2.INTER_CUBIC)
 
-        # CRITICAL: Only replace the masked region to preserve original quality!
-        # The entire frame was resized 1920x1080 -> 256x256 -> 1920x1080 which kills quality
-        # So we keep the original frame and only paste the inpainted watermark region
+        # Paste inpainted crop back into original frame
         result = image.copy()
-        mask_bool = mask > 127
-        result[mask_bool] = result_full[mask_bool]
+        result[crop_y1:crop_y2, crop_x1:crop_x2] = result_crop
 
         return result

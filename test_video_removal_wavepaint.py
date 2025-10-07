@@ -24,7 +24,10 @@ if not video_files:
     exit()
 
 input_video = random.choice(video_files)
-output_video = 'test_video_removal_wavepaint_result.mp4'
+
+# Generate unique output filename with timestamp to avoid permission issues
+timestamp = int(time.time())
+output_video = f'wavepaint_result_{timestamp}.mp4'
 
 print(f"\n📹 Input: {input_video}")
 print(f"📁 Output: {output_video}")
@@ -240,7 +243,14 @@ try:
     else:
         print(f"❌ FFmpeg failed with return code {result.returncode}")
         print(f"\nStderr:\n{result.stderr}")
-        print(f"\n⚠️  Keeping temp file: {temp_video_no_audio}")
+
+        # Check if it's a permission error
+        if "Permission denied" in result.stderr:
+            print(f"\n💡 SOLUTION: Close any video players that might have the output file open!")
+            print(f"   The file might be locked by another program.")
+            print(f"\n   You can still use the temp file: {temp_video_no_audio}")
+        else:
+            print(f"\n⚠️  Keeping temp file: {temp_video_no_audio}")
 
 except subprocess.TimeoutExpired:
     print(f"❌ FFmpeg timed out!")
