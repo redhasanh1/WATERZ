@@ -579,10 +579,9 @@
 
             <ul class="nav-menu" id="navMenu">
                 <li><a href="#remove-watermark">Remove Watermark</a></li>
-                <li><a href="#how-to">How To Use</a></li>
                 <li><a href="#pricing">Pricing</a></li>
                 <li><a href="#comparison">See Results</a></li>
-                <li><a href="/premium.html" class="nav-cta">Go Premium</a></li>
+                <li><a href="/login" class="nav-cta">Login</a></li>
             </ul>
 
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
@@ -824,94 +823,58 @@
                 Choose the plan that works for you
             </p>
 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 2rem; max-width: 1200px; margin: 0 auto;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 3rem; max-width: 800px; margin: 0 auto;">
                 <!-- Free Plan -->
-                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.1); border-radius: 16px; padding: 2rem; text-align: center;">
-                    <h3 style="font-size: 1.5rem; margin-bottom: 1rem; font-weight: 700;">Free</h3>
-                    <div style="font-size: 2.5rem; font-weight: 700; margin-bottom: 0.5rem;">$0<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem;">Perfect for trying out</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
-                        <li style="padding: 0.5rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.1); border-radius: 16px; padding: 2.5rem; text-align: center;">
+                    <h3 style="font-size: 1.75rem; margin-bottom: 1rem; font-weight: 700;">Free</h3>
+                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$0<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
+                    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 1rem;">Perfect for trying out</p>
+                    <ul style="list-style: none; padding: 0; margin-bottom: 2.5rem; text-align: left;">
+                        <li style="padding: 0.75rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>10 removals per month</span>
+                            <span>50 removals per month</span>
                         </li>
-                        <li style="padding: 0.5rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.75rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>No priority</span>
+                            <span>Standard queue</span>
                         </li>
-                    </ul>
-                    <a href="#remove-watermark" style="display: block; padding: 0.8rem 2rem; background: rgba(102, 126, 234, 0.2); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Try Free</a>
-                </div>
-
-                <!-- Basic Plan -->
-                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.1); border-radius: 16px; padding: 2rem; text-align: center;">
-                    <h3 style="font-size: 1.5rem; margin-bottom: 1rem; font-weight: 700;">Basic</h3>
-                    <div style="font-size: 2.5rem; font-weight: 700; margin-bottom: 0.5rem;">$12.99<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem;">For casual users / individuals</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
-                        <li style="padding: 0.5rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.75rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>75 removals per month</span>
+                            <span>Standard quality</span>
                         </li>
                     </ul>
-                    <a href="/premium.html" style="display: block; padding: 0.8rem 2rem; background: rgba(102, 126, 234, 0.2); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Get Started</a>
+                    <a href="#remove-watermark" style="display: block; padding: 1rem 2rem; background: rgba(102, 126, 234, 0.2); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Get Started Free</a>
                 </div>
 
                 <!-- Pro Plan -->
-                <div style="background: var(--bg-card); border: 2px solid var(--primary); border-radius: 16px; padding: 2rem; text-align: center; position: relative; box-shadow: 0 0 40px rgba(102, 126, 234, 0.3);">
+                <div style="background: var(--bg-card); border: 2px solid var(--primary); border-radius: 16px; padding: 2.5rem; text-align: center; position: relative; box-shadow: 0 0 40px rgba(102, 126, 234, 0.3);">
                     <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gradient-primary); padding: 0.3rem 1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">POPULAR</div>
-                    <h3 style="font-size: 1.5rem; margin-bottom: 1rem; font-weight: 700;">Pro</h3>
-                    <div style="font-size: 2.5rem; font-weight: 700; margin-bottom: 0.5rem;">$19.99<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem;">For content creators & social media managers</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
-                        <li style="padding: 0.5rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
+                    <h3 style="font-size: 1.75rem; margin-bottom: 1rem; font-weight: 700;">Pro</h3>
+                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$19.99<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
+                    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 1rem;">For content creators</p>
+                    <ul style="list-style: none; padding: 0; margin-bottom: 2.5rem; text-align: left;">
+                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>225 removals per month</span>
+                            <span>400 removals per month</span>
                         </li>
-                        <li style="padding: 0.5rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
+                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
+                            <span>Priority processing - No queue</span>
+                        </li>
+                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
                             <span>Faster processing speed</span>
                         </li>
-                        <li style="padding: 0.5rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Priority in queue</span>
+                            <span>High quality output</span>
                         </li>
-                        <li style="padding: 0.5rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Multi-format support (images, videos)</span>
+                            <span>Multi-format support</span>
                         </li>
                     </ul>
-                    <a href="/premium.html" style="display: block; padding: 0.8rem 2rem; background: var(--gradient-primary); border-radius: 8px; color: white; text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Go Pro</a>
-                </div>
-
-                <!-- Enterprise Plan -->
-                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.1); border-radius: 16px; padding: 2rem; text-align: center;">
-                    <h3 style="font-size: 1.5rem; margin-bottom: 1rem; font-weight: 700;">Enterprise "Unlimited"</h3>
-                    <div style="font-size: 2.5rem; font-weight: 700; margin-bottom: 0.5rem;">$125<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.95rem;">For agencies & teams</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
-                        <li style="padding: 0.5rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>700 removals per month</span>
-                        </li>
-                        <li style="padding: 0.5rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Highest processing speed & dedicated resources</span>
-                        </li>
-                        <li style="padding: 0.5rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Priority support (chat/email)</span>
-                        </li>
-                        <li style="padding: 0.5rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Multiple seats/team access (3–5 users)</span>
-                        </li>
-                        <li style="padding: 0.5rem 0; color: var(--text-secondary); display: flex; align-items: flex-start; font-size: 0.9rem;">
-                            <span style="color: var(--accent); margin-right: 0.5rem;">•</span>
-                            <span>Fair Use Policy applies</span>
-                        </li>
-                    </ul>
-                    <a href="/premium.html" style="display: block; padding: 0.8rem 2rem; background: rgba(102, 126, 234, 0.2); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Get Started</a>
+                    <a href="/premium.html" style="display: block; padding: 1rem 2rem; background: var(--gradient-primary); border-radius: 8px; color: white; text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Upgrade to Pro</a>
                 </div>
             </div>
         </div>
