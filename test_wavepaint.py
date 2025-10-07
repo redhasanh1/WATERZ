@@ -99,15 +99,33 @@ print("⚠️  NOTE: WavePaint requires pretrained weights!")
 print("Download from: https://github.com/pranavphoenix/WavePaint/releases")
 print("")
 
-weights_path = "wavepaint/WavePaint_blocks4_dim128_modules8_celebhq256.pth"
+# Check available weights
+available_weights = [
+    ("weights/WavePaint_blocks4_dim128_modules8_celebhq_thick_mask.pth", "CelebHQ Thick Mask"),
+    ("weights/WavePaint_blocks4_dim128_modules8_celebhq_medium_mask.pth", "CelebHQ Medium Mask"),
+    ("weights/WavePaint__blocks4_dim128_modules8_places256_thick_mask.pth", "Places256 Thick Mask"),
+    ("weights/WavePaint__blocks4_dim128_modules8_places256_medium_mask.pth", "Places256 Medium Mask"),
+]
 
-if not os.path.exists(weights_path):
-    print(f"❌ Weights not found at: {weights_path}")
-    print("Please download and place weights file there.")
+# Find first available weights
+weights_path = None
+weights_name = None
+for path, name in available_weights:
+    if os.path.exists(path):
+        weights_path = path
+        weights_name = name
+        break
+
+if not weights_path:
+    print(f"❌ No weights found in weights/ folder")
+    print("Please download WavePaint weights from Hugging Face")
     print("")
     print("For now, skipping WavePaint test...")
     wavepaint_result = None
 else:
+    print(f"✅ Using weights: {weights_name}")
+    print(f"   Path: {weights_path}")
+    print("")
     try:
         # Import WavePaint model
         sys.path.insert(0, 'wavepaint')

@@ -31,17 +31,18 @@ echo Python packages: %PYTHONPATH%
 echo.
 
 REM Check if WavePaint weights exist
-if not exist "wavepaint\WavePaint_blocks4_dim128_modules8_celebhq256.pth" (
+if not exist "wavepaint\WavePaint_celebahq.pth" (
     echo ================================================================
     echo WARNING: WavePaint weights not found!
     echo ================================================================
     echo.
-    echo WavePaint requires pretrained model weights.
+    echo WavePaint requires pretrained model weights (232 MB).
     echo.
-    echo Download from:
-    echo https://github.com/pranavphoenix/WavePaint/releases
+    echo Download from Hugging Face:
+    echo https://huggingface.co/cloudwalker/WavePaint/tree/main
     echo.
-    echo Place the .pth file in: wavepaint\
+    echo File: WavePaint_celebahq.pth
+    echo Place in: wavepaint\WavePaint_celebahq.pth
     echo.
     echo For now, the test will only run LaMa.
     echo.

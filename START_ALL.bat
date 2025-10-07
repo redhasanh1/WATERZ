@@ -13,31 +13,30 @@ echo Starting Celery Worker...
 start "Celery Worker" cmd /c START_CELERY.bat
 timeout /t 3 /nobreak >nul
 echo.
-echo Starting Flask Server...
-start "Flask Server" cmd /c START_SERVER.bat
+echo Starting Flask Server (Production Mode with Waitress)...
+start "Flask Server" cmd /c START_SERVER_PRODUCTION.bat
 echo Waiting for Flask to start...
 timeout /t 5 /nobreak >nul
 echo.
-echo Starting Localtunnel (connects to Flask on port 9000)...
-start "Localtunnel" cmd /c START_LOCALTUNNEL.bat
+echo Starting ngrok Tunnel (connects to Flask on port 9000)...
+start "ngrok" cmd /c START_NGROK.bat
 echo Waiting for tunnel to establish...
 timeout /t 8 /nobreak >nul
 echo.
 echo ============================================================
 echo All services started!
 echo.
-echo Localtunnel: Check Localtunnel window for public URL
+echo ngrok: Check ngrok window for public URL
 echo Redis: Running in background
 echo Celery: Processing watermark removal jobs
 echo Flask: http://localhost:9000
 echo.
-if exist web\tunnel_url.txt (
-    echo Public URL detected:
-    type web\tunnel_url.txt
-    echo.
-    echo Frontend will auto-connect to this URL
-    echo.
-)
+echo.
+echo [IMPORTANT] After ngrok starts:
+echo 1. Look for the "Forwarding" line in ngrok window
+echo 2. Copy the https://....ngrok-free.app URL
+echo 3. Update TUNNEL_URL in Railway with that URL
+echo.
 echo Check each window for logs
 echo Press Ctrl+C in each window to stop
 echo ============================================================

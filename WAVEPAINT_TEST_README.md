@@ -6,10 +6,16 @@
    - Place it in the `watermarkz` folder
    - Or have the path ready
 
-2. **Download WavePaint pretrained weights** (optional but recommended)
-   - Visit: https://github.com/pranavphoenix/WavePaint/releases
-   - Download: `WavePaint_blocks4_dim128_modules8_celebhq256.pth`
-   - Place in: `watermarkz/wavepaint/`
+2. **Download WavePaint pretrained weights** (REQUIRED)
+   - Visit: https://huggingface.co/cloudwalker/WavePaint/tree/main
+   - Download: `WavePaint_celebahq.pth` (232 MB)
+   - Place in: `watermarkz/wavepaint/WavePaint_celebahq.pth`
+
+   **Direct download link:**
+   ```
+   https://huggingface.co/cloudwalker/WavePaint/blob/main/WavePaint_celebahq.pth
+   ```
+   Click "download" button on that page
 
 3. **Run the test**
    ```bash
