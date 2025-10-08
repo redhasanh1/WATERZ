@@ -3,6 +3,10 @@ sys.path.insert(0, 'python_packages')
 
 import cv2
 import numpy as np
+try:
+    import torch
+except Exception:
+    torch = None
 
 class YOLOWatermarkDetector:
     def __init__(self, model_path=None):
@@ -39,23 +43,26 @@ class YOLOWatermarkDetector:
 
                 tensorrt_loaded = False
                 if tensorrt_model:
-                    try:
-                        print(f"🚀 Attempting to load TensorRT engine: {tensorrt_model}")
-                        # Try to load TensorRT
-                        self.model = YOLO(tensorrt_model, task='detect')
-                        print(f"✅ TensorRT engine loaded! (20-35 fps on GTX 1660 Ti)")
-                        tensorrt_loaded = True
-                    except FileNotFoundError as e:
-                        if 'nvinfer' in str(e):
-                            print(f"⚠️  TensorRT DLLs not found (nvinfer_10.dll missing)")
-                            print(f"   Falling back to PyTorch .pt model (slower but works)")
-                        else:
-                            print(f"⚠️  TensorRT load error: {e}")
-                        tensorrt_loaded = False
-                    except Exception as e:
-                        print(f"⚠️  TensorRT failed: {e}")
-                        print(f"   Falling back to PyTorch model...")
-                        tensorrt_loaded = False
+                    if (torch is None) or (not torch.cuda.is_available()):
+                        print("⚠️  CUDA torch not available in this process; skipping YOLO TensorRT engine")
+                    else:
+                        try:
+                            print(f"🚀 Attempting to load TensorRT engine: {tensorrt_model}")
+                            # Try to load TensorRT
+                            self.model = YOLO(tensorrt_model, task='detect')
+                            print(f"✅ TensorRT engine loaded! (20-35 fps on GTX 1660 Ti)")
+                            tensorrt_loaded = True
+                        except FileNotFoundError as e:
+                            if 'nvinfer' in str(e):
+                                print(f"⚠️  TensorRT DLLs not found (nvinfer_10.dll missing)")
+                                print(f"   Falling back to PyTorch .pt model (slower but works)")
+                            else:
+                                print(f"⚠️  TensorRT load error: {e}")
+                            tensorrt_loaded = False
+                        except Exception as e:
+                            print(f"⚠️  TensorRT failed: {e}")
+                            print(f"   Falling back to PyTorch model...")
+                            tensorrt_loaded = False
 
                 if not tensorrt_loaded:
                     # Fallback to .pt model
@@ -134,7 +141,8 @@ class YOLOWatermarkDetector:
         h, w = image.shape[:2]
 
         # Run YOLOv8 detection
-        results = self.model(image, conf=confidence_threshold, verbose=False)
+        device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
+        results = self.model(image, conf=confidence_threshold, device=device_arg, verbose=False)
 
         bboxes = []
 
@@ -163,13 +171,23 @@ class YOLOWatermarkDetector:
 
         return bboxes
 
-    def create_mask(self, image, detections):
+    def create_mask(
+        self,
+        image,
+        detections,
+        expand_ratio=0.0,
+        expand_pixels=0,
+        feather_pixels=21,
+    ):
         """
         Create binary mask from detections
 
         Args:
             image: numpy array (H, W, 3)
             detections: List of detection dicts from detect()
+            expand_ratio: fractional expansion applied to bbox (value added per side)
+            expand_pixels: minimum pixel expansion applied per side
+            feather_pixels: Gaussian blur kernel size (odd) for smooth edges
 
         Returns:
             Binary mask (H, W) uint8
@@ -177,9 +195,30 @@ class YOLOWatermarkDetector:
         h, w = image.shape[:2]
         mask = np.zeros((h, w), dtype=np.uint8)
 
+        expand_ratio = float(max(expand_ratio, 0.0))
+        expand_pixels = int(max(expand_pixels, 0))
+
         for det in detections:
             x1, y1, x2, y2 = det['bbox']
-            mask[y1:y2, x1:x2] = 255
+            width = max(1, x2 - x1)
+            height = max(1, y2 - y1)
+
+            pad_x = max(expand_pixels, int(width * expand_ratio * 0.5))
+            pad_y = max(expand_pixels, int(height * expand_ratio * 0.5))
+
+            x1_exp = max(0, x1 - pad_x)
+            x2_exp = min(w, x2 + pad_x)
+            y1_exp = max(0, y1 - pad_y)
+            y2_exp = min(h, y2 + pad_y)
+
+            mask[y1_exp:y2_exp, x1_exp:x2_exp] = 255
+
+        if feather_pixels > 0 and mask.any():
+            k = int(feather_pixels)
+            if k % 2 == 0:
+                k += 1  # kernel must be odd
+            blurred = cv2.GaussianBlur(mask, (k, k), 0)
+            _, mask = cv2.threshold(blurred, 10, 255, cv2.THRESH_BINARY)
 
         return mask
 

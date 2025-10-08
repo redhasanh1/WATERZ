@@ -12,7 +12,7 @@ set OPENCV_TEMP_PATH=%~dp0temp
 set PYTHONPATH=%~dp0python_packages
 
 REM Add TensorRT DLLs to PATH
-set PATH=%~dp0python_packages;%PATH%
+set PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%~dp0TensorRT-10.7.0.23\lib;%PATH%
 
 echo Starting Celery worker (GPU processing)...
 echo Using packages from: %PYTHONPATH%

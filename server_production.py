@@ -1,7 +1,7 @@
 """
 Production Server for Watermark Removal SaaS
 - Async queue processing with Celery + Redis
-- GPU-optimized YOLO + LaMa
+- GPU-optimized YOLO + WavePaint TensorRT (10-20x faster!)
 - Keeps your PC usable while serving customers
 - Designed for $1M/month scale
 - ALL FILES STAY ON D DRIVE (inside watermarkz folder)
@@ -16,9 +16,11 @@ TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
 CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
 UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
 RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
+DEBUG_DIR = os.path.join(RESULT_DIR, 'debug_masks')
+PYTHON_PACKAGES_DIR = os.path.join(SCRIPT_DIR, 'python_packages')
 
 # Create directories
-for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR]:
+for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # Override ALL temp/cache environment variables
@@ -32,8 +34,37 @@ os.environ['TRANSFORMERS_CACHE'] = CACHE_DIR
 os.environ['HF_HOME'] = CACHE_DIR
 os.environ['OPENCV_TEMP_PATH'] = TEMP_DIR
 
-# Add python_packages to path
-sys.path.insert(0, os.path.join(SCRIPT_DIR, 'python_packages'))
+
+def _ensure_cuda_torch():
+    """
+    Make sure we end up with a CUDA-enabled torch build.
+    Prefer the system install if it has CUDA; otherwise fall back to python_packages.
+    """
+    try:
+        import torch as _torch_test  # noqa: F401
+        if hasattr(_torch_test, 'cuda') and _torch_test.cuda.is_available():
+            sys.modules['torch'] = _torch_test
+            return
+        raise RuntimeError("System torch lacks CUDA support")
+    except Exception:
+        # Drop whatever was imported and fall back to bundled packages
+        sys.modules.pop('torch', None)
+
+    if PYTHON_PACKAGES_DIR not in sys.path:
+        sys.path.insert(0, PYTHON_PACKAGES_DIR)
+
+    import importlib
+
+    torch_cuda = importlib.import_module('torch')
+    if not hasattr(torch_cuda, 'cuda') or not torch_cuda.cuda.is_available():
+        raise RuntimeError(
+            "CUDA-enabled torch not available in python_packages. "
+            "Reinstall dependencies or run INSTALL_WAVEMIX.bat."
+        )
+    sys.modules['torch'] = torch_cuda
+
+
+_ensure_cuda_torch()
 
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
@@ -144,6 +175,45 @@ def validate_url(url):
     except Exception:
         return False
 
+
+def save_detection_debug(image, mask, detections, prefix):
+    """
+    Save a debug visualization showing YOLO detections and the inpainting mask.
+
+    Args:
+        image: Original frame (H, W, 3)
+        mask:  Binary mask aligned with image (H, W)
+        detections: List of detection dicts with 'bbox'
+        prefix: Filename prefix (str)
+    """
+    if not detections or image is None or mask is None:
+        return None
+
+    try:
+        overlay = image.copy()
+
+        for det in detections:
+            x1, y1, x2, y2 = det['bbox']
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        if mask.shape[:2] != image.shape[:2]:
+            mask_resized = cv2.resize(mask, (image.shape[1], image.shape[0]))
+        else:
+            mask_resized = mask
+
+        mask_color = np.zeros_like(overlay)
+        mask_color[:, :, 2] = np.clip(mask_resized, 0, 255)
+
+        debug_image = cv2.addWeighted(overlay, 0.7, mask_color, 0.3, 0)
+        filename = f"{prefix}.png"
+        output_path = os.path.join(DEBUG_DIR, filename)
+        cv2.imwrite(output_path, debug_image)
+        print(f"🧪 Detection debug saved: {output_path}")
+        return output_path
+    except Exception as exc:
+        print(f"⚠️  Failed to save detection debug image: {exc}")
+        return None
+
 # Initialize Celery
 celery = Celery(app.name, broker=app.config['broker_url'], backend=app.config['result_backend'])
 celery.conf.update(app.config)
@@ -223,19 +293,20 @@ def get_models():
         detector = YOLOWatermarkDetector()
         print("✅ TensorRT YOLO loaded (GPU accelerated)")
 
-        # Use optimized LaMa for 1.5-2x faster inpainting
+        # Use WavePaint TensorRT for 10-20x faster inpainting!
         try:
-            from lama_inpaint_optimized import LamaInpainterOptimized
-            inpainter = LamaInpainterOptimized()
-            print("✅ Optimized LaMa loaded (FP16 + CUDA, 1.5-2x faster)")
+            from wavepaint_tensorrt_inpainter import WavePaintTensorRTInpainter
+            inpainter = WavePaintTensorRTInpainter()
+            print("✅ WavePaint TensorRT loaded (10-20x faster than LaMa!)")
         except Exception as e:
-            print(f"❌ Failed to load Optimized LaMa: {e}")
-            print("⚠️  Falling back to standard LaMa...")
+            print(f"❌ Failed to load WavePaint TensorRT: {e}")
+            print("⚠️  Falling back to LaMa...")
             try:
-                from lama_inpaint_local import LamaInpainter
-                inpainter = LamaInpainter()
+                from lama_inpaint_optimized import LamaInpainterOptimized
+                inpainter = LamaInpainterOptimized()
+                print("✅ Optimized LaMa loaded (FP16 + CUDA)")
             except Exception as e2:
-                print(f"❌ Failed to load standard LaMa: {e2}")
+                print(f"❌ Failed to load LaMa: {e2}")
                 inpainter = None
 
         print("=" * 60)
@@ -291,6 +362,7 @@ def process_image_task(self, image_data, file_hash):
         if detections:
             start_inpaint = time.time()
             mask = detector.create_mask(image, detections)
+            save_detection_debug(image, mask, detections, f"image_{file_hash[:8]}")
             result = inpainter.inpaint_region(image, mask)
             inpaint_time = time.time() - start_inpaint
         else:
@@ -388,6 +460,7 @@ def process_video_task(self, video_path):
         frames_processed = 0
         frames_with_watermark = 0
         last_valid_bbox = None
+        debug_saved = False
 
         while True:
             ret, frame = cap.read()
@@ -409,6 +482,10 @@ def process_video_task(self, video_path):
 
                 # Remove watermark
                 mask = detector.create_mask(frame, detections)
+                if not debug_saved:
+                    debug_prefix = f"video_{name}_frame{frames_processed:04d}"
+                    save_detection_debug(frame, mask, detections, debug_prefix)
+                    debug_saved = True
                 result = inpainter.inpaint_region(frame, mask)
                 out.write(result)
             else:

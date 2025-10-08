@@ -10,6 +10,7 @@ set TORCH_HOME=%~dp0cache
 set XDG_CACHE_HOME=%~dp0cache
 set OPENCV_TEMP_PATH=%~dp0temp
 set PYTHONPATH=%~dp0python_packages
+set PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%~dp0TensorRT-10.7.0.23\lib;%PATH%
 
 echo ================================================================
 echo Starting PRODUCTION Flask server with Waitress
