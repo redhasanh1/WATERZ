@@ -18,6 +18,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <script>
+        // API base auto-detect: default to same-origin.
+        // This fixes undefined API_BASE_URL causing requests to stall.
+        var API_BASE_URL = window.API_BASE_URL || '';
+    </script>
     <style>
         /* AI Watermark Remover - Standalone Demo */
         :root {
@@ -566,6 +571,41 @@
             }
         }
 
+        /* Maintenance banner */
+        .maintenance-banner {
+            position: relative;
+            z-index: 999; /* under fixed nav (1000) */
+            background: linear-gradient(135deg, rgba(102,126,234,0.25) 0%, rgba(118,75,162,0.25) 100%);
+            border-bottom: 1px solid rgba(102, 126, 234, 0.25);
+            padding: 14px 16px;
+            text-align: center;
+            backdrop-filter: blur(6px);
+        }
+
+        .maintenance-banner .badge {
+            display: inline-block;
+            margin-right: 10px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: var(--gradient-primary);
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .maintenance-banner .msg {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .maintenance-banner .sparkle {
+            display: inline-block;
+            margin-left: 8px;
+            color: #a78bfa;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
     </style>
 </head>
 <body>
@@ -591,6 +631,13 @@
             </div>
         </div>
     </nav>
+
+    <!-- Maintenance Banner -->
+    <div class="maintenance-banner">
+        <span class="badge">Heads up</span>
+        <span class="msg">Temporarily unavailable — we’re making it even better 🙂</span>
+        <span class="sparkle">✨</span>
+    </div>
 
     <!-- Top Banner Ad -->
     <div class="ad-banner-top">
@@ -1315,12 +1362,194 @@
             }
         });
 
-        // Process video (remove watermark)
+        const statusDiv = document.getElementById('processingStatus');
+        const statusText = document.getElementById('statusText');
+        const progressBar = document.getElementById('progressBar');
+        const progressPercent = document.getElementById('progressPercent');
+        const processBtnElem = document.getElementById('processBtn');
+        const removeWatermarkBtnElem = document.getElementById('removeWatermarkBtn');
+        const ACTIVE_TASK_KEY = 'watermarkz_active_task';
+        const videoElem = document.getElementById('previewVideo');
+
+        let activeResultObjectUrl = null;
+
+        const removeExistingDownloadLink = () => {
+            const existingLink = statusDiv.querySelector('a[data-download-link="true"]');
+            if (existingLink) {
+                if (existingLink.dataset.blobUrl) {
+                    URL.revokeObjectURL(existingLink.dataset.blobUrl);
+                }
+                existingLink.remove();
+            }
+            if (activeResultObjectUrl) {
+                URL.revokeObjectURL(activeResultObjectUrl);
+                activeResultObjectUrl = null;
+            }
+        };
+
+        const parseFilenameFromDisposition = (headerValue) => {
+            if (!headerValue) return null;
+
+            const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+            if (utf8Match && utf8Match[1]) {
+                try {
+                    return decodeURIComponent(utf8Match[1].replace(/['"]/g, '').trim());
+                } catch (_) {
+                    // Ignore decode errors and fall back to other patterns
+                }
+            }
+
+            const plainMatch = headerValue.match(/filename="?([^\";]+)"?/i);
+            if (plainMatch && plainMatch[1]) {
+                return plainMatch[1].trim();
+            }
+
+            return null;
+        };
+
+        const buildDownloadLinkElement = (href, filename, isBlob) => {
+            const downloadLink = document.createElement('a');
+            downloadLink.href = href;
+            downloadLink.download = filename || 'cleaned_video.mp4';
+            downloadLink.textContent = 'Download Cleaned Video';
+            downloadLink.style.cssText = 'display: block; margin-top: 1rem; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; text-align: center; font-weight: 600;';
+            downloadLink.dataset.downloadLink = 'true';
+            downloadLink.rel = 'noopener';
+            downloadLink.target = isBlob ? '_self' : '_blank';
+            return downloadLink;
+        };
+
+        const prepareDownloadLink = async (resultUrl) => {
+            try {
+                const response = await fetch(resultUrl, {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Download failed with status ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                activeResultObjectUrl = blobUrl;
+
+                const disposition = response.headers.get('Content-Disposition');
+                const filename = parseFilenameFromDisposition(disposition) || 'cleaned_video.mp4';
+
+                const downloadLink = buildDownloadLinkElement(blobUrl, filename, true);
+                downloadLink.dataset.blobUrl = blobUrl;
+
+                return { downloadLink, filename, autoDownload: () => downloadLink.click() };
+            } catch (error) {
+                console.warn('Prefetching processed video failed, falling back to direct link:', error);
+                const downloadLink = buildDownloadLinkElement(resultUrl, 'cleaned_video.mp4', false);
+                return { downloadLink, filename: 'cleaned_video.mp4', autoDownload: null };
+            }
+        };
+
+        const startStatusPolling = (processTaskId) => {
+            localStorage.setItem(ACTIVE_TASK_KEY, processTaskId);
+
+            const pollStatus = async () => {
+                try {
+                    const statusResponse = await fetch(`${API_BASE_URL}/api/status/${processTaskId}`, {
+                        headers: { 'ngrok-skip-browser-warning': 'true' }
+                    });
+                    const statusData = await statusResponse.json();
+
+                    if (statusData.state === 'SUCCESS') {
+                        progressBar.style.width = '100%';
+                        progressPercent.textContent = '100%';
+                        statusText.textContent = 'Processing complete · Preparing download...';
+                        statusText.style.color = '#10b981';
+
+                        const resultData = statusData.result || {};
+                        if (resultData.result_url) {
+                            const resultUrl = `${API_BASE_URL}${resultData.result_url}`;
+
+                            removeExistingDownloadLink();
+
+                            let downloadLinkElement = null;
+                            let previewSource = resultUrl;
+                            let autoDownload = null;
+
+                            try {
+                                const prepared = await prepareDownloadLink(resultUrl);
+                                downloadLinkElement = prepared.downloadLink;
+                                previewSource = prepared.downloadLink.href;
+                                autoDownload = prepared.autoDownload;
+
+                                statusText.textContent = 'Processing complete · Download ready';
+                            } catch (downloadError) {
+                                console.error('Error preparing download link:', downloadError);
+                                downloadLinkElement = buildDownloadLinkElement(resultUrl, 'cleaned_video.mp4', false);
+                                statusText.textContent = 'Processing complete · Click the download button to save your video';
+                            }
+
+                            if (downloadLinkElement) {
+                                statusDiv.appendChild(downloadLinkElement);
+                            }
+
+                            if (videoElem) {
+                                videoElem.src = previewSource;
+                                document.getElementById('downloadHint').style.display = 'block';
+                                document.getElementById('downloadText').style.display = 'block';
+                            }
+
+                            if (autoDownload && statusDiv.dataset.completed !== 'true') {
+                                setTimeout(() => autoDownload(), 50);
+                            }
+                        }
+
+                        statusDiv.dataset.completed = 'true';
+                        localStorage.removeItem(ACTIVE_TASK_KEY);
+                        if (videoElem) {
+                            videoElem.dataset.taskId = '';
+                        }
+                        return;
+                    }
+
+                    if (statusData.state === 'FAILURE') {
+                        statusText.textContent = 'Error: ' + (statusData.error || 'Processing failed');
+                        statusText.style.color = '#ef4444';
+                        if (processBtnElem) {
+                            processBtnElem.style.display = 'block';
+                        }
+                        localStorage.removeItem(ACTIVE_TASK_KEY);
+                        return;
+                    }
+
+                    if (statusData.info) {
+                        const info = statusData.info;
+                        const percent = Math.max(0, Math.min(100, info.progress || 0));
+                        const status = info.status || 'Processing...';
+
+                        progressBar.style.width = percent + '%';
+                        progressPercent.textContent = percent + '%';
+                        statusText.textContent = status;
+                        statusText.style.color = '#a0a0c0';
+                    }
+
+                    setTimeout(pollStatus, 1000);
+                } catch (error) {
+                    console.error('Status poll error:', error);
+                    statusText.textContent = 'Reconnecting...';
+                    statusText.style.color = '#a0a0c0';
+                    setTimeout(pollStatus, 2000);
+                }
+            };
+
+            pollStatus();
+        };
+
         const processVideo = async () => {
             console.log('Remove Watermark button clicked');
-            const videoElem = document.getElementById('previewVideo');
-            const taskId = videoElem.dataset.taskId;
+            if (!videoElem) {
+                alert('Video element not found');
+                return;
+            }
 
+            const taskId = videoElem.dataset.taskId;
             console.log('Task ID:', taskId);
 
             if (!taskId) {
@@ -1331,20 +1560,18 @@
 
             console.log('Starting processing for task:', taskId);
 
-            const btn = document.getElementById('processBtn');
-            const statusDiv = document.getElementById('processingStatus');
-            const statusText = document.getElementById('statusText');
-            const progressBar = document.getElementById('progressBar');
-            const progressPercent = document.getElementById('progressPercent');
-
-            btn.style.display = 'none';
+            if (processBtnElem) {
+                processBtnElem.style.display = 'none';
+            }
             statusDiv.style.display = 'block';
+            statusDiv.dataset.completed = '';
+            removeExistingDownloadLink();
             statusText.textContent = 'Starting AI processing...';
+            statusText.style.color = '#a0a0c0';
             progressBar.style.width = '0%';
             progressPercent.textContent = '0%';
 
             try {
-                // Start processing
                 const response = await fetch(`${API_BASE_URL}/api/process`, {
                     method: 'POST',
                     headers: {
@@ -1358,83 +1585,22 @@
 
                 if (data.status === 'success') {
                     const processTaskId = data.task_id;
-
-                    // Poll for status
-                    const checkStatus = async () => {
-                        const statusResponse = await fetch(`${API_BASE_URL}/api/status/${processTaskId}`, {
-                            headers: { 'ngrok-skip-browser-warning': 'true' }
-                        });
-                        const statusData = await statusResponse.json();
-
-                        if (statusData.state === 'SUCCESS') {
-                            progressBar.style.width = '100%';
-                            progressPercent.textContent = '100%';
-                            statusText.textContent = 'Processing complete';
-                            statusText.style.color = '#10b981';
-
-                            // Build full result URL
-                            const resultUrl = `${API_BASE_URL}${statusData.result.result_url}`;
-
-                            // Open result in new tab
-                            window.open(resultUrl, '_blank');
-
-                            // Show download link
-                            const downloadLink = document.createElement('a');
-                            downloadLink.href = resultUrl;
-                            downloadLink.download = 'cleaned_video.mp4';
-                            downloadLink.textContent = 'Download Cleaned Video';
-                            downloadLink.style.cssText = 'display: block; margin-top: 1rem; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; text-align: center; font-weight: 600;';
-                            downloadLink.target = '_blank';
-
-                            statusDiv.appendChild(downloadLink);
-
-                            // Update video preview
-                            videoElem.src = resultUrl;
-
-                            // Show download hint on video
-                            document.getElementById('downloadHint').style.display = 'block';
-                            document.getElementById('downloadText').style.display = 'block';
-                        } else if (statusData.state === 'FAILURE') {
-                            statusText.textContent = 'Error: ' + (statusData.error || 'Processing failed');
-                            statusText.style.color = '#ef4444';
-                            btn.style.display = 'block';
-                        } else {
-                            // Update progress with detailed info
-                            if (statusData.info) {
-                                const info = statusData.info;
-                                const percent = info.progress || 0;
-                                const status = info.status || 'Processing...';
-
-                                // Update progress bar
-                                progressBar.style.width = percent + '%';
-                                progressPercent.textContent = percent + '%';
-
-                                // Show clean status without emojis
-                                statusText.textContent = status;
-                                statusText.style.color = '#a0a0c0';
-                            }
-
-                            setTimeout(checkStatus, 1000);
-                        }
-                    };
-
-                    checkStatus();
+                    startStatusPolling(processTaskId);
                 } else {
                     statusText.textContent = '❌ Error: ' + (data.message || 'Failed to start processing');
-                    btn.style.display = 'block';
+                    statusText.style.color = '#ef4444';
+                    if (processBtnElem) {
+                        processBtnElem.style.display = 'block';
+                    }
                 }
             } catch (error) {
                 statusText.textContent = '❌ Error: ' + error.message;
-                btn.style.display = 'block';
+                statusText.style.color = '#ef4444';
+                if (processBtnElem) {
+                    processBtnElem.style.display = 'block';
+                }
             }
         };
-
-        // Attach event listeners to both process buttons
-        const processBtnElem = document.getElementById('processBtn');
-        const removeWatermarkBtnElem = document.getElementById('removeWatermarkBtn');
-
-        console.log('processBtn element:', processBtnElem);
-        console.log('removeWatermarkBtn element:', removeWatermarkBtnElem);
 
         if (processBtnElem) {
             processBtnElem.addEventListener('click', processVideo);
@@ -1448,6 +1614,21 @@
             console.log('✅ Event listener attached to removeWatermarkBtn');
         } else {
             console.error('❌ removeWatermarkBtn not found!');
+        }
+
+        const savedTaskId = localStorage.getItem(ACTIVE_TASK_KEY);
+        if (savedTaskId) {
+            console.log('Resuming active task:', savedTaskId);
+            statusDiv.style.display = 'block';
+            statusDiv.dataset.completed = '';
+            statusText.textContent = 'Reconnecting to active job...';
+            statusText.style.color = '#a0a0c0';
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+            if (videoElem) {
+                videoElem.dataset.taskId = savedTaskId;
+            }
+            startStatusPolling(savedTaskId);
         }
     </script>
 </body>
