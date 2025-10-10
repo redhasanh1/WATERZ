@@ -1,7 +1,7 @@
 """
 Production Server for Watermark Removal SaaS
 - Async queue processing with Celery + Redis
-- GPU-optimized YOLO + WavePaint TensorRT (10-20x faster!)
+- GPU-optimized YOLO detection + ProPainter inpainting
 - Keeps your PC usable while serving customers
 - Designed for $1M/month scale
 - ALL FILES STAY ON D DRIVE (inside watermarkz folder)
@@ -9,6 +9,9 @@ Production Server for Watermark Removal SaaS
 
 import sys
 import os
+import importlib
+import shutil
+from pathlib import Path
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,9 +21,12 @@ UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
 RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
 DEBUG_DIR = os.path.join(RESULT_DIR, 'debug_masks')
 PYTHON_PACKAGES_DIR = os.path.join(SCRIPT_DIR, 'python_packages')
+PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter.py')
+PROPAINTER_OUTPUT_ROOT = os.path.join(RESULT_DIR, 'propainter')
+PROPAINTER_MASK_ROOT = os.path.join(TEMP_DIR, 'propainter_masks')
 
 # Create directories
-for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR]:
+for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR, PROPAINTER_OUTPUT_ROOT, PROPAINTER_MASK_ROOT]:
     os.makedirs(directory, exist_ok=True)
 
 # Override ALL temp/cache environment variables
@@ -40,22 +46,44 @@ def _ensure_cuda_torch():
     Make sure we end up with a CUDA-enabled torch build.
     Prefer the system install if it has CUDA; otherwise fall back to python_packages.
     """
+    def _import_torch(disable_triton_retry: bool = False):
+        """
+        Import torch and, if we hit the duplicated TORCH_LIBRARY Triton error,
+        retry exactly once with Triton disabled.
+        """
+        try:
+            return importlib.import_module('torch')
+        except RuntimeError as exc:
+            message = str(exc)
+            if (
+                not disable_triton_retry
+                and "Only a single TORCH_LIBRARY" in message
+            ):
+                os.environ['PYTORCH_DISABLE_TRITON'] = '1'
+                for module_name in ['torch', 'triton', 'torch_triton', 'torchvision._cuda', 'torchvision._C']:
+                    sys.modules.pop(module_name, None)
+                importlib.invalidate_caches()
+                return _import_torch(disable_triton_retry=True)
+            raise
+
     try:
-        import torch as _torch_test  # noqa: F401
+        _torch_test = _import_torch()
         if hasattr(_torch_test, 'cuda') and _torch_test.cuda.is_available():
             sys.modules['torch'] = _torch_test
             return
-        raise RuntimeError("System torch lacks CUDA support")
+        # GPU not available – continue with the existing torch module (CPU fallback)
+        sys.modules['torch'] = _torch_test
+        print("⚠️  CUDA not detected in system torch; continuing with CPU mode.")
+        return
     except Exception:
         # Drop whatever was imported and fall back to bundled packages
         sys.modules.pop('torch', None)
+        sys.modules.pop('triton', None)
 
     if PYTHON_PACKAGES_DIR not in sys.path:
         sys.path.insert(0, PYTHON_PACKAGES_DIR)
 
-    import importlib
-
-    torch_cuda = importlib.import_module('torch')
+    torch_cuda = _import_torch()
     if not hasattr(torch_cuda, 'cuda') or not torch_cuda.cuda.is_available():
         raise RuntimeError(
             "CUDA-enabled torch not available in python_packages. "
@@ -82,7 +110,64 @@ import secrets
 import hmac
 
 app = Flask(__name__, static_folder='web')
-CORS(app)
+# CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
+CORS(
+    app,
+    resources={r"/api/*": {"origins": "*"}},
+    supports_credentials=False,
+    allow_headers=["Content-Type", "ngrok-skip-browser-warning"],
+    expose_headers=["Content-Disposition"]
+)
+
+# ----------------------------------------------------------------------------
+# Simple access logging (Waitress doesn't emit per‑request access logs by default)
+# ----------------------------------------------------------------------------
+import sys
+import logging
+
+# Toggle per-request access logs with ACCESS_LOGS=1 (default disabled)
+ENABLE_ACCESS_LOGS = str(os.getenv('ACCESS_LOGS', '0')).lower() in ('1', 'true', 'yes', 'on')
+LOG_LEVEL = logging.INFO if ENABLE_ACCESS_LOGS else logging.WARNING
+logging.basicConfig(stream=sys.stdout, level=LOG_LEVEL)
+
+from flask import g
+
+@app.before_request
+def _log_request_start():
+    if not ENABLE_ACCESS_LOGS:
+        return
+    try:
+        g._req_start = time.time()
+        g._req_id = secrets.token_hex(4)
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr) or '-'
+        qs = request.query_string.decode('utf-8', errors='ignore')
+        path_qs = request.path + (('?' + qs) if qs else '')
+        logging.info(f"--> {g._req_id} {request.method} {path_qs} from {ip}")
+    except Exception:
+        pass
+
+@app.after_request
+def _log_request_end(response):
+    if ENABLE_ACCESS_LOGS:
+        try:
+            rid = getattr(g, '_req_id', '-')
+            dur_ms = int((time.time() - getattr(g, '_req_start', time.time())) * 1000)
+            length = response.calculate_content_length() or 0
+            logging.info(f"<-- {rid} {response.status_code} {length}b {dur_ms}ms {request.method} {request.path}")
+        except Exception:
+            pass
+    return response
+
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
+def health_check():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """Basic health endpoint for monitoring."""
+    return jsonify({
+        'status': 'ok',
+        'detector_loaded': detector is not None,
+        'propainter_ready': _check_propainter_assets()
+    })
 
 # Security headers middleware
 @app.after_request
@@ -241,7 +326,7 @@ celery.conf.update(
 
 # Global model instances (lazy loaded)
 detector = None
-inpainter = None
+propainter_ready = False
 
 # File cleanup - delete files older than 1 hour
 def cleanup_old_files():
@@ -276,44 +361,54 @@ print("🗑️  File cleanup scheduler started (runs every 10 minutes)")
 # Model Loading (Shared across workers)
 # ============================================================================
 
-def get_models():
+def _check_propainter_assets() -> bool:
     """
-    Lazy load models (called once per worker)
-    Models are kept in GPU memory for fast inference
+    Verify required ProPainter assets are present.
+    Returns True when everything looks good.
     """
-    global detector, inpainter
+    global propainter_ready
 
-    if detector is None or inpainter is None:
-        print("=" * 60)
-        print("Loading AI models...")
-        print("=" * 60)
+    if propainter_ready:
+        return True
 
-        # Use TensorRT YOLO for production speed
+    required_paths = [
+        PROPAINTER_SCRIPT,
+        os.path.join(SCRIPT_DIR, 'weights', 'ProPainter.pth'),
+        os.path.join(SCRIPT_DIR, 'weights', 'raft-things.pth'),
+        os.path.join(SCRIPT_DIR, 'weights', 'recurrent_flow_completion.pth'),
+    ]
+
+    missing = [path for path in required_paths if not os.path.exists(path)]
+    if missing:
+        print("❌ ProPainter assets missing:")
+        for path in missing:
+            print(f"   - {path}")
+        print("   Download weights or copy them into the paths above.")
+        propainter_ready = False
+        return False
+
+    propainter_ready = True
+    return True
+
+
+def get_detector():
+    """
+    Lazy load the YOLO detector (TensorRT if available).
+    """
+    global detector
+
+    if detector is None:
+        print("=" * 60)
+        print("Loading YOLO detector...")
+        print("=" * 60)
         from yolo_detector import YOLOWatermarkDetector
         detector = YOLOWatermarkDetector()
-        print("✅ TensorRT YOLO loaded (GPU accelerated)")
-
-        # Use WavePaint TensorRT for 10-20x faster inpainting!
-        try:
-            from wavepaint_tensorrt_inpainter import WavePaintTensorRTInpainter
-            inpainter = WavePaintTensorRTInpainter()
-            print("✅ WavePaint TensorRT loaded (10-20x faster than LaMa!)")
-        except Exception as e:
-            print(f"❌ Failed to load WavePaint TensorRT: {e}")
-            print("⚠️  Falling back to LaMa...")
-            try:
-                from lama_inpaint_optimized import LamaInpainterOptimized
-                inpainter = LamaInpainterOptimized()
-                print("✅ Optimized LaMa loaded (FP16 + CUDA)")
-            except Exception as e2:
-                print(f"❌ Failed to load LaMa: {e2}")
-                inpainter = None
-
         print("=" * 60)
-        print("✅ Models loaded and ready!")
+        print("✅ YOLO detector ready!")
         print("=" * 60)
 
-    return detector, inpainter
+    _check_propainter_assets()
+    return detector
 
 
 # ============================================================================
@@ -321,203 +416,233 @@ def get_models():
 # ============================================================================
 
 @celery.task(bind=True, name='watermark.remove_image')
-def process_image_task(self, image_data, file_hash):
+def process_image_task(self, image_path):
     """
-    Background task for image watermark removal
-
-    Args:
-        image_data: Image bytes
-        file_hash: MD5 hash for caching
-
-    Returns:
-        Processed image bytes
+    Single-image watermark removal using YOLO mask + OpenCV inpaint (fast).
     """
     try:
-        # Update progress
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Loading models'})
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Loading detector'})
+        det = get_detector()
 
-        # Load models (cached after first call)
-        detector, inpainter = get_models()
+        if not os.path.exists(image_path):
+            raise Exception(f'Image not found: {image_path}')
 
-        if inpainter is None:
-            raise Exception("LaMa model not available")
+        img = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if img is None:
+            raise Exception('Failed to read image')
 
-        # Decode image
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Decoding image'})
-        nparr = np.frombuffer(image_data, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        self.update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Detecting watermark'})
+        detections = det.detect(img, confidence_threshold=0.25, padding=0)
 
-        if image is None:
-            raise Exception("Failed to decode image")
+        # If no detections, return original
+        if not detections:
+            out_name = os.path.basename(image_path).rsplit('.', 1)[0] + '_clean.png'
+            out_path = os.path.join(RESULT_DIR, out_name)
+            cv2.imwrite(out_path, img)
+            self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Completed (no watermark detected)'} )
+            return {'path': out_path}
 
-        # Detect watermark (optimized settings)
-        self.update_state(state='PROCESSING', meta={'progress': 30, 'status': 'Detecting watermark'})
-        start_detect = time.time()
-        detections = detector.detect(image, confidence_threshold=0.25, padding=0)
-        detect_time = time.time() - start_detect
+        mask = det.create_mask(img, detections)
+        if mask is None or mask.size == 0:
+            out_name = os.path.basename(image_path).rsplit('.', 1)[0] + '_clean.png'
+            out_path = os.path.join(RESULT_DIR, out_name)
+            cv2.imwrite(out_path, img)
+            self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Completed (empty mask)'} )
+            return {'path': out_path}
 
-        # Remove watermark
-        self.update_state(state='PROCESSING', meta={'progress': 60, 'status': 'Removing watermark'})
+        self.update_state(state='PROCESSING', meta={'progress': 55, 'status': 'Inpainting'})
+        # Ensure single-channel 8-bit mask
+        m = mask
+        if len(m.shape) == 3:
+            m = cv2.cvtColor(m, cv2.COLOR_BGR2GRAY)
+        m = (m > 0).astype(np.uint8) * 255
 
-        if detections:
-            start_inpaint = time.time()
-            mask = detector.create_mask(image, detections)
-            save_detection_debug(image, mask, detections, f"image_{file_hash[:8]}")
-            result = inpainter.inpaint_region(image, mask)
-            inpaint_time = time.time() - start_inpaint
-        else:
-            result = image
-            inpaint_time = 0
-            print(f"⚠️  No watermark detected in image")
+        # Telea inpainting radius 3 is a good default
+        result = cv2.inpaint(img, m, 3, cv2.INPAINT_TELEA)
 
-        # Encode result
-        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Encoding result'})
-        _, buffer = cv2.imencode('.png', result, [cv2.IMWRITE_PNG_COMPRESSION, 6])
-        result_bytes = buffer.tobytes()
+        out_name = os.path.basename(image_path).rsplit('.', 1)[0] + '_clean.png'
+        out_path = os.path.join(RESULT_DIR, out_name)
+        cv2.imwrite(out_path, result)
 
-        # Log performance
-        total_time = detect_time + inpaint_time
-        print(f"✅ Image processed in {total_time:.2f}s (detect: {detect_time:.2f}s, inpaint: {inpaint_time:.2f}s)")
-        print(f"   Detections: {len(detections)}")
-        print(f"   Size: {len(image_data)/1024:.1f}KB → {len(result_bytes)/1024:.1f}KB")
-
-        return {
-            'data': result_bytes,
-            'metadata': {
-                'detections': len(detections),
-                'processing_time': total_time,
-                'detect_time': detect_time,
-                'inpaint_time': inpaint_time,
-                'original_size': len(image_data),
-                'result_size': len(result_bytes)
-            }
-        }
-
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Completed'})
+        return {'path': out_path}
     except Exception as e:
-        print(f"❌ Error processing image: {e}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise
 
 
 @celery.task(bind=True, name='watermark.remove_video')
 def process_video_task(self, video_path):
     """
-    Background task for video watermark removal
-
-    Args:
-        video_path: Path to uploaded video
-
-    Returns:
-        Path to processed video
+    Background task for video watermark removal using YOLO + ProPainter.
     """
     try:
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Loading models'})
+        self.update_state(
+            state='STARTED',
+            meta={'progress': 0, 'status': 'Loading YOLO detector'}
+        )
 
-        # Load models
-        detector, inpainter = get_models()
+        detector = get_detector()
+        if not _check_propainter_assets():
+            raise RuntimeError("ProPainter assets missing - see logs for details")
 
-        if inpainter is None:
-            raise Exception("LaMa model not available")
-
-        # Open video
-        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Opening video'})
-
-        # Check if file exists
+        # If running on a remote worker (e.g., Salad), the local path from the API host
+        # won't exist. In that case, try to download the file from the API via TUNNEL_URL.
         if not os.path.exists(video_path):
-            raise Exception(f"Video file not found: {video_path}")
+            tunnel = os.getenv('TUNNEL_URL')
+            try:
+                from urllib.parse import urljoin
+                import requests
+            except Exception:
+                tunnel = None
 
-        print(f"Opening video: {video_path}")
-        print(f"File size: {os.path.getsize(video_path) / (1024*1024):.2f} MB")
+            if tunnel:
+                # Handle Windows-style paths coming from the API host
+                try:
+                    from pathlib import PureWindowsPath
+                    base_name = PureWindowsPath(video_path).name
+                except Exception:
+                    base_name = os.path.basename(video_path.replace('\\', '/'))
+
+                download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+                print(f"🌐 Video not found locally. Downloading from: {download_url}")
+                try:
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
+                    r.raise_for_status()
+                    # Save to a temp path in UPLOAD_DIR
+                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                    remote_cached = os.path.join(UPLOAD_DIR, base_name)
+                    with open(remote_cached, 'wb') as f:
+                        f.write(r.content)
+                    video_path = remote_cached
+                    print(f"✅ Downloaded to: {video_path}")
+                except Exception as dl_err:
+                    print(f"❌ Failed to download video from API host: {dl_err}")
+                    raise Exception(f"Video file not found and remote download failed: {base_name}")
+            else:
+                raise Exception(f"Video file not found: {video_path}")
+
+        print(f"Opening video for ProPainter: {video_path}")
+        print(f"File size: {os.path.getsize(video_path) / (1024 * 1024):.2f} MB")
+
+        self.update_state(
+            state='PROCESSING',
+            meta={'progress': 5, 'status': 'Scanning video frames'}
+        )
 
         cap = cv2.VideoCapture(video_path)
-
         if not cap.isOpened():
-            raise Exception(f"Failed to open video: {video_path}. OpenCV could not decode the file.")
+            raise Exception(f"Failed to open video: {video_path}")
 
-        # Get video properties
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
 
-        print(f"Processing video: {width}x{height} @ {fps}fps, {total_frames} frames")
+        base_name = Path(video_path).stem
+        unique_suffix = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
+        mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{unique_suffix}")
+        os.makedirs(mask_dir, exist_ok=True)
 
-        # Setup output (D drive only!)
-        filename = os.path.basename(video_path)
-        name, ext = os.path.splitext(filename)
-        output_filename = f'{name}_processed.avi'  # Use AVI with MJPG (most reliable)
-        output_path = os.path.join(RESULT_DIR, output_filename)
-
-        # Use MJPG codec (native to OpenCV, most reliable on Windows)
-        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-        if not out.isOpened():
-            raise Exception("Failed to create video writer")
-
-        # Process frames
+        zero_mask = np.zeros((height, width), dtype=np.uint8)
+        last_valid_bbox = None
         frames_processed = 0
         frames_with_watermark = 0
-        last_valid_bbox = None
-        debug_saved = False
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            # Update progress
-            progress = int((frames_processed / total_frames) * 85) + 10
-            self.update_state(state='PROCESSING', meta={
-                'progress': progress,
-                'status': f'Processing frame {frames_processed}/{total_frames}'
-            })
+            progress = 5 + int((frames_processed / max(total_frames, 1)) * 40)
+            self.update_state(
+                state='PROCESSING',
+                meta={
+                    'progress': progress,
+                    'status': f'Building masks {frames_processed}/{total_frames}'
+                }
+            )
 
-            # Detect watermark (optimized settings from test_video_removal.py)
             detections = detector.detect(frame, confidence_threshold=0.25, padding=0)
+            active_detections = detections
 
             if detections:
                 frames_with_watermark += 1
+                primary = detections[0]
+                if primary.get('confidence', 0) >= 0.25:
+                    last_valid_bbox = primary['bbox']
+            elif last_valid_bbox:
+                active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}]
 
-                # Remove watermark
-                mask = detector.create_mask(frame, detections)
-                if not debug_saved:
-                    debug_prefix = f"video_{name}_frame{frames_processed:04d}"
-                    save_detection_debug(frame, mask, detections, debug_prefix)
-                    debug_saved = True
-                result = inpainter.inpaint_region(frame, mask)
-                out.write(result)
+            if active_detections:
+                mask = detector.create_mask(frame, active_detections)
             else:
-                # No watermark, write original
-                out.write(frame)
+                mask = zero_mask
 
+            mask_path = os.path.join(mask_dir, f"{frames_processed:04d}.png")
+            cv2.imwrite(mask_path, mask)
             frames_processed += 1
 
-        # Cleanup
         cap.release()
-        out.release()
 
-        print(f"✅ Video processed: {frames_processed} frames, {frames_with_watermark} with watermarks")
+        if frames_processed == 0:
+            raise RuntimeError("No frames were processed - video may be corrupted")
 
-        # Merge audio from original video using FFmpeg
-        self.update_state(state='PROCESSING', meta={'progress': 95, 'status': 'Adding audio'})
-
-        final_output = output_path.replace('.avi', '_with_audio.mp4')
+        print(f"✅ Masks generated: {frames_processed} frames, {frames_with_watermark} with detections")
 
         try:
-            import subprocess
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
-            # Use FFmpeg to copy audio from original and merge with processed video
-            # -i input1: processed video (no audio)
-            # -i input2: original video (with audio)
-            # -map 0:v: take video from first input (processed)
-            # -map 1:a: take audio from second input (original)
-            # -c:v libx264: encode video with h264
-            # -c:a aac: encode audio with aac
-            # -shortest: match shortest stream duration
+        self.update_state(
+            state='PROCESSING',
+            meta={'progress': 55, 'status': 'Running ProPainter'}
+        )
 
-            # First check if original video has audio
+        cmd = [
+            sys.executable,
+            PROPAINTER_SCRIPT,
+            '-i', video_path,
+            '-m', mask_dir,
+            '-o', PROPAINTER_OUTPUT_ROOT,
+            '--save_fps', str(fps),
+        ]
+        try:
+            import torch
+            if torch.cuda.is_available():
+                cmd.append('--fp16')
+        except Exception:
+            pass
+
+        print(f"Launching ProPainter: {' '.join(cmd)}")
+
+        import subprocess
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print("❌ ProPainter failed")
+            print(result.stdout)
+            print(result.stderr)
+            raise RuntimeError("ProPainter inference failed")
+
+        save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, base_name)
+        produced_video = os.path.join(save_root, 'inpaint_out.mp4')
+        if not os.path.exists(produced_video):
+            raise RuntimeError(f"ProPainter output not found: {produced_video}")
+
+        temp_processed = os.path.join(RESULT_DIR, f"{base_name}_propainter_video.mp4")
+        shutil.copy2(produced_video, temp_processed)
+
+        self.update_state(
+            state='PROCESSING',
+            meta={'progress': 85, 'status': 'Merging audio'}
+        )
+
+        final_output = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
+
+        try:
             check_audio_cmd = [
                 'ffprobe',
                 '-v', 'error',
@@ -531,91 +656,107 @@ def process_video_task(self, video_path):
             has_audio = 'audio' in has_audio_check.stdout
 
             if has_audio:
-                print(f"✅ Original video has audio - merging...")
-                cmd = [
-                    'ffmpeg',
-                    '-y',  # Overwrite output file
-                    '-i', output_path,  # Processed video (no audio)
-                    '-i', video_path,   # Original video (with audio)
-                    '-map', '0:v:0',    # Video from processed (explicit stream)
-                    '-map', '1:a:0',    # Audio from original (explicit stream)
-                    '-c:v', 'libx264',  # Video codec
-                    '-preset', 'ultrafast',  # Faster encoding
-                    '-crf', '18',       # Better quality
-                    '-c:a', 'aac',      # Audio codec
-                    '-b:a', '192k',     # Audio bitrate
-                    '-strict', 'experimental',  # Allow experimental AAC encoder
-                    final_output
-                ]
-            else:
-                print(f"⚠️  Original video has no audio - encoding without audio...")
                 cmd = [
                     'ffmpeg',
                     '-y',
-                    '-i', output_path,
+                    '-i', temp_processed,
+                    '-i', video_path,
+                    '-map', '0:v:0',
+                    '-map', '1:a:0',
+                    '-c:v', 'libx264',
+                    '-preset', 'ultrafast',
+                    '-crf', '18',
+                    '-c:a', 'aac',
+                    '-b:a', '192k',
+                    '-shortest',
+                    final_output
+                ]
+            else:
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', temp_processed,
                     '-c:v', 'libx264',
                     '-preset', 'ultrafast',
                     '-crf', '18',
                     final_output
                 ]
 
-            print(f"Running FFmpeg command: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            print(f"Running FFmpeg audio merge: {' '.join(cmd)}")
+            audio_merge = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
-            if result.returncode == 0:
-                print(f"✅ Audio merged successfully")
-
-                # Verify output actually has audio
-                verify_cmd = [
-                    'ffprobe',
-                    '-v', 'error',
-                    '-select_streams', 'a:0',
-                    '-show_entries', 'stream=codec_type',
-                    '-of', 'default=noprint_wrappers=1:nokey=1',
-                    final_output
-                ]
-                verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=5)
-
-                if 'audio' in verify.stdout:
-                    print(f"✅ VERIFIED: Output has audio track")
-                    # Delete the temporary AVI file without audio
-                    if os.path.exists(output_path):
-                        os.remove(output_path)
-                    output_path = final_output
-                else:
-                    print(f"⚠️  WARNING: FFmpeg succeeded but output has NO audio!")
-                    print(f"   This shouldn't happen. Check FFmpeg installation.")
-                    print(f"   Stdout: {result.stdout}")
-                    print(f"   Stderr: {result.stderr}")
+            if audio_merge.returncode != 0:
+                print("⚠️  Audio merge failed, returning video without audio")
+                print(audio_merge.stderr)
+                final_output = temp_processed
             else:
-                print(f"⚠️  FFmpeg audio merge FAILED!")
-                print(f"   Return code: {result.returncode}")
-                print(f"   Command: {' '.join(cmd)}")
-                print(f"   Stderr: {result.stderr}")
-                print(f"   Stdout: {result.stdout}")
-                print(f"   Returning video without audio: {output_path}")
-        except FileNotFoundError as e:
-            print(f"⚠️  FFmpeg not found - returning video without audio")
-            print(f"   Error: {e}")
-            print(f"   Install FFmpeg: https://ffmpeg.org/download.html")
+                if has_audio:
+                    verify_cmd = [
+                        'ffprobe',
+                        '-v', 'error',
+                        '-select_streams', 'a:0',
+                        '-show_entries', 'stream=codec_type',
+                        '-of', 'default=noprint_wrappers=1:nokey=1',
+                        final_output
+                    ]
+                    verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=5)
+                    if 'audio' not in verify.stdout:
+                        print("⚠️  Audio verification failed, keeping silent video")
+                        final_output = temp_processed
+                if final_output != temp_processed and os.path.exists(temp_processed):
+                    os.remove(temp_processed)
+        except FileNotFoundError:
+            print("⚠️  ffmpeg/ffprobe not available, returning silent video")
+            final_output = temp_processed
         except subprocess.TimeoutExpired:
-            print(f"⚠️  FFmpeg timeout - audio merge took too long")
-            print(f"   Returning video without audio")
-        except Exception as e:
-            print(f"⚠️  Error merging audio: {e}")
-            print(f"   Exception type: {type(e).__name__}")
-            import traceback
-            traceback.print_exc()
-            print(f"   Returning video without audio")
+            print("⚠️  FFmpeg timed out, returning silent video")
+            final_output = temp_processed
+
+        try:
+            shutil.rmtree(mask_dir, ignore_errors=True)
+        except Exception as cleanup_exc:
+            print(f"⚠️  Failed to delete mask directory {mask_dir}: {cleanup_exc}")
+
+        self.update_state(
+            state='SUCCESS',
+            meta={'progress': 100, 'status': 'Completed'}
+        )
+
+        # If running remotely and the API host is reachable via TUNNEL_URL,
+        # upload the result back so the frontend can download from the API server.
+        uploaded_path = None
+        tunnel = os.getenv('TUNNEL_URL')
+        if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
+            try:
+                import requests
+                upload_url = tunnel.rstrip('/') + '/api/upload-result'
+                print(f"⬆️  Uploading result to API host: {upload_url}")
+                with open(final_output, 'rb') as fp:
+                    resp = requests.post(
+                        upload_url,
+                        headers={'ngrok-skip-browser-warning': 'true'},
+                        files={'file': (os.path.basename(final_output), fp, 'video/mp4')},
+                        timeout=60
+                    )
+                if resp.ok:
+                    j = resp.json()
+                    if j.get('status') == 'success' and j.get('result_url'):
+                        uploaded_path = j['result_url']  # e.g. /results/<filename>
+                        print(f"✅ Uploaded result registered at: {uploaded_path}")
+                else:
+                    print(f"⚠️  Upload back failed: HTTP {resp.status_code}")
+            except Exception as up_err:
+                print(f"⚠️  Upload back error: {up_err}")
 
         return {
-            'path': output_path,
+            'path': uploaded_path or final_output,
             'metadata': {
                 'frames_processed': frames_processed,
                 'frames_with_watermark': frames_with_watermark,
                 'fps': fps,
-                'resolution': f"{width}x{height}",
-                'has_audio': os.path.exists(final_output)
+                'width': width,
+                'height': height,
+                'propainter_output': final_output,
             }
         }
 
@@ -624,6 +765,7 @@ def process_video_task(self, video_path):
         import traceback
         traceback.print_exc()
         raise
+
 
 
 # ============================================================================
@@ -705,23 +847,24 @@ def remove_watermark():
 
             # Queue video processing
             task = process_video_task.apply_async(args=[temp_path])
-        else:
-            # Queue image processing
-            task = process_image_task.apply_async(args=[image_data, file_hash])
 
-        return jsonify({
-            'task_id': task.id,
-            'status': 'queued',
-            'file_type': 'video' if is_video else 'image'
-        })
+            return jsonify({
+                'task_id': task.id,
+                'status': 'queued',
+                'file_type': 'video'
+            })
+
+        return jsonify({'error': 'Image processing disabled in ProPainter mode'}), 400
 
     except Exception as e:
         print(f"❌ Error queuing task: {e}")
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/status/<task_id>', methods=['GET'])
+@app.route('/api/status/<task_id>', methods=['GET', 'OPTIONS'])
 def get_status(task_id):
+    if request.method == 'OPTIONS':
+        return ('', 204)
     """
     Check task status
 
@@ -736,7 +879,8 @@ def get_status(task_id):
 
     task = AsyncResult(task_id, app=celery)
 
-    print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
+    if ENABLE_ACCESS_LOGS:
+        print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
 
     response = {
         'state': task.state
@@ -819,8 +963,10 @@ def get_result(task_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/download-from-url', methods=['POST'])
+@app.route('/api/download-from-url', methods=['POST', 'OPTIONS'])
 def download_from_url():
+    if request.method == 'OPTIONS':
+        return ('', 204)
     """
     Download video from URL using Playwright (bypasses Cloudflare)
     Works for most video sites with anti-bot protection
@@ -979,8 +1125,10 @@ def download_from_url():
         }), 500
 
 
-@app.route('/api/download-sora', methods=['POST'])
+@app.route('/api/download-sora', methods=['POST', 'OPTIONS'])
 def download_sora():
+    if request.method == 'OPTIONS':
+        return ('', 204)
     """
     Download Sora video from OpenAI using Playwright bypass + cookies
     Bypasses Cloudflare protection using saved cookies
@@ -1198,8 +1346,10 @@ def check_rate_limit(ip):
         UPLOAD_RATE_LIMIT[ip] = (1, current_time)
         return True
 
-@app.route('/api/upload', methods=['POST'])
+@app.route('/api/upload', methods=['POST', 'OPTIONS'])
 def upload_file():
+    if request.method == 'OPTIONS':
+        return ('', 204)
     """
     Upload video/image file (rate limited to 10/hour per IP)
 
@@ -1243,8 +1393,10 @@ def upload_file():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@app.route('/api/process', methods=['POST'])
+@app.route('/api/process', methods=['POST', 'OPTIONS'])
 def process_video():
+    if request.method == 'OPTIONS':
+        return ('', 204)
     """
     Process video to remove watermarks
 
@@ -1269,58 +1421,24 @@ def process_video():
         if not video_path:
             return jsonify({'status': 'error', 'message': 'Video not found'}), 404
 
-        # Queue processing task
-        print(f"📤 Queuing video processing task for: {video_path}")
-
-        # Try direct Redis queue instead of apply_async
-        print("🔄 Attempting to queue task via direct Redis push...")
+        # Queue processing task via Celery and return the real task id
+        print(f"📤 Queuing processing task for: {video_path}")
 
         try:
-            # Use send_task instead of apply_async - it's non-blocking
-            import json as json_lib
-            import kombu
-            from kombu import Connection
-
-            # Create direct connection to Redis
-            with Connection(REDIS_URL, connect_timeout=2) as conn:
-                # Generate task ID
-                task_id = str(uuid.uuid4())
-
-                # Create Celery-compatible message
-                message = {
-                    'id': task_id,
-                    'task': 'watermark.remove_video',  # Must match @celery.task(name=...)
-                    'args': [video_path],
-                    'kwargs': {},
-                    'retries': 0,
-                    'eta': None,
-                    'expires': None,
-                }
-
-                # Send to queue
-                producer = conn.Producer(serializer='json')
-                producer.publish(
-                    json_lib.dumps(message),
-                    exchange='',
-                    routing_key='celery',
-                    content_type='application/json',
-                    content_encoding='utf-8',
-                )
-
-                print(f"✅ Task queued with ID: {task_id}")
-                return jsonify({
-                    'status': 'success',
-                    'task_id': task_id
-                })
+            # Decide pipeline based on extension
+            ext = os.path.splitext(video_path)[1].lower()
+            image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+            if ext in image_exts:
+                result = celery.send_task('watermark.remove_image', args=[video_path])
+            else:
+                result = celery.send_task('watermark.remove_video', args=[video_path])
+            print(f"✅ Task queued with ID: {result.id}")
+            return jsonify({'status': 'success', 'task_id': result.id})
 
         except Exception as e:
             print(f"❌ Failed to queue task: {e}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to connect to Redis: {str(e)}'
-            }), 500
+            import traceback; traceback.print_exc()
+            return jsonify({'status': 'error', 'message': f'Failed to connect to Redis: {str(e)}'}), 500
 
     except Exception as e:
         print(f"❌ Process endpoint error: {e}")
@@ -1375,6 +1493,32 @@ def serve_result(filename):
             print(f"⚠️  Error deleting files: {e}")
 
     return response
+
+
+@app.route('/api/upload-result', methods=['POST', 'OPTIONS'])
+def upload_result():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """Accept result file from a remote worker and store it under results/.
+
+    Request: multipart/form-data with field 'file' and optional 'filename'.
+    Response: { "status": "success", "result_url": "/results/<filename>" }
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+        up = request.files['file']
+        if up.filename == '':
+            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
+
+        req_filename = request.form.get('filename') or up.filename
+        safe_name = sanitize_filename(req_filename)
+        os.makedirs(RESULT_DIR, exist_ok=True)
+        dest = os.path.join(RESULT_DIR, safe_name)
+        up.save(dest)
+        return jsonify({'status': 'success', 'result_url': f'/results/{safe_name}'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/privacy')
@@ -1445,3 +1589,7 @@ if __name__ == '__main__':
         debug=False,  # Set to False for production
         threaded=True
     )
+# Explicit CORS preflight catch-all for /api/* (helps when proxies strip headers)
+@app.route('/api/<path:subpath>', methods=['OPTIONS'])
+def cors_preflight(subpath):
+    return ('', 204)
