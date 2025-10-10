@@ -682,30 +682,26 @@
         </script>
     </div>
 
-    <!-- Left Sidebar Ad -->
+    <!-- Left Sidebar Ad (deferred init) -->
     <div class="ad-sidebar left">
         <ins class="adsbygoogle"
              style="display:block"
              data-ad-client="ca-pub-5884276468441861"
              data-ad-slot="1234567891"
              data-ad-format="vertical"
-             data-full-width-responsive="true"></ins>
-        <script>
-             (adsbygoogle = window.adsbygoogle || []).push({});
-        </script>
+             data-full-width-responsive="true"
+             data-defer="true"></ins>
     </div>
 
-    <!-- Right Sidebar Ad -->
+    <!-- Right Sidebar Ad (deferred init) -->
     <div class="ad-sidebar right">
         <ins class="adsbygoogle"
              style="display:block"
              data-ad-client="ca-pub-5884276468441861"
              data-ad-slot="1234567892"
              data-ad-format="vertical"
-             data-full-width-responsive="true"></ins>
-        <script>
-             (adsbygoogle = window.adsbygoogle || []).push({});
-        </script>
+             data-full-width-responsive="true"
+             data-defer="true"></ins>
     </div>
 
     <section class="hero" id="remove-watermark">
@@ -791,17 +787,15 @@
                                 Click the button below to begin processing
                             </p>
                         </div>
-                        <!-- Ad Before Process Button -->
+                        <!-- Ad Before Process Button (deferred init) -->
                         <div class="ad-container" style="margin-top: 1.5rem;">
                             <ins class="adsbygoogle"
                                  style="display:block"
                                  data-ad-client="ca-pub-5884276468441861"
                                  data-ad-slot="1234567893"
                                  data-ad-format="rectangle"
-                                 data-full-width-responsive="true"></ins>
-                            <script>
-                                 (adsbygoogle = window.adsbygoogle || []).push({});
-                            </script>
+                                 data-full-width-responsive="true"
+                                 data-defer="true"></ins>
                         </div>
 
                         <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Remove Watermark</button>
@@ -813,17 +807,15 @@
                             <p id="progressPercent" style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">0%</p>
                         </div>
 
-                        <!-- Ad After Processing Status -->
+                        <!-- Ad After Processing Status (deferred init) -->
                         <div class="ad-container" style="margin-top: 1.5rem;">
                             <ins class="adsbygoogle"
                                  style="display:block"
                                  data-ad-client="ca-pub-5884276468441861"
                                  data-ad-slot="1234567893"
                                  data-ad-format="rectangle"
-                                 data-full-width-responsive="true"></ins>
-                            <script>
-                                 (adsbygoogle = window.adsbygoogle || []).push({});
-                            </script>
+                                 data-full-width-responsive="true"
+                                 data-defer="true"></ins>
                         </div>
                     </div> <!-- End uploadSection -->
                 </div> <!-- End demo-card -->
@@ -1198,6 +1190,31 @@
             });
         })();
 
+        // --- Deferred Google Ads init helpers ---
+        function initVisibleGoogleAd(ins) {
+            if (!ins || ins.dataset.adInit === 'true') return;
+            var visible = ins.offsetParent !== null && ins.offsetWidth > 0;
+            if (!visible) return;
+            try {
+                (adsbygoogle = window.adsbygoogle || []).push({});
+                ins.dataset.adInit = 'true';
+            } catch (e) {
+                // ignore; will retry on resize/visibility
+            }
+        }
+
+        function initDeferredAdsIn(container) {
+            try {
+                var root = typeof container === 'string' ? document.querySelector(container) : (container || document);
+                if (!root) return;
+                var slots = root.querySelectorAll('ins.adsbygoogle[data-defer="true"]');
+                slots.forEach(initVisibleGoogleAd);
+            } catch (e) { /* ignore */ }
+        }
+
+        window.addEventListener('load', function () { initDeferredAdsIn(document); });
+        window.addEventListener('resize', function () { initDeferredAdsIn(document); });
+
         const fileInput = document.getElementById('fileInput');
         const uploadZone = document.getElementById('uploadZone');
         const previewContainer = document.getElementById('previewContainer');
@@ -1268,6 +1285,8 @@
                     document.getElementById('downloadText').style.display = 'block';
                 }
                 previewContainer.classList.add('active');
+                // Initialize deferred ad slots now that the container is visible
+                initDeferredAdsIn(previewContainer);
             };
             reader.readAsDataURL(file);
 
@@ -1359,6 +1378,8 @@
                     videoElem.dataset.taskId = data.task_id;
                     document.getElementById('previewImage').style.display = 'none';
                     previewContainer.classList.add('active');
+                    // Initialize deferred ad slots now that the container is visible
+                    initDeferredAdsIn(previewContainer);
 
                     // Show process button
                     const processBtn = document.getElementById('processBtn');
