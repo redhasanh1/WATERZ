@@ -1254,10 +1254,8 @@
             chip.classList.remove('ok','err');
             chip.classList.add('checking');
             try {
-                const res = await fetchWithTimeout(`${API_BASE_URL}/api/health`, {
-                    headers: { 'ngrok-skip-browser-warning': 'true' },
-                    timeout: 5000
-                });
+                // Use a simple GET without custom headers to avoid CORS preflight on some setups
+                const res = await fetchWithTimeout(`${API_BASE_URL}/api/health`, { timeout: 5000 });
                 const data = await res.json().catch(() => ({}));
                 if (res.ok && data && (data.status === 'ok' || data.detector_loaded !== undefined)) {
                     chip.textContent = 'API: Online';
@@ -1344,6 +1342,19 @@
             }
         }
 
+        function apiFetchUrl(url, options) {
+            const opts = options || {};
+            const headers = Object.assign({}, opts.headers || {}, {
+                'ngrok-skip-browser-warning': 'true'
+            });
+            return fetch(url, Object.assign({}, opts, { headers }));
+        }
+
+        function apiFetchPath(path, options) {
+            const url = `${API_BASE_URL}${path}`;
+            return apiFetchUrl(url, options);
+        }
+
         async function uploadFile(file) {
             // Show preview immediately
             const reader = new FileReader();
@@ -1373,9 +1384,8 @@
             formData.append('file', file);
 
             try {
-                const response = await fetch(`${API_BASE_URL}/api/upload`, {
+                const response = await apiFetchPath(`/api/upload`, {
                     method: 'POST',
-                    headers: { 'ngrok-skip-browser-warning': 'true' },
                     body: formData
                 });
 
@@ -1434,12 +1444,9 @@
                 console.log(`Using endpoint: ${endpoint} for URL: ${url} (Sora: ${isSoraUrl})`);
 
                 // Send URL to backend for downloading
-                const response = await fetch(endpoint, {
+                const response = await apiFetchUrl(endpoint, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'ngrok-skip-browser-warning': 'true'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url: url })
                 });
 
@@ -1581,9 +1588,7 @@
 
             const pollStatus = async () => {
                 try {
-                    const statusResponse = await fetch(`${API_BASE_URL}/api/status/${processTaskId}`, {
-                        headers: { 'ngrok-skip-browser-warning': 'true' }
-                    });
+                    const statusResponse = await apiFetchPath(`/api/status/${processTaskId}`);
                     const statusData = await statusResponse.json();
 
                     if (statusData.state === 'SUCCESS') {
@@ -1701,12 +1706,9 @@
             progressPercent.textContent = '0%';
 
             try {
-                const response = await fetch(`${API_BASE_URL}/api/process`, {
+                const response = await apiFetchPath(`/api/process`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'ngrok-skip-browser-warning': 'true'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ task_id: taskId })
                 });
 

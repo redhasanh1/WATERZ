@@ -24,7 +24,7 @@ from pathlib import Path
 # Import watermark removal modules
 try:
     from yolo_detector import YOLOWatermarkDetector
-    from lama_inpaint_local import LamaInpainter
+    from wavepaint_tensorrt_inpainter import WavePaintTensorRTInpainter
 except ImportError as e:
     print(f"Warning: Could not import watermark removal modules: {e}")
     print("Make sure you're running from the watermarkz directory")
@@ -55,11 +55,11 @@ def get_detector():
 
 
 def get_inpainter():
-    """Lazy load LaMa inpainter"""
+    """Lazy load WavePaint TensorRT inpainter"""
     global inpainter
     if inpainter is None:
-        print("Initializing LaMa inpainter...")
-        inpainter = LamaInpainter()
+        print("Initializing WavePaint TensorRT inpainter...")
+        inpainter = WavePaintTensorRTInpainter()
     return inpainter
 
 
