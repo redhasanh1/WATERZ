@@ -1266,6 +1266,21 @@
             }
         });
 
+        async function parseJsonSafe(response) {
+            try {
+                // Try JSON first
+                return await response.clone().json();
+            } catch (e) {
+                // Fallback to text for clearer diagnostics
+                const text = await response.text();
+                let msg = text && text.trim().slice(0, 300);
+                if (msg && /^\s*<!doctype|^\s*<html/i.test(msg)) {
+                    msg = 'Received HTML instead of JSON (likely wrong API host or tunnel banner).';
+                }
+                return { status: 'error', message: `Non-JSON response (${response.status}): ${msg || 'no body'}` };
+            }
+        }
+
         async function uploadFile(file) {
             // Show preview immediately
             const reader = new FileReader();
@@ -1301,7 +1316,7 @@
                     body: formData
                 });
 
-                const data = await response.json();
+                const data = await parseJsonSafe(response);
 
                 if (data.status === 'success') {
                     // Store task_id for processing
@@ -1365,7 +1380,7 @@
                     body: JSON.stringify({ url: url })
                 });
 
-                const data = await response.json();
+                const data = await parseJsonSafe(response);
 
                 if (data.status === 'success') {
                     // Show video in media player
@@ -1632,7 +1647,7 @@
                     body: JSON.stringify({ task_id: taskId })
                 });
 
-                const data = await response.json();
+                const data = await parseJsonSafe(response);
 
                 if (data.status === 'success') {
                     const processTaskId = data.task_id;
