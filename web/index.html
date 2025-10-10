@@ -4,12 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Watermark Remover - Demo</title>
+    <title>WatermarkAI - Responsible Cleanup Demo</title>
 
     <!-- Favicon -->
-    <link rel="icon" type="image/png" href="/emblem.png">
-    <link rel="shortcut icon" type="image/png" href="/emblem.png">
-    <link rel="apple-touch-icon" href="/emblem.png">
+    <link rel="icon" type="image/png" href="emblem.png">
+    <link rel="shortcut icon" type="image/png" href="emblem.png">
+    <link rel="apple-touch-icon" href="emblem.png">
 
     <!-- Google AdSense -->
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5884276468441861"
@@ -663,16 +663,17 @@
     <!-- Navigation Header -->
     <nav class="nav-header">
         <div class="nav-container">
-            <a href="/" class="nav-logo">
-                <img src="/emblem.png" alt="Logo">
-                <span>Watermark Remover</span>
+            <a href="index.html" class="nav-logo">
+                <img src="emblem.png" alt="Logo">
+                <span>WatermarkAI</span>
             </a>
 
             <ul class="nav-menu" id="navMenu">
-                <li><a href="#remove-watermark">Remove Watermark</a></li>
-                <li><a href="#pricing">Pricing</a></li>
-                <li><a href="#comparison">See Results</a></li>
-                <li><a href="/login" class="nav-cta">Login</a></li>
+                <li><a href="#remove-watermark">Restore Content</a></li>
+                <li><a href="#pricing">Plans</a></li>
+                <li><a href="premium.html#pricing">Full Pricing</a></li>
+                <li><a href="#comparison">Results</a></li>
+                <li><a href="login.html" class="nav-cta">Sign In</a></li>
             </ul>
 
             <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking…</div>
@@ -732,12 +733,12 @@
         <div class="container">
             <div class="hero-content">
                 <h1 class="hero-title">
-                    Remove <span class="gradient-text">Watermarks</span>
-                    <br>Instantly
+                    Restore <span class="gradient-text">Authorized</span>
+                    <br>Content with AI
                 </h1>
                 <p class="hero-subtitle">
-                    Advanced AI for removing watermarks from videos and images.
-                    <br>High quality results. Fast processing. Professional output.
+                    Built for lawful watermark cleanup on media you own or have permission to edit.
+                    <br>Refresh archives, deliver polished client work, and stay brand-safe in seconds.
                 </p>
 
                 <div class="demo-card">
@@ -746,18 +747,18 @@
                         <label style="display: flex; align-items: center; cursor: pointer; gap: 0.75rem;">
                             <input type="checkbox" id="agreeTerms" style="width: 22px; height: 22px; cursor: pointer; accent-color: #667eea; flex-shrink: 0;">
                             <span style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.4;">
-                                I confirm I own this content or have permission to modify it. I agree to the <a href="/terms" style="color: #667eea; text-decoration: none;">Terms</a> and <a href="/privacy" style="color: #667eea; text-decoration: none;">Privacy Policy</a>.
+                                I confirm I control the rights to this content or have written permission to modify it. I agree to the <a href="terms.html" style="color: #667eea; text-decoration: none;">Terms</a> and <a href="privacy.html" style="color: #667eea; text-decoration: none;">Privacy Policy</a>.
                             </span>
                         </label>
                     </div>
 
                     <div id="uploadSection" style="opacity: 0.5; pointer-events: none; transition: opacity 0.3s ease;">
-                        <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Video URL Here</h3>
+                        <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Video URL (owned or licensed)</h3>
 
                         <div style="text-align: center; margin-bottom: 2rem;">
                             <input type="text" id="videoUrl" placeholder="Paste video link here"
                                    style="width: 100%; max-width: 600px; padding: 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
-                            <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Download from URL</button>
+                            <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Import from URL</button>
                         <div id="urlLoadingProgress" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px;">
                             <p style="margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">Downloading video...</p>
                             <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.2); border-radius: 3px; overflow: hidden;">
@@ -804,10 +805,10 @@
                         <!-- Scroll Hint Below Video -->
                         <div id="scrollHint" style="display: none; text-align: center; margin-top: 1.5rem; padding: 1rem; background: rgba(102, 126, 234, 0.15); border-left: 4px solid #667eea; border-radius: 8px;">
                             <p style="font-size: 1.1rem; font-weight: 600; color: #667eea; margin-bottom: 0.3rem;">
-                                Next Step: Remove Watermark
+                                Next Step: Start Cleanup
                             </p>
                             <p style="font-size: 0.9rem; color: var(--text-secondary);">
-                                Click the button below to begin processing
+                                Click the button below to begin authorized processing
                             </p>
                         </div>
                         <!-- Ad Before Process Button (deferred init) -->
@@ -821,7 +822,7 @@
                                  data-defer="true"></ins>
                         </div>
 
-                        <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Remove Watermark</button>
+                        <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Start Cleanup</button>
                         <div id="processingStatus" style="display: none; margin-top: 1rem; padding: 1.5rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px; text-align: center;">
                             <p id="statusText" style="margin-bottom: 1rem; font-weight: 600;">Processing...</p>
                             <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden;">
@@ -844,9 +845,14 @@
                 </div> <!-- End demo-card -->
 
                     <div class="info-box">
-                        <h3>AI Watermark Removal</h3>
-                        <p><strong>Works on:</strong> Video and image watermarks • All types supported</p>
-                        <p style="margin-top: 0.5rem;"><strong>Processing:</strong> Real-time progress updates • High-quality results • Fast processing</p>
+                        <h3>AI Cleanup for Owned Media</h3>
+                        <p><strong>Perfect for:</strong> Updating branded assets • Refreshing licensed stock • Removing legacy bugs</p>
+                        <p style="margin-top: 0.5rem;"><strong>Processing:</strong> Real-time progress updates • High-quality restoration • Fast turnaround</p>
+                    </div>
+                    <div class="info-box" style="margin-top: 1.5rem;">
+                        <h3>Responsible Use Commitment</h3>
+                        <p style="color: var(--text-secondary);">WatermarkAI supports agencies, studios, and creators with documented rights. Do not upload pirated, confidential, or unauthorized material. We may suspend access for misuse.</p>
+                        <p style="color: var(--text-secondary); margin-top: 0.5rem;">Need guidance? Review the <a href="terms.html" style="color: #667eea; text-decoration: none;">Terms</a> for accepted use cases before you begin.</p>
                     </div>
                 </div>
 
@@ -867,25 +873,25 @@
                     <div class="feature-card">
                         <div class="feature-number">1</div>
                         <h3>Upload File</h3>
-                        <p style="color: var(--text-secondary);">Drag and drop or click to upload your video or image</p>
+                        <p style="color: var(--text-secondary);">Drag and drop owned or licensed footage, or click to browse securely</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-number">2</div>
                         <h3>AI Detection</h3>
-                        <p style="color: var(--text-secondary);">AI automatically detects watermarks</p>
+                        <p style="color: var(--text-secondary);">AI highlights logos, bugs, or timestamps you have permission to remove</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-number">3</div>
-                        <h3>Remove Watermark</h3>
-                        <p style="color: var(--text-secondary);">Click the button below to start AI processing</p>
+                        <h3>Run Cleanup</h3>
+                        <p style="color: var(--text-secondary);">Click the button below to start rights-respecting AI processing</p>
                         <button id="removeWatermarkBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; display: none;">
-                            Remove Watermark
+                            Start Cleanup
                         </button>
                     </div>
                     <div class="feature-card">
                         <div class="feature-number">4</div>
                         <h3>Download Result</h3>
-                        <p style="color: var(--text-secondary);">Get your clean file instantly</p>
+                        <p style="color: var(--text-secondary);">Download a refreshed version of your approved content</p>
                     </div>
                 </div>
 
@@ -909,66 +915,84 @@
     <section id="pricing" style="padding: 4rem 2rem; background: var(--bg-dark);">
         <div class="container">
             <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                Pricing Plans
+                Choose Your Plan
             </h2>
             <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 3rem;">
-                Choose the plan that works for you
+                Upfront pricing on the homepage, with the full breakdown one click away.
             </p>
 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 3rem; max-width: 800px; margin: 0 auto;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2.5rem; max-width: 1000px; margin: 0 auto;">
                 <!-- Free Plan -->
-                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.1); border-radius: 16px; padding: 2.5rem; text-align: center;">
-                    <h3 style="font-size: 1.75rem; margin-bottom: 1rem; font-weight: 700;">Free</h3>
+                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.15); border-radius: 16px; padding: 2.5rem; text-align: center;">
+                    <h3 style="font-size: 1.6rem; margin-bottom: 1rem; font-weight: 700;">Free</h3>
                     <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$0<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 1rem;">Perfect for trying out</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2.5rem; text-align: left;">
-                        <li style="padding: 0.75rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                    <p style="color: var(--text-secondary); margin-bottom: 1.75rem; font-size: 0.95rem;">Ideal for validating watermark cleanup on a rights-cleared pilot project.</p>
+                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
+                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>50 removals per month</span>
+                            <span>10 images & 2 short videos each month</span>
                         </li>
-                        <li style="padding: 0.75rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Standard queue</span>
+                            <span>Shared queue with standard turnaround</span>
                         </li>
-                        <li style="padding: 0.75rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Standard quality</span>
+                            <span>720p output and email support</span>
                         </li>
                     </ul>
-                    <a href="#remove-watermark" style="display: block; padding: 1rem 2rem; background: rgba(102, 126, 234, 0.2); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Get Started Free</a>
+                    <a href="#remove-watermark" style="display: block; padding: 1rem 2rem; background: rgba(102, 126, 234, 0.18); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Start for Free</a>
                 </div>
 
                 <!-- Pro Plan -->
                 <div style="background: var(--bg-card); border: 2px solid var(--primary); border-radius: 16px; padding: 2.5rem; text-align: center; position: relative; box-shadow: 0 0 40px rgba(102, 126, 234, 0.3);">
-                    <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gradient-primary); padding: 0.3rem 1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">POPULAR</div>
-                    <h3 style="font-size: 1.75rem; margin-bottom: 1rem; font-weight: 700;">Pro</h3>
-                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$19.99<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 1rem;">For content creators</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2.5rem; text-align: left;">
-                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
+                    <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gradient-primary); padding: 0.35rem 1.1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">MOST POPULAR</div>
+                    <h3 style="font-size: 1.6rem; margin-bottom: 1rem; font-weight: 700;">Pro</h3>
+                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$29<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
+                    <p style="color: var(--text-secondary); margin-bottom: 1.75rem; font-size: 0.95rem;">For independent creators, platforms, and agency teams handling licensed assets every week.</p>
+                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
+                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>400 removals per month</span>
+                            <span>500 images & 50 videos (≤10 min) every month</span>
                         </li>
-                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Priority processing - No queue</span>
+                            <span>Priority cleanup lane with 4K output</span>
                         </li>
-                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
+                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
                             <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Faster processing speed</span>
-                        </li>
-                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>High quality output</span>
-                        </li>
-                        <li style="padding: 0.75rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Multi-format support</span>
+                            <span>Batch uploads, API (1,000 calls), priority inbox support</span>
                         </li>
                     </ul>
-                    <a href="/premium.html" style="display: block; padding: 1rem 2rem; background: var(--gradient-primary); border-radius: 8px; color: white; text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Upgrade to Pro</a>
+                    <a href="premium.html#pricing" style="display: block; padding: 1rem 2rem; background: var(--gradient-primary); border-radius: 8px; color: white; text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Upgrade to Pro</a>
+                </div>
+
+                <!-- Enterprise Plan -->
+                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.15); border-radius: 16px; padding: 2.5rem; text-align: center;">
+                    <h3 style="font-size: 1.6rem; margin-bottom: 1rem; font-weight: 700;">Enterprise</h3>
+                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$299<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
+                    <p style="color: var(--text-secondary); margin-bottom: 1.75rem; font-size: 0.95rem;">Designed for global agencies that need governance features and SLAs.</p>
+                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
+                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
+                            <span>Unlimited cleanups & API calls with usage controls</span>
+                        </li>
+                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
+                            <span>8K support, dedicated success manager, 99.9% SLA</span>
+                        </li>
+                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
+                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
+                            <span>Audit-ready logs, white-label delivery, custom workflow rules</span>
+                        </li>
+                    </ul>
+                    <a href="premium.html#pricing" style="display: block; padding: 1rem 2rem; background: rgba(102, 126, 234, 0.18); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Talk to Sales</a>
                 </div>
             </div>
+
+            <p style="text-align: center; color: var(--text-secondary); font-size: 0.95rem; margin-top: 2.5rem;">
+                Need feature-by-feature comparisons, usage calculators, or compliance add-ons? Explore the full <a href="premium.html#pricing" style="color: #667eea; text-decoration: none;">pricing breakdown</a>.
+            </p>
         </div>
     </section>
 
@@ -976,10 +1000,10 @@
     <section id="comparison" style="background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(17, 17, 35, 0.98) 100%); padding: 4rem 2rem; margin: 2rem 0;">
         <div class="container">
             <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                See the Difference
+                See Authorized Cleanup Results
             </h2>
             <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 3rem;">
-                Drag the slider to compare watermarked vs clean video
+                Drag the slider to compare rights-cleared demo footage before and after cleanup
             </p>
 
             <div style="max-width: 300px; margin: 0 auto;">
@@ -987,13 +1011,13 @@
                 <div id="comparison-container" style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
                     <!-- Before Video (Background - WITH watermark) -->
                     <video id="before-video" style="width: 100%; display: block;" muted loop playsinline>
-                        <source src="/demos/before.mp4" type="video/mp4">
+                        <source src="demos/before.mp4" type="video/mp4">
                     </video>
 
                     <!-- After Video (Overlay - WITHOUT watermark, clipped by slider) -->
                     <div id="after-container" style="position: absolute; top: 0; right: 0; width: 50%; height: 100%; overflow: hidden;">
                         <video id="after-video" style="position: absolute; top: 0; right: 0; width: 300px; height: 100%; object-fit: cover;" muted loop playsinline>
-                            <source src="/demos/after.mp4" type="video/mp4">
+                            <source src="demos/after.mp4" type="video/mp4">
                         </video>
                     </div>
 
@@ -1032,6 +1056,28 @@
         </div>
     </section>
 
+    <section style="padding: 3rem 2rem; background: rgba(15, 15, 30, 0.9); border-top: 1px solid rgba(102, 126, 234, 0.1); border-bottom: 1px solid rgba(102, 126, 234, 0.1);">
+        <div class="container" style="max-width: 900px;">
+            <h2 style="text-align: center; font-size: 2rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                Built to Respect Creators and Rights Holders
+            </h2>
+            <p style="color: var(--text-secondary); text-align: center; margin-bottom: 2rem;">
+                WatermarkAI exists to help you modernize assets you already own, from updating brand kits to repurposing licensed stock. We actively reject piracy and unauthorized use.
+            </p>
+            <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem;">
+                <li style="background: rgba(26, 26, 46, 0.6); border-radius: 12px; padding: 1.25rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
+                    <strong style="color: var(--text-primary);">Rights First:</strong> Upload content you created, commissioned, licensed, or that is in the public domain.
+                </li>
+                <li style="background: rgba(26, 26, 46, 0.6); border-radius: 12px; padding: 1.25rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
+                    <strong style="color: var(--text-primary);">Policy Compliant:</strong> We follow Google Ads and major platform policies. Misuse may result in account termination and reporting.
+                </li>
+                <li style="background: rgba(26, 26, 46, 0.6); border-radius: 12px; padding: 1.25rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
+                    <strong style="color: var(--text-primary);">Privacy by Design:</strong> Files are automatically purged after processing. Review the revised <a href="privacy.html" style="color: #667eea; text-decoration: none;">Privacy Policy</a> for details.
+                </li>
+            </ul>
+        </div>
+    </section>
+
     <!-- Bottom Banner Ad -->
     <div class="ad-banner-bottom">
         <ins class="adsbygoogle"
@@ -1046,6 +1092,7 @@
     </div>
 
     <script src="config.js"></script>
+    <script src="js/billing.js"></script>
     <script>
         // Mobile Menu Toggle
         const mobileMenuToggle = document.getElementById('mobileMenuToggle');
@@ -1473,7 +1520,7 @@
                     // Show scroll hint
                     document.getElementById('scrollHint').style.display = 'block';
 
-                    // Show remove watermark button in feature section
+                    // Show cleanup button in feature section
                     document.getElementById('removeWatermarkBtn').style.display = 'block';
 
                     // Show download hint
@@ -1485,7 +1532,7 @@
                         processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }, 500);
 
-                    alert('Video loaded successfully! Ready to remove watermark.');
+                    alert('Video loaded successfully! Ready to start authorized cleanup.');
                 } else {
                     alert('Error: ' + (data.message || 'Failed to load video'));
                 }
@@ -1547,7 +1594,7 @@
             const downloadLink = document.createElement('a');
             downloadLink.href = href;
             downloadLink.download = filename || 'cleaned_video.mp4';
-            downloadLink.textContent = 'Download Cleaned Video';
+            downloadLink.textContent = 'Download Clean Copy';
             downloadLink.style.cssText = 'display: block; margin-top: 1rem; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; text-align: center; font-weight: 600;';
             downloadLink.dataset.downloadLink = 'true';
             downloadLink.rel = 'noopener';
@@ -1677,7 +1724,7 @@
         };
 
         const processVideo = async () => {
-            console.log('Remove Watermark button clicked');
+            console.log('Start Cleanup button clicked');
             if (!videoElem) {
                 alert('Video element not found');
                 return;

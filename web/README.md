@@ -52,6 +52,32 @@ Open your browser and navigate to:
 http://localhost:5000
 ```
 
+## Billing & Stripe Integration
+
+Stripe Checkout is wired in for the paid plans. Configure the following environment variables before starting the backend:
+
+| Variable | Description |
+|----------|-------------|
+| `STRIPE_SECRET_KEY` | Your Stripe secret API key (starts with `sk_...`). |
+| `STRIPE_PRICE_ID_PRO` | Price ID for the Professional subscription (e.g. `price_123`). |
+| `STRIPE_PRICE_ID_ENTERPRISE` | Price ID for the Enterprise subscription. |
+| `STRIPE_WEBHOOK_SECRET` | (Optional) Webhook signing secret for the billing webhook endpoint. |
+
+When running locally you can use the Stripe CLI to forward webhooks:
+
+```bash
+stripe login
+stripe listen --forward-to localhost:5000/api/billing/webhook
+```
+
+### Billing Endpoints
+
+- `POST /api/billing/create-checkout-session` – Creates a Stripe Checkout session for a plan. Payload: `{ "plan": "pro" }`.
+- `POST /api/billing/create-portal-session` – Creates a Stripe billing portal session. Accepts `{ "customer_id": "cus_..." }` or `{ "session_id": "cs_..." }`.
+- `POST /api/billing/webhook` – Receives Stripe webhook events (enabled when `STRIPE_WEBHOOK_SECRET` is provided).
+
+The frontend pricing buttons call these endpoints through `web/js/billing.js`.
+
 ## Usage
 
 1. **Upload File**: Drag and drop or click to select an image or video file
