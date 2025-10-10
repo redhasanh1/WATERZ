@@ -438,6 +438,27 @@
             transition: all 0.3s ease;
         }
 
+        /* API status chip */
+        .api-chip {
+            display: none; /* hidden on very small screens by default */
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(26,26,46,0.6);
+            color: var(--text-secondary);
+            margin-left: 12px;
+        }
+        @media (min-width: 769px) {
+            .api-chip { display: inline-flex; }
+        }
+        .api-chip.ok { color: #22c55e; border-color: rgba(34,197,94,0.35); }
+        .api-chip.err { color: #ef4444; border-color: rgba(239,68,68,0.35); }
+        .api-chip.checking { color: #f59e0b; border-color: rgba(245,158,11,0.35); }
+
         @media (max-width: 768px) {
             .hero {
                 padding: 100px 0 40px;
@@ -653,6 +674,8 @@
                 <li><a href="#comparison">See Results</a></li>
                 <li><a href="/login" class="nav-cta">Login</a></li>
             </ul>
+
+            <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking…</div>
 
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
                 <span></span>
@@ -1214,6 +1237,46 @@
 
         window.addEventListener('load', function () { initDeferredAdsIn(document); });
         window.addEventListener('resize', function () { initDeferredAdsIn(document); });
+
+        // --- API health indicator ---
+        function fetchWithTimeout(resource, options) {
+            const { timeout = 5000, ...opts } = options || {};
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+            return fetch(resource, { ...opts, signal: controller.signal })
+                .finally(() => clearTimeout(id));
+        }
+
+        async function updateApiChip() {
+            var chip = document.getElementById('apiStatusChip');
+            if (!chip) return;
+            chip.textContent = 'API: Checking…';
+            chip.classList.remove('ok','err');
+            chip.classList.add('checking');
+            try {
+                const res = await fetchWithTimeout(`${API_BASE_URL}/api/health`, {
+                    headers: { 'ngrok-skip-browser-warning': 'true' },
+                    timeout: 5000
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data && (data.status === 'ok' || data.detector_loaded !== undefined)) {
+                    chip.textContent = 'API: Online';
+                    chip.classList.remove('checking','err');
+                    chip.classList.add('ok');
+                } else {
+                    chip.textContent = 'API: Offline';
+                    chip.classList.remove('checking','ok');
+                    chip.classList.add('err');
+                }
+            } catch (e) {
+                chip.textContent = 'API: Offline';
+                chip.classList.remove('checking','ok');
+                chip.classList.add('err');
+            }
+        }
+
+        window.addEventListener('load', updateApiChip);
+        window.addEventListener('focus', updateApiChip);
 
         const fileInput = document.getElementById('fileInput');
         const uploadZone = document.getElementById('uploadZone');
