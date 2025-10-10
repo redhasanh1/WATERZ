@@ -19,9 +19,39 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <script>
-        // API base auto-detect: default to same-origin.
-        // This fixes undefined API_BASE_URL causing requests to stall.
-        var API_BASE_URL = window.API_BASE_URL || '';
+        // API base detection and override support.
+        // - Defaults to same-origin ('').
+        // - Reads a persisted override from localStorage if present.
+        // - Best-effort fetch of /tunnel_url.txt to auto-fill when front and API are split.
+        (function () {
+            var url = '';
+            try {
+                url = window.API_BASE_URL || localStorage.getItem('api_base_url_override') || '';
+            } catch (e) { /* ignore */ }
+
+            window.API_BASE_URL = url || '';
+
+            if (!url) {
+                try {
+                    fetch('/tunnel_url.txt', { headers: { 'ngrok-skip-browser-warning': 'true' } })
+                        .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+                        .then(function (txt) {
+                            if (!txt) return;
+                            txt = txt.trim();
+                            if (/^https?:\/\//i.test(txt)) {
+                                window.API_BASE_URL = txt;
+                                try { localStorage.setItem('api_base_url_override', txt); } catch (e) { }
+                            }
+                        })
+                        .catch(function () { /* ignore */ });
+                } catch (e) { /* ignore */ }
+            }
+
+            window.setApiBaseUrl = function (newUrl, persist) {
+                window.API_BASE_URL = newUrl || '';
+                try { if (persist) localStorage.setItem('api_base_url_override', window.API_BASE_URL); } catch (e) { }
+            };
+        })();
     </script>
     <style>
         /* AI Watermark Remover - Standalone Demo */
