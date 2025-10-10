@@ -20,6 +20,8 @@ from werkzeug.utils import secure_filename
 import tempfile
 import mimetypes
 from pathlib import Path
+from urllib.parse import urljoin
+import stripe
 
 # Import watermark removal modules
 try:
@@ -39,6 +41,14 @@ MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
+
+# Stripe configuration
+stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', '')
+STRIPE_PRICE_LOOKUP = {
+    'pro': os.environ.get('STRIPE_PRICE_ID_PRO', ''),
+    'enterprise': os.environ.get('STRIPE_PRICE_ID_ENTERPRISE', '')
+}
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 
 # Initialize detector and inpainter (lazy loading)
 detector = None
@@ -203,6 +213,36 @@ def index():
     return send_file('index.html')
 
 
+@app.route('/success.html')
+def success_page():
+    return send_file('success.html')
+
+
+@app.route('/cancel.html')
+def cancel_page():
+    return send_file('cancel.html')
+
+
+@app.route('/premium.html')
+def premium_page():
+    return send_file('premium.html')
+
+
+@app.route('/login.html')
+def login_page():
+    return send_file('login.html')
+
+
+@app.route('/terms.html')
+def terms_page():
+    return send_file('terms.html')
+
+
+@app.route('/privacy.html')
+def privacy_page():
+    return send_file('privacy.html')
+
+
 @app.route('/css/<path:path>')
 def serve_css(path):
     """Serve CSS files"""
@@ -268,6 +308,118 @@ def remove_watermark():
                 os.remove(filepath)
             except:
                 pass
+
+
+def _default_url(path: str) -> str:
+    """Build an absolute URL for redirect targets."""
+    base_url = request.headers.get('Origin') or request.host_url
+    return urljoin(base_url.rstrip('/') + '/', path.lstrip('/'))
+
+
+@app.route('/api/billing/create-checkout-session', methods=['POST'])
+def create_checkout_session():
+    """Create a Stripe Checkout session for a subscription purchase."""
+    if not stripe.api_key:
+        return jsonify({'error': 'Stripe is not configured on the server.'}), 503
+
+    data = request.get_json(silent=True) or {}
+    plan = data.get('plan', 'pro').lower()
+    price_id = STRIPE_PRICE_LOOKUP.get(plan)
+
+    if not price_id:
+        return jsonify({'error': f'Unsupported plan "{plan}".'}), 400
+
+    success_url = data.get('success_url') or _default_url('success.html?session_id={CHECKOUT_SESSION_ID}')
+    cancel_url = data.get('cancel_url') or _default_url('cancel.html')
+    customer_email = data.get('email') or None
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode='subscription',
+            payment_method_types=['card'],
+            line_items=[{
+                'price': price_id,
+                'quantity': 1
+            }],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            customer_email=customer_email,
+            allow_promotion_codes=True,
+            metadata={'plan': plan}
+        )
+        return jsonify({'url': session.url})
+    except stripe.error.StripeError as exc:
+        print(f"Stripe error: {exc}")
+        return jsonify({'error': str(exc)}), 502
+    except Exception as exc:
+        print(f"Unexpected error creating checkout session: {exc}")
+        return jsonify({'error': 'Unable to create checkout session.'}), 500
+
+
+@app.route('/api/billing/create-portal-session', methods=['POST'])
+def create_portal_session():
+    """Create a Stripe billing portal session for existing customers."""
+    if not stripe.api_key:
+        return jsonify({'error': 'Stripe is not configured on the server.'}), 503
+
+    data = request.get_json(silent=True) or {}
+    customer_id = data.get('customer_id')
+    session_id = data.get('session_id')
+
+    if not customer_id and session_id:
+        try:
+            checkout_session = stripe.checkout.Session.retrieve(session_id)
+            customer_id = checkout_session.customer
+        except stripe.error.StripeError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+    if not customer_id:
+        return jsonify({'error': 'customer_id or session_id is required.'}), 400
+
+    try:
+        portal_session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=_default_url('premium.html#pricing')
+        )
+        return jsonify({'url': portal_session.url})
+    except stripe.error.StripeError as exc:
+        return jsonify({'error': str(exc)}), 502
+
+
+@app.route('/api/billing/webhook', methods=['POST'])
+def stripe_webhook():
+    """Process Stripe webhook events."""
+    if not STRIPE_WEBHOOK_SECRET:
+        return '', 200  # Webhooks disabled
+
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature', '')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload=payload,
+            sig_header=sig_header,
+            secret=STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError as exc:
+        print(f"Invalid payload: {exc}")
+        return 'Invalid payload', 400
+    except stripe.error.SignatureVerificationError as exc:
+        print(f"Invalid signature: {exc}")
+        return 'Invalid signature', 400
+
+    event_type = event['type']
+    print(f"Received Stripe event: {event_type}")
+
+    # Placeholder for future business logic
+    if event_type == 'checkout.session.completed':
+        session = event['data']['object']
+        print(f"Checkout completed for customer {session.get('customer')}")
+    elif event_type == 'customer.subscription.deleted':
+        subscription = event['data']['object']
+        print(f"Subscription canceled: {subscription.get('id')}")
+
+    return '', 200
 
 
 @app.route('/api/health', methods=['GET'])

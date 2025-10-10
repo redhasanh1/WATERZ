@@ -874,17 +874,32 @@
         </div>
     </footer>
 
+    <script src="js/billing.js"></script>
     <script>
         function scrollToPricing() {
             document.getElementById('pricing').scrollIntoView({ behavior: 'smooth' });
         }
 
-        function signUp(plan) {
-            alert(`Starting your free trial for the ${plan} plan!\n\nIn production, this would:\n1. Open a signup modal\n2. Capture rights attestation and business details\n3. Process payment if required\n4. Grant access with compliance onboarding`);
+        async function signUp(plan) {
+            if (plan === 'free') {
+                window.location.href = 'login.html';
+                return;
+            }
+            try {
+                await Billing.startCheckout(plan);
+            } catch (error) {
+                console.error('Stripe checkout error:', error);
+                alert('We were unable to start checkout. Please try again or contact support.');
+            }
         }
 
-        function contactSales() {
-            alert('Opening sales contact form...\n\nIn production, this would:\n1. Open a discovery form\n2. Capture licensed catalog details\n3. Schedule a compliance-focused demo\n4. Route to the sales team');
+        async function contactSales() {
+            try {
+                await Billing.startCheckout('enterprise');
+            } catch (error) {
+                console.error('Stripe checkout error:', error);
+                alert('We were unable to start checkout. Please try again or contact sales at hello@watermarkai.com.');
+            }
         }
 
         function submitEmail(e) {

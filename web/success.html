@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Successful - WatermarkAI</title>
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0f0f1e;
+            color: #e0e0e0;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .card {
+            max-width: 520px;
+            background: rgba(26, 26, 46, 0.9);
+            border: 1px solid rgba(102, 126, 234, 0.25);
+            border-radius: 18px;
+            padding: 2.5rem;
+            text-align: center;
+            box-shadow: 0 25px 60px rgba(15, 15, 30, 0.45);
+        }
+        h1 {
+            margin: 0 0 1rem 0;
+            font-size: 2rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        p { color: #a0a0c0; line-height: 1.6; }
+        .btn {
+            margin-top: 1.5rem;
+            padding: 0.95rem 2rem;
+            border-radius: 12px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.35);
+        }
+        a.secondary {
+            display: inline-block;
+            margin-top: 1rem;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>You're all set!</h1>
+        <p>Thanks for choosing WatermarkAI. We’ve received your payment and your subscription is now active. Check your inbox for a confirmation email with onboarding details.</p>
+        <button class="btn" id="manageSubscriptionBtn">Manage subscription</button>
+        <a href="premium.html" class="secondary">← Back to pricing</a>
+        <a href="index.html" class="secondary">Go to homepage</a>
+    </div>
+
+    <script src="js/billing.js"></script>
+    <script>
+        (function () {
+            const params = new URLSearchParams(window.location.search);
+            const sessionId = params.get('session_id');
+            const button = document.getElementById('manageSubscriptionBtn');
+            button.addEventListener('click', async () => {
+                if (!sessionId) {
+                    alert('We could not find your checkout session. Please check your email for the manage billing link.');
+                    return;
+                }
+                try {
+                    await Billing.openPortal(sessionId);
+                } catch (error) {
+                    console.error('Portal error:', error);
+                    alert('Unable to open the billing portal. Please contact support if the issue persists.');
+                }
+            });
+        })();
+    </script>
+</body>
+</html>
