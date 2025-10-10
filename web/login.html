@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WatermarkAI Sign In</title>
+    <link rel="icon" type="image/png" href="emblem.png">
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0f0f1e;
+            color: #e0e0e0;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .card {
+            max-width: 420px;
+            width: 100%;
+            background: rgba(26, 26, 46, 0.85);
+            border: 1px solid rgba(102, 126, 234, 0.25);
+            border-radius: 18px;
+            padding: 2.5rem;
+            box-shadow: 0 20px 60px rgba(15, 15, 30, 0.45);
+        }
+        .tab-group {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            background: rgba(26, 26, 46, 0.6);
+            border: 1px solid rgba(102, 126, 234, 0.25);
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+        }
+        .tab-button {
+            padding: 0.85rem 1rem;
+            border: none;
+            background: transparent;
+            color: #a0a0c0;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 12px;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+        .tab-button.active {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.25) 0%, rgba(118, 75, 162, 0.35) 100%);
+            color: #fff;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .tab-panel[hidden] { display: none; }
+        .google-btn {
+            background: white;
+            color: #1a1a2e;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            margin-bottom: 1rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .google-btn img {
+            height: 18px;
+            width: 18px;
+            margin-right: 0.6rem;
+        }
+
+        .card h1 {
+            margin-top: 0;
+            margin-bottom: 0.75rem;
+            font-size: 1.75rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .card p {
+            color: #a0a0c0;
+            margin-bottom: 1.5rem;
+            line-height: 1.5;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #c7c7f1;
+        }
+        input[type="email"],
+        input[type="password"],
+        input[type="text"] {
+            width: 100%;
+            padding: 0.9rem 1rem;
+            border-radius: 10px;
+            border: 1px solid rgba(102, 126, 234, 0.35);
+            background: rgba(15, 15, 30, 0.85);
+            color: #fff;
+            font-size: 0.95rem;
+            margin-bottom: 1.25rem;
+        }
+        input::placeholder {
+            color: #7070a0;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 0.95rem 1rem;
+            border-radius: 12px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            text-decoration: none;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.35);
+        }
+        .footer-links {
+            margin-top: 1.5rem;
+            font-size: 0.9rem;
+            text-align: center;
+            color: #8080a8;
+        }
+        .footer-links a {
+            color: #667eea;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+        <div class="card">
+        <h1>Welcome to WatermarkAI</h1>
+        <p>Existing customers—from solo creators to full studios—can sign in, and new users can create accounts instantly.</p>
+
+        <div class="tab-group" role="tablist" aria-label="Authentication options">
+            <button class="tab-button active" id="tab-signin" data-target="panel-signin" role="tab" aria-controls="panel-signin" aria-selected="true">Sign in</button>
+            <button class="tab-button" id="tab-signup" data-target="panel-signup" role="tab" aria-controls="panel-signup" aria-selected="false">Create account</button>
+        </div>
+
+        <div id="panel-signin" class="tab-panel active" role="tabpanel" aria-labelledby="tab-signin">
+            <button type="button" id="googleSignIn" class="btn google-btn">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="" aria-hidden="true">
+                Continue with Google
+            </button>
+            <form id="loginForm">
+                <label for="email">Work email</label>
+                <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required>
+
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+
+                <button type="submit" class="btn">Sign in</button>
+            </form>
+        </div>
+
+        <div id="panel-signup" class="tab-panel" role="tabpanel" aria-labelledby="tab-signup" hidden>
+            <button type="button" id="googleSignup" class="btn google-btn">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="" aria-hidden="true">
+                Continue with Google
+            </button>
+            <form id="signupForm">
+                <label for="signupName">Full name</label>
+                <input type="text" id="signupName" name="signupName" placeholder="Alex Morgan" autocomplete="name" required>
+
+                <label for="signupEmail">Work email</label>
+                <input type="email" id="signupEmail" name="signupEmail" placeholder="you@agency.com" autocomplete="email" required>
+
+                <label for="signupPassword">Password</label>
+                <input type="password" id="signupPassword" name="signupPassword" placeholder="Create a password" autocomplete="new-password" required>
+
+                <button type="submit" class="btn">Create account</button>
+            </form>
+        </div>
+        <div class="footer-links">
+            <p><a href="index.html">← Back to Home</a></p>
+            <p>Need pricing info first? <a href="premium.html#pricing">Explore plans</a></p>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = window.API_BASE_URL || '';
+
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const panels = document.querySelectorAll('.tab-panel');
+
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                tabButtons.forEach(b => b.classList.remove('active'));
+                panels.forEach(panel => {
+                    panel.classList.remove('active');
+                    panel.hidden = true;
+                });
+                button.classList.add('active');
+                const targetId = button.dataset.target;
+                const panel = document.getElementById(targetId);
+                panel.classList.add('active');
+                panel.hidden = false;
+            });
+        });
+
+        document.getElementById('googleSignIn').addEventListener('click', () => {
+            const target = API_BASE ? `${API_BASE}/auth/google` : '/auth/google';
+            window.location.href = target;
+        });
+
+        document.getElementById('googleSignup').addEventListener('click', () => {
+            const target = API_BASE ? `${API_BASE}/auth/google?flow=signup` : '/auth/google?flow=signup';
+            window.location.href = target;
+        });
+
+        document.getElementById('loginForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+            alert('Sign-in is handled by the hosted WatermarkAI service. Please connect this form to your authentication backend or contact support for access.');
+        });
+
+        document.getElementById('signupForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+            alert('Account creation is handled by the hosted WatermarkAI service. Connect this form to your signup endpoint or reach out to support for onboarding.');
+        });
+    </script>
+
+</body>
+</html>
