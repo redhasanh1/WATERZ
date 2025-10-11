@@ -901,6 +901,8 @@ def get_status(task_id):
         elif task.state == 'SUCCESS':
             # task.result is a dict with 'path' and 'metadata'
             result_data = task.result
+            print(f"🔍 DEBUG - task.result type: {type(result_data)}, value: {result_data}")
+
             if isinstance(result_data, dict):
                 result_path = result_data.get('path')
                 if not result_path:
