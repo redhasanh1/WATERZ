@@ -1410,16 +1410,24 @@ def process_video():
         if not task_id:
             return jsonify({'status': 'error', 'message': 'No task_id provided'}), 400
 
-        # Find video file with any extension
+        # Find uploaded media (video first, then image) with any extension
         video_path = None
+        # Try common video extensions
         for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
             test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
             if os.path.exists(test_path):
                 video_path = test_path
                 break
+        # If not found, try common image extensions
+        if not video_path:
+            for ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp']:
+                test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+                if os.path.exists(test_path):
+                    video_path = test_path
+                    break
 
         if not video_path:
-            return jsonify({'status': 'error', 'message': 'Video not found'}), 404
+            return jsonify({'status': 'error', 'message': 'Media not found'}), 404
 
         # Queue processing task via Celery and return the real task id
         print(f"📤 Queuing processing task for: {video_path}")
