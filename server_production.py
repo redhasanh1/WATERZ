@@ -418,57 +418,175 @@ def get_detector():
 @celery.task(bind=True, name='watermark.remove_image')
 def process_image_task(self, image_path):
     """
-    Single-image watermark removal using YOLO mask + OpenCV inpaint (fast).
+    Single-image watermark removal using YOLO mask + ProPainter with FP16.
+
+    ProPainter works on video sequences, so we:
+    1. Duplicate the image into a 3-frame sequence
+    2. Generate masks for each frame
+    3. Run ProPainter with --fp16
+    4. Extract the middle frame as result
     """
     try:
         self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Loading detector'})
         det = get_detector()
 
+        if not _check_propainter_assets():
+            raise RuntimeError("ProPainter assets missing - see logs for details")
+
+        # If running on a remote worker (e.g., Salad), the local path from the API host
+        # won't exist. In that case, try to download the file from the API via TUNNEL_URL.
         if not os.path.exists(image_path):
-            raise Exception(f'Image not found: {image_path}')
+            tunnel = os.getenv('TUNNEL_URL')
+            try:
+                from urllib.parse import urljoin
+                import requests
+            except Exception:
+                tunnel = None
+
+            if tunnel:
+                # Handle Windows-style paths coming from the API host
+                try:
+                    from pathlib import PureWindowsPath
+                    base_name = PureWindowsPath(image_path).name
+                except Exception:
+                    base_name = os.path.basename(image_path.replace('\\', '/'))
+
+                download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+                print(f"🌐 Image not found locally. Downloading from: {download_url}")
+                try:
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
+                    r.raise_for_status()
+                    # Save to a temp path in UPLOAD_DIR
+                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                    remote_cached = os.path.join(UPLOAD_DIR, base_name)
+                    with open(remote_cached, 'wb') as f:
+                        f.write(r.content)
+                    image_path = remote_cached
+                    print(f"✅ Downloaded to: {image_path}")
+                except Exception as dl_err:
+                    print(f"❌ Failed to download image from API host: {dl_err}")
+                    raise Exception(f"Image file not found and remote download failed: {base_name}")
+            else:
+                raise Exception(f"Image file not found: {image_path}")
 
         img = cv2.imread(image_path, cv2.IMREAD_COLOR)
         if img is None:
             raise Exception('Failed to read image')
 
-        self.update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Detecting watermark'})
+        height, width = img.shape[:2]
+        base_name = Path(image_path).stem
+        unique_suffix = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
+
+        self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Detecting watermark'})
         detections = det.detect(img, confidence_threshold=0.25, padding=0)
 
         # If no detections, return original
         if not detections:
-            out_name = os.path.basename(image_path).rsplit('.', 1)[0] + '_clean.png'
+            out_name = base_name + '_clean.png'
             out_path = os.path.join(RESULT_DIR, out_name)
             cv2.imwrite(out_path, img)
-            # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
             return {'path': out_path}
 
+        # Create 3-frame sequence directory for ProPainter
+        frame_dir = os.path.join(TEMP_DIR, f"image_frames_{unique_suffix}")
+        mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{unique_suffix}")
+        os.makedirs(frame_dir, exist_ok=True)
+        os.makedirs(mask_dir, exist_ok=True)
+
+        self.update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Preparing frames'})
+
+        # Create 3 identical frames (ProPainter needs temporal context)
+        for i in range(3):
+            frame_path = os.path.join(frame_dir, f"{i:04d}.png")
+            cv2.imwrite(frame_path, img)
+
+        # Generate mask
         mask = det.create_mask(img, detections)
         if mask is None or mask.size == 0:
-            out_name = os.path.basename(image_path).rsplit('.', 1)[0] + '_clean.png'
+            out_name = base_name + '_clean.png'
             out_path = os.path.join(RESULT_DIR, out_name)
             cv2.imwrite(out_path, img)
-            # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
+            shutil.rmtree(frame_dir, ignore_errors=True)
+            shutil.rmtree(mask_dir, ignore_errors=True)
             return {'path': out_path}
 
-        self.update_state(state='PROCESSING', meta={'progress': 55, 'status': 'Inpainting'})
-        # Ensure single-channel 8-bit mask
-        m = mask
-        if len(m.shape) == 3:
-            m = cv2.cvtColor(m, cv2.COLOR_BGR2GRAY)
-        m = (m > 0).astype(np.uint8) * 255
+        # Ensure binary mask
+        if len(mask.shape) == 3:
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        mask = (mask > 0).astype(np.uint8) * 255
 
-        # Telea inpainting radius 3 is a good default
-        result = cv2.inpaint(img, m, 3, cv2.INPAINT_TELEA)
+        # Save same mask for all 3 frames
+        for i in range(3):
+            mask_path = os.path.join(mask_dir, f"{i:04d}.png")
+            cv2.imwrite(mask_path, mask)
 
-        out_name = os.path.basename(image_path).rsplit('.', 1)[0] + '_clean.png'
+        self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Running ProPainter with FP16'})
+
+        # Run ProPainter on the frame sequence with FP16 optimization
+        cmd = [
+            sys.executable,
+            PROPAINTER_SCRIPT,
+            '-i', frame_dir,
+            '-m', mask_dir,
+            '-o', PROPAINTER_OUTPUT_ROOT,
+            '--save_frames',  # Save individual frames
+        ]
+
+        # Enable FP16 for 2x speedup
+        try:
+            import torch
+            if torch.cuda.is_available():
+                cmd.append('--fp16')
+                print("✓ ProPainter FP16 enabled for image processing")
+        except Exception:
+            pass
+
+        print(f"Launching ProPainter for image: {' '.join(cmd)}")
+
+        import subprocess
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print("❌ ProPainter failed")
+            print(result.stdout)
+            print(result.stderr)
+            raise RuntimeError("ProPainter inference failed")
+
+        # Extract middle frame (frame 0001 out of 0000, 0001, 0002)
+        # Frame directory name from ProPainter is the basename of input dir
+        propainter_output_name = os.path.basename(frame_dir)
+        save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, propainter_output_name)
+        middle_frame_path = os.path.join(save_root, 'frames', '0001.png')
+
+        if not os.path.exists(middle_frame_path):
+            # Fallback: try frame 0000 if middle doesn't exist
+            middle_frame_path = os.path.join(save_root, 'frames', '0000.png')
+
+        if not os.path.exists(middle_frame_path):
+            raise RuntimeError(f"ProPainter output frame not found: {middle_frame_path}")
+
+        self.update_state(state='PROCESSING', meta={'progress': 85, 'status': 'Finalizing'})
+
+        # Copy result to final location
+        out_name = base_name + '_clean.png'
         out_path = os.path.join(RESULT_DIR, out_name)
-        cv2.imwrite(out_path, result)
+        shutil.copy2(middle_frame_path, out_path)
 
-        # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
-        # Celery automatically sets state to SUCCESS when the task returns normally
+        # Cleanup temporary directories
+        try:
+            shutil.rmtree(frame_dir, ignore_errors=True)
+            shutil.rmtree(mask_dir, ignore_errors=True)
+            shutil.rmtree(save_root, ignore_errors=True)
+        except Exception as cleanup_exc:
+            print(f"⚠️  Failed to cleanup temp directories: {cleanup_exc}")
+
+        print(f"✅ Image processed with ProPainter FP16: {out_path}")
+
         return {'path': out_path}
     except Exception as e:
-        import traceback; traceback.print_exc()
+        print(f"❌ Error processing image: {e}")
+        import traceback
+        traceback.print_exc()
         raise
 
 
@@ -853,7 +971,22 @@ def remove_watermark():
                 'file_type': 'video'
             })
 
-        return jsonify({'error': 'Image processing disabled in ProPainter mode'}), 400
+        # Process image with YOLO + ProPainter
+        # Save image temporarily
+        temp_filename = f"{file_hash}.png"
+        temp_path = os.path.join(UPLOAD_DIR, temp_filename)
+
+        with open(temp_path, 'wb') as f:
+            f.write(image_data)
+
+        # Queue image processing with ProPainter
+        task = process_image_task.apply_async(args=[temp_path])
+
+        return jsonify({
+            'task_id': task.id,
+            'status': 'queued',
+            'file_type': 'image'
+        })
 
     except Exception as e:
         print(f"❌ Error queuing task: {e}")
@@ -879,8 +1012,19 @@ def get_status(task_id):
 
         task = AsyncResult(task_id, app=celery)
 
-        # Always log for debugging stuck "Waiting in queue" issue
-        print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
+        # Throttled debug logging to avoid log flooding from frequent client polls
+        global _STATUS_LOG_LAST
+        try:
+            STATUS_LOG_THROTTLE_SECONDS = int(os.getenv('STATUS_LOG_THROTTLE_SECONDS', '600'))  # default 10 minutes
+        except Exception:
+            STATUS_LOG_THROTTLE_SECONDS = 600
+        if '_STATUS_LOG_LAST' not in globals():
+            _STATUS_LOG_LAST = {}
+        now_ts = time.time()
+        last_ts = _STATUS_LOG_LAST.get(task_id, 0)
+        if STATUS_LOG_THROTTLE_SECONDS <= 0 or (now_ts - last_ts) >= STATUS_LOG_THROTTLE_SECONDS:
+            print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
+            _STATUS_LOG_LAST[task_id] = now_ts
 
         response = {
             'state': task.state
