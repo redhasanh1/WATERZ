@@ -12,6 +12,14 @@ import os
 import importlib
 import shutil
 from pathlib import Path
+import multiprocessing
+
+# CRITICAL: Set multiprocessing start method to 'spawn' for CUDA compatibility
+# This MUST be done at the very top, before any other imports
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -454,19 +462,53 @@ def process_image_task(self, image_path):
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
                 print(f"🌐 Image not found locally. Downloading from: {download_url}")
                 try:
-                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
                     r.raise_for_status()
+
+                    # Verify we got actual image content
+                    if len(r.content) < 1000:  # Less than 1KB is suspicious
+                        print(f"⚠️  Downloaded file is too small ({len(r.content)} bytes), may be an error page")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Image file not found or was deleted. Please re-upload. (filename: {base_name})'}
+                        )
+                        raise Exception(f"Image file not found or was deleted: {base_name}")
+
                     # Save to a temp path in UPLOAD_DIR
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
                     remote_cached = os.path.join(UPLOAD_DIR, base_name)
                     with open(remote_cached, 'wb') as f:
                         f.write(r.content)
                     image_path = remote_cached
-                    print(f"✅ Downloaded to: {image_path}")
+                    print(f"✅ Downloaded {len(r.content) / (1024):.2f} KB to: {image_path}")
+                except requests.exceptions.HTTPError as http_err:
+                    if http_err.response.status_code == 404:
+                        print(f"❌ Image file was deleted from server (404): {base_name}")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Image file not found. It may have been cleaned up. Please re-upload.'}
+                        )
+                        raise Exception(f"Image file was deleted from server: {base_name}")
+                    else:
+                        print(f"❌ HTTP error downloading image: {http_err}")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Failed to download image from server: HTTP {http_err.response.status_code}'}
+                        )
+                        raise Exception(f"Failed to download image: HTTP {http_err.response.status_code}")
                 except Exception as dl_err:
                     print(f"❌ Failed to download image from API host: {dl_err}")
+                    self.update_state(
+                        state='FAILURE',
+                        meta={'error': f'Image file not found and remote download failed. Please re-upload.'}
+                    )
                     raise Exception(f"Image file not found and remote download failed: {base_name}")
             else:
+                print(f"❌ No TUNNEL_URL configured and image not found locally: {image_path}")
+                self.update_state(
+                    state='FAILURE',
+                    meta={'error': 'Image file not found on worker. TUNNEL_URL not configured.'}
+                )
                 raise Exception(f"Image file not found: {image_path}")
 
         img = cv2.imread(image_path, cv2.IMREAD_COLOR)
@@ -523,24 +565,25 @@ def process_image_task(self, image_path):
         self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Running ProPainter with FP16'})
 
         # Run ProPainter on the frame sequence with FP16 optimization
-        # Compute fast settings (with safety):
-        # - neighbor_length 1 would break ProPainter (zero stride). Clamp to >=2.
+        # Ultra-light settings for fast processing (static watermarks):
+        # - neighbor_length=2 (minimum valid, fast)
+        # - ref_length=1 (minimal reference frames)
         try:
-            _n = int(os.getenv('PROP_NEIGHBOR_LENGTH', '1'))
+            _n = int(os.getenv('PROP_NEIGHBOR_LENGTH', '2'))
         except Exception:
-            _n = 3
+            _n = 2
         if _n < 2:
             print("⚠️  neighbor_length=1 is invalid for ProPainter; using 2 instead")
             _n = 2
 
         # Map desired ref_length to ref_stride; ref_length=0 -> huge stride (no refs)
         _ref_stride = os.getenv('PROP_REF_STRIDE')
-        _ref_length_env = os.getenv('PROP_REF_LENGTH')
+        _ref_length_env = os.getenv('PROP_REF_LENGTH', '1')  # Default to 1 reference frame
         if _ref_length_env is not None:
             try:
                 _rl = int(_ref_length_env)
             except Exception:
-                _rl = -1
+                _rl = 1
             if _rl <= 0:
                 _ref_stride = '999999'  # effectively zero reference frames
             else:
@@ -551,8 +594,8 @@ def process_image_task(self, image_path):
                     _sub = 80
                 _ref_stride = str(max(1, _sub // max(1, _rl)))
         if not _ref_stride:
-            # Default to no references when not specified
-            _ref_stride = '999999'
+            # Default ref_stride for ref_length=1
+            _ref_stride = '80'
 
         print(f"ProPainter fast settings (image): neighbor_length={_n}, ref_stride={_ref_stride}")
 
@@ -687,19 +730,53 @@ def process_video_task(self, video_path):
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
                 print(f"🌐 Video not found locally. Downloading from: {download_url}")
                 try:
-                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
                     r.raise_for_status()
+
+                    # Verify we got actual video content
+                    if len(r.content) < 1000:  # Less than 1KB is suspicious
+                        print(f"⚠️  Downloaded file is too small ({len(r.content)} bytes), may be an error page")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Video file not found or was deleted. Please re-upload. (filename: {base_name})'}
+                        )
+                        raise Exception(f"Video file not found or was deleted: {base_name}")
+
                     # Save to a temp path in UPLOAD_DIR
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
                     remote_cached = os.path.join(UPLOAD_DIR, base_name)
                     with open(remote_cached, 'wb') as f:
                         f.write(r.content)
                     video_path = remote_cached
-                    print(f"✅ Downloaded to: {video_path}")
+                    print(f"✅ Downloaded {len(r.content) / (1024*1024):.2f} MB to: {video_path}")
+                except requests.exceptions.HTTPError as http_err:
+                    if http_err.response.status_code == 404:
+                        print(f"❌ Video file was deleted from server (404): {base_name}")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Video file not found. It may have been cleaned up. Please re-upload.'}
+                        )
+                        raise Exception(f"Video file was deleted from server: {base_name}")
+                    else:
+                        print(f"❌ HTTP error downloading video: {http_err}")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Failed to download video from server: HTTP {http_err.response.status_code}'}
+                        )
+                        raise Exception(f"Failed to download video: HTTP {http_err.response.status_code}")
                 except Exception as dl_err:
                     print(f"❌ Failed to download video from API host: {dl_err}")
+                    self.update_state(
+                        state='FAILURE',
+                        meta={'error': f'Video file not found and remote download failed. Please re-upload.'}
+                    )
                     raise Exception(f"Video file not found and remote download failed: {base_name}")
             else:
+                print(f"❌ No TUNNEL_URL configured and video not found locally: {video_path}")
+                self.update_state(
+                    state='FAILURE',
+                    meta={'error': 'Video file not found on worker. TUNNEL_URL not configured.'}
+                )
                 raise Exception(f"Video file not found: {video_path}")
 
         print(f"Opening video for ProPainter: {video_path}")
@@ -719,37 +796,22 @@ def process_video_task(self, video_path):
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
 
-        # Optional frame skipping for speed (process 1 of every N frames and rebuild)
-        try:
-            step = int(os.getenv('PROP_STEP', '1'))
-        except Exception:
-            step = 1
-        if step < 1:
-            step = 1
-
         base_name = Path(video_path).stem
         unique_suffix = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
         mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{unique_suffix}")
         os.makedirs(mask_dir, exist_ok=True)
-        selected_frames_dir = None
-        if step > 1:
-            selected_frames_dir = os.path.join(TEMP_DIR, f"selected_frames_{base_name}_{unique_suffix}")
-            os.makedirs(selected_frames_dir, exist_ok=True)
 
         zero_mask = np.zeros((height, width), dtype=np.uint8)
         last_valid_bbox = None
         frames_processed = 0
         frames_with_watermark = 0
-        selected_count = 0
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            estimated_total_selected = max(1, (total_frames + step - 1) // step) if step > 1 else total_frames
-            current_progress_count = selected_count if step > 1 else frames_processed
-            progress = 5 + int((current_progress_count / max(estimated_total_selected, 1)) * 40)
+            progress = 5 + int((frames_processed / max(total_frames, 1)) * 40)
             self.update_state(
                 state='PROCESSING',
                 meta={
@@ -758,33 +820,24 @@ def process_video_task(self, video_path):
                 }
             )
 
-            take_this = (step == 1) or ((frames_processed % step) == 0)
-            if take_this:
-                detections = detector.detect(frame, confidence_threshold=0.25, padding=0)
-                active_detections = detections
+            detections = detector.detect(frame, confidence_threshold=0.25, padding=0)
+            active_detections = detections
 
-                if detections:
-                    frames_with_watermark += 1
-                    primary = detections[0]
-                    if primary.get('confidence', 0) >= 0.25:
-                        last_valid_bbox = primary['bbox']
-                elif last_valid_bbox:
-                    active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}]
+            if detections:
+                frames_with_watermark += 1
+                primary = detections[0]
+                if primary.get('confidence', 0) >= 0.25:
+                    last_valid_bbox = primary['bbox']
+            elif last_valid_bbox:
+                active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}]
 
-                if active_detections:
-                    mask = detector.create_mask(frame, active_detections)
-                else:
-                    mask = zero_mask
+            if active_detections:
+                mask = detector.create_mask(frame, active_detections)
+            else:
+                mask = zero_mask
 
-                if step > 1 and selected_frames_dir is not None:
-                    frame_out = os.path.join(selected_frames_dir, f"{selected_count:04d}.png")
-                    cv2.imwrite(frame_out, frame)
-                    mask_path = os.path.join(mask_dir, f"{selected_count:04d}.png")
-                else:
-                    mask_path = os.path.join(mask_dir, f"{frames_processed:04d}.png")
-                cv2.imwrite(mask_path, mask)
-                selected_count += 1
-
+            mask_path = os.path.join(mask_dir, f"{frames_processed:04d}.png")
+            cv2.imwrite(mask_path, mask)
             frames_processed += 1
 
         cap.release()
@@ -792,10 +845,7 @@ def process_video_task(self, video_path):
         if frames_processed == 0:
             raise RuntimeError("No frames were processed - video may be corrupted")
 
-        if step > 1:
-            print(f"✅ Selected frames: {selected_count}/{frames_processed}, with detections: {frames_with_watermark}")
-        else:
-            print(f"✅ Masks generated: {frames_processed} frames, {frames_with_watermark} with detections")
+        print(f"✅ Masks generated: {frames_processed} frames, {frames_with_watermark} with detections")
 
         try:
             import torch
@@ -808,59 +858,49 @@ def process_video_task(self, video_path):
             meta={'progress': 55, 'status': 'Running ProPainter'}
         )
 
-        # Compute fast settings (with safety) for video too
+        # Ultra-light settings for fast processing (static watermarks):
+        # - neighbor_length=2 (minimum valid, fast)
+        # - ref_length=1 (minimal reference frames)
         try:
-            _n = int(os.getenv('PROP_NEIGHBOR_LENGTH', '1'))
+            _n = int(os.getenv('PROP_NEIGHBOR_LENGTH', '2'))
         except Exception:
-            _n = 3
+            _n = 2
         if _n < 2:
             print("⚠️  neighbor_length=1 is invalid for ProPainter; using 2 instead")
             _n = 2
 
         _ref_stride = os.getenv('PROP_REF_STRIDE')
-        _ref_length_env = os.getenv('PROP_REF_LENGTH')
+        _ref_length_env = os.getenv('PROP_REF_LENGTH', '1')
         if _ref_length_env is not None:
             try:
                 _rl = int(_ref_length_env)
             except Exception:
-                _rl = -1
+                _rl = 1
             if _rl <= 0:
-                _ref_stride = '999999'
+                _ref_stride = '999999'  # effectively zero reference frames
             else:
+                # Approximate: stride ≈ subvideo_length / ref_length (default subvideo_length=80)
                 try:
                     _sub = int(os.getenv('PROP_SUBVIDEO_LENGTH', '80'))
                 except Exception:
                     _sub = 80
                 _ref_stride = str(max(1, _sub // max(1, _rl)))
         if not _ref_stride:
-            _ref_stride = '999999'
+            # Default ref_stride for ref_length=1
+            _ref_stride = '80'
 
         print(f"ProPainter fast settings (video): neighbor_length={_n}, ref_stride={_ref_stride}")
 
-        if step > 1 and selected_frames_dir is not None:
-            fps_down = max(1, int(round(fps / float(step))))
-            cmd = [
-                sys.executable,
-                PROPAINTER_SCRIPT,
-                '-i', selected_frames_dir,
-                '-m', mask_dir,
-                '-o', PROPAINTER_OUTPUT_ROOT,
-                '--save_fps', str(fps_down),
-                '--save_frames',
-                '--neighbor_length', str(_n),
-                '--ref_stride', _ref_stride,
-            ]
-        else:
-            cmd = [
-                sys.executable,
-                PROPAINTER_SCRIPT,
-                '-i', video_path,
-                '-m', mask_dir,
-                '-o', PROPAINTER_OUTPUT_ROOT,
-                '--save_fps', str(fps),
-                '--neighbor_length', str(_n),
-                '--ref_stride', _ref_stride,
-            ]
+        cmd = [
+            sys.executable,
+            PROPAINTER_SCRIPT,
+            '-i', video_path,
+            '-m', mask_dir,
+            '-o', PROPAINTER_OUTPUT_ROOT,
+            '--save_fps', str(fps),
+            '--neighbor_length', str(_n),
+            '--ref_stride', _ref_stride,
+        ]
         try:
             import torch
             if torch.cuda.is_available():
@@ -879,75 +919,13 @@ def process_video_task(self, video_path):
             print(result.stderr)
             raise RuntimeError("ProPainter inference failed")
 
-        if step > 1 and selected_frames_dir is not None:
-            # When using downsampled frames, outputs are saved under the selected frames folder name
-            save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, os.path.basename(selected_frames_dir))
-            frames_dir = os.path.join(save_root, 'frames')
-            produced_video = os.path.join(save_root, 'inpaint_out.mp4')
-            if not os.path.exists(produced_video) or not os.path.isdir(frames_dir):
-                raise RuntimeError(f"ProPainter output not found: {produced_video} or frames dir {frames_dir}")
+        save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, base_name)
+        produced_video = os.path.join(save_root, 'inpaint_out.mp4')
+        if not os.path.exists(produced_video):
+            raise RuntimeError(f"ProPainter output not found: {produced_video}")
 
-            # Expand back to original frame count by duplicating each processed frame step times
-            expanded_dir = os.path.join(TEMP_DIR, f"expanded_frames_{base_name}_{unique_suffix}")
-            os.makedirs(expanded_dir, exist_ok=True)
-
-            try:
-                processed_frames = sorted([f for f in os.listdir(frames_dir) if f.lower().endswith('.png')])
-            except Exception:
-                processed_frames = []
-            n_sel = len(processed_frames)
-            if n_sel == 0:
-                raise RuntimeError("No processed frames found to expand")
-
-            for j in range(n_sel):
-                src = os.path.join(frames_dir, f"{j:04d}.png")
-                if not os.path.exists(src):
-                    continue
-                for k in range(step):
-                    dest_idx = j * step + k
-                    if dest_idx >= total_frames:
-                        break
-                    dst = os.path.join(expanded_dir, f"{dest_idx:04d}.png")
-                    shutil.copy2(src, dst)
-
-            # Pad tail if needed with last frame
-            last_src = os.path.join(frames_dir, f"{max(0, n_sel-1):04d}.png")
-            existing = len([name for name in os.listdir(expanded_dir) if name.lower().endswith('.png')])
-            while existing < total_frames and os.path.exists(last_src):
-                dst = os.path.join(expanded_dir, f"{existing:04d}.png")
-                shutil.copy2(last_src, dst)
-                existing += 1
-
-            # Encode expanded frames at original fps
-            temp_processed = os.path.join(RESULT_DIR, f"{base_name}_propainter_video.mp4")
-            try:
-                import subprocess
-                encode_cmd = [
-                    'ffmpeg', '-y',
-                    '-framerate', str(max(1, fps)),
-                    '-i', os.path.join(expanded_dir, '%04d.png'),
-                    '-c:v', 'libx264',
-                    '-preset', 'ultrafast',
-                    '-crf', '18',
-                    '-pix_fmt', 'yuv420p',
-                    temp_processed
-                ]
-                print(f"Encoding expanded video: {' '.join(encode_cmd)}")
-                enc = subprocess.run(encode_cmd, capture_output=True, text=True, timeout=600)
-                if enc.returncode != 0:
-                    print(enc.stdout)
-                    print(enc.stderr)
-                    raise RuntimeError("Failed to encode expanded frames")
-            except FileNotFoundError:
-                raise RuntimeError("ffmpeg not available to encode expanded frames")
-        else:
-            save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, base_name)
-            produced_video = os.path.join(save_root, 'inpaint_out.mp4')
-            if not os.path.exists(produced_video):
-                raise RuntimeError(f"ProPainter output not found: {produced_video}")
-
-            temp_processed = os.path.join(RESULT_DIR, f"{base_name}_propainter_video.mp4")
-            shutil.copy2(produced_video, temp_processed)
+        temp_processed = os.path.join(RESULT_DIR, f"{base_name}_propainter_video.mp4")
+        shutil.copy2(produced_video, temp_processed)
 
         self.update_state(
             state='PROCESSING',
