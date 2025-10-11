@@ -119,6 +119,18 @@ CORS(
     expose_headers=["Content-Disposition"]
 )
 
+# Track the latest queued task per client IP to stop stale status polls
+_LATEST_TASK_BY_IP = {}
+
+def _client_ip():
+    try:
+        fwd = request.headers.get('X-Forwarded-For')
+        if fwd:
+            return fwd.split(',')[0].strip()
+    except Exception:
+        pass
+    return request.remote_addr or 'unknown'
+
 # ----------------------------------------------------------------------------
 # Simple access logging (Waitress doesn't emit per‑request access logs by default)
 # ----------------------------------------------------------------------------
@@ -358,6 +370,117 @@ threading.Thread(target=schedule_cleanup, daemon=True).start()
 print("🗑️  File cleanup scheduler started (runs every 10 minutes)")
 
 # ============================================================================
+# Stuck Task Recovery System
+# ============================================================================
+
+# Track monitored tasks: task_id -> (start_time, last_check_time, check_count)
+_MONITORED_TASKS = {}
+
+def force_output_recovery(task_id):
+    """
+    Force-recover video output from ProPainter if task is stuck.
+    Finds the latest ProPainter output and copies it to results.
+    """
+    try:
+        print(f"⚠️  Attempting force output recovery for task {task_id}")
+
+        # Find latest ProPainter output video
+        propainter_outputs = []
+        for root, dirs, files in os.walk(PROPAINTER_OUTPUT_ROOT):
+            for file in files:
+                if file.endswith('.mp4'):
+                    file_path = os.path.join(root, file)
+                    mtime = os.path.getmtime(file_path)
+                    propainter_outputs.append((mtime, file_path))
+
+        if not propainter_outputs:
+            print(f"❌ No ProPainter outputs found for recovery")
+            return None
+
+        # Sort by modification time (newest first)
+        propainter_outputs.sort(reverse=True)
+        latest_video = propainter_outputs[0][1]
+
+        # Copy to results with recovery marker
+        recovery_filename = f"recovered_{task_id[:8]}_{int(time.time())}.mp4"
+        recovery_path = os.path.join(RESULT_DIR, recovery_filename)
+        shutil.copy2(latest_video, recovery_path)
+
+        print(f"✅ Force recovery successful: {recovery_path}")
+        print(f"   Source: {latest_video}")
+
+        return recovery_path
+
+    except Exception as e:
+        print(f"❌ Force recovery failed for task {task_id}: {e}")
+        return None
+
+
+def monitor_stuck_tasks():
+    """
+    Monitor tasks for stuck ProPainter processing.
+    Runs every 30 seconds and checks for tasks stuck at 'Running ProPainter'.
+    """
+    from celery.result import AsyncResult
+
+    global _MONITORED_TASKS
+    current_time = time.time()
+
+    # Clean up completed/failed tasks from monitoring
+    tasks_to_remove = []
+    for tid in list(_MONITORED_TASKS.keys()):
+        try:
+            task = AsyncResult(tid, app=celery)
+            if task.state in ['SUCCESS', 'FAILURE', 'REVOKED']:
+                tasks_to_remove.append(tid)
+        except Exception:
+            tasks_to_remove.append(tid)
+
+    for tid in tasks_to_remove:
+        del _MONITORED_TASKS[tid]
+
+    # Check all monitored tasks
+    for task_id, (start_time, last_check_time, check_count) in list(_MONITORED_TASKS.items()):
+        try:
+            task = AsyncResult(task_id, app=celery)
+
+            if task.state == 'PROCESSING':
+                info = task.info or {}
+                status = info.get('status', '')
+                progress = info.get('progress', 0)
+
+                # Check if stuck: Running ProPainter for more than 5 minutes
+                time_stuck = current_time - start_time
+
+                if 'Running ProPainter' in status and progress < 100 and time_stuck > 300:  # 5 minutes
+                    print(f"⚠️  Task {task_id} stuck at '{status}' for {time_stuck/60:.1f} minutes")
+
+                    # Attempt force recovery after 5 minutes
+                    recovery_path = force_output_recovery(task_id)
+
+                    if recovery_path:
+                        # Update task monitoring
+                        _MONITORED_TASKS[task_id] = (start_time, current_time, check_count + 1)
+                        print(f"✅ Recovery attempt #{check_count + 1} for task {task_id}")
+                    else:
+                        print(f"❌ Recovery failed for task {task_id}")
+                        _MONITORED_TASKS[task_id] = (start_time, current_time, check_count + 1)
+                else:
+                    # Update last check time
+                    _MONITORED_TASKS[task_id] = (start_time, current_time, check_count)
+
+        except Exception as e:
+            print(f"⚠️  Error monitoring task {task_id}: {e}")
+
+    # Schedule next check
+    threading.Timer(30, monitor_stuck_tasks).start()
+
+
+# Start stuck task monitor
+threading.Thread(target=monitor_stuck_tasks, daemon=True).start()
+print("🔍 Stuck task recovery monitor started (checks every 30 seconds)")
+
+# ============================================================================
 # Model Loading (Shared across workers)
 # ============================================================================
 
@@ -454,19 +577,53 @@ def process_image_task(self, image_path):
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
                 print(f"🌐 Image not found locally. Downloading from: {download_url}")
                 try:
-                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
                     r.raise_for_status()
+
+                    # Verify we got actual image content
+                    if len(r.content) < 1000:  # Less than 1KB is suspicious
+                        print(f"⚠️  Downloaded file is too small ({len(r.content)} bytes), may be an error page")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Image file not found or was deleted. Please re-upload. (filename: {base_name})'}
+                        )
+                        raise Exception(f"Image file not found or was deleted: {base_name}")
+
                     # Save to a temp path in UPLOAD_DIR
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
                     remote_cached = os.path.join(UPLOAD_DIR, base_name)
                     with open(remote_cached, 'wb') as f:
                         f.write(r.content)
                     image_path = remote_cached
-                    print(f"✅ Downloaded to: {image_path}")
+                    print(f"✅ Downloaded {len(r.content) / (1024):.2f} KB to: {image_path}")
+                except requests.exceptions.HTTPError as http_err:
+                    if http_err.response.status_code == 404:
+                        print(f"❌ Image file was deleted from server (404): {base_name}")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Image file not found. It may have been cleaned up. Please re-upload.'}
+                        )
+                        raise Exception(f"Image file was deleted from server: {base_name}")
+                    else:
+                        print(f"❌ HTTP error downloading image: {http_err}")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Failed to download image from server: HTTP {http_err.response.status_code}'}
+                        )
+                        raise Exception(f"Failed to download image: HTTP {http_err.response.status_code}")
                 except Exception as dl_err:
                     print(f"❌ Failed to download image from API host: {dl_err}")
+                    self.update_state(
+                        state='FAILURE',
+                        meta={'error': f'Image file not found and remote download failed. Please re-upload.'}
+                    )
                     raise Exception(f"Image file not found and remote download failed: {base_name}")
             else:
+                print(f"❌ No TUNNEL_URL configured and image not found locally: {image_path}")
+                self.update_state(
+                    state='FAILURE',
+                    meta={'error': 'Image file not found on worker. TUNNEL_URL not configured.'}
+                )
                 raise Exception(f"Image file not found: {image_path}")
 
         img = cv2.imread(image_path, cv2.IMREAD_COLOR)
@@ -626,19 +783,53 @@ def process_video_task(self, video_path):
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
                 print(f"🌐 Video not found locally. Downloading from: {download_url}")
                 try:
-                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
                     r.raise_for_status()
+
+                    # Verify we got actual video content
+                    if len(r.content) < 1000:  # Less than 1KB is suspicious
+                        print(f"⚠️  Downloaded file is too small ({len(r.content)} bytes), may be an error page")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Video file not found or was deleted. Please re-upload. (filename: {base_name})'}
+                        )
+                        raise Exception(f"Video file not found or was deleted: {base_name}")
+
                     # Save to a temp path in UPLOAD_DIR
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
                     remote_cached = os.path.join(UPLOAD_DIR, base_name)
                     with open(remote_cached, 'wb') as f:
                         f.write(r.content)
                     video_path = remote_cached
-                    print(f"✅ Downloaded to: {video_path}")
+                    print(f"✅ Downloaded {len(r.content) / (1024*1024):.2f} MB to: {video_path}")
+                except requests.exceptions.HTTPError as http_err:
+                    if http_err.response.status_code == 404:
+                        print(f"❌ Video file was deleted from server (404): {base_name}")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Video file not found. It may have been cleaned up. Please re-upload.'}
+                        )
+                        raise Exception(f"Video file was deleted from server: {base_name}")
+                    else:
+                        print(f"❌ HTTP error downloading video: {http_err}")
+                        self.update_state(
+                            state='FAILURE',
+                            meta={'error': f'Failed to download video from server: HTTP {http_err.response.status_code}'}
+                        )
+                        raise Exception(f"Failed to download video: HTTP {http_err.response.status_code}")
                 except Exception as dl_err:
                     print(f"❌ Failed to download video from API host: {dl_err}")
+                    self.update_state(
+                        state='FAILURE',
+                        meta={'error': f'Video file not found and remote download failed. Please re-upload.'}
+                    )
                     raise Exception(f"Video file not found and remote download failed: {base_name}")
             else:
+                print(f"❌ No TUNNEL_URL configured and video not found locally: {video_path}")
+                self.update_state(
+                    state='FAILURE',
+                    meta={'error': 'Video file not found on worker. TUNNEL_URL not configured.'}
+                )
                 raise Exception(f"Video file not found: {video_path}")
 
         print(f"Opening video for ProPainter: {video_path}")
@@ -982,6 +1173,13 @@ def remove_watermark():
         # Queue image processing with ProPainter
         task = process_image_task.apply_async(args=[temp_path])
 
+        # Record latest real Celery task id for this client IP
+        try:
+            ip = _client_ip()
+            _LATEST_TASK_BY_IP[ip] = task.id
+        except Exception:
+            pass
+
         return jsonify({
             'task_id': task.id,
             'status': 'queued',
@@ -1010,21 +1208,39 @@ def get_status(task_id):
     try:
         from celery.result import AsyncResult
 
+        # If enabled, require that clients only poll the latest task they created
+        require_current = str(os.getenv('STATUS_REQUIRE_CURRENT', '1')).lower() in ('1', 'true', 'yes', 'on')
+        if require_current:
+            try:
+                ip = _client_ip()
+                current_for_ip = _LATEST_TASK_BY_IP.get(ip)
+                if current_for_ip and current_for_ip != task_id:
+                    # Mark as stale and do not log
+                    return jsonify({
+                        'state': 'STALE',
+                        'stale': True,
+                        'current_task_id': current_for_ip
+                    }), 409
+            except Exception:
+                pass
+
         task = AsyncResult(task_id, app=celery)
 
-        # Throttled debug logging to avoid log flooding from frequent client polls
-        global _STATUS_LOG_LAST
-        try:
-            STATUS_LOG_THROTTLE_SECONDS = int(os.getenv('STATUS_LOG_THROTTLE_SECONDS', '600'))  # default 10 minutes
-        except Exception:
-            STATUS_LOG_THROTTLE_SECONDS = 600
-        if '_STATUS_LOG_LAST' not in globals():
-            _STATUS_LOG_LAST = {}
-        now_ts = time.time()
-        last_ts = _STATUS_LOG_LAST.get(task_id, 0)
-        if STATUS_LOG_THROTTLE_SECONDS <= 0 or (now_ts - last_ts) >= STATUS_LOG_THROTTLE_SECONDS:
-            print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
-            _STATUS_LOG_LAST[task_id] = now_ts
+        # Throttled or suppressed debug logging to avoid flooding from client polls
+        suppress = str(os.getenv('STATUS_LOG_SUPPRESS', '0')).lower() in ('1', 'true', 'yes', 'on')
+        if not suppress:
+            global _STATUS_LOG_LAST
+            try:
+                STATUS_LOG_THROTTLE_SECONDS = int(os.getenv('STATUS_LOG_THROTTLE_SECONDS', '600'))  # default 10 minutes
+            except Exception:
+                STATUS_LOG_THROTTLE_SECONDS = 600
+            if '_STATUS_LOG_LAST' not in globals():
+                _STATUS_LOG_LAST = {}
+            now_ts = time.time()
+            last_ts = _STATUS_LOG_LAST.get(task_id, 0)
+            if STATUS_LOG_THROTTLE_SECONDS <= 0 or (now_ts - last_ts) >= STATUS_LOG_THROTTLE_SECONDS:
+                print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
+                _STATUS_LOG_LAST[task_id] = now_ts
 
         response = {
             'state': task.state
@@ -1544,6 +1760,13 @@ def upload_file():
 
         print(f"✅ File uploaded: {file_path}")
 
+        # Remember this as the latest client task-id placeholder
+        try:
+            ip = _client_ip()
+            _LATEST_TASK_BY_IP[ip] = task_id  # placeholder until queued
+        except Exception:
+            pass
+
         return jsonify({
             'status': 'success',
             'task_id': task_id
@@ -1601,6 +1824,13 @@ def process_video():
             else:
                 result = celery.send_task('watermark.remove_video', args=[video_path])
             print(f"✅ Task queued with ID: {result.id}")
+
+            # Record the latest real Celery task id for this client IP
+            try:
+                ip = _client_ip()
+                _LATEST_TASK_BY_IP[ip] = result.id
+            except Exception:
+                pass
             return jsonify({'status': 'success', 'task_id': result.id})
 
         except Exception as e:
