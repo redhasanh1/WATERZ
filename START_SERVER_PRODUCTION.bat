@@ -38,9 +38,12 @@ echo.
 REM Disable Python output buffering to prevent hanging
 set PYTHONUNBUFFERED=1
 
+REM Enable Flask error logging
+set FLASK_ENV=development
+
 REM Start with Waitress (production WSGI server)
 REM Use python -m to run waitress (doesn't need PATH)
-python -u -m waitress --host=0.0.0.0 --port=9000 --threads=4 server_production:app
+python -u -m waitress --host=0.0.0.0 --port=9000 --threads=4 --expose-tracebacks server_production:app
 
 REM If we get here, something failed
 echo.
