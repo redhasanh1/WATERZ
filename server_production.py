@@ -875,46 +875,61 @@ def get_status(task_id):
             'result': { 'result_url': str } (if SUCCESS)
         }
     """
-    from celery.result import AsyncResult
+    try:
+        from celery.result import AsyncResult
 
-    task = AsyncResult(task_id, app=celery)
+        task = AsyncResult(task_id, app=celery)
 
-    if ENABLE_ACCESS_LOGS:
+        # Always log for debugging stuck "Waiting in queue" issue
         print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
 
-    response = {
-        'state': task.state
-    }
-
-    if task.state == 'PENDING':
-        response['progress'] = 'Task is waiting in queue...'
-        response['info'] = {'progress': 0, 'status': 'Waiting in queue...'}
-    elif task.state == 'STARTED':
-        info = task.info or {}
-        response['progress'] = info.get('status', 'Starting...')
-        response['info'] = {'progress': info.get('progress', 5), 'status': info.get('status', 'Starting...')}
-    elif task.state == 'PROCESSING':
-        info = task.info or {}
-        response['progress'] = info.get('status', 'Processing...')
-        response['info'] = {'progress': info.get('progress', 50), 'status': info.get('status', 'Processing...')}
-    elif task.state == 'SUCCESS':
-        # task.result is a dict with 'path' and 'metadata'
-        result_data = task.result
-        if isinstance(result_data, dict):
-            result_path = result_data.get('path', result_data)
-        else:
-            result_path = result_data
-        filename = os.path.basename(result_path)
-        response['result'] = {
-            'result_url': f'/results/{filename}'
+        response = {
+            'state': task.state
         }
-        if isinstance(result_data, dict) and 'metadata' in result_data:
-            response['metadata'] = result_data['metadata']
-    elif task.state == 'FAILURE':
-        response['error'] = str(task.info)
-        print(f"❌ Task failed: {task.info}")
 
-    return jsonify(response)
+        if task.state == 'PENDING':
+            response['progress'] = 'Task is waiting in queue...'
+            response['info'] = {'progress': 0, 'status': 'Waiting in queue...'}
+        elif task.state == 'STARTED':
+            info = task.info or {}
+            response['progress'] = info.get('status', 'Starting...')
+            response['info'] = {'progress': info.get('progress', 5), 'status': info.get('status', 'Starting...')}
+        elif task.state == 'PROCESSING':
+            info = task.info or {}
+            response['progress'] = info.get('status', 'Processing...')
+            response['info'] = {'progress': info.get('progress', 50), 'status': info.get('status', 'Processing...')}
+        elif task.state == 'SUCCESS':
+            # task.result is a dict with 'path' and 'metadata'
+            result_data = task.result
+            if isinstance(result_data, dict):
+                result_path = result_data.get('path')
+                if not result_path:
+                    print(f"❌ Task {task_id} SUCCESS but no path in result: {result_data}")
+                    return jsonify({'error': 'Invalid result format - missing path'}), 500
+            else:
+                result_path = result_data
+
+            # Final safety check for None result_path
+            if not result_path:
+                print(f"❌ Task {task_id} has None result_path")
+                return jsonify({'error': 'Invalid result - path is None'}), 500
+
+            filename = os.path.basename(result_path)
+            response['result'] = {
+                'result_url': f'/results/{filename}'
+            }
+            if isinstance(result_data, dict) and 'metadata' in result_data:
+                response['metadata'] = result_data['metadata']
+        elif task.state == 'FAILURE':
+            response['error'] = str(task.info)
+            print(f"❌ Task failed: {task.info}")
+
+        return jsonify(response)
+    except Exception as e:
+        print(f"❌ Status endpoint error for task {task_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Status check failed: {str(e)}'}), 500
 
 
 @app.route('/api/result/<task_id>', methods=['GET'])
