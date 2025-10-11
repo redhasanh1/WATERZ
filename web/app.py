@@ -12,7 +12,7 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 sys.path.insert(0, os.path.join(parent_dir, 'python_packages'))
 
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, redirect, session
 from flask_cors import CORS
 import cv2
 import numpy as np
@@ -20,8 +20,10 @@ from werkzeug.utils import secure_filename
 import tempfile
 import mimetypes
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 import stripe
+import secrets
+import requests
 
 # Import watermark removal modules
 try:
@@ -33,6 +35,7 @@ except ImportError as e:
 
 app = Flask(__name__, static_folder='.')
 CORS(app)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.environ.get('SECRET_KEY', 'watermarkai-dev-secret'))
 
 # Configuration
 UPLOAD_FOLDER = tempfile.mkdtemp()
@@ -49,6 +52,10 @@ STRIPE_PRICE_LOOKUP = {
     'enterprise': os.environ.get('STRIPE_PRICE_ID_ENTERPRISE', '')
 }
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
+GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI')
+GOOGLE_OAUTH_SCOPE = os.environ.get('GOOGLE_OAUTH_SCOPE', 'openid email profile')
 
 # Initialize detector and inpainter (lazy loading)
 detector = None
@@ -231,6 +238,122 @@ def premium_page():
 @app.route('/login.html')
 def login_page():
     return send_file('login.html')
+
+
+@app.route('/auth/google')
+def google_auth_start():
+    """Kick off Google OAuth flow by redirecting to consent screen."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return jsonify({'error': 'Google OAuth is not configured.'}), 500
+
+    redirect_uri = GOOGLE_REDIRECT_URI or urljoin(request.host_url, 'auth/google/callback')
+    state = secrets.token_urlsafe(16)
+    session['google_oauth_state'] = state
+
+    flow = request.args.get('flow')
+    if flow:
+        session['google_oauth_flow'] = flow
+
+    post_auth = request.args.get('next')
+    if post_auth and post_auth.startswith('/'):
+        session['google_redirect_after_login'] = post_auth
+
+    query_params = {
+        'client_id': GOOGLE_CLIENT_ID,
+        'redirect_uri': redirect_uri,
+        'response_type': 'code',
+        'scope': GOOGLE_OAUTH_SCOPE,
+        'state': state,
+        'access_type': 'offline',
+        'prompt': 'select_account',
+        'include_granted_scopes': 'true',
+    }
+
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(query_params)}"
+    return redirect(auth_url)
+
+
+@app.route('/auth/google/callback')
+def google_auth_callback():
+    """Handle Google's OAuth redirect back to the application."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return jsonify({'error': 'Google OAuth is not configured.'}), 500
+
+    def _redirect_to_login(params):
+        base = urljoin(request.host_url, 'login.html')
+        cleaned = {k: v for k, v in params.items() if v}
+        query = urlencode(cleaned)
+        return redirect(f"{base}?{query}" if query else base)
+
+    error = request.args.get('error')
+    if error:
+        description = request.args.get('error_description', error)
+        return _redirect_to_login({'google': 'error', 'message': description})
+
+    state = request.args.get('state')
+    saved_state = session.pop('google_oauth_state', None)
+    if not state or saved_state != state:
+        return _redirect_to_login({'google': 'error', 'message': 'state_mismatch'})
+
+    code = request.args.get('code')
+    if not code:
+        return _redirect_to_login({'google': 'error', 'message': 'missing_code'})
+
+    redirect_uri = GOOGLE_REDIRECT_URI or urljoin(request.host_url, 'auth/google/callback')
+    token_payload = {
+        'code': code,
+        'client_id': GOOGLE_CLIENT_ID,
+        'client_secret': GOOGLE_CLIENT_SECRET,
+        'redirect_uri': redirect_uri,
+        'grant_type': 'authorization_code',
+    }
+
+    try:
+        token_response = requests.post(
+            'https://oauth2.googleapis.com/token',
+            data=token_payload,
+            timeout=10,
+        )
+        token_data = token_response.json()
+    except requests.RequestException as exc:
+        print(f"Google token exchange failed: {exc}")
+        return _redirect_to_login({'google': 'error', 'message': 'token_exchange_failed'})
+
+    if not token_response.ok or 'access_token' not in token_data:
+        error_msg = token_data.get('error_description') or token_data.get('error') or 'token_error'
+        return _redirect_to_login({'google': 'error', 'message': error_msg})
+
+    user_info = {}
+    access_token = token_data.get('access_token')
+    if access_token:
+        try:
+            user_response = requests.get(
+                'https://openidconnect.googleapis.com/v1/userinfo',
+                headers={'Authorization': f'Bearer {access_token}'},
+                timeout=10,
+            )
+            if user_response.ok:
+                user_info = user_response.json()
+        except requests.RequestException as exc:
+            print(f"Google userinfo fetch failed: {exc}")
+
+    session['google_user'] = {
+        'email': user_info.get('email'),
+        'name': user_info.get('name'),
+        'picture': user_info.get('picture'),
+    }
+    session.pop('google_oauth_flow', None)
+
+    next_path = session.pop('google_redirect_after_login', None)
+    if next_path and next_path.startswith('/'):
+        return redirect(next_path)
+
+    success_params = {'google': 'success'}
+    if session['google_user'].get('email'):
+        success_params['email'] = session['google_user']['email']
+    if session['google_user'].get('name'):
+        success_params['name'] = session['google_user']['name']
+    return _redirect_to_login(success_params)
 
 
 @app.route('/terms.html')
