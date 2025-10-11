@@ -1672,7 +1672,13 @@
                                 statusDiv.appendChild(downloadLinkElement);
                             }
 
-                            if (videoElem) {
+                            // Update preview with result - handle both images and videos
+                            const imageElem = document.getElementById('previewImage');
+                            if (imageElem && imageElem.style.display !== 'none') {
+                                // Image was uploaded - show cleaned image
+                                imageElem.src = previewSource;
+                            } else if (videoElem) {
+                                // Video was uploaded - show cleaned video
                                 videoElem.src = previewSource;
                                 document.getElementById('downloadHint').style.display = 'block';
                                 document.getElementById('downloadText').style.display = 'block';
