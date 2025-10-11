@@ -439,7 +439,7 @@ def process_image_task(self, image_path):
             out_name = os.path.basename(image_path).rsplit('.', 1)[0] + '_clean.png'
             out_path = os.path.join(RESULT_DIR, out_name)
             cv2.imwrite(out_path, img)
-            self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Completed (no watermark detected)'} )
+            # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
             return {'path': out_path}
 
         mask = det.create_mask(img, detections)
@@ -447,7 +447,7 @@ def process_image_task(self, image_path):
             out_name = os.path.basename(image_path).rsplit('.', 1)[0] + '_clean.png'
             out_path = os.path.join(RESULT_DIR, out_name)
             cv2.imwrite(out_path, img)
-            self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Completed (empty mask)'} )
+            # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
             return {'path': out_path}
 
         self.update_state(state='PROCESSING', meta={'progress': 55, 'status': 'Inpainting'})
@@ -464,7 +464,8 @@ def process_image_task(self, image_path):
         out_path = os.path.join(RESULT_DIR, out_name)
         cv2.imwrite(out_path, result)
 
-        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Completed'})
+        # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
+        # Celery automatically sets state to SUCCESS when the task returns normally
         return {'path': out_path}
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -717,10 +718,8 @@ def process_video_task(self, video_path):
         except Exception as cleanup_exc:
             print(f"⚠️  Failed to delete mask directory {mask_dir}: {cleanup_exc}")
 
-        self.update_state(
-            state='SUCCESS',
-            meta={'progress': 100, 'status': 'Completed'}
-        )
+        # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
+        # Celery automatically sets state to SUCCESS when the task returns normally
 
         # If running remotely and the API host is reachable via TUNNEL_URL,
         # upload the result back so the frontend can download from the API server.
