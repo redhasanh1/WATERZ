@@ -754,22 +754,6 @@
                     <div style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; color: #6ee7b7; font-weight: 600;">Most creators see payback after the first client delivery.</div>
                     <button class="btn-pricing primary" onclick="signUp('pro')">Start Free Trial</button>
                 </div>
-
-                <!-- Enterprise Plan -->
-                <div class="pricing-card" style="position: relative; overflow: hidden;">
-                    <div class="pricing-header">
-                        <h3>Enterprise</h3>
-                        <div class="pricing-price">$299<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">For global studios that need governance, automation, and strict SLAs.</p>
-                    </div>
-                    <ul class="pricing-features">
-                        <li>Unlimited cleanups & API calls with usage controls</li>
-                        <li>8K support, dedicated success manager, 99.9% SLA</li>
-                        <li>Audit-ready activity logs & white-label delivery</li>
-                        <li>Custom model tuning and private deployments</li>
-                    </ul>
-                    <button class="btn-pricing primary" onclick="contactSales()">Talk to Sales</button>
-                </div>
             </div>
 
             <div style="margin-top: 3rem; text-align: center; color: var(--text-secondary); font-size: 0.95rem;">
@@ -892,14 +876,6 @@
                 alert('We were unable to start checkout. Please try again or contact support.');
             }
         }
-
-        async function contactSales() {
-            try {
-                await Billing.startCheckout('enterprise');
-            } catch (error) {
-                console.error('Stripe checkout error:', error);
-                alert('We were unable to start checkout. Please try again or contact sales at hello@watermarkai.com.');
-            }
         }
 
         function submitEmail(e) {
