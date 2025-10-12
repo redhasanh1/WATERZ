@@ -1615,6 +1615,30 @@
             const pollStatus = async () => {
                 try {
                     const statusResponse = await apiFetchPath(`/api/status/${processTaskId}`);
+
+                    // Handle HTTP 410 EXPIRED - task no longer exists
+                    if (statusResponse.status === 410) {
+                        const statusData = await statusResponse.json();
+                        statusText.textContent = statusData.error || 'Task expired. Please submit a new request.';
+                        statusText.style.color = '#ef4444';
+                        localStorage.removeItem(ACTIVE_TASK_KEY);
+                        if (processBtnElem) {
+                            processBtnElem.style.display = 'block';
+                        }
+                        return; // STOP polling
+                    }
+
+                    // Handle HTTP 409 STALE - task superseded by newer one
+                    if (statusResponse.status === 409) {
+                        const statusData = await statusResponse.json();
+                        if (statusData.stale && statusData.current_task_id) {
+                            console.log('Task stale, switching to current task:', statusData.current_task_id);
+                            localStorage.setItem(ACTIVE_TASK_KEY, statusData.current_task_id);
+                            startStatusPolling(statusData.current_task_id);
+                            return;
+                        }
+                    }
+
                     const statusData = await statusResponse.json();
 
                     if (statusData.state === 'SUCCESS') {

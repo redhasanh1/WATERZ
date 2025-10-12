@@ -12,14 +12,6 @@ import os
 import importlib
 import shutil
 from pathlib import Path
-import multiprocessing
-
-# CRITICAL: Set multiprocessing start method to 'spawn' for CUDA compatibility
-# This MUST be done at the very top, before any other imports
-try:
-    multiprocessing.set_start_method('spawn', force=True)
-except RuntimeError:
-    pass  # Already set
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -462,53 +454,19 @@ def process_image_task(self, image_path):
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
                 print(f"🌐 Image not found locally. Downloading from: {download_url}")
                 try:
-                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
                     r.raise_for_status()
-
-                    # Verify we got actual image content
-                    if len(r.content) < 1000:  # Less than 1KB is suspicious
-                        print(f"⚠️  Downloaded file is too small ({len(r.content)} bytes), may be an error page")
-                        self.update_state(
-                            state='FAILURE',
-                            meta={'error': f'Image file not found or was deleted. Please re-upload. (filename: {base_name})'}
-                        )
-                        raise Exception(f"Image file not found or was deleted: {base_name}")
-
                     # Save to a temp path in UPLOAD_DIR
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
                     remote_cached = os.path.join(UPLOAD_DIR, base_name)
                     with open(remote_cached, 'wb') as f:
                         f.write(r.content)
                     image_path = remote_cached
-                    print(f"✅ Downloaded {len(r.content) / (1024):.2f} KB to: {image_path}")
-                except requests.exceptions.HTTPError as http_err:
-                    if http_err.response.status_code == 404:
-                        print(f"❌ Image file was deleted from server (404): {base_name}")
-                        self.update_state(
-                            state='FAILURE',
-                            meta={'error': f'Image file not found. It may have been cleaned up. Please re-upload.'}
-                        )
-                        raise Exception(f"Image file was deleted from server: {base_name}")
-                    else:
-                        print(f"❌ HTTP error downloading image: {http_err}")
-                        self.update_state(
-                            state='FAILURE',
-                            meta={'error': f'Failed to download image from server: HTTP {http_err.response.status_code}'}
-                        )
-                        raise Exception(f"Failed to download image: HTTP {http_err.response.status_code}")
+                    print(f"✅ Downloaded to: {image_path}")
                 except Exception as dl_err:
                     print(f"❌ Failed to download image from API host: {dl_err}")
-                    self.update_state(
-                        state='FAILURE',
-                        meta={'error': f'Image file not found and remote download failed. Please re-upload.'}
-                    )
                     raise Exception(f"Image file not found and remote download failed: {base_name}")
             else:
-                print(f"❌ No TUNNEL_URL configured and image not found locally: {image_path}")
-                self.update_state(
-                    state='FAILURE',
-                    meta={'error': 'Image file not found on worker. TUNNEL_URL not configured.'}
-                )
                 raise Exception(f"Image file not found: {image_path}")
 
         img = cv2.imread(image_path, cv2.IMREAD_COLOR)
@@ -564,41 +522,7 @@ def process_image_task(self, image_path):
 
         self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Running ProPainter with FP16'})
 
-        # Run ProPainter on the frame sequence with FP16 optimization
-        # Ultra-light settings for fast processing (static watermarks):
-        # - neighbor_length=2 (minimum valid, fast)
-        # - ref_length=1 (minimal reference frames)
-        try:
-            _n = int(os.getenv('PROP_NEIGHBOR_LENGTH', '2'))
-        except Exception:
-            _n = 2
-        if _n < 2:
-            print("⚠️  neighbor_length=1 is invalid for ProPainter; using 2 instead")
-            _n = 2
-
-        # Map desired ref_length to ref_stride; ref_length=0 -> huge stride (no refs)
-        _ref_stride = os.getenv('PROP_REF_STRIDE')
-        _ref_length_env = os.getenv('PROP_REF_LENGTH', '1')  # Default to 1 reference frame
-        if _ref_length_env is not None:
-            try:
-                _rl = int(_ref_length_env)
-            except Exception:
-                _rl = 1
-            if _rl <= 0:
-                _ref_stride = '999999'  # effectively zero reference frames
-            else:
-                # Approximate: stride ≈ subvideo_length / ref_length (default subvideo_length=80)
-                try:
-                    _sub = int(os.getenv('PROP_SUBVIDEO_LENGTH', '80'))
-                except Exception:
-                    _sub = 80
-                _ref_stride = str(max(1, _sub // max(1, _rl)))
-        if not _ref_stride:
-            # Default ref_stride for ref_length=1
-            _ref_stride = '80'
-
-        print(f"ProPainter fast settings (image): neighbor_length={_n}, ref_stride={_ref_stride}")
-
+        # Run ProPainter on the frame sequence with FP16 optimization + speed settings
         cmd = [
             sys.executable,
             PROPAINTER_SCRIPT,
@@ -606,8 +530,8 @@ def process_image_task(self, image_path):
             '-m', mask_dir,
             '-o', PROPAINTER_OUTPUT_ROOT,
             '--save_frames',  # Save individual frames
-            '--neighbor_length', str(_n),
-            '--ref_stride', _ref_stride,
+            '--neighbor_length', '20',  # Faster processing
+            '--ref_stride', '20',       # Fewer reference frames
         ]
 
         # Enable FP16 for 2x speedup
@@ -615,8 +539,9 @@ def process_image_task(self, image_path):
             import torch
             if torch.cuda.is_available():
                 cmd.append('--fp16')
-                print("✓ ProPainter FP16 enabled for image processing")
+                print("✓ ProPainter optimized: FP16 + neighbor_length=20 + ref_stride=20")
         except Exception:
+            print("✓ ProPainter optimized: neighbor_length=20 + ref_stride=20")
             pass
 
         print(f"Launching ProPainter for image: {' '.join(cmd)}")
@@ -730,53 +655,19 @@ def process_video_task(self, video_path):
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
                 print(f"🌐 Video not found locally. Downloading from: {download_url}")
                 try:
-                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
                     r.raise_for_status()
-
-                    # Verify we got actual video content
-                    if len(r.content) < 1000:  # Less than 1KB is suspicious
-                        print(f"⚠️  Downloaded file is too small ({len(r.content)} bytes), may be an error page")
-                        self.update_state(
-                            state='FAILURE',
-                            meta={'error': f'Video file not found or was deleted. Please re-upload. (filename: {base_name})'}
-                        )
-                        raise Exception(f"Video file not found or was deleted: {base_name}")
-
                     # Save to a temp path in UPLOAD_DIR
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
                     remote_cached = os.path.join(UPLOAD_DIR, base_name)
                     with open(remote_cached, 'wb') as f:
                         f.write(r.content)
                     video_path = remote_cached
-                    print(f"✅ Downloaded {len(r.content) / (1024*1024):.2f} MB to: {video_path}")
-                except requests.exceptions.HTTPError as http_err:
-                    if http_err.response.status_code == 404:
-                        print(f"❌ Video file was deleted from server (404): {base_name}")
-                        self.update_state(
-                            state='FAILURE',
-                            meta={'error': f'Video file not found. It may have been cleaned up. Please re-upload.'}
-                        )
-                        raise Exception(f"Video file was deleted from server: {base_name}")
-                    else:
-                        print(f"❌ HTTP error downloading video: {http_err}")
-                        self.update_state(
-                            state='FAILURE',
-                            meta={'error': f'Failed to download video from server: HTTP {http_err.response.status_code}'}
-                        )
-                        raise Exception(f"Failed to download video: HTTP {http_err.response.status_code}")
+                    print(f"✅ Downloaded to: {video_path}")
                 except Exception as dl_err:
                     print(f"❌ Failed to download video from API host: {dl_err}")
-                    self.update_state(
-                        state='FAILURE',
-                        meta={'error': f'Video file not found and remote download failed. Please re-upload.'}
-                    )
                     raise Exception(f"Video file not found and remote download failed: {base_name}")
             else:
-                print(f"❌ No TUNNEL_URL configured and video not found locally: {video_path}")
-                self.update_state(
-                    state='FAILURE',
-                    meta={'error': 'Video file not found on worker. TUNNEL_URL not configured.'}
-                )
                 raise Exception(f"Video file not found: {video_path}")
 
         print(f"Opening video for ProPainter: {video_path}")
@@ -805,6 +696,7 @@ def process_video_task(self, video_path):
         last_valid_bbox = None
         frames_processed = 0
         frames_with_watermark = 0
+        detect_interval = 10  # Only run YOLO detection every 10th frame for speed
 
         while True:
             ret, frame = cap.read()
@@ -820,16 +712,21 @@ def process_video_task(self, video_path):
                 }
             )
 
-            detections = detector.detect(frame, confidence_threshold=0.25, padding=0)
-            active_detections = detections
+            # Only run YOLO detection every Nth frame to save time
+            if frames_processed % detect_interval == 0:
+                detections = detector.detect(frame, confidence_threshold=0.25, padding=0)
+                active_detections = detections
 
-            if detections:
-                frames_with_watermark += 1
-                primary = detections[0]
-                if primary.get('confidence', 0) >= 0.25:
-                    last_valid_bbox = primary['bbox']
-            elif last_valid_bbox:
-                active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}]
+                if detections:
+                    frames_with_watermark += 1
+                    primary = detections[0]
+                    if primary.get('confidence', 0) >= 0.25:
+                        last_valid_bbox = primary['bbox']
+                elif last_valid_bbox:
+                    active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}]
+            else:
+                # Reuse last detected bounding box for frames in between
+                active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}] if last_valid_bbox else []
 
             if active_detections:
                 mask = detector.create_mask(frame, active_detections)
@@ -845,7 +742,10 @@ def process_video_task(self, video_path):
         if frames_processed == 0:
             raise RuntimeError("No frames were processed - video may be corrupted")
 
-        print(f"✅ Masks generated: {frames_processed} frames, {frames_with_watermark} with detections")
+        detections_run = (frames_processed + detect_interval - 1) // detect_interval
+        print(f"✅ Masks generated: {frames_processed} frames total")
+        print(f"   🎯 YOLO detections: {detections_run}/{frames_processed} frames (detect_interval={detect_interval})")
+        print(f"   💧 Frames with watermark: {frames_with_watermark}")
 
         try:
             import torch
@@ -858,39 +758,6 @@ def process_video_task(self, video_path):
             meta={'progress': 55, 'status': 'Running ProPainter'}
         )
 
-        # Ultra-light settings for fast processing (static watermarks):
-        # - neighbor_length=2 (minimum valid, fast)
-        # - ref_length=1 (minimal reference frames)
-        try:
-            _n = int(os.getenv('PROP_NEIGHBOR_LENGTH', '2'))
-        except Exception:
-            _n = 2
-        if _n < 2:
-            print("⚠️  neighbor_length=1 is invalid for ProPainter; using 2 instead")
-            _n = 2
-
-        _ref_stride = os.getenv('PROP_REF_STRIDE')
-        _ref_length_env = os.getenv('PROP_REF_LENGTH', '1')
-        if _ref_length_env is not None:
-            try:
-                _rl = int(_ref_length_env)
-            except Exception:
-                _rl = 1
-            if _rl <= 0:
-                _ref_stride = '999999'  # effectively zero reference frames
-            else:
-                # Approximate: stride ≈ subvideo_length / ref_length (default subvideo_length=80)
-                try:
-                    _sub = int(os.getenv('PROP_SUBVIDEO_LENGTH', '80'))
-                except Exception:
-                    _sub = 80
-                _ref_stride = str(max(1, _sub // max(1, _rl)))
-        if not _ref_stride:
-            # Default ref_stride for ref_length=1
-            _ref_stride = '80'
-
-        print(f"ProPainter fast settings (video): neighbor_length={_n}, ref_stride={_ref_stride}")
-
         cmd = [
             sys.executable,
             PROPAINTER_SCRIPT,
@@ -898,14 +765,17 @@ def process_video_task(self, video_path):
             '-m', mask_dir,
             '-o', PROPAINTER_OUTPUT_ROOT,
             '--save_fps', str(fps),
-            '--neighbor_length', str(_n),
-            '--ref_stride', _ref_stride,
+            '--neighbor_length', '20',  # Process every 10th frame (default 10 = every 5th)
+            '--ref_stride', '20',       # Fewer reference frames (default 10)
+            '--raft_iter', '10',        # Faster optical flow computation (default 20)
         ]
         try:
             import torch
             if torch.cuda.is_available():
                 cmd.append('--fp16')
+                print("✓ ProPainter optimized: FP16 + neighbor_length=20 + ref_stride=20 + raft_iter=10")
         except Exception:
+            print("✓ ProPainter optimized: neighbor_length=20 + ref_stride=20 + raft_iter=10")
             pass
 
         print(f"Launching ProPainter: {' '.join(cmd)}")
