@@ -584,7 +584,9 @@ def process_image_task(self, image_path):
         try:
             # Import faster-propainter pipeline at runtime
             import sys
-            sys.path.insert(0, '/app/faster-propainter-main')
+            faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+            if faster_propainter_path not in sys.path:
+                sys.path.insert(0, faster_propainter_path)
             from watermark import pipeline as faster_propainter_pipeline
             
             import torch
@@ -911,7 +913,9 @@ def process_video_task(self, video_path):
                 try:
                     # Import faster-propainter pipeline at runtime
                     import sys
-                    sys.path.insert(0, '/app/faster-propainter-main')
+                    faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+                    if faster_propainter_path not in sys.path:
+                        sys.path.insert(0, faster_propainter_path)
                     from watermark import pipeline as faster_propainter_pipeline
                     
                     import torch
@@ -1039,7 +1043,9 @@ def process_video_task(self, video_path):
             try:
                 # Import faster-propainter pipeline at runtime
                 import sys
-                sys.path.insert(0, '/app/faster-propainter-main')
+                faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+                if faster_propainter_path not in sys.path:
+                    sys.path.insert(0, faster_propainter_path)
                 from watermark import pipeline as faster_propainter_pipeline
                 
                 import torch
