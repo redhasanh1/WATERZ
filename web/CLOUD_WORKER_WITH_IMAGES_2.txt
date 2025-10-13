@@ -761,7 +761,7 @@ def process_video_task(self, video_path):
         last_valid_bbox = None
         frames_processed = 0
         frames_with_watermark = 0
-        detect_interval = 25  # Ultra-speed: detect every 25th frame
+        detect_interval = 3   # Detect every 3rd frame to catch movements
         warmup_frames = 60    # Detect every frame for first N frames or until first hit
         hit_found = False
         det_conf = 0.15       # Balanced confidence like YOLO GOOD version
