@@ -25,7 +25,11 @@ PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter
 PROPAINTER_OUTPUT_ROOT = os.path.join(RESULT_DIR, 'propainter')
 PROPAINTER_MASK_ROOT = os.path.join(TEMP_DIR, 'propainter_masks')
 PROPAINTER_FLOW_BACKEND = os.getenv('PROPAINTER_FLOW_BACKEND', 'raft')  # 'raft' or 'fastflownet'
-SEGMENT_WORKERS = max(1, int(os.getenv('SEGMENT_WORKERS', '2')))
+try:
+    _segment_workers_env = int(os.getenv('SEGMENT_WORKERS', '2'))
+except ValueError:
+    _segment_workers_env = 2
+SEGMENT_WORKERS = max(1, _segment_workers_env)
 
 # Create directories
 for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR, PROPAINTER_OUTPUT_ROOT, PROPAINTER_MASK_ROOT]:
@@ -402,7 +406,6 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
 
             import torch
             use_fp16 = torch.cuda.is_available()
-            _segment_subvideo, _ = get_dynamic_subvideo_length(crop_w, crop_h)
 
             print(f"   🚀 Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=20, ref_stride=10, subvideo_length=80, FP16={use_fp16}")
 
