@@ -534,7 +534,7 @@ def process_image_task(self, image_path):
 
         self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Detecting watermark'})
         detection_start = performance_checkpoint("YOLO Detection")
-        detections = det.detect(img, confidence_threshold=0.25, padding=0)
+        detections = det.detect(img, confidence_threshold=0.15, padding=20)  # Lower confidence + padding for Sora
         performance_checkpoint("YOLO Detection", detection_start)
 
         # If no detections, return original
@@ -557,8 +557,8 @@ def process_image_task(self, image_path):
             frame_path = os.path.join(frame_dir, f"{i:04d}.png")
             cv2.imwrite(frame_path, img)
 
-        # Generate mask
-        mask = det.create_mask(img, detections)
+        # Generate mask with expanded coverage for Sora watermarks
+        mask = det.create_mask(img, detections, expand_ratio=0.15, expand_pixels=10, feather_pixels=25)
         if mask is None or mask.size == 0:
             out_name = base_name + '_clean.png'
             out_path = os.path.join(RESULT_DIR, out_name)
@@ -764,7 +764,7 @@ def process_video_task(self, video_path):
         detect_interval = 25  # Ultra-speed: detect every 25th frame
         warmup_frames = 60    # Detect every frame for first N frames or until first hit
         hit_found = False
-        det_conf = 0.15       # Aggressive: lower confidence threshold to catch faint logos
+        det_conf = 0.12       # Very aggressive: optimized for Sora watermarks
 
         # Track bbox per frame for segmentation
         bboxes_per_frame = []
@@ -785,7 +785,7 @@ def process_video_task(self, video_path):
 
             # Only run YOLO detection every Nth frame, but always during warmup until first hit
             if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
-                detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
+                detections = detector.detect(frame, confidence_threshold=det_conf, padding=25)  # Add padding for better coverage
                 active_detections = detections
                 actual_detections = actual_detections + 1 if 'actual_detections' in locals() else 1
 
@@ -802,7 +802,7 @@ def process_video_task(self, video_path):
                 active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}] if last_valid_bbox else []
 
             if active_detections:
-                mask = detector.create_mask(frame, active_detections)
+                mask = detector.create_mask(frame, active_detections, expand_ratio=0.15, expand_pixels=10, feather_pixels=25)
                 # Track bbox for segmentation
                 bboxes_per_frame.append(active_detections[0]['bbox'])
             else:
