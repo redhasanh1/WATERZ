@@ -884,16 +884,14 @@ def process_video_task(self, video_path):
                 os.makedirs(seg_cleaned_dir, exist_ok=True)
 
                 # Copy segment frames from original_frames_dir
-                # Note: FFmpeg numbers frames starting at 1 by default, so add 1 to frame indices
+                # Note: -start_number 0 makes FFmpeg use 0-based numbering (frame 0 -> 0000.png)
                 for frame_idx in range(start_frame, end_frame + 1):
-                    # FFmpeg frame numbering: frame 0 -> 0001.png, frame 1 -> 0002.png, etc.
-                    ffmpeg_frame_num = frame_idx + 1
-                    src = os.path.join(original_frames_dir, f"{ffmpeg_frame_num:04d}.png")
+                    src = os.path.join(original_frames_dir, f"{frame_idx:04d}.png")
                     dst = os.path.join(seg_frames_dir, f"{frame_idx-start_frame:04d}.png")
 
-                    # Safety check: skip if frame doesn't exist (handles off-by-one at video end)
+                    # Safety check: skip if frame doesn't exist (handles edge cases)
                     if not os.path.exists(src):
-                        print(f"⚠️  Warning: Frame {frame_idx} (FFmpeg: {ffmpeg_frame_num:04d}.png) not found, skipping")
+                        print(f"⚠️  Warning: Frame {frame_idx} ({frame_idx:04d}.png) not found, skipping")
                         continue
 
                     shutil.copy2(src, dst)
