@@ -25,6 +25,7 @@ PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter
 PROPAINTER_OUTPUT_ROOT = os.path.join(RESULT_DIR, 'propainter')
 PROPAINTER_MASK_ROOT = os.path.join(TEMP_DIR, 'propainter_masks')
 PROPAINTER_FLOW_BACKEND = os.getenv('PROPAINTER_FLOW_BACKEND', 'raft')  # 'raft' or 'fastflownet'
+SEGMENT_WORKERS = max(1, int(os.getenv('SEGMENT_WORKERS', '2')))
 
 # Create directories
 for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR, PROPAINTER_OUTPUT_ROOT, PROPAINTER_MASK_ROOT]:
@@ -109,6 +110,7 @@ import redis
 import threading
 import secrets
 import hmac
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import faster-propainter modules for direct pipeline processing
 # Note: These imports are moved to inside functions to avoid startup errors
@@ -315,6 +317,155 @@ def performance_checkpoint(stage_name, start_time=None):
         print(f"🚀 {stage_name} started")
     
     return current_time
+
+
+def _process_propainter_segment(seg_idx, total_segments, segment, context):
+    """
+    Process a single smart-cropped segment with faster-propainter.
+
+    Returns a tuple (seg_idx, segment_video_path).
+    """
+    from crop_utils import calculate_crop_region, estimate_speedup
+    import subprocess
+
+    start_frame, end_frame, seg_bbox = segment
+    seg_duration = end_frame - start_frame + 1
+
+    base_name = context['base_name']
+    unique_suffix = context['unique_suffix']
+    width = context['width']
+    height = context['height']
+    fps = context['fps']
+    mask_dir = context['mask_dir']
+    original_frames_dir = context['original_frames_dir']
+
+    seg_label = f"{seg_idx + 1}/{total_segments}"
+    print(f"\n🎬 Processing segment {seg_label}: frames {start_frame}-{end_frame} ({seg_duration} frames)")
+
+    crop_x, crop_y, crop_w, crop_h = calculate_crop_region(seg_bbox, width, height, padding_ratio=0.2, min_size=128)
+    speedup = estimate_speedup((width, height), (crop_w, crop_h))
+    print(f"   📐 Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h} (estimated {speedup:.1f}x speedup)")
+
+    seg_prefix = f"{base_name}_{unique_suffix}_seg{seg_idx}"
+    seg_frames_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_frames")
+    seg_cropped_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cropped")
+    seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
+    seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
+    seg_cleaned_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cleaned")
+    seg_video_path = os.path.join(TEMP_DIR, f"{seg_prefix}.mp4")
+
+    for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+        os.makedirs(path, exist_ok=True)
+
+    try:
+        frames_copied = 0
+        for frame_idx in range(start_frame, end_frame + 1):
+            src = os.path.join(original_frames_dir, f"{frame_idx:04d}.png")
+            dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+            if not os.path.exists(src):
+                print(f"⚠️  Warning: Frame {frame_idx} ({frame_idx:04d}.png) not found, skipping")
+                continue
+            shutil.copy2(src, dst)
+            frames_copied += 1
+
+        if frames_copied == 0:
+            raise RuntimeError(f"No frames copied for segment {seg_idx}")
+
+        print(f"   ✂️  Cropping {frames_copied} frames to {crop_w}x{crop_h}...")
+        for frame_idx in range(frames_copied):
+            frame_file = f"{frame_idx:04d}.png"
+            frame_path = os.path.join(seg_frames_dir, frame_file)
+            frame = cv2.imread(frame_path)
+            if frame is None:
+                print(f"⚠️  Warning: Could not read frame {frame_file}, skipping crop")
+                continue
+            cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+            cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
+
+        masks_copied = 0
+        for frame_idx in range(start_frame, end_frame + 1):
+            mask_file = f"{frame_idx:04d}.png"
+            mask_src = os.path.join(mask_dir, mask_file)
+            if os.path.exists(mask_src):
+                mask = cv2.imread(mask_src, cv2.IMREAD_GRAYSCALE)
+                if mask is not None:
+                    cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
+                    masks_copied += 1
+
+        print(f"   🎨 Running faster-propainter pipeline on cropped segment...")
+        try:
+            faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+            if faster_propainter_path not in sys.path:
+                sys.path.insert(0, faster_propainter_path)
+            from watermark import pipeline as faster_propainter_pipeline
+
+            import torch
+            use_fp16 = torch.cuda.is_available()
+            _segment_subvideo, _ = get_dynamic_subvideo_length(crop_w, crop_h)
+
+            print(f"   🚀 Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=20, ref_stride=10, subvideo_length=80, FP16={use_fp16}")
+
+            faster_propainter_pipeline(
+                video=seg_cropped_dir,
+                mask=seg_mask_dir,
+                output=seg_output_dir,
+                resize_ratio=1.0,
+                mask_dilation=4,
+                ref_stride=10,
+                neighbor_length=20,
+                subvideo_length=80,
+                raft_iter=20,
+                mode="video_inpainting",
+                save_frames=True,
+                fp16=use_fp16
+            )
+
+            print(f"   ✅ faster-propainter segment {seg_idx+1} completed")
+        except Exception as exc:
+            print(f"❌ faster-propainter failed on segment {seg_idx}: {exc}")
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(f"faster-propainter failed on segment {seg_idx}: {exc}") from exc
+        finally:
+            clear_gpu_memory()
+
+        seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
+        if not os.path.exists(seg_propainter_frames):
+            raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
+
+        print(f"   🔗 Merging cleaned region back to full frames...")
+        for frame_idx in range(seg_duration):
+            frame_file = f"{frame_idx:04d}.png"
+            original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+            cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+
+            if cleaned_crop is not None and original is not None:
+                result_frame = original.copy()
+                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+            elif original is not None:
+                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+
+        print(f"   🎞️  Encoding segment to video...")
+        encode_cmd = [
+            'ffmpeg', '-y', '-framerate', str(fps),
+            '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-pix_fmt', 'yuv420p',
+            '-profile:v', 'main',
+            seg_video_path
+        ]
+        subprocess.run(encode_cmd, capture_output=True, check=True)
+
+        return seg_idx, seg_video_path
+    finally:
+        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+            shutil.rmtree(path, ignore_errors=True)
+        clear_gpu_memory()
+        import gc
+        gc.collect()
+
 
 def save_detection_debug(image, mask, detections, prefix):
     """
@@ -841,7 +992,6 @@ def process_video_task(self, video_path):
 
         if use_cropping and segments:
             print("🚀 Smart cropping enabled - processing segments individually")
-            from crop_utils import calculate_crop_region, estimate_speedup
             import subprocess
 
             # Extract original frames once for merging later
@@ -857,164 +1007,67 @@ def process_video_task(self, video_path):
             ]
             subprocess.run(extract_cmd, capture_output=True, check=True)
 
-            segment_videos = []
+            segment_context = {
+                'base_name': base_name,
+                'unique_suffix': unique_suffix,
+                'width': width,
+                'height': height,
+                'fps': fps,
+                'mask_dir': mask_dir,
+                'original_frames_dir': original_frames_dir,
+            }
+            segment_videos = [None] * len(segments)
+            max_workers = min(SEGMENT_WORKERS, len(segments))
 
-            # Process each segment
-            for seg_idx, (start_frame, end_frame, seg_bbox) in enumerate(segments):
-                seg_duration = end_frame - start_frame + 1
-                print(f"\n🎬 Processing segment {seg_idx+1}/{len(segments)}: frames {start_frame}-{end_frame} ({seg_duration} frames)")
+            print(f"⚙️  Segment worker pool size: {max_workers}")
+            self.update_state(
+                state='PROCESSING',
+                meta={'progress': 55, 'status': f'faster-propainter segments (workers={max_workers})'}
+            )
 
-                # Calculate crop region with padding
-                crop_region = calculate_crop_region(seg_bbox, width, height, padding_ratio=0.2, min_size=128)
-                crop_x, crop_y, crop_w, crop_h = crop_region
-                speedup = estimate_speedup((width, height), (crop_w, crop_h))
-                print(f"   📐 Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h} (estimated {speedup:.1f}x speedup)")
-
-                # Create directories for this segment
-                seg_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_frames")
-                seg_cropped_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_cropped")
-                seg_mask_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_masks")
-                seg_output_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_output")
-                seg_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_cleaned")
-
-                os.makedirs(seg_frames_dir, exist_ok=True)
-                os.makedirs(seg_cropped_dir, exist_ok=True)
-                os.makedirs(seg_mask_dir, exist_ok=True)
-                os.makedirs(seg_output_dir, exist_ok=True)
-                os.makedirs(seg_cleaned_dir, exist_ok=True)
-
-                # Copy segment frames from original_frames_dir
-                # Note: -start_number 0 makes FFmpeg use 0-based numbering (frame 0 -> 0000.png)
-                frames_copied = 0
-                for frame_idx in range(start_frame, end_frame + 1):
-                    src = os.path.join(original_frames_dir, f"{frame_idx:04d}.png")
-                    dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
-
-                    # Safety check: skip if frame doesn't exist (handles edge cases)
-                    if not os.path.exists(src):
-                        print(f"⚠️  Warning: Frame {frame_idx} ({frame_idx:04d}.png) not found, skipping")
-                        continue
-
-                    shutil.copy2(src, dst)
-                    frames_copied += 1
-
-                # Crop frames to watermark region (only process frames that were actually copied)
-                print(f"   ✂️  Cropping {frames_copied} frames to {crop_w}x{crop_h}...")
-                for frame_idx in range(frames_copied):
-                    frame_file = f"{frame_idx:04d}.png"
-                    frame = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-                    if frame is None:
-                        print(f"⚠️  Warning: Could not read frame {frame_file}, skipping crop")
-                        continue
-                    cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                    cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
-
-                # Crop masks to watermark region (only for frames that were actually copied)
-                masks_copied = 0
-                for frame_idx in range(start_frame, end_frame + 1):
-                    mask_file = f"{frame_idx:04d}.png"
-                    mask_src = os.path.join(mask_dir, mask_file)
-                    if os.path.exists(mask_src):
-                        mask = cv2.imread(mask_src, cv2.IMREAD_GRAYSCALE)
-                        if mask is not None:
-                            cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                            cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
-                            masks_copied += 1
-
-                # Run faster-propainter pipeline on cropped segment  
-                print(f"   🎨 Running faster-propainter pipeline on cropped segment...")
-                progress = 55 + int((seg_idx / len(segments)) * 25)
-                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'faster-propainter segment {seg_idx+1}/{len(segments)}'})
-
-                try:
-                    # Import faster-propainter pipeline at runtime
-                    import sys
-                    faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
-                    if faster_propainter_path not in sys.path:
-                        sys.path.insert(0, faster_propainter_path)
-                    from watermark import pipeline as faster_propainter_pipeline
-                    
-                    import torch
-                    use_fp16 = torch.cuda.is_available()
-                    
-                    # Dynamic optimization for cropped segments - use higher quality since they're small
-                    dynamic_subvideo, _ = get_dynamic_subvideo_length(crop_w, crop_h)
-                    
-                    print(f"   🚀 Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=20, ref_stride=10, subvideo_length=80, FP16={use_fp16}")
-                    
-                    # Direct pipeline call for cropped segment - TRUE FASTER-PROPAINTER SETTINGS
-                    faster_propainter_pipeline(
-                        video=seg_cropped_dir,              # Cropped frames directory
-                        mask=seg_mask_dir,                  # Cropped masks directory
-                        output=seg_output_dir,              # Segment output directory
-                        resize_ratio=1.0,                   # Keep crop resolution
-                        mask_dilation=4,                    # Standard mask dilation
-                        ref_stride=10,                      # faster-propainter: reduce references
-                        neighbor_length=20,                 # faster-propainter: recommended neighbors for quality
-                        subvideo_length=80,                 # faster-propainter: standard subvideo length
-                        raft_iter=20,                       # faster-propainter: standard optical flow
-                        mode="video_inpainting",            # Standard inpainting
-                        save_frames=True,                   # Save frames for merging
-                        fp16=use_fp16                       # FP16 if available
+            if max_workers > 1:
+                completed = 0
+                print(f"🧵 Processing {len(segments)} segments in parallel...")
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            _process_propainter_segment,
+                            seg_idx,
+                            len(segments),
+                            segments[seg_idx],
+                            segment_context
+                        ): seg_idx
+                        for seg_idx in range(len(segments))
+                    }
+                    try:
+                        for future in as_completed(futures):
+                            seg_idx = futures[future]
+                            _, seg_video_path = future.result()
+                            segment_videos[seg_idx] = seg_video_path
+                            completed += 1
+                            progress = 55 + int((completed / len(segments)) * 25)
+                            self.update_state(
+                                state='PROCESSING',
+                                meta={'progress': progress, 'status': f'faster-propainter segments {completed}/{len(segments)}'}
+                            )
+                            print(f"✅ Segment {seg_idx+1}/{len(segments)} finished ({completed}/{len(segments)} total)")
+                    except Exception:
+                        for pending in futures:
+                            if not pending.done():
+                                pending.cancel()
+                        raise
+            else:
+                for seg_idx, segment in enumerate(segments):
+                    _, seg_video_path = _process_propainter_segment(seg_idx, len(segments), segment, segment_context)
+                    segment_videos[seg_idx] = seg_video_path
+                    progress = 55 + int(((seg_idx + 1) / len(segments)) * 25)
+                    self.update_state(
+                        state='PROCESSING',
+                        meta={'progress': progress, 'status': f'faster-propainter segment {seg_idx+1}/{len(segments)}'}
                     )
-                    
-                    print(f"   ✅ faster-propainter segment {seg_idx+1} completed")
-                    
-                except Exception as e:
-                    print(f"❌ faster-propainter failed on segment {seg_idx}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    raise RuntimeError(f"faster-propainter failed on segment {seg_idx}: {e}")
-                finally:
-                    # Clear GPU memory after each segment
-                    clear_gpu_memory()
 
-                # Find ProPainter output frames
-                seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
-                if not os.path.exists(seg_propainter_frames):
-                    raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
-
-                # Merge cleaned crops back to full frames
-                print(f"   🔗 Merging cleaned region back to full frames...")
-                for frame_idx in range(seg_duration):
-                    frame_file = f"{frame_idx:04d}.png"
-                    original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-                    cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
-
-                    if cleaned_crop is not None:
-                        result_frame = original.copy()
-                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
-                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
-                    else:
-                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
-
-                # Convert segment frames to video
-                seg_video_path = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}.mp4")
-                print(f"   🎞️  Encoding segment to video...")
-                encode_cmd = [
-                    'ffmpeg', '-y', '-framerate', str(fps),
-                    '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-                    '-pix_fmt', 'yuv420p',  # Windows Media Player compatibility
-                    '-profile:v', 'main',   # Broad compatibility profile
-                    seg_video_path
-                ]
-                subprocess.run(encode_cmd, capture_output=True, check=True)
-                segment_videos.append(seg_video_path)
-
-                # Cleanup segment temp dirs
-                shutil.rmtree(seg_frames_dir, ignore_errors=True)
-                shutil.rmtree(seg_cropped_dir, ignore_errors=True)
-                shutil.rmtree(seg_mask_dir, ignore_errors=True)
-                shutil.rmtree(seg_output_dir, ignore_errors=True)
-                shutil.rmtree(seg_cleaned_dir, ignore_errors=True)
-
-                # Advanced memory management after segment cleanup
-                clear_gpu_memory()
-                
-                # Force garbage collection to free Python memory
-                import gc
-                gc.collect()
+            if any(path is None for path in segment_videos):
+                raise RuntimeError("One or more segments failed to produce output")
 
             # Concatenate all segments
             print(f"\n🎬 Concatenating {len(segment_videos)} segments...")
