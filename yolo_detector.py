@@ -112,10 +112,12 @@ class YOLOWatermarkDetector:
                     possible_paths = [
                         'runs/detect/new_sora_watermark/weights/best.pt',  # NEW trained model
                         '../runs/detect/new_sora_watermark/weights/best.pt',
+                        '/app/waterz/WATERZ/runs/detect/new_sora_watermark/weights/best.pt',  # Docker/production path
                         'D:/github/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.pt',
                         '/workspaces/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.pt',
                         'runs/detect/sora_watermark/weights/best.pt',  # Old model fallback
                         '../runs/detect/sora_watermark/weights/best.pt',
+                        '/app/waterz/WATERZ/runs/detect/sora_watermark/weights/best.pt',  # Docker/production path (old)
                         'D:/github/RoomFinderAI/runs/detect/sora_watermark/weights/best.pt',
                         '/workspaces/RoomFinderAI/runs/detect/sora_watermark/weights/best.pt',
                     ]
