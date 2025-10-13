@@ -590,19 +590,19 @@ def process_image_task(self, image_path):
             import torch
             use_fp16 = torch.cuda.is_available()
             
-            print(f"🚀 Running direct faster-propainter pipeline: FP16={use_fp16} + neighbor_length=10 + ref_stride=20")
+            print(f"🚀 Running direct faster-propainter pipeline: FP16={use_fp16} + neighbor_length=2 + ref_stride=10 + subvideo_length=80")
             
-            # Direct pipeline call - no subprocess overhead!
+            # Direct pipeline call - AGGRESSIVE FASTER-PROPAINTER SETTINGS
             faster_propainter_pipeline(
                 video=frame_dir,                    # Input frame directory
                 mask=mask_dir,                      # Mask directory  
                 output=PROPAINTER_OUTPUT_ROOT,      # Output directory
                 resize_ratio=1.0,                   # Keep original resolution for images
-                mask_dilation=5,                    # Enhanced mask dilation for better quality
-                ref_stride=20,                      # Fewer reference frames for speed
-                neighbor_length=10,                 # Good quality for images
-                subvideo_length=80,                 # Standard subvideo length
-                raft_iter=20,                       # Standard optical flow iterations
+                mask_dilation=4,                    # faster-propainter: standard mask dilation
+                ref_stride=10,                      # faster-propainter: reduce references
+                neighbor_length=2,                  # faster-propainter: AGGRESSIVE minimum neighbors
+                subvideo_length=80,                 # faster-propainter: standard subvideo length
+                raft_iter=20,                       # faster-propainter: standard optical flow
                 mode="video_inpainting",            # Standard inpainting mode
                 save_frames=True,                   # Save individual frames
                 fp16=use_fp16                       # Enable FP16 if available
@@ -920,19 +920,19 @@ def process_video_task(self, video_path):
                     # Dynamic optimization for cropped segments - use higher quality since they're small
                     dynamic_subvideo, _ = get_dynamic_subvideo_length(crop_w, crop_h)
                     
-                    print(f"   🚀 Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, subvideo_length={dynamic_subvideo}, FP16={use_fp16}")
+                    print(f"   🚀 Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=2, ref_stride=10, subvideo_length=80, FP16={use_fp16}")
                     
-                    # Direct pipeline call for cropped segment
+                    # Direct pipeline call for cropped segment - AGGRESSIVE FASTER-PROPAINTER SETTINGS
                     faster_propainter_pipeline(
                         video=seg_cropped_dir,              # Cropped frames directory
                         mask=seg_mask_dir,                  # Cropped masks directory
                         output=seg_output_dir,              # Segment output directory
                         resize_ratio=1.0,                   # Keep crop resolution
                         mask_dilation=4,                    # Standard mask dilation
-                        ref_stride=10,                      # Higher quality for small crops
-                        neighbor_length=20,                 # Higher quality for small crops
-                        subvideo_length=dynamic_subvideo,   # Dynamic based on crop size
-                        raft_iter=20,                       # Standard optical flow
+                        ref_stride=10,                      # faster-propainter: reduce references
+                        neighbor_length=2,                  # faster-propainter: AGGRESSIVE minimum neighbors
+                        subvideo_length=80,                 # faster-propainter: standard subvideo length
+                        raft_iter=20,                       # faster-propainter: standard optical flow
                         mode="video_inpainting",            # Standard inpainting
                         save_frames=True,                   # Save frames for merging
                         fp16=use_fp16                       # FP16 if available
@@ -1046,20 +1046,20 @@ def process_video_task(self, video_path):
                 # Dynamic optimization based on video resolution
                 dynamic_subvideo, _ = get_dynamic_subvideo_length(width, height)
                 
-                print(f"🚀 Direct faster-propainter pipeline: resolution={width}x{height}, subvideo_length={dynamic_subvideo}, FP16={use_fp16}")
-                print(f"   Ultra speed: neighbor_length=6 + ref_stride=50 + raft_iter=5 + flow_backend={PROPAINTER_FLOW_BACKEND}")
+                print(f"🚀 Direct faster-propainter pipeline: resolution={width}x{height}, FP16={use_fp16}")
+                print(f"   AGGRESSIVE: neighbor_length=2 + ref_stride=10 + raft_iter=20 + subvideo_length=80 + flow_backend={PROPAINTER_FLOW_BACKEND}")
                 
-                # Direct pipeline call - no subprocess overhead!
+                # Direct pipeline call - AGGRESSIVE FASTER-PROPAINTER SETTINGS
                 faster_propainter_pipeline(
                     video=video_path,                   # Input video
                     mask=mask_dir,                      # Mask directory
                     output=PROPAINTER_OUTPUT_ROOT,      # Output directory
                     resize_ratio=1.0,                   # Keep original resolution
-                    mask_dilation=4,                    # Standard mask dilation
-                    ref_stride=50,                      # Ultra sparse references for speed
-                    neighbor_length=6,                  # Ultra speed preset
-                    subvideo_length=dynamic_subvideo,   # Dynamic based on resolution
-                    raft_iter=5,                        # Minimal optical flow for speed
+                    mask_dilation=4,                    # faster-propainter: standard mask dilation
+                    ref_stride=10,                      # faster-propainter: reduce references
+                    neighbor_length=2,                  # faster-propainter: AGGRESSIVE minimum neighbors
+                    subvideo_length=80,                 # faster-propainter: standard subvideo length
+                    raft_iter=20,                       # faster-propainter: standard optical flow
                     mode="video_inpainting",            # Standard inpainting
                     save_fps=fps,                       # Preserve original FPS
                     save_frames=False,                  # Only save video, not frames
