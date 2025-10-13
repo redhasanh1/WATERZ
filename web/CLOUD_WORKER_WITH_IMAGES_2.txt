@@ -534,7 +534,7 @@ def process_image_task(self, image_path):
 
         self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Detecting watermark'})
         detection_start = performance_checkpoint("YOLO Detection")
-        detections = det.detect(img, confidence_threshold=0.25, padding=0)  # Precise detection like YOLO GOOD
+        detections = det.detect(img, confidence_threshold=0.20, padding=0)  # Lower threshold for faint watermarks (Sora optimized)
         performance_checkpoint("YOLO Detection", detection_start)
 
         # If no detections, return original
