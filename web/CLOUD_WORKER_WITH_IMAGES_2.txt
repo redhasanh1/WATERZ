@@ -111,10 +111,11 @@ import secrets
 import hmac
 
 # Import faster-propainter modules for direct pipeline processing
-sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
-from watermark import pipeline as faster_propainter_pipeline
-from mytimer import timer_decorator
-from pre_post_process import crop_video_mask, merge_videos_with_mask
+# Note: These imports are moved to inside functions to avoid startup errors
+# sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
+# from watermark import pipeline as faster_propainter_pipeline
+# from mytimer import timer_decorator  
+# from pre_post_process import crop_video_mask, merge_videos_with_mask
 
 app = Flask(__name__, static_folder='web')
 # CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
@@ -315,7 +316,6 @@ def performance_checkpoint(stage_name, start_time=None):
     
     return current_time
 
-@timer_decorator
 def save_detection_debug(image, mask, detections, prefix):
     """
     Save a debug visualization showing YOLO detections and the inpainting mask.
@@ -471,7 +471,6 @@ def get_detector():
 # ============================================================================
 
 @celery.task(bind=True, name='watermark.remove_image')
-@timer_decorator
 def process_image_task(self, image_path):
     """
     Single-image watermark removal using YOLO mask + ProPainter with FP16.
@@ -583,6 +582,11 @@ def process_image_task(self, image_path):
         # Use direct faster-propainter pipeline instead of subprocess for 3x speedup
         pipeline_start = performance_checkpoint("faster-propainter Pipeline")
         try:
+            # Import faster-propainter pipeline at runtime
+            import sys
+            sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
+            from watermark import pipeline as faster_propainter_pipeline
+            
             import torch
             use_fp16 = torch.cuda.is_available()
             
@@ -681,7 +685,6 @@ def process_image_task(self, image_path):
 
 
 @celery.task(bind=True, name='watermark.remove_video')
-@timer_decorator
 def process_video_task(self, video_path):
     """
     Background task for video watermark removal using YOLO + ProPainter.
@@ -906,6 +909,11 @@ def process_video_task(self, video_path):
                 self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'faster-propainter segment {seg_idx+1}/{len(segments)}'})
 
                 try:
+                    # Import faster-propainter pipeline at runtime
+                    import sys
+                    sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
+                    from watermark import pipeline as faster_propainter_pipeline
+                    
                     import torch
                     use_fp16 = torch.cuda.is_available()
                     
@@ -1027,6 +1035,11 @@ def process_video_task(self, video_path):
             )
 
             try:
+                # Import faster-propainter pipeline at runtime
+                import sys
+                sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
+                from watermark import pipeline as faster_propainter_pipeline
+                
                 import torch
                 use_fp16 = torch.cuda.is_available()
                 
