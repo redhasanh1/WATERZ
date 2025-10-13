@@ -852,6 +852,7 @@ def process_video_task(self, video_path):
             extract_cmd = [
                 'ffmpeg', '-i', video_path,
                 '-qscale:v', '2',
+                '-start_number', '0',  # Start numbering at 0 to match frame indices
                 os.path.join(original_frames_dir, '%04d.png')
             ]
             subprocess.run(extract_cmd, capture_output=True, check=True)
@@ -883,8 +884,9 @@ def process_video_task(self, video_path):
                 os.makedirs(seg_cleaned_dir, exist_ok=True)
 
                 # Copy segment frames from original_frames_dir
+                # Note: FFmpeg numbers frames starting at 1 by default, so add 1 to frame indices
                 for frame_idx in range(start_frame, end_frame + 1):
-                    src = os.path.join(original_frames_dir, f"{frame_idx:04d}.png")
+                    src = os.path.join(original_frames_dir, f"{frame_idx+1:04d}.png")
                     dst = os.path.join(seg_frames_dir, f"{frame_idx-start_frame:04d}.png")
                     shutil.copy2(src, dst)
 
