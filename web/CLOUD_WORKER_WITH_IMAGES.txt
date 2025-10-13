@@ -1,0 +1,1985 @@
+"""
+Production Server for Watermark Removal SaaS
+- Async queue processing with Celery + Redis
+- GPU-optimized YOLO detection + ProPainter inpainting
+- Keeps your PC usable while serving customers
+- Designed for $1M/month scale
+- ALL FILES STAY ON D DRIVE (inside watermarkz folder)
+"""
+
+import sys
+import os
+import importlib
+import shutil
+from pathlib import Path
+
+# CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
+CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
+UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
+RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
+DEBUG_DIR = os.path.join(RESULT_DIR, 'debug_masks')
+PYTHON_PACKAGES_DIR = os.path.join(SCRIPT_DIR, 'python_packages')
+PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter.py')
+PROPAINTER_OUTPUT_ROOT = os.path.join(RESULT_DIR, 'propainter')
+PROPAINTER_MASK_ROOT = os.path.join(TEMP_DIR, 'propainter_masks')
+
+# Create directories
+for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR, PROPAINTER_OUTPUT_ROOT, PROPAINTER_MASK_ROOT]:
+    os.makedirs(directory, exist_ok=True)
+
+# Override ALL temp/cache environment variables
+os.environ['TEMP'] = TEMP_DIR
+os.environ['TMP'] = TEMP_DIR
+os.environ['TMPDIR'] = TEMP_DIR
+os.environ['TORCH_HOME'] = CACHE_DIR
+os.environ['XDG_CACHE_HOME'] = CACHE_DIR
+os.environ['PIP_CACHE_DIR'] = os.path.join(SCRIPT_DIR, 'pip_cache')
+os.environ['TRANSFORMERS_CACHE'] = CACHE_DIR
+os.environ['HF_HOME'] = CACHE_DIR
+os.environ['OPENCV_TEMP_PATH'] = TEMP_DIR
+
+
+def _ensure_cuda_torch():
+    """
+    Make sure we end up with a CUDA-enabled torch build.
+    Prefer the system install if it has CUDA; otherwise fall back to python_packages.
+    """
+    def _import_torch(disable_triton_retry: bool = False):
+        """
+        Import torch and, if we hit the duplicated TORCH_LIBRARY Triton error,
+        retry exactly once with Triton disabled.
+        """
+        try:
+            return importlib.import_module('torch')
+        except RuntimeError as exc:
+            message = str(exc)
+            if (
+                not disable_triton_retry
+                and "Only a single TORCH_LIBRARY" in message
+            ):
+                os.environ['PYTORCH_DISABLE_TRITON'] = '1'
+                for module_name in ['torch', 'triton', 'torch_triton', 'torchvision._cuda', 'torchvision._C']:
+                    sys.modules.pop(module_name, None)
+                importlib.invalidate_caches()
+                return _import_torch(disable_triton_retry=True)
+            raise
+
+    try:
+        _torch_test = _import_torch()
+        if hasattr(_torch_test, 'cuda') and _torch_test.cuda.is_available():
+            sys.modules['torch'] = _torch_test
+            return
+        # GPU not available – continue with the existing torch module (CPU fallback)
+        sys.modules['torch'] = _torch_test
+        print("⚠️  CUDA not detected in system torch; continuing with CPU mode.")
+        return
+    except Exception:
+        # Drop whatever was imported and fall back to bundled packages
+        sys.modules.pop('torch', None)
+        sys.modules.pop('triton', None)
+
+    if PYTHON_PACKAGES_DIR not in sys.path:
+        sys.path.insert(0, PYTHON_PACKAGES_DIR)
+
+    torch_cuda = _import_torch()
+    if not hasattr(torch_cuda, 'cuda') or not torch_cuda.cuda.is_available():
+        raise RuntimeError(
+            "CUDA-enabled torch not available in python_packages. "
+            "Reinstall dependencies or run INSTALL_WAVEMIX.bat."
+        )
+    sys.modules['torch'] = torch_cuda
+
+
+_ensure_cuda_torch()
+
+from flask import Flask, request, send_file, jsonify
+from flask_cors import CORS
+from celery import Celery
+import cv2
+import numpy as np
+import io
+import time
+import hashlib
+import uuid
+from datetime import datetime
+import redis
+import threading
+import secrets
+import hmac
+
+app = Flask(__name__, static_folder='web')
+# CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
+CORS(
+    app,
+    resources={r"/api/*": {"origins": "*"}},
+    supports_credentials=False,
+    allow_headers=["Content-Type", "ngrok-skip-browser-warning"],
+    expose_headers=["Content-Disposition"]
+)
+
+# ----------------------------------------------------------------------------
+# Simple access logging (Waitress doesn't emit per‑request access logs by default)
+# ----------------------------------------------------------------------------
+import sys
+import logging
+
+# Toggle per-request access logs with ACCESS_LOGS=1 (default disabled)
+ENABLE_ACCESS_LOGS = str(os.getenv('ACCESS_LOGS', '0')).lower() in ('1', 'true', 'yes', 'on')
+LOG_LEVEL = logging.INFO if ENABLE_ACCESS_LOGS else logging.WARNING
+logging.basicConfig(stream=sys.stdout, level=LOG_LEVEL)
+
+from flask import g
+
+@app.before_request
+def _log_request_start():
+    if not ENABLE_ACCESS_LOGS:
+        return
+    try:
+        g._req_start = time.time()
+        g._req_id = secrets.token_hex(4)
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr) or '-'
+        qs = request.query_string.decode('utf-8', errors='ignore')
+        path_qs = request.path + (('?' + qs) if qs else '')
+        logging.info(f"--> {g._req_id} {request.method} {path_qs} from {ip}")
+    except Exception:
+        pass
+
+@app.after_request
+def _log_request_end(response):
+    if ENABLE_ACCESS_LOGS:
+        try:
+            rid = getattr(g, '_req_id', '-')
+            dur_ms = int((time.time() - getattr(g, '_req_start', time.time())) * 1000)
+            length = response.calculate_content_length() or 0
+            logging.info(f"<-- {rid} {response.status_code} {length}b {dur_ms}ms {request.method} {request.path}")
+        except Exception:
+            pass
+    return response
+
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
+def health_check():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """Basic health endpoint for monitoring."""
+    return jsonify({
+        'status': 'ok',
+        'detector_loaded': detector is not None,
+        'propainter_ready': _check_propainter_assets()
+    })
+
+# Security headers middleware
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to all responses"""
+    # Prevent clickjacking
+    response.headers['X-Frame-Options'] = 'DENY'
+    # Prevent MIME sniffing
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    # XSS protection
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    # Referrer policy
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # Content Security Policy
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https:; frame-src https://pagead2.googlesyndication.com;"
+    # Remove server header
+    response.headers.pop('Server', None)
+    return response
+
+# ============================================================================
+# Configuration - ALL ON D DRIVE
+# ============================================================================
+
+# Security - Generate secret key for session encryption
+SECRET_KEY = os.getenv('SECRET_KEY', secrets.token_hex(32))
+app.config['SECRET_KEY'] = SECRET_KEY
+
+# Redis configuration (for queue + caching) - with password protection
+REDIS_URL = os.getenv('REDIS_URL', 'redis://:watermarkz_secure_2024@localhost:6379/0')
+
+app.config['broker_url'] = REDIS_URL
+app.config['result_backend'] = REDIS_URL  # Store results in Redis
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
+app.config['UPLOAD_FOLDER'] = UPLOAD_DIR  # D drive only!
+app.config['TEMP_FOLDER'] = TEMP_DIR  # D drive only!
+
+# Rate limiting - prevent abuse
+UPLOAD_RATE_LIMIT = {}  # IP -> (count, timestamp)
+
+# Input validation
+def sanitize_filename(filename):
+    """Remove dangerous characters from filenames"""
+    import re
+    # Remove path traversal attempts
+    filename = os.path.basename(filename)
+    # Only allow alphanumeric, dots, dashes, underscores
+    filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
+    return filename
+
+def validate_url(url):
+    """Validate and sanitize URLs to prevent SSRF attacks"""
+    from urllib.parse import urlparse
+
+    if not url or not isinstance(url, str):
+        return False
+
+    # Basic length check
+    if len(url) > 2048:
+        return False
+
+    try:
+        parsed = urlparse(url)
+
+        # Must have scheme and netloc
+        if not parsed.scheme or not parsed.netloc:
+            return False
+
+        # Only allow http/https
+        if parsed.scheme not in ['http', 'https']:
+            return False
+
+        # Block localhost/internal IPs to prevent SSRF
+        blocked_hosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
+        if any(blocked in parsed.netloc.lower() for blocked in blocked_hosts):
+            return False
+
+        # Block private IP ranges
+        import ipaddress
+        try:
+            # Extract hostname without port
+            hostname = parsed.netloc.split(':')[0]
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                return False
+        except ValueError:
+            # Not an IP address, that's fine (it's a domain)
+            pass
+
+        return True
+    except Exception:
+        return False
+
+
+def save_detection_debug(image, mask, detections, prefix):
+    """
+    Save a debug visualization showing YOLO detections and the inpainting mask.
+
+    Args:
+        image: Original frame (H, W, 3)
+        mask:  Binary mask aligned with image (H, W)
+        detections: List of detection dicts with 'bbox'
+        prefix: Filename prefix (str)
+    """
+    if not detections or image is None or mask is None:
+        return None
+
+    try:
+        overlay = image.copy()
+
+        for det in detections:
+            x1, y1, x2, y2 = det['bbox']
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        if mask.shape[:2] != image.shape[:2]:
+            mask_resized = cv2.resize(mask, (image.shape[1], image.shape[0]))
+        else:
+            mask_resized = mask
+
+        mask_color = np.zeros_like(overlay)
+        mask_color[:, :, 2] = np.clip(mask_resized, 0, 255)
+
+        debug_image = cv2.addWeighted(overlay, 0.7, mask_color, 0.3, 0)
+        filename = f"{prefix}.png"
+        output_path = os.path.join(DEBUG_DIR, filename)
+        cv2.imwrite(output_path, debug_image)
+        print(f"🧪 Detection debug saved: {output_path}")
+        return output_path
+    except Exception as exc:
+        print(f"⚠️  Failed to save detection debug image: {exc}")
+        return None
+
+# Initialize Celery
+celery = Celery(app.name, broker=app.config['broker_url'], backend=app.config['result_backend'])
+celery.conf.update(app.config)
+
+# Celery configuration for production
+celery.conf.update(
+    task_serializer='json',
+    result_serializer='json',
+    accept_content=['json'],
+    timezone='UTC',
+    enable_utc=True,
+    task_track_started=True,
+    task_time_limit=600,  # 10 minute timeout
+    worker_prefetch_multiplier=1,  # Process one task at a time
+    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks (prevent memory leaks)
+    result_expires=3600,  # Results expire after 1 hour
+    broker_connection_retry_on_startup=True,
+    # Fix connection hanging
+    broker_pool_limit=1,  # Limit connection pool
+    broker_connection_timeout=3,  # 3 second timeout for broker connection
+    result_backend_transport_options={'socket_connect_timeout': 3},
+    task_ignore_result=False,  # We need results for status tracking
+    task_acks_late=True,
+)
+
+# Global model instances (lazy loaded)
+detector = None
+propainter_ready = False
+
+# File cleanup - delete files older than 1 hour
+def cleanup_old_files():
+    """Delete uploaded and processed files older than 1 hour"""
+    import time
+    current_time = time.time()
+    max_age = 3600  # 1 hour
+
+    for directory in [UPLOAD_DIR, RESULT_DIR]:
+        try:
+            for filename in os.listdir(directory):
+                file_path = os.path.join(directory, filename)
+                if os.path.isfile(file_path):
+                    file_age = current_time - os.path.getmtime(file_path)
+                    if file_age > max_age:
+                        os.remove(file_path)
+                        print(f"🗑️  Cleaned up old file: {filename} (age: {file_age/60:.1f} min)")
+        except Exception as e:
+            print(f"⚠️  Cleanup error in {directory}: {e}")
+
+# Schedule cleanup to run every 10 minutes
+import threading
+def schedule_cleanup():
+    cleanup_old_files()
+    threading.Timer(600, schedule_cleanup).start()  # Run every 10 minutes
+
+# Start cleanup scheduler
+threading.Thread(target=schedule_cleanup, daemon=True).start()
+print("🗑️  File cleanup scheduler started (runs every 10 minutes)")
+
+# ============================================================================
+# Model Loading (Shared across workers)
+# ============================================================================
+
+def _check_propainter_assets() -> bool:
+    """
+    Verify required ProPainter assets are present.
+    Returns True when everything looks good.
+    """
+    global propainter_ready
+
+    if propainter_ready:
+        return True
+
+    required_paths = [
+        PROPAINTER_SCRIPT,
+        os.path.join(SCRIPT_DIR, 'weights', 'ProPainter.pth'),
+        os.path.join(SCRIPT_DIR, 'weights', 'raft-things.pth'),
+        os.path.join(SCRIPT_DIR, 'weights', 'recurrent_flow_completion.pth'),
+    ]
+
+    missing = [path for path in required_paths if not os.path.exists(path)]
+    if missing:
+        print("❌ ProPainter assets missing:")
+        for path in missing:
+            print(f"   - {path}")
+        print("   Download weights or copy them into the paths above.")
+        propainter_ready = False
+        return False
+
+    propainter_ready = True
+    return True
+
+
+def get_detector():
+    """
+    Lazy load the YOLO detector (TensorRT if available).
+    """
+    global detector
+
+    if detector is None:
+        print("=" * 60)
+        print("Loading YOLO detector...")
+        print("=" * 60)
+        from yolo_detector import YOLOWatermarkDetector
+        detector = YOLOWatermarkDetector()
+        print("=" * 60)
+        print("✅ YOLO detector ready!")
+        print("=" * 60)
+
+    _check_propainter_assets()
+    return detector
+
+
+# ============================================================================
+# Celery Tasks (Background Processing)
+# ============================================================================
+
+@celery.task(bind=True, name='watermark.remove_image')
+def process_image_task(self, image_path):
+    """
+    Single-image watermark removal using YOLO mask + ProPainter with FP16.
+
+    ProPainter works on video sequences, so we:
+    1. Duplicate the image into a 3-frame sequence
+    2. Generate masks for each frame
+    3. Run ProPainter with --fp16
+    4. Extract the middle frame as result
+    """
+    try:
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Loading detector'})
+        det = get_detector()
+
+        if not _check_propainter_assets():
+            raise RuntimeError("ProPainter assets missing - see logs for details")
+
+        # If running on a remote worker (e.g., Salad), the local path from the API host
+        # won't exist. In that case, try to download the file from the API via TUNNEL_URL.
+        if not os.path.exists(image_path):
+            tunnel = os.getenv('TUNNEL_URL')
+            try:
+                from urllib.parse import urljoin
+                import requests
+            except Exception:
+                tunnel = None
+
+            if tunnel:
+                # Handle Windows-style paths coming from the API host
+                try:
+                    from pathlib import PureWindowsPath
+                    base_name = PureWindowsPath(image_path).name
+                except Exception:
+                    base_name = os.path.basename(image_path.replace('\\', '/'))
+
+                download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+                print(f"🌐 Image not found locally. Downloading from: {download_url}")
+                try:
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
+                    r.raise_for_status()
+                    # Save to a temp path in UPLOAD_DIR
+                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                    remote_cached = os.path.join(UPLOAD_DIR, base_name)
+                    with open(remote_cached, 'wb') as f:
+                        f.write(r.content)
+                    image_path = remote_cached
+                    print(f"✅ Downloaded to: {image_path}")
+                except Exception as dl_err:
+                    print(f"❌ Failed to download image from API host: {dl_err}")
+                    raise Exception(f"Image file not found and remote download failed: {base_name}")
+            else:
+                raise Exception(f"Image file not found: {image_path}")
+
+        img = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if img is None:
+            raise Exception('Failed to read image')
+
+        height, width = img.shape[:2]
+        base_name = Path(image_path).stem
+        unique_suffix = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
+
+        self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Detecting watermark'})
+        detections = det.detect(img, confidence_threshold=0.25, padding=0)
+
+        # If no detections, return original
+        if not detections:
+            out_name = base_name + '_clean.png'
+            out_path = os.path.join(RESULT_DIR, out_name)
+            cv2.imwrite(out_path, img)
+            return {'path': out_path}
+
+        # Create 3-frame sequence directory for ProPainter
+        frame_dir = os.path.join(TEMP_DIR, f"image_frames_{unique_suffix}")
+        mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{unique_suffix}")
+        os.makedirs(frame_dir, exist_ok=True)
+        os.makedirs(mask_dir, exist_ok=True)
+
+        self.update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Preparing frames'})
+
+        # Create 3 identical frames (ProPainter needs temporal context)
+        for i in range(3):
+            frame_path = os.path.join(frame_dir, f"{i:04d}.png")
+            cv2.imwrite(frame_path, img)
+
+        # Generate mask
+        mask = det.create_mask(img, detections)
+        if mask is None or mask.size == 0:
+            out_name = base_name + '_clean.png'
+            out_path = os.path.join(RESULT_DIR, out_name)
+            cv2.imwrite(out_path, img)
+            shutil.rmtree(frame_dir, ignore_errors=True)
+            shutil.rmtree(mask_dir, ignore_errors=True)
+            return {'path': out_path}
+
+        # Ensure binary mask
+        if len(mask.shape) == 3:
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        mask = (mask > 0).astype(np.uint8) * 255
+
+        # Save same mask for all 3 frames
+        for i in range(3):
+            mask_path = os.path.join(mask_dir, f"{i:04d}.png")
+            cv2.imwrite(mask_path, mask)
+
+        self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Running ProPainter with FP16'})
+
+        # Run ProPainter on the frame sequence with FP16 optimization + speed settings
+        cmd = [
+            sys.executable,
+            PROPAINTER_SCRIPT,
+            '-i', frame_dir,
+            '-m', mask_dir,
+            '-o', PROPAINTER_OUTPUT_ROOT,
+            '--save_frames',  # Save individual frames
+            '--neighbor_length', '10',  # More neighbors than 3, images need less than video
+            '--ref_stride', '20',       # Reference stride tuned for coherence
+        ]
+
+        # Enable FP16 for 2x speedup
+        try:
+            import torch
+            if torch.cuda.is_available():
+                cmd.append('--fp16')
+                print("✓ ProPainter optimized: FP16 + neighbor_length=10 + ref_stride=20")
+        except Exception:
+            print("✓ ProPainter optimized: neighbor_length=10 + ref_stride=20")
+            pass
+
+        print(f"Launching ProPainter for image: {' '.join(cmd)}")
+
+        import subprocess
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print("❌ ProPainter failed")
+            print(result.stdout)
+            print(result.stderr)
+            raise RuntimeError("ProPainter inference failed")
+
+        # Extract middle frame (frame 0001 out of 0000, 0001, 0002)
+        # Frame directory name from ProPainter is the basename of input dir
+        propainter_output_name = os.path.basename(frame_dir)
+        save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, propainter_output_name)
+        middle_frame_path = os.path.join(save_root, 'frames', '0001.png')
+
+        if not os.path.exists(middle_frame_path):
+            # Fallback: try frame 0000 if middle doesn't exist
+            middle_frame_path = os.path.join(save_root, 'frames', '0000.png')
+
+        if not os.path.exists(middle_frame_path):
+            raise RuntimeError(f"ProPainter output frame not found: {middle_frame_path}")
+
+        self.update_state(state='PROCESSING', meta={'progress': 85, 'status': 'Finalizing'})
+
+        # Copy result to final location
+        out_name = base_name + '_clean.png'
+        out_path = os.path.join(RESULT_DIR, out_name)
+        shutil.copy2(middle_frame_path, out_path)
+
+        # Cleanup temporary directories
+        try:
+            shutil.rmtree(frame_dir, ignore_errors=True)
+            shutil.rmtree(mask_dir, ignore_errors=True)
+            shutil.rmtree(save_root, ignore_errors=True)
+        except Exception as cleanup_exc:
+            print(f"⚠️  Failed to cleanup temp directories: {cleanup_exc}")
+
+        print(f"✅ Image processed with ProPainter FP16: {out_path}")
+
+        # If running remotely and the API host is reachable via TUNNEL_URL,
+        # upload the result back so the frontend can download from the API server.
+        uploaded_path = None
+        tunnel = os.getenv('TUNNEL_URL')
+        if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
+            try:
+                import requests
+                upload_url = tunnel.rstrip('/') + '/api/upload-result'
+                print(f"⬆️  Uploading result to API host: {upload_url}")
+                with open(out_path, 'rb') as fp:
+                    resp = requests.post(
+                        upload_url,
+                        headers={'ngrok-skip-browser-warning': 'true'},
+                        files={'file': (os.path.basename(out_path), fp, 'image/png')},
+                        timeout=60
+                    )
+                if resp.ok:
+                    j = resp.json()
+                    if j.get('status') == 'success' and j.get('result_url'):
+                        uploaded_path = j['result_url']
+                        print(f"✅ Uploaded result registered at: {uploaded_path}")
+                else:
+                    print(f"⚠️  Upload back failed: HTTP {resp.status_code}")
+            except Exception as up_err:
+                print(f"⚠️  Upload back error: {up_err}")
+
+        return {'path': uploaded_path or out_path}
+    except Exception as e:
+        print(f"❌ Error processing image: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.remove_video')
+def process_video_task(self, video_path):
+    """
+    Background task for video watermark removal using YOLO + ProPainter.
+    """
+    try:
+        self.update_state(
+            state='STARTED',
+            meta={'progress': 0, 'status': 'Loading YOLO detector'}
+        )
+
+        detector = get_detector()
+        if not _check_propainter_assets():
+            raise RuntimeError("ProPainter assets missing - see logs for details")
+
+        # If running on a remote worker (e.g., Salad), the local path from the API host
+        # won't exist. In that case, try to download the file from the API via TUNNEL_URL.
+        if not os.path.exists(video_path):
+            tunnel = os.getenv('TUNNEL_URL')
+            try:
+                from urllib.parse import urljoin
+                import requests
+            except Exception:
+                tunnel = None
+
+            if tunnel:
+                # Handle Windows-style paths coming from the API host
+                try:
+                    from pathlib import PureWindowsPath
+                    base_name = PureWindowsPath(video_path).name
+                except Exception:
+                    base_name = os.path.basename(video_path.replace('\\', '/'))
+
+                download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+                print(f"🌐 Video not found locally. Downloading from: {download_url}")
+                try:
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
+                    r.raise_for_status()
+                    # Save to a temp path in UPLOAD_DIR
+                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                    remote_cached = os.path.join(UPLOAD_DIR, base_name)
+                    with open(remote_cached, 'wb') as f:
+                        f.write(r.content)
+                    video_path = remote_cached
+                    print(f"✅ Downloaded to: {video_path}")
+                except Exception as dl_err:
+                    print(f"❌ Failed to download video from API host: {dl_err}")
+                    raise Exception(f"Video file not found and remote download failed: {base_name}")
+            else:
+                raise Exception(f"Video file not found: {video_path}")
+
+        print(f"Opening video for ProPainter: {video_path}")
+        print(f"File size: {os.path.getsize(video_path) / (1024 * 1024):.2f} MB")
+
+        self.update_state(
+            state='PROCESSING',
+            meta={'progress': 5, 'status': 'Scanning video frames'}
+        )
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise Exception(f"Failed to open video: {video_path}")
+
+        fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+
+        base_name = Path(video_path).stem
+        unique_suffix = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
+        mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{unique_suffix}")
+        os.makedirs(mask_dir, exist_ok=True)
+
+        zero_mask = np.zeros((height, width), dtype=np.uint8)
+        last_valid_bbox = None
+        frames_processed = 0
+        frames_with_watermark = 0
+        detect_interval = 25  # Ultra-speed: detect every 25th frame
+        warmup_frames = 60    # Detect every frame for first N frames or until first hit
+        hit_found = False
+        det_conf = 0.15       # Aggressive: lower confidence threshold to catch faint logos
+
+        # Track bbox per frame for segmentation
+        bboxes_per_frame = []
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            progress = 5 + int((frames_processed / max(total_frames, 1)) * 40)
+            self.update_state(
+                state='PROCESSING',
+                meta={
+                    'progress': progress,
+                    'status': f'Building masks {frames_processed}/{total_frames}'
+                }
+            )
+
+            # Only run YOLO detection every Nth frame, but always during warmup until first hit
+            if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
+                detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
+                active_detections = detections
+                actual_detections = actual_detections + 1 if 'actual_detections' in locals() else 1
+
+                if detections:
+                    frames_with_watermark += 1
+                    primary = detections[0]
+                    if primary.get('confidence', 0) >= det_conf:
+                        last_valid_bbox = primary['bbox']
+                    hit_found = True
+                elif last_valid_bbox:
+                    active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}]
+            else:
+                # Reuse last detected bounding box for frames in between
+                active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}] if last_valid_bbox else []
+
+            if active_detections:
+                mask = detector.create_mask(frame, active_detections)
+                # Track bbox for segmentation
+                bboxes_per_frame.append(active_detections[0]['bbox'])
+            else:
+                mask = zero_mask
+                # No detection for this frame
+                bboxes_per_frame.append(None)
+
+            mask_path = os.path.join(mask_dir, f"{frames_processed:04d}.png")
+            cv2.imwrite(mask_path, mask)
+            frames_processed += 1
+
+        cap.release()
+
+        if frames_processed == 0:
+            raise RuntimeError("No frames were processed - video may be corrupted")
+
+        detections_run = actual_detections if 'actual_detections' in locals() else (frames_processed + detect_interval - 1) // detect_interval
+        print(f"✅ Masks generated: {frames_processed} frames total")
+        print(f"   🎯 YOLO detections: {detections_run}/{frames_processed} frames (detect_interval={detect_interval})")
+        print(f"   💧 Frames with watermark: {frames_with_watermark}")
+
+        from segment_detector import detect_segments, merge_adjacent_segments, should_use_cropping
+
+        segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
+        if segments:
+            segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
+            print(f"📊 Detected {len(segments)} watermark position segments:")
+            for i, (start, end, bbox) in enumerate(segments):
+                duration = end - start + 1
+                print(f"   Segment {i+1}: frames {start}-{end} ({duration} frames) bbox={bbox}")
+
+        use_cropping = should_use_cropping(segments, width, height, min_speedup=5.0) if segments else False
+
+        if use_cropping and segments:
+            print("🚀 Smart cropping enabled - processing segments individually")
+            from crop_utils import calculate_crop_region, estimate_speedup
+            import subprocess
+
+            # Extract original frames once for merging later
+            original_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_originals")
+            os.makedirs(original_frames_dir, exist_ok=True)
+
+            print(f"📷 Extracting original frames for merging...")
+            extract_cmd = [
+                'ffmpeg', '-i', video_path,
+                '-qscale:v', '2',
+                os.path.join(original_frames_dir, '%04d.png')
+            ]
+            subprocess.run(extract_cmd, capture_output=True, check=True)
+
+            segment_videos = []
+
+            # Process each segment
+            for seg_idx, (start_frame, end_frame, seg_bbox) in enumerate(segments):
+                seg_duration = end_frame - start_frame + 1
+                print(f"\n🎬 Processing segment {seg_idx+1}/{len(segments)}: frames {start_frame}-{end_frame} ({seg_duration} frames)")
+
+                # Calculate crop region with padding
+                crop_region = calculate_crop_region(seg_bbox, width, height, padding_ratio=0.2, min_size=128)
+                crop_x, crop_y, crop_w, crop_h = crop_region
+                speedup = estimate_speedup((width, height), (crop_w, crop_h))
+                print(f"   📐 Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h} (estimated {speedup:.1f}x speedup)")
+
+                # Create directories for this segment
+                seg_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_frames")
+                seg_cropped_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_cropped")
+                seg_mask_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_masks")
+                seg_output_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_output")
+                seg_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_cleaned")
+
+                os.makedirs(seg_frames_dir, exist_ok=True)
+                os.makedirs(seg_cropped_dir, exist_ok=True)
+                os.makedirs(seg_mask_dir, exist_ok=True)
+                os.makedirs(seg_output_dir, exist_ok=True)
+                os.makedirs(seg_cleaned_dir, exist_ok=True)
+
+                # Copy segment frames from original_frames_dir
+                for frame_idx in range(start_frame, end_frame + 1):
+                    src = os.path.join(original_frames_dir, f"{frame_idx:04d}.png")
+                    dst = os.path.join(seg_frames_dir, f"{frame_idx-start_frame:04d}.png")
+                    shutil.copy2(src, dst)
+
+                # Crop frames to watermark region
+                print(f"   ✂️  Cropping {seg_duration} frames to {crop_w}x{crop_h}...")
+                for frame_idx in range(seg_duration):
+                    frame_file = f"{frame_idx:04d}.png"
+                    frame = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                    cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
+
+                # Crop masks to watermark region
+                for frame_idx in range(start_frame, end_frame + 1):
+                    mask_file = f"{frame_idx:04d}.png"
+                    mask_src = os.path.join(mask_dir, mask_file)
+                    if os.path.exists(mask_src):
+                        mask = cv2.imread(mask_src, cv2.IMREAD_GRAYSCALE)
+                        cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                        cv2.imwrite(os.path.join(seg_mask_dir, f"{frame_idx-start_frame:04d}.png"), cropped_mask)
+
+                # Run ProPainter on cropped segment
+                print(f"   🎨 Running ProPainter on cropped segment...")
+                progress = 55 + int((seg_idx / len(segments)) * 25)
+                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'ProPainter segment {seg_idx+1}/{len(segments)}'})
+
+                cmd = [
+                    sys.executable, PROPAINTER_SCRIPT,
+                    '-i', seg_cropped_dir,
+                    '-m', seg_mask_dir,
+                    '-o', seg_output_dir,
+                    '--save_frames',
+                    '--neighbor_length', '20',  # faster-propainter setting
+                    '--ref_stride', '10',       # faster-propainter setting
+                    '--raft_iter', '20',        # faster-propainter setting
+                    '--subvideo_length', '80',  # faster-propainter setting
+                ]
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        cmd.append('--fp16')
+                except Exception:
+                    pass
+
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"❌ ProPainter failed on segment {seg_idx}")
+                    print(result.stderr)
+                    raise RuntimeError(f"ProPainter failed on segment {seg_idx}")
+
+                # Find ProPainter output frames
+                seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
+                if not os.path.exists(seg_propainter_frames):
+                    raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
+
+                # Merge cleaned crops back to full frames
+                print(f"   🔗 Merging cleaned region back to full frames...")
+                for frame_idx in range(seg_duration):
+                    frame_file = f"{frame_idx:04d}.png"
+                    original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                    cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+
+                    if cleaned_crop is not None:
+                        result_frame = original.copy()
+                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+                    else:
+                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+
+                # Convert segment frames to video
+                seg_video_path = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}.mp4")
+                print(f"   🎞️  Encoding segment to video...")
+                encode_cmd = [
+                    'ffmpeg', '-y', '-framerate', str(fps),
+                    '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
+                    seg_video_path
+                ]
+                subprocess.run(encode_cmd, capture_output=True, check=True)
+                segment_videos.append(seg_video_path)
+
+                # Cleanup segment temp dirs
+                shutil.rmtree(seg_frames_dir, ignore_errors=True)
+                shutil.rmtree(seg_cropped_dir, ignore_errors=True)
+                shutil.rmtree(seg_mask_dir, ignore_errors=True)
+                shutil.rmtree(seg_output_dir, ignore_errors=True)
+                shutil.rmtree(seg_cleaned_dir, ignore_errors=True)
+
+                try:
+                    import torch
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
+            # Concatenate all segments
+            print(f"\n🎬 Concatenating {len(segment_videos)} segments...")
+            self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Concatenating segments'})
+
+            concat_list_file = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_concat.txt")
+            with open(concat_list_file, 'w') as f:
+                for seg_video in segment_videos:
+                    f.write(f"file '{seg_video}'\n")
+
+            temp_processed = os.path.join(RESULT_DIR, f"{base_name}_propainter_video.mp4")
+            concat_cmd = [
+                'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+                '-i', concat_list_file,
+                '-c', 'copy',
+                temp_processed
+            ]
+            subprocess.run(concat_cmd, capture_output=True, check=True)
+
+            # Cleanup
+            shutil.rmtree(original_frames_dir, ignore_errors=True)
+            for seg_video in segment_videos:
+                os.remove(seg_video)
+            os.remove(concat_list_file)
+
+        else:
+            # Fall back to full video processing
+            if not use_cropping and segments:
+                print("ℹ️  Smart cropping not beneficial for this video, using full frame processing")
+
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+            self.update_state(
+                state='PROCESSING',
+                meta={'progress': 55, 'status': 'Running ProPainter'}
+            )
+
+            cmd = [
+                sys.executable,
+                PROPAINTER_SCRIPT,
+                '-i', video_path,
+                '-m', mask_dir,
+                '-o', PROPAINTER_OUTPUT_ROOT,
+                '--save_fps', str(fps),
+                '--neighbor_length', '6',   # Ultra speed preset
+                '--ref_stride', '50',       # Very sparse references
+                '--raft_iter', '5',         # Minimal optical flow refinement
+                '--subvideo_length', '80',  # Faster subvideo length from faster-propainter
+                # No resize_ratio - full resolution for faster-propainter cropping
+            ]
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    cmd.append('--fp16')
+                    print("✓ ProPainter ultra: FP16 + neighbor_length=6 + ref_stride=50 + raft_iter=5 + subvideo_length=80")
+            except Exception:
+                print("✓ ProPainter ultra: neighbor_length=6 + ref_stride=50 + raft_iter=5 + subvideo_length=80")
+                pass
+
+            print(f"Launching ProPainter: {' '.join(cmd)}")
+
+            import subprocess
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                print("❌ ProPainter failed")
+                print(result.stdout)
+                print(result.stderr)
+                raise RuntimeError("ProPainter inference failed")
+
+            save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, base_name)
+            produced_video = os.path.join(save_root, 'inpaint_out.mp4')
+            if not os.path.exists(produced_video):
+                raise RuntimeError(f"ProPainter output not found: {produced_video}")
+
+            temp_processed = os.path.join(RESULT_DIR, f"{base_name}_propainter_video.mp4")
+            shutil.copy2(produced_video, temp_processed)
+
+        self.update_state(
+            state='PROCESSING',
+            meta={'progress': 85, 'status': 'Merging audio'}
+        )
+
+        final_output = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
+
+        try:
+            check_audio_cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'a:0',
+                '-show_entries', 'stream=codec_type',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
+            ]
+
+            has_audio_check = subprocess.run(check_audio_cmd, capture_output=True, text=True, timeout=10)
+            has_audio = 'audio' in has_audio_check.stdout
+
+            if has_audio:
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', temp_processed,
+                    '-i', video_path,
+                    '-map', '0:v:0',
+                    '-map', '1:a:0',
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-b:a', '192k',
+                    '-shortest',
+                    final_output
+                ]
+            else:
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', temp_processed,
+                    '-c', 'copy',
+                    final_output
+                ]
+
+            print(f"Running FFmpeg audio merge: {' '.join(cmd)}")
+            audio_merge = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+            if audio_merge.returncode != 0:
+                print("⚠️  Audio merge failed, returning video without audio")
+                print(audio_merge.stderr)
+                final_output = temp_processed
+            else:
+                if has_audio:
+                    verify_cmd = [
+                        'ffprobe',
+                        '-v', 'error',
+                        '-select_streams', 'a:0',
+                        '-show_entries', 'stream=codec_type',
+                        '-of', 'default=noprint_wrappers=1:nokey=1',
+                        final_output
+                    ]
+                    verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=5)
+                    if 'audio' not in verify.stdout:
+                        print("⚠️  Audio verification failed, keeping silent video")
+                        final_output = temp_processed
+                if final_output != temp_processed and os.path.exists(temp_processed):
+                    os.remove(temp_processed)
+        except FileNotFoundError:
+            print("⚠️  ffmpeg/ffprobe not available, returning silent video")
+            final_output = temp_processed
+        except subprocess.TimeoutExpired:
+            print("⚠️  FFmpeg timed out, returning silent video")
+            final_output = temp_processed
+
+        try:
+            shutil.rmtree(mask_dir, ignore_errors=True)
+        except Exception as cleanup_exc:
+            print(f"⚠️  Failed to delete mask directory {mask_dir}: {cleanup_exc}")
+
+        # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
+        # Celery automatically sets state to SUCCESS when the task returns normally
+
+        # If running remotely and the API host is reachable via TUNNEL_URL,
+        # upload the result back so the frontend can download from the API server.
+        uploaded_path = None
+        tunnel = os.getenv('TUNNEL_URL')
+        if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
+            try:
+                import requests
+                upload_url = tunnel.rstrip('/') + '/api/upload-result'
+                print(f"⬆️  Uploading result to API host: {upload_url}")
+                with open(final_output, 'rb') as fp:
+                    resp = requests.post(
+                        upload_url,
+                        headers={'ngrok-skip-browser-warning': 'true'},
+                        files={'file': (os.path.basename(final_output), fp, 'video/mp4')},
+                        timeout=60
+                    )
+                if resp.ok:
+                    j = resp.json()
+                    if j.get('status') == 'success' and j.get('result_url'):
+                        uploaded_path = j['result_url']  # e.g. /results/<filename>
+                        print(f"✅ Uploaded result registered at: {uploaded_path}")
+                else:
+                    print(f"⚠️  Upload back failed: HTTP {resp.status_code}")
+            except Exception as up_err:
+                print(f"⚠️  Upload back error: {up_err}")
+
+        return {
+            'path': uploaded_path or final_output,
+            'metadata': {
+                'frames_processed': frames_processed,
+                'frames_with_watermark': frames_with_watermark,
+                'fps': fps,
+                'width': width,
+                'height': height,
+                'propainter_output': final_output,
+            }
+        }
+
+    except Exception as e:
+        print(f"❌ Error processing video: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+
+# ============================================================================
+# API Endpoints
+# ============================================================================
+
+@app.route('/ads.txt')
+def ads_txt():
+    """Serve ads.txt file for Google AdSense"""
+    return send_file(os.path.join(app.static_folder, 'ads.txt'), mimetype='text/plain')
+
+
+@app.route('/tunnel_url.txt')
+def tunnel_url():
+    """Serve tunnel URL for frontend auto-detection"""
+    # Check environment variable first (for Railway deployment)
+    env_url = os.getenv('TUNNEL_URL')
+    if env_url:
+        return env_url, 200, {'Content-Type': 'text/plain'}
+
+    # Check file (for local development with localtunnel)
+    tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
+    if os.path.exists(tunnel_file):
+        return send_file(tunnel_file, mimetype='text/plain')
+
+    # Fallback to localhost
+    return "http://localhost:9000", 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/')
+def index():
+    """Serve landing page"""
+    return send_file('web/index.html')
+
+
+@app.route('/web/<path:path>')
+def serve_web(path):
+    """Serve static files"""
+    return send_file(f'web/{path}')
+
+
+
+@app.route('/api/remove-watermark', methods=['POST'])
+def remove_watermark():
+    """
+    Submit image for watermark removal
+
+    Returns:
+        {
+            'task_id': str,
+            'status': 'queued'
+        }
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['file']
+
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    try:
+        # Read file
+        image_data = file.read()
+
+        # Calculate hash for caching/deduplication
+        file_hash = hashlib.md5(image_data).hexdigest()
+
+        # Determine file type
+        is_video = file.filename.lower().endswith(('.mp4', '.mov', '.avi'))
+
+        if is_video:
+            # Save video temporarily (D drive only!)
+            temp_filename = f"{file_hash}{os.path.splitext(file.filename)[1]}"
+            temp_path = os.path.join(UPLOAD_DIR, temp_filename)
+
+            with open(temp_path, 'wb') as f:
+                f.write(image_data)
+
+            # Queue video processing
+            task = process_video_task.apply_async(args=[temp_path])
+
+            return jsonify({
+                'task_id': task.id,
+                'status': 'queued',
+                'file_type': 'video'
+            })
+
+        # Process image with YOLO + ProPainter
+        # Save image temporarily
+        temp_filename = f"{file_hash}.png"
+        temp_path = os.path.join(UPLOAD_DIR, temp_filename)
+
+        with open(temp_path, 'wb') as f:
+            f.write(image_data)
+
+        # Queue image processing with ProPainter
+        task = process_image_task.apply_async(args=[temp_path])
+
+        return jsonify({
+            'task_id': task.id,
+            'status': 'queued',
+            'file_type': 'image'
+        })
+
+    except Exception as e:
+        print(f"❌ Error queuing task: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/status/<task_id>', methods=['GET', 'OPTIONS'])
+def get_status(task_id):
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """
+    Check task status
+
+    Returns:
+        {
+            'state': 'PENDING' | 'STARTED' | 'PROCESSING' | 'SUCCESS' | 'FAILURE',
+            'progress': str,
+            'result': { 'result_url': str } (if SUCCESS)
+        }
+    """
+    try:
+        from celery.result import AsyncResult
+
+        task = AsyncResult(task_id, app=celery)
+
+        # Always log for debugging stuck "Waiting in queue" issue
+        print(f"📊 Status check - Task: {task_id}, State: {task.state}, Info: {task.info}")
+
+        response = {
+            'state': task.state
+        }
+
+        if task.state == 'PENDING':
+            response['progress'] = 'Task is waiting in queue...'
+            response['info'] = {'progress': 0, 'status': 'Waiting in queue...'}
+        elif task.state == 'STARTED':
+            info = task.info or {}
+            response['progress'] = info.get('status', 'Starting...')
+            response['info'] = {'progress': info.get('progress', 5), 'status': info.get('status', 'Starting...')}
+        elif task.state == 'PROCESSING':
+            info = task.info or {}
+            response['progress'] = info.get('status', 'Processing...')
+            response['info'] = {'progress': info.get('progress', 50), 'status': info.get('status', 'Processing...')}
+        elif task.state == 'SUCCESS':
+            # task.result is a dict with 'path' and 'metadata'
+            result_data = task.result
+            print(f"🔍 DEBUG - task.result type: {type(result_data)}, value: {result_data}")
+
+            if isinstance(result_data, dict):
+                result_path = result_data.get('path')
+                if not result_path:
+                    print(f"❌ Task {task_id} SUCCESS but no path in result: {result_data}")
+                    return jsonify({'error': 'Invalid result format - missing path'}), 500
+            else:
+                result_path = result_data
+
+            # Final safety check for None result_path
+            if not result_path:
+                print(f"❌ Task {task_id} has None result_path")
+                return jsonify({'error': 'Invalid result - path is None'}), 500
+
+            filename = os.path.basename(result_path)
+            response['result'] = {
+                'result_url': f'/results/{filename}'
+            }
+            if isinstance(result_data, dict) and 'metadata' in result_data:
+                response['metadata'] = result_data['metadata']
+        elif task.state == 'FAILURE':
+            response['error'] = str(task.info)
+            print(f"❌ Task failed: {task.info}")
+
+        return jsonify(response)
+    except Exception as e:
+        print(f"❌ Status endpoint error for task {task_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Status check failed: {str(e)}'}), 500
+
+
+@app.route('/api/result/<task_id>', methods=['GET'])
+def get_result(task_id):
+    """
+    Download processed file
+
+    Returns:
+        Processed image/video file
+    """
+    from celery.result import AsyncResult
+
+    task = AsyncResult(task_id, app=celery)
+
+    if task.state != 'SUCCESS':
+        return jsonify({
+            'error': 'Task not complete',
+            'status': task.state
+        }), 400
+
+    try:
+        result = task.result
+
+        if 'data' in result:
+            # Image result
+            result_bytes = result['data']
+            return send_file(
+                io.BytesIO(result_bytes),
+                mimetype='image/png',
+                as_attachment=True,
+                download_name='watermark_removed.png'
+            )
+        elif 'path' in result:
+            # Video result
+            return send_file(
+                result['path'],
+                mimetype='video/mp4',
+                as_attachment=True,
+                download_name='watermark_removed.mp4'
+            )
+        else:
+            return jsonify({'error': 'Invalid result format'}), 500
+
+    except Exception as e:
+        print(f"❌ Error retrieving result: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/download-from-url', methods=['POST', 'OPTIONS'])
+def download_from_url():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """
+    Download video from URL using Playwright (bypasses Cloudflare)
+    Works for most video sites with anti-bot protection
+
+    Request: { "url": "https://..." }
+    Response: { "status": "success", "task_id": "...", "video_url": "/uploads/..." }
+    """
+    try:
+        data = request.get_json()
+        url = data.get('url')
+
+        if not url:
+            return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
+
+        # Normalize URL - handle partial URLs from ChatGPT Sora
+        url = url.strip()
+
+        # If URL starts with /backend or is a path, prepend Sora domain
+        if url.startswith('/') or not url.startswith('http'):
+            if 'sora' in url or 'backend/project_y' in url:
+                url = 'https://sora.chatgpt.com' + (url if url.startswith('/') else '/' + url)
+            else:
+                return jsonify({'status': 'error', 'message': 'URL must start with http:// or https://'}), 400
+
+        print(f"📋 Normalized URL: {url}")
+
+        # Validate URL to prevent SSRF attacks
+        if not validate_url(url):
+            return jsonify({'status': 'error', 'message': 'Invalid or unsafe URL'}), 400
+
+        # Generate unique filename
+        task_id = str(uuid.uuid4())
+        output_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
+
+        # Use Playwright for better Cloudflare bypass
+        from playwright.sync_api import sync_playwright
+        import time
+        import re
+        import html
+
+        with sync_playwright() as p:
+            print("🚀 Launching browser for video download...")
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process'
+                ]
+            )
+
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                viewport={'width': 1920, 'height': 1080}
+            )
+
+            page = context.new_page()
+
+            # Hide webdriver
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
+            print(f"🌐 Navigating to: {url}")
+            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+
+            time.sleep(2)
+
+            print("🔍 Extracting video URL...")
+
+            # Collect network requests for video URLs
+            video_urls = []
+
+            def handle_response(response):
+                if '.mp4' in response.url or 'video' in response.headers.get('content-type', ''):
+                    video_urls.append(response.url)
+
+            page.on('response', handle_response)
+
+            # Wait for network activity
+            time.sleep(2)
+
+            # Find video URL in page content
+            content = page.content()
+            content_video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+            video_urls.extend(content_video_urls)
+
+            if not video_urls:
+                # Try to find video element
+                try:
+                    video_element = page.locator('video').first
+                    video_src = video_element.get_attribute('src')
+                    if video_src:
+                        video_urls = [video_src]
+                    else:
+                        # Try source elements
+                        sources = page.locator('video source').all()
+                        for source in sources:
+                            src = source.get_attribute('src')
+                            if src:
+                                video_urls.append(src)
+                except Exception as e:
+                    print(f"⚠️  Error checking video element: {e}")
+
+            if video_urls:
+                video_src = html.unescape(video_urls[0])
+                print(f"✅ Found video URL: {video_src}")
+
+                # Download the video
+                import requests
+                response = requests.get(video_src, stream=True, timeout=300)
+                response.raise_for_status()
+
+                with open(output_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+                browser.close()
+                print(f"✅ Video downloaded: {output_path}")
+
+                return jsonify({
+                    'status': 'success',
+                    'task_id': task_id,
+                    'video_url': f'/uploads/{task_id}.mp4'
+                })
+            else:
+                # Save debug screenshot
+                screenshot_path = os.path.join(TEMP_DIR, f'debug_{task_id}.png')
+                page.screenshot(path=screenshot_path)
+                print(f"📸 Debug screenshot saved: {screenshot_path}")
+
+                # Save page HTML for debugging
+                debug_html_path = os.path.join(TEMP_DIR, f'debug_{task_id}.html')
+                with open(debug_html_path, 'w', encoding='utf-8') as f:
+                    f.write(page.content())
+                print(f"📄 Debug HTML saved: {debug_html_path}")
+
+                browser.close()
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Could not find video source URL. Debug files saved.',
+                    'debug': {
+                        'screenshot': f'/temp/debug_{task_id}.png',
+                        'html': f'/temp/debug_{task_id}.html'
+                    }
+                }), 404
+
+    except Exception as e:
+        print(f"❌ Download error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/download-sora', methods=['POST', 'OPTIONS'])
+def download_sora():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """
+    Download Sora video from OpenAI using Playwright bypass + cookies
+    Bypasses Cloudflare protection using saved cookies
+
+    Request: { "url": "https://sora.chatgpt.com/..." or "/backend/project_y/..." }
+    Response: { "status": "success", "task_id": "...", "video_url": "/uploads/..." }
+    """
+    try:
+        data = request.get_json()
+        url = data.get('url')
+
+        if not url:
+            return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
+
+        # Normalize URL - handle partial URLs from ChatGPT Sora
+        url = url.strip()
+
+        # If URL starts with /backend or is a path, prepend Sora domain
+        if url.startswith('/') or not url.startswith('http'):
+            url = 'https://sora.chatgpt.com' + (url if url.startswith('/') else '/' + url)
+
+        print(f"📋 Normalized Sora URL: {url}")
+
+        # Validate URL to prevent SSRF attacks
+        if not validate_url(url):
+            return jsonify({'status': 'error', 'message': 'Invalid or unsafe URL'}), 400
+
+        # Generate unique filename
+        task_id = str(uuid.uuid4())
+        output_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
+
+        # Import Playwright
+        from playwright.sync_api import sync_playwright
+        import time
+        import json
+
+        # Path to cookies file
+        cookies_file = os.path.join(SCRIPT_DIR, 'downz', 'cookies.json')
+        print(f"🔍 Looking for cookies at: {cookies_file}")
+        print(f"🔍 SCRIPT_DIR is: {SCRIPT_DIR}")
+
+        with sync_playwright() as p:
+            print("🚀 Launching browser for Sora download...")
+            browser = p.chromium.launch(
+                headless=True,  # Run headless in production
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process'
+                ]
+            )
+
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080},
+                locale='en-US',
+                timezone_id='America/New_York'
+            )
+
+            # Load cookies if they exist
+            if os.path.exists(cookies_file):
+                print(f"📂 Loading cookies from {cookies_file}...")
+                with open(cookies_file, 'r') as f:
+                    cookies = json.load(f)
+                    context.add_cookies(cookies)
+                print("✅ Cookies loaded!")
+            else:
+                print(f"⚠️  No cookies found at: {cookies_file}")
+                browser.close()
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Authentication required for Sora videos. Please contact administrator to set up cookies.',
+                    'hint': 'Sora videos require login cookies from ChatGPT.'
+                }), 401
+
+            page = context.new_page()
+
+            # Hide webdriver
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
+            print(f"🌐 Navigating to: {url}")
+            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+
+            time.sleep(2)
+
+            print("🔍 Extracting video URL from page content...")
+
+            video_src = None
+
+            # Try to find video URLs in page content (works for Sora)
+            content = page.content()
+            import re
+            video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+
+            if video_urls:
+                import html
+                video_src = html.unescape(video_urls[0])  # Decode &amp; to &
+                print(f"✅ Found video URL in page content: {video_src}")
+            else:
+                # Fallback: try video element
+                print("⏳ No .mp4 URL found, trying video element...")
+                video_element = page.query_selector('video')
+                if video_element:
+                    video_src = video_element.get_attribute('src')
+                    if not video_src:
+                        source = page.query_selector('video source')
+                        if source:
+                            video_src = source.get_attribute('src')
+
+                if not video_src:
+                    # Take screenshot for debugging
+                    screenshot_path = os.path.join(TEMP_DIR, f'debug_{task_id}.png')
+                    page.screenshot(path=screenshot_path)
+                    print(f"📸 Screenshot saved to {screenshot_path}")
+
+                    browser.close()
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'No video URL found. Screenshot saved to {screenshot_path}'
+                    }), 404
+
+            if video_src:
+                print(f"✅ Found video source: {video_src}")
+
+                # Make absolute URL if relative
+                if video_src.startswith('//'):
+                    video_src = 'https:' + video_src
+                elif video_src.startswith('/'):
+                    from urllib.parse import urljoin
+                    video_src = urljoin(url, video_src)
+
+                print(f"⬇️  Downloading video...")
+
+                # Download using Playwright's request context with retry logic
+                max_retries = 3
+                retry_delay = 3
+
+                for retry in range(max_retries):
+                    try:
+                        if retry > 0:
+                            print(f"🔄 Retry attempt {retry}/{max_retries-1}...")
+                            time.sleep(retry_delay)
+                        else:
+                            # Small delay before first attempt to avoid rate limiting
+                            time.sleep(1)
+
+                        response = page.request.get(video_src)
+
+                        if response.ok:
+                            with open(output_path, 'wb') as f:
+                                f.write(response.body())
+
+                            file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
+                            print(f"✅ Downloaded successfully! Size: {file_size:.2f} MB")
+
+                            browser.close()
+
+                            return jsonify({
+                                'status': 'success',
+                                'task_id': task_id,
+                                'video_url': f'/uploads/{task_id}.mp4'
+                            })
+                        else:
+                            print(f"⚠️  Download failed: HTTP {response.status}")
+                            if retry == max_retries - 1:
+                                browser.close()
+                                return jsonify({
+                                    'status': 'error',
+                                    'message': f'Download failed after {max_retries} attempts: HTTP {response.status}'
+                                }), 500
+                    except Exception as download_error:
+                        print(f"⚠️  Download error: {download_error}")
+                        if retry == max_retries - 1:
+                            browser.close()
+                            return jsonify({
+                                'status': 'error',
+                                'message': f'Download failed after {max_retries} attempts: {str(download_error)}'
+                            }), 500
+            else:
+                browser.close()
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Could not find video source URL'
+                }), 404
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+def check_rate_limit(ip):
+    """Check if IP has exceeded rate limit (10 uploads per hour)"""
+    current_time = time.time()
+
+    if ip in UPLOAD_RATE_LIMIT:
+        count, first_upload_time = UPLOAD_RATE_LIMIT[ip]
+
+        # Reset if hour has passed
+        if current_time - first_upload_time > 3600:
+            UPLOAD_RATE_LIMIT[ip] = (1, current_time)
+            return True
+
+        # Check limit
+        if count >= 10:
+            return False
+
+        UPLOAD_RATE_LIMIT[ip] = (count + 1, first_upload_time)
+        return True
+    else:
+        UPLOAD_RATE_LIMIT[ip] = (1, current_time)
+        return True
+
+@app.route('/api/upload', methods=['POST', 'OPTIONS'])
+def upload_file():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """
+    Upload video/image file (rate limited to 10/hour per IP)
+
+    Returns: { "status": "success", "task_id": "uuid" }
+    """
+    try:
+        # Rate limiting
+        client_ip = request.remote_addr
+        if not check_rate_limit(client_ip):
+            return jsonify({
+                'status': 'error',
+                'message': 'Rate limit exceeded. Maximum 10 uploads per hour.'
+            }), 429
+
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+
+        file = request.files['file']
+
+        if file.filename == '':
+            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
+
+        # Generate unique task ID
+        task_id = str(uuid.uuid4())
+
+        # Get file extension
+        ext = os.path.splitext(file.filename)[1] or '.mp4'
+
+        # Save file
+        file_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+        file.save(file_path)
+
+        print(f"✅ File uploaded: {file_path}")
+
+        return jsonify({
+            'status': 'success',
+            'task_id': task_id
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/process', methods=['POST', 'OPTIONS'])
+def process_video():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """
+    Process video to remove watermarks
+
+    Request: { "task_id": "uuid-from-download" }
+    Response: { "status": "success", "task_id": "celery-task-id" }
+    """
+    try:
+        data = request.get_json()
+        task_id = data.get('task_id')
+
+        if not task_id:
+            return jsonify({'status': 'error', 'message': 'No task_id provided'}), 400
+
+        # Find uploaded media (video first, then image) with any extension
+        video_path = None
+        # Try common video extensions
+        for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+            test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+            if os.path.exists(test_path):
+                video_path = test_path
+                break
+        # If not found, try common image extensions
+        if not video_path:
+            for ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp']:
+                test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+                if os.path.exists(test_path):
+                    video_path = test_path
+                    break
+
+        if not video_path:
+            return jsonify({'status': 'error', 'message': 'Media not found'}), 404
+
+        # Queue processing task via Celery and return the real task id
+        print(f"📤 Queuing processing task for: {video_path}")
+
+        try:
+            # Decide pipeline based on extension
+            ext = os.path.splitext(video_path)[1].lower()
+            image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+            if ext in image_exts:
+                result = celery.send_task('watermark.remove_image', args=[video_path])
+            else:
+                result = celery.send_task('watermark.remove_video', args=[video_path])
+            print(f"✅ Task queued with ID: {result.id}")
+            return jsonify({'status': 'success', 'task_id': result.id})
+
+        except Exception as e:
+            print(f"❌ Failed to queue task: {e}")
+            import traceback; traceback.print_exc()
+            return jsonify({'status': 'error', 'message': f'Failed to connect to Redis: {str(e)}'}), 500
+
+    except Exception as e:
+        print(f"❌ Process endpoint error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/uploads/<filename>')
+def serve_upload(filename):
+    """Serve uploaded video files"""
+    # Sanitize filename to prevent path traversal
+    filename = sanitize_filename(filename)
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    # Verify file exists and is within upload directory
+    if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR)):
+        return jsonify({'error': 'File not found'}), 404
+
+    return send_file(file_path)
+
+
+@app.route('/results/<filename>')
+def serve_result(filename):
+    """Serve processed result files and delete after sending"""
+    # Sanitize filename to prevent path traversal
+    filename = sanitize_filename(filename)
+    file_path = os.path.join(RESULT_DIR, filename)
+
+    # Verify file exists and is within result directory
+    if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(RESULT_DIR)):
+        return jsonify({'error': 'File not found'}), 404
+
+    # Send file with as_attachment to trigger download
+    response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
+
+    # Schedule file deletion after response is sent
+    @response.call_on_close
+    def delete_files():
+        try:
+            # Delete the result file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"🗑️  Deleted result: {filename}")
+
+            # Delete corresponding upload file
+            # Extract original task_id from processed filename
+            original_name = filename.replace('_processed.avi', '.mp4')
+            upload_path = os.path.join(UPLOAD_DIR, original_name)
+            if os.path.exists(upload_path):
+                os.remove(upload_path)
+                print(f"🗑️  Deleted upload: {original_name}")
+        except Exception as e:
+            print(f"⚠️  Error deleting files: {e}")
+
+    return response
+
+
+@app.route('/api/upload-result', methods=['POST', 'OPTIONS'])
+def upload_result():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    """Accept result file from a remote worker and store it under results/.
+
+    Request: multipart/form-data with field 'file' and optional 'filename'.
+    Response: { "status": "success", "result_url": "/results/<filename>" }
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+        up = request.files['file']
+        if up.filename == '':
+            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
+
+        req_filename = request.form.get('filename') or up.filename
+        safe_name = sanitize_filename(req_filename)
+        os.makedirs(RESULT_DIR, exist_ok=True)
+        dest = os.path.join(RESULT_DIR, safe_name)
+        up.save(dest)
+        return jsonify({'status': 'success', 'result_url': f'/results/{safe_name}'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/privacy')
+def privacy_policy():
+    """Serve Privacy Policy page"""
+    return send_file(os.path.join(app.static_folder, 'privacy.html'))
+
+
+@app.route('/terms')
+def terms_of_service():
+    """Serve Terms of Service page"""
+    return send_file(os.path.join(app.static_folder, 'terms.html'))
+
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """
+    Get server statistics
+
+    Returns:
+        {
+            'queue_length': int,
+            'active_tasks': int,
+            'completed_today': int
+        }
+    """
+    # Get Celery stats
+    from celery.task.control import inspect
+
+    i = inspect(app=celery)
+    active = i.active()
+    scheduled = i.scheduled()
+
+    active_count = sum(len(tasks) for tasks in (active or {}).values())
+    scheduled_count = sum(len(tasks) for tasks in (scheduled or {}).values())
+
+    return jsonify({
+        'queue_length': scheduled_count,
+        'active_tasks': active_count,
+        'timestamp': datetime.utcnow().isoformat()
+    })
+
+
+
+
+# ============================================================================
+# Run Server
+# ============================================================================
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("WatermarkAI Production Server")
+    print("=" * 60)
+    print("Starting Flask server on http://0.0.0.0:9000")
+    print("")
+    print("To start Celery worker (in separate terminal):")
+    print("  celery -A server_production.celery worker --loglevel=info --concurrency=2")
+    print("")
+    print("To start Redis (required):")
+    print("  redis-server")
+    print("")
+    print("=" * 60)
+
+    # Run Flask app
+    app.run(
+        host='0.0.0.0',  # Listen on all interfaces for tunnel
+        port=9000,
+        debug=False,  # Set to False for production
+        threaded=True
+    )
+# Explicit CORS preflight catch-all for /api/* (helps when proxies strip headers)
+@app.route('/api/<path:subpath>', methods=['OPTIONS'])
+def cors_preflight(subpath):
+    return ('', 204)
