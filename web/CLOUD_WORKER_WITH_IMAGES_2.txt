@@ -116,11 +116,6 @@ from watermark import pipeline as faster_propainter_pipeline
 from mytimer import timer_decorator
 from pre_post_process import crop_video_mask, merge_videos_with_mask
 
-# Import segmentation modules from parent directory
-sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
-from segment_detector import detect_segments, merge_adjacent_segments, should_use_cropping
-from crop_utils import calculate_crop_region, estimate_speedup
-
 app = Flask(__name__, static_folder='web')
 # CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
 CORS(
@@ -827,6 +822,8 @@ def process_video_task(self, video_path):
         print(f"   💧 Frames with watermark: {frames_with_watermark}")
 
         # Detect position segments for smart cropping
+        from segment_detector import detect_segments, merge_adjacent_segments, should_use_cropping
+
         segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
         if segments:
             segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
@@ -839,6 +836,7 @@ def process_video_task(self, video_path):
 
         if use_cropping and segments:
             print("🚀 Smart cropping enabled - processing segments individually")
+            from crop_utils import calculate_crop_region, estimate_speedup
             import subprocess
 
             # Extract original frames once for merging later
