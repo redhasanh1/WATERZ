@@ -1,13 +1,30 @@
 import sys
-sys.path.insert(0, '../python_packages')
+import os
 
-from playwright.sync_api import sync_playwright
+# Ensure repo-root python_packages and repo root are importable regardless of CWD
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_THIS_DIR)
+_PY_PKGS = os.path.join(_REPO_ROOT, 'python_packages')
+for _p in (_PY_PKGS, _REPO_ROOT):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+try:
+    from playwright.sync_api import sync_playwright  # type: ignore
+    _HAS_PLAYWRIGHT = True
+except Exception:
+    sync_playwright = None  # type: ignore
+    _HAS_PLAYWRIGHT = False
 import time
 import os
 import json
 import cv2
 import numpy as np
 from tqdm import tqdm
+from url_utils import sanitize_video_url, is_potentially_watermarked_url
+import re
+import html
+from urllib.parse import urljoin
 
 # Import from parent directory
 sys.path.insert(0, '..')
@@ -15,103 +32,202 @@ from yolo_detector import YOLOWatermarkDetector
 from lama_inpaint_local import LamaInpainter
 
 def download_video(url, output_filename, cookies_file="cookies.json"):
-    """Download video using Playwright with saved cookies"""
+    """Download video using Playwright with saved cookies.
 
-    with sync_playwright() as p:
-        print("🚀 Launching browser...")
-        browser = p.chromium.launch(
-            headless=False,
-            args=[
-                '--disable-blink-features=AutomationControlled',
-                '--disable-features=IsolateOrigins,site-per-process'
-            ]
-        )
+    Falls back to HTTP+cookies parsing if Playwright is unavailable or fails.
+    """
 
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            viewport={'width': 1920, 'height': 1080},
-            locale='en-US',
-            timezone_id='America/New_York'
-        )
+    def _http_fallback(page_url: str) -> str:
+        print("\n🛟 Falling back to HTTP session scraping...")
+        import requests
 
-        # Load cookies if they exist
-        if os.path.exists(cookies_file):
-            print(f"📂 Loading cookies from {cookies_file}...")
-            with open(cookies_file, 'r') as f:
-                cookies = json.load(f)
-                context.add_cookies(cookies)
-            print("✅ Cookies loaded!")
-        else:
+        if not os.path.exists(cookies_file):
             print("⚠️  No cookies found - run save_cookies.py first!")
-            browser.close()
             return None
 
-        page = context.new_page()
+        sess = requests.Session()
+        sess.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
 
-        # Hide webdriver
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-        """)
+        try:
+            with open(cookies_file, 'r') as f:
+                cookies = json.load(f)
+            for c in cookies:
+                domain = c.get('domain') or 'sora.chatgpt.com'
+                if 'sora.chatgpt.com' in domain:
+                    sess.cookies.set(
+                        name=c.get('name'),
+                        value=c.get('value'),
+                        domain=domain,
+                        path=c.get('path', '/'),
+                    )
+        except Exception as e:
+            print(f"❌ Failed to load cookies: {e}")
+            return None
 
-        print(f"\n🌐 Navigating to: {url}")
-        page.goto(url, wait_until='networkidle', timeout=60000)
+        try:
+            resp = sess.get(page_url, timeout=30)
+            if resp.status_code >= 400:
+                print(f"❌ HTTP error fetching page: {resp.status_code}")
+                return None
+            content = resp.text
+        except Exception as e:
+            print(f"❌ HTTP error: {e}")
+            return None
 
-        print("⏳ Waiting for page to load...")
-        time.sleep(3)
-
-        # Check if Cloudflare challenge appears
-        if "cloudflare" in page.content().lower() or "just a moment" in page.content().lower():
-            print("🔄 Cloudflare detected - waiting for it to resolve...")
-            time.sleep(5)
-
-        print("\n🔍 Looking for video element...")
-
-        # Find video tag
-        video_element = page.query_selector('video')
-
-        if video_element:
-            video_src = video_element.get_attribute('src')
-            if not video_src:
-                source = page.query_selector('video source')
-                if source:
-                    video_src = source.get_attribute('src')
-
-            if video_src:
-                print(f"✅ Found video source: {video_src}")
-
-                # Make absolute URL if relative
-                if video_src.startswith('//'):
-                    video_src = 'https:' + video_src
-                elif video_src.startswith('/'):
-                    from urllib.parse import urljoin
-                    video_src = urljoin(url, video_src)
-
-                print(f"\n⬇️  Downloading video...")
-
-                response = page.request.get(video_src)
-
-                if response.ok:
-                    with open(output_filename, 'wb') as f:
-                        f.write(response.body())
-
-                    file_size = os.path.getsize(output_filename) / (1024 * 1024)
-                    print(f"✅ Downloaded successfully!")
-                    print(f"📁 Saved as: {output_filename}")
-                    print(f"📊 Size: {file_size:.2f} MB")
-
-                    browser.close()
-                    return output_filename
-                else:
-                    print(f"❌ Download failed: HTTP {response.status}")
-            else:
-                print("❌ Could not find video source URL")
+        # Try to extract .mp4 URLs from HTML
+        mp4_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+        video_src = None
+        if mp4_urls:
+            video_src = html.unescape(mp4_urls[0])
         else:
-            print("❌ No video element found on page")
+            # Try to find <video src="...">
+            m = re.search(r'<video[^>]+src=["\']([^"\']+)["\']', content, re.IGNORECASE)
+            if m:
+                video_src = html.unescape(m.group(1))
 
-        browser.close()
-        return None
+        if not video_src:
+            print("❌ Could not find video URL in page (fallback)")
+            return None
+
+        if video_src.startswith('//'):
+            video_src = 'https:' + video_src
+        elif video_src.startswith('/'):
+            video_src = urljoin(page_url, video_src)
+
+        if is_potentially_watermarked_url(video_src):
+            cleaned = sanitize_video_url(video_src)
+            if cleaned != video_src:
+                print(f"🧼 Watermark flags detected. Using cleaned URL: {cleaned}")
+                video_src = cleaned
+
+        print(f"\n⬇️  Downloading video (HTTP fallback): {video_src}")
+        try:
+            with sess.get(video_src, stream=True, timeout=300) as r:
+                r.raise_for_status()
+                with open(output_filename, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=1024*256):
+                        if chunk:
+                            f.write(chunk)
+        except Exception as e:
+            print(f"❌ Download failed (fallback): {e}")
+            return None
+
+        file_size = os.path.getsize(output_filename) / (1024 * 1024)
+        print(f"✅ Downloaded successfully!\n📁 Saved as: {output_filename}\n📊 Size: {file_size:.2f} MB")
+        return output_filename
+
+    # Try Playwright path first
+    if not _HAS_PLAYWRIGHT:
+        return _http_fallback(url)
+
+    try:
+        with sync_playwright() as p:
+            print("🚀 Launching browser...")
+            browser = p.chromium.launch(
+                headless=False,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process'
+                ]
+            )
+
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080},
+                locale='en-US',
+                timezone_id='America/New_York'
+            )
+
+            # Load cookies if they exist
+            if os.path.exists(cookies_file):
+                print(f"📂 Loading cookies from {cookies_file}...")
+                with open(cookies_file, 'r') as f:
+                    cookies = json.load(f)
+                    context.add_cookies(cookies)
+                print("✅ Cookies loaded!")
+            else:
+                print("⚠️  No cookies found - run save_cookies.py first!")
+                browser.close()
+                return _http_fallback(url)
+
+            page = context.new_page()
+
+            # Hide webdriver
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
+            print(f"\n🌐 Navigating to: {url}")
+            page.goto(url, wait_until='networkidle', timeout=60000)
+
+            print("⏳ Waiting for page to load...")
+            time.sleep(3)
+
+            # Check if Cloudflare challenge appears
+            if "cloudflare" in page.content().lower() or "just a moment" in page.content().lower():
+                print("🔄 Cloudflare detected - waiting for it to resolve...")
+                time.sleep(5)
+
+            print("\n🔍 Looking for video element...")
+
+            # Find video tag
+            video_element = page.query_selector('video')
+
+            if video_element:
+                video_src = video_element.get_attribute('src')
+                if not video_src:
+                    source = page.query_selector('video source')
+                    if source:
+                        video_src = source.get_attribute('src')
+
+                if video_src:
+                    print(f"✅ Found video source: {video_src}")
+
+                    # Prefer non-watermarked URL if watermark toggles are present
+                    if is_potentially_watermarked_url(video_src):
+                        cleaned = sanitize_video_url(video_src)
+                        if cleaned != video_src:
+                            print(f"🧼 Watermark flags detected in URL. Using cleaned URL: {cleaned}")
+                            video_src = cleaned
+
+                    # Make absolute URL if relative
+                    if video_src.startswith('//'):
+                        video_src = 'https:' + video_src
+                    elif video_src.startswith('/'):
+                        video_src = urljoin(url, video_src)
+
+                    print(f"\n⬇️  Downloading video...")
+
+                    response = page.request.get(video_src)
+
+                    if response.ok:
+                        with open(output_filename, 'wb') as f:
+                            f.write(response.body())
+
+                        file_size = os.path.getsize(output_filename) / (1024 * 1024)
+                        print(f"✅ Downloaded successfully!")
+                        print(f"📁 Saved as: {output_filename}")
+                        print(f"📊 Size: {file_size:.2f} MB")
+
+                        browser.close()
+                        return output_filename
+                    else:
+                        print(f"❌ Download failed: HTTP {response.status}")
+                else:
+                    print("❌ Could not find video source URL")
+            else:
+                print("❌ No video element found on page")
+
+            browser.close()
+            # Try fallback if Playwright path didn't succeed
+            return _http_fallback(url)
+    except Exception as e:
+        print(f"⚠️  Playwright path failed: {e}")
+        return _http_fallback(url)
 
 
 def remove_watermarks(input_video, output_video):

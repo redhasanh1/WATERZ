@@ -92,7 +92,12 @@ def _ensure_cuda_torch():
     sys.modules['torch'] = torch_cuda
 
 
-_ensure_cuda_torch()
+try:
+    _ensure_cuda_torch()
+except Exception as _torch_init_exc:
+    print(f"⚠️  Torch/CUDA initialization failed: {_torch_init_exc}")
+    print("    Continuing without torch; CPU-only endpoints may still work.")
+    sys.modules.pop('torch', None)
 
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
@@ -108,6 +113,11 @@ import redis
 import threading
 import secrets
 import hmac
+from url_utils import (
+    sanitize_video_url,
+    is_potentially_watermarked_url,
+    pick_best_video_url,
+)
 
 app = Flask(__name__, static_folder='web')
 # CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
@@ -657,8 +667,16 @@ def process_image_task(self, image_path):
             frame_path = os.path.join(frame_dir, f"{i:04d}.png")
             cv2.imwrite(frame_path, img)
 
-        # Generate mask
-        mask = det.create_mask(img, detections)
+        # Generate mask (expand + feather to cover edges and artifacts)
+        try:
+            pad = int(os.getenv('DETECTOR_PADDING', '20'))
+        except Exception:
+            pad = 20
+        try:
+            feather = int(os.getenv('DETECTOR_FEATHER', '21'))
+        except Exception:
+            feather = 21
+        mask = det.create_mask(img, detections, expand_pixels=pad, feather_pixels=feather)
         if mask is None or mask.size == 0:
             out_name = base_name + '_clean.png'
             out_path = os.path.join(RESULT_DIR, out_name)
@@ -689,6 +707,38 @@ def process_image_task(self, image_path):
             '--save_frames',  # Save individual frames
         ]
 
+        # Default ProPainter tuning for images (balanced fast)
+        if '--neighbor_length' not in cmd:
+            cmd.extend(['--neighbor_length', '10'])
+        if '--ref_stride' not in cmd:
+            cmd.extend(['--ref_stride', '20'])
+        if '--mask_dilation' not in cmd:
+            cmd.extend(['--mask_dilation', '6'])
+
+        # Optional ProPainter tuning via environment variables (applies to image path as well)
+        try:
+            opt_map = {
+                'PROPAINTER_NEIGHBOR_LENGTH': '--neighbor_length',
+                'PROPAINTER_REF_STRIDE': '--ref_stride',
+                'PROPAINTER_SUBVIDEO_LENGTH': '--subvideo_length',
+                'PROPAINTER_RAFT_ITER': '--raft_iter',
+                'PROPAINTER_MASK_DILATION': '--mask_dilation',
+                'PROPAINTER_WIDTH': '--width',
+                'PROPAINTER_HEIGHT': '--height',
+            }
+            for env_name, flag in opt_map.items():
+                val = os.getenv(env_name)
+                if val is not None and str(val).strip() != '':
+                    ival = int(float(val))
+                    cmd.extend([flag, str(ival)])
+            # float option for resize ratio
+            rr = os.getenv('PROPAINTER_RESIZE_RATIO')
+            if rr is not None and str(rr).strip() != '':
+                fval = float(rr)
+                cmd.extend(['--resize_ratio', str(fval)])
+        except Exception as _env_exc:
+            print(f"⚠️  Ignoring invalid PROPAINTER_* env: {_env_exc}")
+
         # Enable FP16 for 2x speedup
         try:
             import torch
@@ -697,6 +747,8 @@ def process_image_task(self, image_path):
                 print("✓ ProPainter FP16 enabled for image processing")
         except Exception:
             pass
+        if '--fp16' not in cmd and str(os.getenv('PROPAINTER_FP16', '0')).lower() in ('1', 'true', 'yes', 'on'):
+            cmd.append('--fp16')
 
         print(f"Launching ProPainter for image: {' '.join(cmd)}")
 
@@ -853,11 +905,42 @@ def process_video_task(self, video_path):
         unique_suffix = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
         mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{unique_suffix}")
         os.makedirs(mask_dir, exist_ok=True)
+        # Also write frames to disk so we can call ProPainter in 'frames' mode.
+        frame_dir = os.path.join(TEMP_DIR, f"video_frames_{base_name}_{unique_suffix}")
+        os.makedirs(frame_dir, exist_ok=True)
+
+        # Ultra-speed: optionally process every Nth frame and replicate outputs
+        skip_inpaint_every = int(os.getenv('SKIP_INPAINT_EVERY', '2'))
+        use_skip = skip_inpaint_every > 1
+        if use_skip:
+            frame_dir_proc = os.path.join(TEMP_DIR, f"video_frames_reduced_{base_name}_{unique_suffix}")
+            mask_dir_proc = os.path.join(TEMP_DIR, f"masks_reduced_{base_name}_{unique_suffix}")
+            os.makedirs(frame_dir_proc, exist_ok=True)
+            os.makedirs(mask_dir_proc, exist_ok=True)
+        else:
+            frame_dir_proc = frame_dir
+            mask_dir_proc = mask_dir
 
         zero_mask = np.zeros((height, width), dtype=np.uint8)
         last_valid_bbox = None
         frames_processed = 0
         frames_with_watermark = 0
+        reduced_index = 0
+        replication_plan = []  # (reduced_idx, start_original_idx, count)
+        actual_detections = 0
+
+        # Track bbox per frame for smart cropping segmentation
+        bboxes_per_frame = []  # List of bbox tuples or None
+
+        # Detection interval: run YOLO every Nth frame (lower = more frequent)
+        detect_interval = int(os.getenv('YOLO_DETECT_INTERVAL', '5'))
+        # Detector warmup and sensitivity tuning
+        warmup_frames = int(os.getenv('YOLO_DETECT_WARMUP_FRAMES', '60'))
+        try:
+            detector_conf = float(os.getenv('DETECTOR_CONFIDENCE', '0.25'))
+        except Exception:
+            detector_conf = 0.25
+        hit_found = False
 
         while True:
             ret, frame = cap.read()
@@ -873,24 +956,60 @@ def process_video_task(self, video_path):
                 }
             )
 
-            detections = detector.detect(frame, confidence_threshold=0.25, padding=0)
-            active_detections = detections
+            process_this_frame = (frames_processed % max(skip_inpaint_every, 1) == 0) if use_skip else True
 
-            if detections:
-                frames_with_watermark += 1
-                primary = detections[0]
-                if primary.get('confidence', 0) >= 0.25:
-                    last_valid_bbox = primary['bbox']
-            elif last_valid_bbox:
-                active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}]
+            if process_this_frame:
+                # Run detector on first warmup frames or at interval
+                run_detection = (
+                    (not hit_found and frames_processed < warmup_frames) or
+                    (frames_processed % max(detect_interval, 1) == 0)
+                )
+                if run_detection:
+                    detections = detector.detect(frame, confidence_threshold=detector_conf, padding=0)
+                    active_detections = detections
+                    actual_detections += 1
 
-            if active_detections:
-                mask = detector.create_mask(frame, active_detections)
-            else:
-                mask = zero_mask
+                    if detections:
+                        hit_found = True
+                        frames_with_watermark += 1
+                        primary = detections[0]
+                        if primary.get('confidence', 0) >= detector_conf:
+                            last_valid_bbox = primary['bbox']
+                    elif last_valid_bbox:
+                        active_detections = [{'bbox': last_valid_bbox, 'confidence': 0.0}]
+                else:
+                    # Reuse last detected bounding box for frames in between
+                    active_detections = (
+                        [{'bbox': last_valid_bbox, 'confidence': 0.0}] if last_valid_bbox else []
+                    )
 
-            mask_path = os.path.join(mask_dir, f"{frames_processed:04d}.png")
-            cv2.imwrite(mask_path, mask)
+                if active_detections:
+                    # Expand + feather for robust mask coverage
+                    try:
+                        pad = int(os.getenv('DETECTOR_PADDING', '20'))
+                    except Exception:
+                        pad = 20
+                    try:
+                        feather = int(os.getenv('DETECTOR_FEATHER', '21'))
+                    except Exception:
+                        feather = 21
+                    mask = detector.create_mask(frame, active_detections, expand_pixels=pad, feather_pixels=feather)
+                else:
+                    mask = zero_mask
+
+                # Save reduced frame/mask with contiguous indices
+                frame_path = os.path.join(frame_dir_proc, f"{reduced_index:04d}.png")
+                cv2.imwrite(frame_path, frame)
+                mask_path = os.path.join(mask_dir_proc, f"{reduced_index:04d}.png")
+                cv2.imwrite(mask_path, mask)
+
+                # Plan replication for skipped frames
+                remaining_after = max(total_frames - frames_processed, 0)
+                replicate_count = min(skip_inpaint_every if use_skip else 1, remaining_after + 1)
+                replication_plan.append((reduced_index, frames_processed, replicate_count))
+                reduced_index += 1
+
+            # Count overall frames for progress/logs
             frames_processed += 1
 
         cap.release()
@@ -898,7 +1017,10 @@ def process_video_task(self, video_path):
         if frames_processed == 0:
             raise RuntimeError("No frames were processed - video may be corrupted")
 
-        print(f"✅ Masks generated: {frames_processed} frames, {frames_with_watermark} with detections")
+        detections_run = actual_detections
+        print(f"✅ Masks generated: {frames_processed} frames total")
+        print(f"   🎯 YOLO detections: {detections_run}/{frames_processed} frames (detect_interval={detect_interval})")
+        print(f"   💧 Frames with watermark: {frames_with_watermark}")
 
         try:
             import torch
@@ -911,21 +1033,76 @@ def process_video_task(self, video_path):
             meta={'progress': 55, 'status': 'Running ProPainter'}
         )
 
+        # Prefer frames mode to avoid torchvision video decode issues on some builds
         cmd = [
             sys.executable,
             PROPAINTER_SCRIPT,
-            '-i', video_path,
-            '-m', mask_dir,
+            '-i', frame_dir_proc,
+            '-m', mask_dir_proc,
             '-o', PROPAINTER_OUTPUT_ROOT,
             '--save_fps', str(fps),
+            '--save_frames',
         ]
+        # Ultra-speed ProPainter tuning for videos (optimized for Phase 2 cropping)
+        if '--neighbor_length' not in cmd:
+            cmd.extend(['--neighbor_length', '6'])
+        if '--ref_stride' not in cmd:
+            cmd.extend(['--ref_stride', '50'])
+        if '--raft_iter' not in cmd:
+            cmd.extend(['--raft_iter', '5'])
+        if '--subvideo_length' not in cmd:
+            cmd.extend(['--subvideo_length', '150'])
+        if '--mask_dilation' not in cmd:
+            cmd.extend(['--mask_dilation', '8'])
+        # Process at full resolution (no resize_ratio) for Phase 2 cropped regions
+        # Optional ProPainter tuning via environment variables (video path)
+        try:
+            opt_map = {
+                'PROPAINTER_NEIGHBOR_LENGTH': '--neighbor_length',
+                'PROPAINTER_REF_STRIDE': '--ref_stride',
+                'PROPAINTER_SUBVIDEO_LENGTH': '--subvideo_length',
+                'PROPAINTER_RAFT_ITER': '--raft_iter',
+                'PROPAINTER_MASK_DILATION': '--mask_dilation',
+                'PROPAINTER_WIDTH': '--width',
+                'PROPAINTER_HEIGHT': '--height',
+            }
+            for env_name, flag in opt_map.items():
+                val = os.getenv(env_name)
+                if val is not None and str(val).strip() != '':
+                    ival = int(float(val))
+                    cmd.extend([flag, str(ival)])
+            rr = os.getenv('PROPAINTER_RESIZE_RATIO')
+            if rr is not None and str(rr).strip() != '':
+                fval = float(rr)
+                cmd.extend(['--resize_ratio', str(fval)])
+        except Exception as _env_exc:
+            print(f"⚠️  Ignoring invalid PROPAINTER_* env: {_env_exc}")
         try:
             import torch
             if torch.cuda.is_available():
                 cmd.append('--fp16')
         except Exception:
             pass
+        # Allow forcing FP16 even if torch check fails
+        if '--fp16' not in cmd and str(os.getenv('PROPAINTER_FP16', '0')).lower() in ('1', 'true', 'yes', 'on'):
+            cmd.append('--fp16')
 
+        # Log summary of actual parameters used
+        def _get_flag_val(lst, flag):
+            try:
+                idx = len(lst) - 1 - lst[::-1].index(flag)
+                return lst[idx + 1]
+            except ValueError:
+                return None
+        print(
+            "✓ ProPainter ultra: "
+            f"{'FP16 + ' if '--fp16' in cmd else ''}"
+            f"neighbor_length={_get_flag_val(cmd, '--neighbor_length')} + "
+            f"ref_stride={_get_flag_val(cmd, '--ref_stride')} + "
+            f"raft_iter={_get_flag_val(cmd, '--raft_iter')} + "
+            f"subvideo_length={_get_flag_val(cmd, '--subvideo_length')} + "
+            f"resize_ratio={_get_flag_val(cmd, '--resize_ratio')}"
+        )
         print(f"Launching ProPainter: {' '.join(cmd)}")
 
         import subprocess
@@ -937,13 +1114,52 @@ def process_video_task(self, video_path):
             print(result.stderr)
             raise RuntimeError("ProPainter inference failed")
 
-        save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, base_name)
-        produced_video = os.path.join(save_root, 'inpaint_out.mp4')
-        if not os.path.exists(produced_video):
-            raise RuntimeError(f"ProPainter output not found: {produced_video}")
+        save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, os.path.basename(frame_dir_proc))
+        frames_out = os.path.join(save_root, 'frames')
+        if not os.path.isdir(frames_out):
+            raise RuntimeError(f"ProPainter frames output not found: {frames_out}")
 
         temp_processed = os.path.join(RESULT_DIR, f"{base_name}_propainter_video.mp4")
-        shutil.copy2(produced_video, temp_processed)
+
+        if use_skip:
+            # Reconstruct full-length sequence by replicating reduced outputs
+            reconstructed_dir = os.path.join(TEMP_DIR, f"reconstructed_{base_name}_{unique_suffix}")
+            os.makedirs(reconstructed_dir, exist_ok=True)
+
+            for red_idx, start_idx, count in replication_plan:
+                src = os.path.join(frames_out, f"{red_idx:04d}.png")
+                if not os.path.exists(src):
+                    raise RuntimeError(f"Missing ProPainter frame: {src}")
+                for k in range(count):
+                    dest_idx = start_idx + k
+                    dest = os.path.join(reconstructed_dir, f"{dest_idx:04d}.png")
+                    shutil.copy2(src, dest)
+
+            # Encode reconstructed frames to video
+            try:
+                import subprocess
+                encode_cmd = [
+                    'ffmpeg', '-y',
+                    '-framerate', str(fps),
+                    '-i', os.path.join(reconstructed_dir, '%04d.png'),
+                    '-c:v', 'libx264',
+                    '-preset', 'ultrafast',
+                    '-crf', '18',
+                    temp_processed
+                ]
+                print(f"Encoding reconstructed video: {' '.join(encode_cmd)}")
+                enc = subprocess.run(encode_cmd, capture_output=True, text=True, timeout=300)
+                if enc.returncode != 0:
+                    print(enc.stderr)
+                    raise RuntimeError('Failed to encode reconstructed frames')
+            except FileNotFoundError:
+                raise RuntimeError('ffmpeg not available to encode reconstructed video')
+        else:
+            # Use ProPainter produced video directly
+            produced_video = os.path.join(save_root, 'inpaint_out.mp4')
+            if not os.path.exists(produced_video):
+                raise RuntimeError(f"ProPainter output not found: {produced_video}")
+            shutil.copy2(produced_video, temp_processed)
 
         self.update_state(
             state='PROCESSING',
@@ -1024,6 +1240,7 @@ def process_video_task(self, video_path):
 
         try:
             shutil.rmtree(mask_dir, ignore_errors=True)
+            shutil.rmtree(frame_dir, ignore_errors=True)
         except Exception as cleanup_exc:
             print(f"⚠️  Failed to delete mask directory {mask_dir}: {cleanup_exc}")
 
@@ -1226,6 +1443,26 @@ def get_status(task_id):
 
         task = AsyncResult(task_id, app=celery)
 
+        # Check if task actually exists in Redis or if it's just an expired/nonexistent task
+        # PENDING can mean either "queued and waiting" OR "doesn't exist"
+        if task.state == 'PENDING':
+            try:
+                # Try to get the task result from Redis to see if it actually exists
+                redis_client = redis.from_url(REDIS_URL)
+                task_key = f"celery-task-meta-{task_id}"
+                exists = redis_client.exists(task_key)
+                redis_client.close()
+
+                if not exists:
+                    # Task doesn't exist in Redis - it either expired or never existed
+                    print(f"⚠️  Task {task_id} not found in Redis (expired or invalid)")
+                    return jsonify({
+                        'state': 'EXPIRED',
+                        'error': 'Task not found. It may have expired or been cleaned up. Please submit a new request.'
+                    }), 410  # 410 Gone - resource no longer available
+            except Exception as redis_err:
+                print(f"⚠️  Redis check failed for task {task_id}: {redis_err}")
+
         # Throttled or suppressed debug logging to avoid flooding from client polls
         suppress = str(os.getenv('STATUS_LOG_SUPPRESS', '0')).lower() in ('1', 'true', 'yes', 'on')
         if not suppress:
@@ -1383,6 +1620,88 @@ def download_from_url():
         import re
         import html
 
+        # Try Playwright path first; if unavailable in environment, fall back to
+        # cookie-authenticated HTTP parsing via requests.
+        try:
+            from playwright.sync_api import sync_playwright  # type: ignore
+            _has_playwright = True
+        except Exception:
+            _has_playwright = False
+
+        if not _has_playwright:
+            print("⚠️  Playwright not available. Falling back to authenticated HTTP parsing.")
+            import re as _re
+            import html as _html
+            import requests as _requests
+
+            # Build a session with Sora cookies
+            sess = _requests.Session()
+            sess.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
+
+            try:
+                with open(cookies_file, 'r') as f:
+                    cookies = json.load(f)
+                for c in cookies:
+                    # Only add cookies for sora domain (or subdomains)
+                    domain = c.get('domain') or 'sora.chatgpt.com'
+                    if 'sora.chatgpt.com' in domain:
+                        sess.cookies.set(
+                            name=c.get('name'),
+                            value=c.get('value'),
+                            domain=domain,
+                            path=c.get('path', '/'),
+                        )
+            except Exception as cookie_err:
+                print(f"❌ Failed to load cookies for HTTP fallback: {cookie_err}")
+                return jsonify({'status': 'error', 'message': 'Cookie load failed for fallback'}), 401
+
+            # Fetch page HTML
+            try:
+                resp = sess.get(url, timeout=30)
+                if resp.status_code >= 400:
+                    return jsonify({'status': 'error', 'message': f'HTTP {resp.status_code} fetching page'}), 502
+                content = resp.text
+            except Exception as http_err:
+                print(f"❌ HTTP error during fallback: {http_err}")
+                return jsonify({'status': 'error', 'message': 'Failed to fetch Sora page'}), 502
+
+            # Extract .mp4 URLs and pick best
+            video_urls = _re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
+            if not video_urls:
+                return jsonify({'status': 'error', 'message': 'No .mp4 URL found in page (fallback)'}), 404
+
+            ordered = [_html.unescape(u) for u in video_urls]
+            video_src = pick_best_video_url(ordered) or ordered[0]
+            if is_potentially_watermarked_url(video_src):
+                cleaned = sanitize_video_url(video_src)
+                if cleaned != video_src:
+                    print(f"🧼 Watermark flags detected. Using cleaned URL: {cleaned}")
+                    video_src = cleaned
+
+            print(f"⬇️  Downloading video via HTTP fallback: {video_src}")
+            try:
+                with sess.get(video_src, stream=True, timeout=300) as r:
+                    r.raise_for_status()
+                    with open(output_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=1024 * 256):
+                            if chunk:
+                                f.write(chunk)
+            except Exception as dl_err:
+                print(f"❌ Fallback download error: {dl_err}")
+                return jsonify({'status': 'error', 'message': 'Fallback download failed'}), 500
+
+            file_size = os.path.getsize(output_path) / (1024 * 1024)
+            print(f"✅ Downloaded successfully! Size: {file_size:.2f} MB")
+
+            return jsonify({
+                'status': 'success',
+                'task_id': task_id,
+                'video_url': f'/uploads/{task_id}.mp4'
+            })
+
+        # Playwright path
         with sync_playwright() as p:
             print("🚀 Launching browser for video download...")
             browser = p.chromium.launch(
@@ -1449,7 +1768,18 @@ def download_from_url():
                     print(f"⚠️  Error checking video element: {e}")
 
             if video_urls:
-                video_src = html.unescape(video_urls[0])
+                # Prefer a candidate that does not look watermarked
+                ordered = [html.unescape(u) for u in video_urls]
+                chosen = pick_best_video_url(ordered)
+                video_src = chosen or html.unescape(video_urls[0])
+
+                # Final sanitize if watermark toggles detected
+                if is_potentially_watermarked_url(video_src):
+                    cleaned = sanitize_video_url(video_src)
+                    if cleaned != video_src:
+                        print(f"🧼 Watermark flags detected. Using cleaned URL: {cleaned}")
+                        video_src = cleaned
+
                 print(f"✅ Found video URL: {video_src}")
 
                 # Download the video
@@ -1604,7 +1934,8 @@ def download_sora():
 
             if video_urls:
                 import html
-                video_src = html.unescape(video_urls[0])  # Decode &amp; to &
+                ordered = [html.unescape(u) for u in video_urls]
+                video_src = pick_best_video_url(ordered) or ordered[0]
                 print(f"✅ Found video URL in page content: {video_src}")
             else:
                 # Fallback: try video element
@@ -1638,6 +1969,13 @@ def download_sora():
                 elif video_src.startswith('/'):
                     from urllib.parse import urljoin
                     video_src = urljoin(url, video_src)
+
+                # Prefer non-watermarked URL if watermark toggles are present
+                if is_potentially_watermarked_url(video_src):
+                    cleaned = sanitize_video_url(video_src)
+                    if cleaned != video_src:
+                        print(f"🧼 Watermark flags detected. Using cleaned URL: {cleaned}")
+                        video_src = cleaned
 
                 print(f"⬇️  Downloading video...")
 

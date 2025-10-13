@@ -3,23 +3,32 @@ sys.path.insert(0, 'python_packages')
 
 import cv2
 import numpy as np
+import os
 try:
     import torch
 except Exception:
     torch = None
 
 class YOLOWatermarkDetector:
-    def __init__(self, model_path=None):
+    def __init__(self, model_path=None, require_tensorrt=None):
         """
         Initialize YOLOv8 watermark detector
 
         Args:
             model_path: Path to custom YOLOv8 model, or None to use trained Sora model
+            require_tensorrt: If True, require TensorRT engine and fail otherwise. If None, reads
+                YOLO_REQUIRE_TENSORRT/YOLO_ENGINE_ONLY from environment.
         """
         try:
             print("Loading YOLOv8 watermark detection model...")
             from ultralytics import YOLO
-            import os
+            # Determine if we must force TensorRT-only mode
+            if require_tensorrt is None:
+                env_val = os.getenv('YOLO_REQUIRE_TENSORRT', os.getenv('YOLO_ENGINE_ONLY', '0'))
+                require_tensorrt = str(env_val).lower() in ('1', 'true', 'yes', 'on')
+
+            self._require_tensorrt = bool(require_tensorrt)
+            self._using_tensorrt = False
 
             if model_path:
                 # Use custom model
@@ -27,12 +36,19 @@ class YOLOWatermarkDetector:
                 print(f"✅ Loaded custom model: {model_path}")
             else:
                 # Try to use TensorRT engine first (FAST!)
+                env_engine = os.getenv('YOLO_TENSORRT_ENGINE') or os.getenv('YOLO_ENGINE_PATH')
                 tensorrt_paths = [
-                    'runs/detect/new_sora_watermark/weights/best.engine',  # NEW trained model
-                    '../runs/detect/new_sora_watermark/weights/best.engine',
-                    'D:/github/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.engine',
-                    'runs/detect/sora_watermark/weights/best.engine',      # Old model
-                    'yolov8n.engine',
+                    p for p in [
+                        env_engine,
+                        'runs/detect/new_sora_watermark/weights/best.engine',  # NEW trained model
+                        '../runs/detect/new_sora_watermark/weights/best.engine',
+                        'D:/github/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.engine',
+                        'runs/detect/sora_watermark/weights/best.engine',      # Old model
+                        'yolov8n.engine',
+                        # Common alternate names
+                        'runs/detect/new_sora_watermark/weights/best_fp16.engine',
+                        'runs/detect/new_sora_watermark/weights/best.int8.engine',
+                    ] if p
                 ]
 
                 tensorrt_model = None
@@ -44,7 +60,12 @@ class YOLOWatermarkDetector:
                 tensorrt_loaded = False
                 if tensorrt_model:
                     if (torch is None) or (not torch.cuda.is_available()):
-                        print("⚠️  CUDA torch not available in this process; skipping YOLO TensorRT engine")
+                        msg = "⚠️  CUDA torch not available in this process; skipping YOLO TensorRT engine"
+                        if self._require_tensorrt:
+                            raise RuntimeError(
+                                msg + " (YOLO_REQUIRE_TENSORRT=1 set; refusing to fall back)"
+                            )
+                        print(msg)
                     else:
                         try:
                             print(f"🚀 Attempting to load TensorRT engine: {tensorrt_model}")
@@ -52,20 +73,38 @@ class YOLOWatermarkDetector:
                             self.model = YOLO(tensorrt_model, task='detect')
                             print(f"✅ TensorRT engine loaded! (20-35 fps on GTX 1660 Ti)")
                             tensorrt_loaded = True
+                            self._using_tensorrt = True
                         except FileNotFoundError as e:
                             if 'nvinfer' in str(e):
+                                if self._require_tensorrt:
+                                    raise RuntimeError(
+                                        "TensorRT DLLs not found (e.g., nvinfer_10.dll missing) and YOLO_REQUIRE_TENSORRT=1"
+                                    ) from e
                                 print(f"⚠️  TensorRT DLLs not found (nvinfer_10.dll missing)")
                                 print(f"   Falling back to PyTorch .pt model (slower but works)")
                             else:
+                                if self._require_tensorrt:
+                                    raise RuntimeError(f"TensorRT load error and YOLO_REQUIRE_TENSORRT=1: {e}") from e
                                 print(f"⚠️  TensorRT load error: {e}")
                             tensorrt_loaded = False
                         except Exception as e:
+                            if self._require_tensorrt:
+                                raise RuntimeError(f"TensorRT failed and YOLO_REQUIRE_TENSORRT=1: {e}") from e
                             print(f"⚠️  TensorRT failed: {e}")
                             print(f"   Falling back to PyTorch model...")
                             tensorrt_loaded = False
+                else:
+                    if self._require_tensorrt:
+                        searched = "\n".join([f"  - {p}" for p in tensorrt_paths])
+                        raise RuntimeError(
+                            "TensorRT engine not found at expected paths and YOLO_REQUIRE_TENSORRT=1.\n"
+                            "Searched paths:\n" + searched
+                        )
 
                 if not tensorrt_loaded:
                     # Fallback to .pt model
+                    if self._require_tensorrt:
+                        raise RuntimeError("TensorRT required but not loaded; refusing to use .pt fallback")
                     print("⚠️  Using .pt model (10-15 fps, slower than TensorRT)")
 
                     # Try to use trained Sora watermark model first
@@ -120,6 +159,9 @@ class YOLOWatermarkDetector:
 
         except Exception as e:
             print(f"❌ Could not load YOLOv8: {e}")
+            # If TensorRT-only mode is requested, fail fast instead of silently disabling YOLO
+            if getattr(self, '_require_tensorrt', False):
+                raise
             print("Will use fallback detection")
             self.use_yolo = False
 

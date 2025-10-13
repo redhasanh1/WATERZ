@@ -1,8 +1,20 @@
 ﻿{
-  "name": "Watermarkz Dev Container",
-  "image": "node:20",
-  "workspaceFolder": "${containerWorkspaceFolder}",
-  "workspaceMount": "source=${localWorkspaceFolder},target=${containerWorkspaceFolder},type=bind",
+  "name": "Watermarkz (Attach-Safe)",
+  "image": "humblewoslayer/watermarkz:latest",
+
+  // GPU can be re-enabled once attach works
+  "runArgs": ["--gpus", "all"],
+
+  "remoteUser": "root",
+  "workspaceFolder": "/app",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
+
+  // --- the magic lines ---
+  "overrideCommand": true,
+  "command": ["/bin/sh", "-c", "while sleep 1000; do :; done"],
+  // keeps container alive forever so VS Code can attach
+  // -------------------------------------
+
   "customizations": {
     "vscode": {
       "extensions": [
@@ -10,9 +22,18 @@
         "ms-vscode-remote.remote-containers",
         "esbenp.prettier-vscode",
         "dbaeumer.vscode-eslint"
-      ]
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "editor.formatOnSave": true
+      }
     }
   },
-  "postCreateCommand": "npm install",
-  "remoteUser": "root"
+
+  "mounts": [
+    "source=${localWorkspaceFolder}/uploads,target=/app/uploads,type=bind",
+    "source=${localWorkspaceFolder}/weights,target=/app/weights,type=bind"
+  ],
+
+  "hostRequirements": { "memory": "8gb", "cpus": 4 }
 }
