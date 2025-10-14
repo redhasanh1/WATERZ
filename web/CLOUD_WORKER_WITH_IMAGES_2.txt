@@ -1359,30 +1359,13 @@ def finalize_video_task(self, segment_results, prepare_result):
         raise
 
 
-@celery.task(bind=True, name='watermark.remove_video_distributed')
-def process_video_distributed_task(self, video_path, api_base=None, temp_base=None):
-    """
-    DISTRIBUTED VIDEO PROCESSING - Main entry point
-
-    This task coordinates multiple workers across different machines to process
-    one video together. It uses Celery's chord pattern to:
-    1. Prepare video (YOLO detection, segmentation) - runs on one worker
-    2. Process segments in parallel - distributes across ALL available workers/GPUs
-    3. Finalize video (concatenate, merge audio) - runs on one worker
-
-    All workers (across all computers) will collaborate on the same video job.
+@celery.task(bind=True, name='watermark._launch_segments')
+def launch_segments_task(self, prepare_result):
+    """Create a chord of segment tasks and replace this task with it.
+    The final result from finalize_video_task becomes the result of this task.
     """
     try:
-        from celery import chain, chord, group
-
-        print(f"🚀 Starting DISTRIBUTED video processing: {video_path}")
-        print(f"   All available workers will collaborate on this video")
-
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Initializing distributed processing'})
-
-        # Phase 1: Prepare video (runs on one worker)
-        print("📋 Phase 1: Preparing video for distribution...")
-        prepare_result = prepare_video_task.apply_async(args=[video_path], kwargs={'api_base': api_base, 'temp_base': temp_base}).get()
+        from celery import chord, group
 
         if not prepare_result or 'segments' not in prepare_result:
             raise RuntimeError("Video preparation failed")
@@ -1390,54 +1373,48 @@ def process_video_distributed_task(self, video_path, api_base=None, temp_base=No
         segments = prepare_result['segments']
         total_segments = len(segments)
 
-        print(f"✅ Video prepared: {total_segments} segments ready for distributed processing")
-        print(f"🌐 Distributing segments across all available workers...")
-
-        self.update_state(
-            state='PROCESSING',
-            meta={'progress': 50, 'status': f'Distributing {total_segments} segments across workers'}
-        )
-
         # Add total_segments to each segment data
-        for seg_data in segments:
-            seg_data['total_segments'] = total_segments
+        for seg in segments:
+            seg['total_segments'] = total_segments
 
-        # Phase 2: Process segments in parallel (distributes across ALL workers)
-        # Using chord: when all segment tasks complete, finalize task runs automatically
-        print(f"🔥 Phase 2: Processing {total_segments} segments in parallel...")
+        print(f"🔥 Launching chord: {total_segments} segments in parallel...")
+        header = group([process_segment_task.s(seg) for seg in segments])
+        callback = finalize_video_task.s(prepare_result)
 
-        workflow = chord(
-            # Header: All segment processing tasks (run in parallel across all workers)
-            group([
-                process_segment_task.s(seg_data)
-                for seg_data in segments
-            ]),
-            # Callback: Finalization task (runs when all segments complete)
-            finalize_video_task.s(prepare_result)
+        # Replace this task with the chord so its result becomes ours
+        raise self.replace(chord(header, callback))
+
+    except Exception as e:
+        print(f"❌ Segment launch failed: {e}")
+        import traceback; traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.remove_video_distributed')
+def process_video_distributed_task(self, video_path, api_base=None, temp_base=None):
+    """
+    Orchestrator entrypoint: replace this task with a chain of
+    prepare_video_task -> launch_segments_task (which itself replaces with a chord).
+    This avoids blocking .get() calls inside tasks and ties the final result
+    to this task's ID.
+    """
+    try:
+        from celery import chain
+
+        print(f"🚀 Starting DISTRIBUTED video processing: {video_path}")
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Initializing distributed processing'})
+
+        workflow = chain(
+            prepare_video_task.s(video_path, api_base=api_base, temp_base=temp_base),
+            launch_segments_task.s(),
         )
 
-        # Execute the distributed workflow
-        result = workflow.apply_async()
-
-        print(f"📊 Workflow submitted:")
-        print(f"   - {total_segments} segment tasks queued")
-        print(f"   - Tasks will be picked up by ANY available worker")
-        print(f"   - Finalization will run automatically when all segments complete")
-
-        # Wait for the entire workflow to complete
-        final_result = result.get(timeout=3600)  # 1 hour timeout
-
-        print(f"✅ DISTRIBUTED processing complete!")
-        print(f"   Final video: {final_result.get('path')}")
-
-        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Distributed processing complete'})
-
-        return final_result
+        # Replace this task with the workflow so the final result propagates
+        raise self.replace(workflow)
 
     except Exception as e:
         print(f"❌ Distributed processing failed: {e}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise
 
 
