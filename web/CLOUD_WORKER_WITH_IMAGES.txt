@@ -24,6 +24,12 @@ PYTHON_PACKAGES_DIR = os.path.join(SCRIPT_DIR, 'python_packages')
 PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter.py')
 PROPAINTER_OUTPUT_ROOT = os.path.join(RESULT_DIR, 'propainter')
 PROPAINTER_MASK_ROOT = os.path.join(TEMP_DIR, 'propainter_masks')
+PROPAINTER_FLOW_BACKEND = os.getenv('PROPAINTER_FLOW_BACKEND', 'raft')  # 'raft' or 'fastflownet'
+try:
+    _segment_workers_env = int(os.getenv('SEGMENT_WORKERS', '2'))
+except ValueError:
+    _segment_workers_env = 2
+SEGMENT_WORKERS = max(1, _segment_workers_env)
 
 # Create directories
 for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR, PROPAINTER_OUTPUT_ROOT, PROPAINTER_MASK_ROOT]:
@@ -108,6 +114,14 @@ import redis
 import threading
 import secrets
 import hmac
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Import faster-propainter modules for direct pipeline processing
+# Note: These imports are moved to inside functions to avoid startup errors
+# sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
+# from watermark import pipeline as faster_propainter_pipeline
+# from mytimer import timer_decorator  
+# from pre_post_process import crop_video_mask, merge_videos_with_mask
 
 app = Flask(__name__, static_folder='web')
 # CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
@@ -261,6 +275,239 @@ def validate_url(url):
         return False
 
 
+def get_dynamic_subvideo_length(width, height):
+    """
+    Calculate optimal subvideo length based on video resolution for memory efficiency.
+    Higher resolution videos need smaller chunks to fit in GPU memory.
+    """
+    resolution = width * height
+    
+    if resolution <= 640 * 480:        # 640p and below
+        return 100, 12  # subvideo_length, short_clip_len
+    elif resolution <= 1280 * 720:     # 720p
+        return 80, 8
+    elif resolution <= 1920 * 1080:    # 1080p  
+        return 60, 6
+    elif resolution <= 2560 * 1440:    # 1440p
+        return 40, 4
+    else:                              # 4K and above
+        return 20, 2
+
+def clear_gpu_memory():
+    """
+    Strategic GPU memory clearing for optimal memory management.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            print(f"🧹 GPU memory cleared: {torch.cuda.memory_allocated() / 1024**2:.1f}MB allocated")
+    except Exception as e:
+        print(f"⚠️  GPU memory clear failed: {e}")
+        pass
+
+def performance_checkpoint(stage_name, start_time=None):
+    """
+    Performance checkpoint logging for identifying bottlenecks.
+    """
+    import time
+    current_time = time.perf_counter()
+    
+    if start_time is not None:
+        elapsed = current_time - start_time
+        print(f"⏱️  {stage_name} completed in {elapsed:.2f} seconds")
+    else:
+        print(f"🚀 {stage_name} started")
+    
+    return current_time
+
+
+def _init_gpu_worker(gpu_id):
+    """
+    Initialize worker process with specific GPU assignment.
+    Each worker gets exclusive access to one GPU.
+    """
+    import os
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    print(f"Worker initialized with GPU {gpu_id}")
+
+
+def _process_propainter_segment(seg_idx, total_segments, segment, context):
+    """
+    Process a single smart-cropped segment with faster-propainter.
+    Returns frames directory ready for encoding.
+    Runs in separate process with assigned GPU via CUDA_VISIBLE_DEVICES.
+
+    Returns a tuple (seg_idx, seg_cleaned_dir, crop_info, temp_dirs_to_cleanup).
+    """
+    from crop_utils import calculate_crop_region, estimate_speedup
+
+    start_frame, end_frame, seg_bbox = segment
+    seg_duration = end_frame - start_frame + 1
+
+    base_name = context['base_name']
+    unique_suffix = context['unique_suffix']
+    width = context['width']
+    height = context['height']
+    mask_dir = context['mask_dir']
+    original_frames_dir = context['original_frames_dir']
+
+    seg_label = f"{seg_idx + 1}/{total_segments}"
+    print(f"\n🎬 Processing segment {seg_label}: frames {start_frame}-{end_frame} ({seg_duration} frames)")
+
+    crop_x, crop_y, crop_w, crop_h = calculate_crop_region(seg_bbox, width, height, padding_ratio=0.2, min_size=128)
+    speedup = estimate_speedup((width, height), (crop_w, crop_h))
+    print(f"   📐 Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h} (estimated {speedup:.1f}x speedup)")
+
+    seg_prefix = f"{base_name}_{unique_suffix}_seg{seg_idx}"
+    seg_frames_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_frames")
+    seg_cropped_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cropped")
+    seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
+    seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
+    seg_cleaned_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cleaned")
+
+    for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+        os.makedirs(path, exist_ok=True)
+
+    try:
+        frames_copied = 0
+        for frame_idx in range(start_frame, end_frame + 1):
+            src = os.path.join(original_frames_dir, f"{frame_idx:04d}.png")
+            dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+            if not os.path.exists(src):
+                print(f"⚠️  Warning: Frame {frame_idx} ({frame_idx:04d}.png) not found, skipping")
+                continue
+            shutil.copy2(src, dst)
+            frames_copied += 1
+
+        if frames_copied == 0:
+            raise RuntimeError(f"No frames copied for segment {seg_idx}")
+
+        print(f"   ✂️  Cropping {frames_copied} frames to {crop_w}x{crop_h}...")
+        for frame_idx in range(frames_copied):
+            frame_file = f"{frame_idx:04d}.png"
+            frame_path = os.path.join(seg_frames_dir, frame_file)
+            frame = cv2.imread(frame_path)
+            if frame is None:
+                print(f"⚠️  Warning: Could not read frame {frame_file}, skipping crop")
+                continue
+            cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+            cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
+
+        masks_copied = 0
+        for frame_idx in range(start_frame, end_frame + 1):
+            mask_file = f"{frame_idx:04d}.png"
+            mask_src = os.path.join(mask_dir, mask_file)
+            if os.path.exists(mask_src):
+                mask = cv2.imread(mask_src, cv2.IMREAD_GRAYSCALE)
+                if mask is not None:
+                    cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
+                    masks_copied += 1
+
+        print(f"   🎨 Running faster-propainter pipeline on cropped segment...")
+        try:
+            faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+            if faster_propainter_path not in sys.path:
+                sys.path.insert(0, faster_propainter_path)
+            from watermark import pipeline as faster_propainter_pipeline
+
+            import torch
+            use_fp16 = torch.cuda.is_available()
+
+            print(f"   🚀 Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=20, ref_stride=10, subvideo_length=80, FP16={use_fp16}")
+
+            # Each process gets its own CUDA context for true parallel processing
+            faster_propainter_pipeline(
+                video=seg_cropped_dir,
+                mask=seg_mask_dir,
+                output=seg_output_dir,
+                resize_ratio=1.0,
+                mask_dilation=4,
+                ref_stride=10,
+                neighbor_length=20,
+                subvideo_length=80,
+                raft_iter=20,
+                mode="video_inpainting",
+                save_frames=True,
+                fp16=use_fp16
+            )
+
+            print(f"   ✅ faster-propainter segment {seg_idx+1} completed")
+
+        except Exception as exc:
+            print(f"❌ faster-propainter failed on segment {seg_idx}: {exc}")
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(f"faster-propainter failed on segment {seg_idx}: {exc}") from exc
+
+        seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
+        if not os.path.exists(seg_propainter_frames):
+            raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
+
+        print(f"   🔗 Merging cleaned region back to full frames...")
+        for frame_idx in range(seg_duration):
+            frame_file = f"{frame_idx:04d}.png"
+            original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+            cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+
+            if cleaned_crop is not None and original is not None:
+                result_frame = original.copy()
+                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+            elif original is not None:
+                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+
+        # Return cleaned frames directory for later encoding
+        temp_dirs = [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir]
+        return seg_idx, seg_cleaned_dir, {'fps': context['fps']}, temp_dirs
+
+    except Exception as e:
+        # Cleanup on error
+        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+            shutil.rmtree(path, ignore_errors=True)
+        raise
+
+
+def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs_to_cleanup):
+    """
+    Encode a segment's cleaned frames to video (CPU-bound, runs in parallel).
+
+    Returns a tuple (seg_idx, seg_video_path).
+    """
+    import subprocess
+
+    base_name = context['base_name']
+    unique_suffix = context['unique_suffix']
+    fps = context['fps']
+
+    seg_prefix = f"{base_name}_{unique_suffix}_seg{seg_idx}"
+    seg_video_path = os.path.join(TEMP_DIR, f"{seg_prefix}.mp4")
+
+    seg_label = f"{seg_idx + 1}/{total_segments}"
+    print(f"   🎞️  Encoding segment {seg_label} to video...")
+
+    try:
+        encode_cmd = [
+            'ffmpeg', '-y', '-framerate', str(fps),
+            '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-pix_fmt', 'yuv420p',
+            '-profile:v', 'main',
+            seg_video_path
+        ]
+        subprocess.run(encode_cmd, capture_output=True, check=True)
+
+        print(f"   ✅ Segment {seg_label} encoded successfully")
+        return seg_idx, seg_video_path
+
+    finally:
+        # Cleanup temp directories after encoding
+        for path in temp_dirs_to_cleanup + [seg_cleaned_dir]:
+            shutil.rmtree(path, ignore_errors=True)
+
+
 def save_detection_debug(image, mask, detections, prefix):
     """
     Save a debug visualization showing YOLO detections and the inpainting mask.
@@ -327,6 +574,10 @@ celery.conf.update(
 # Global model instances (lazy loaded)
 detector = None
 propainter_ready = False
+
+# Use multiprocessing for true parallel GPU processing
+# Each process gets its own CUDA context and model instances
+from concurrent.futures import ProcessPoolExecutor
 
 # File cleanup - delete files older than 1 hour
 def cleanup_old_files():
@@ -415,6 +666,706 @@ def get_detector():
 # Celery Tasks (Background Processing)
 # ============================================================================
 
+# ============================================================================
+# DISTRIBUTED VIDEO PROCESSING TASKS
+# These tasks enable multiple workers across different machines to collaborate
+# on processing one video together by distributing segments across all GPUs
+# ============================================================================
+
+@celery.task(bind=True, name='watermark.prepare_video')
+def prepare_video_task(self, video_path):
+    """
+    Phase 1: Prepare video for distributed processing
+    - Download video if needed
+    - Run YOLO detection on all frames
+    - Generate masks
+    - Detect segments
+    - Upload shared data (masks, frames) to all workers
+
+    Returns: dict with video_id, segments, metadata for distributed processing
+    """
+    try:
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Preparing video'})
+
+        detector = get_detector()
+        if not _check_propainter_assets():
+            raise RuntimeError("ProPainter assets missing")
+
+        # Download video if on remote worker
+        if not os.path.exists(video_path):
+            tunnel = os.getenv('TUNNEL_URL')
+            if tunnel:
+                try:
+                    from urllib.parse import urljoin
+                    import requests
+                    from pathlib import PureWindowsPath
+                    base_name = PureWindowsPath(video_path).name if '\\' in video_path else os.path.basename(video_path)
+                    download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+                    print(f"🌐 Downloading video: {download_url}")
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                    r.raise_for_status()
+                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                    video_path = os.path.join(UPLOAD_DIR, base_name)
+                    with open(video_path, 'wb') as f:
+                        f.write(r.content)
+                    print(f"✅ Video downloaded: {video_path}")
+                except Exception as e:
+                    raise Exception(f"Failed to download video: {e}")
+            else:
+                raise Exception(f"Video not found: {video_path}")
+
+        print(f"📹 Preparing video: {video_path} ({os.path.getsize(video_path) / (1024 * 1024):.2f} MB)")
+
+        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise Exception(f"Failed to open video: {video_path}")
+
+        fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+
+        base_name = Path(video_path).stem
+        video_id = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
+
+        # Create shared directories for distributed access
+        shared_mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{video_id}")
+        shared_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_originals")
+        os.makedirs(shared_mask_dir, exist_ok=True)
+        os.makedirs(shared_frames_dir, exist_ok=True)
+
+        print(f"🎯 Running YOLO detection on {total_frames} frames...")
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
+
+        zero_mask = np.zeros((height, width), dtype=np.uint8)
+        last_valid_bbox = None
+        frames_processed = 0
+        frames_with_watermark = 0
+        detect_interval = 3
+        warmup_frames = 60
+        hit_found = False
+        det_conf = 0.15
+        bboxes_per_frame = []
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            progress = 10 + int((frames_processed / max(total_frames, 1)) * 30)
+            self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Detection {frames_processed}/{total_frames}'})
+
+            if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
+                detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
+                if detections:
+                    frames_with_watermark += 1
+                    last_valid_bbox = detections[0]['bbox']
+                    hit_found = True
+                    bboxes_per_frame.append(last_valid_bbox)
+                elif last_valid_bbox:
+                    bboxes_per_frame.append(last_valid_bbox)
+                else:
+                    bboxes_per_frame.append(None)
+
+                mask = detector.create_mask(frame, detections) if detections else zero_mask
+            else:
+                bboxes_per_frame.append(last_valid_bbox)
+                mask = detector.create_mask(frame, [{'bbox': last_valid_bbox}]) if last_valid_bbox else zero_mask
+
+            mask_path = os.path.join(shared_mask_dir, f"{frames_processed:04d}.png")
+            cv2.imwrite(mask_path, mask)
+            frames_processed += 1
+
+        cap.release()
+
+        if frames_processed == 0:
+            raise RuntimeError("No frames processed - video may be corrupted")
+
+        print(f"✅ Detection complete: {frames_processed} frames, {frames_with_watermark} with watermarks")
+
+        # Extract frames for distributed processing
+        print(f"📷 Extracting frames for distributed processing...")
+        self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Extracting frames'})
+
+        import subprocess
+        extract_cmd = [
+            'ffmpeg', '-i', video_path,
+            '-qscale:v', '2',
+            '-start_number', '0',
+            os.path.join(shared_frames_dir, '%04d.png')
+        ]
+        subprocess.run(extract_cmd, capture_output=True, check=True)
+
+        # Detect segments
+        from segment_detector import detect_segments, merge_adjacent_segments
+        segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
+        if segments:
+            segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
+            print(f"📊 Detected {len(segments)} segments for distributed processing")
+            for i, (start, end, bbox) in enumerate(segments):
+                print(f"   Segment {i+1}: frames {start}-{end} ({end-start+1} frames)")
+        else:
+            # No segments detected - treat entire video as one segment
+            segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
+            print("📊 No segments detected - processing entire video as one segment")
+
+        # Upload shared data to API server for other workers
+        tunnel = os.getenv('TUNNEL_URL')
+        if tunnel:
+            print(f"⬆️  Uploading shared data to API server for distributed access...")
+            # We'll use a simple approach: workers will download what they need via TUNNEL_URL
+            # No explicit upload needed - masks and frames are already in shared directories
+
+        # Prepare segment data for distribution
+        segment_tasks_data = []
+        for seg_idx, (start_frame, end_frame, bbox) in enumerate(segments):
+            segment_tasks_data.append({
+                'seg_idx': seg_idx,
+                'start_frame': start_frame,
+                'end_frame': end_frame,
+                'bbox': bbox,
+                'video_id': video_id,
+                'base_name': base_name,
+                'width': width,
+                'height': height,
+                'fps': fps,
+                'shared_mask_dir': shared_mask_dir,
+                'shared_frames_dir': shared_frames_dir,
+            })
+
+        result = {
+            'video_id': video_id,
+            'base_name': base_name,
+            'video_path': video_path,
+            'segments': segment_tasks_data,
+            'total_segments': len(segments),
+            'width': width,
+            'height': height,
+            'fps': fps,
+            'total_frames': frames_processed,
+            'frames_with_watermark': frames_with_watermark,
+            'shared_mask_dir': shared_mask_dir,
+            'shared_frames_dir': shared_frames_dir,
+        }
+
+        print(f"✅ Video prepared for distributed processing: {len(segments)} segments ready")
+        self.update_state(state='SUCCESS', meta={'progress': 50, 'status': 'Ready for processing'})
+        return result
+
+    except Exception as e:
+        print(f"❌ Error preparing video: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.process_segment')
+def process_segment_task(self, segment_data):
+    """
+    Phase 2: Process one segment (distributed across all available workers/GPUs)
+    - Download required frames and masks
+    - Run ProPainter on this segment
+    - Upload cleaned frames back
+
+    This task can run on ANY available worker with a GPU
+    """
+    try:
+        seg_idx = segment_data['seg_idx']
+        total_segments = segment_data.get('total_segments', '?')
+        start_frame = segment_data['start_frame']
+        end_frame = segment_data['end_frame']
+        bbox = segment_data['bbox']
+        video_id = segment_data['video_id']
+        base_name = segment_data['base_name']
+        width = segment_data['width']
+        height = segment_data['height']
+        fps = segment_data['fps']
+
+        print(f"\n🎬 Worker processing segment {seg_idx+1}/{total_segments}: frames {start_frame}-{end_frame}")
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
+
+        # Import crop utilities
+        from crop_utils import calculate_crop_region
+
+        seg_duration = end_frame - start_frame + 1
+        crop_x, crop_y, crop_w, crop_h = calculate_crop_region(bbox, width, height, padding_ratio=0.2, min_size=128)
+        print(f"   📐 Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h}")
+
+        # Create local temp directories for this segment
+        seg_prefix = f"{base_name}_{video_id}_seg{seg_idx}"
+        seg_frames_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_frames")
+        seg_cropped_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cropped")
+        seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
+        seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
+        seg_cleaned_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cleaned")
+
+        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+            os.makedirs(path, exist_ok=True)
+
+        # Download required frames and masks from shared storage
+        tunnel = os.getenv('TUNNEL_URL')
+        shared_mask_dir = segment_data.get('shared_mask_dir')
+        shared_frames_dir = segment_data.get('shared_frames_dir')
+
+        print(f"   ⬇️  Downloading frames {start_frame}-{end_frame}...")
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading frames'})
+
+        import requests
+        frames_copied = 0
+        for frame_idx in range(start_frame, end_frame + 1):
+            frame_file = f"{frame_idx:04d}.png"
+
+            # Try local first
+            local_frame = os.path.join(shared_frames_dir, frame_file) if shared_frames_dir else None
+            if local_frame and os.path.exists(local_frame):
+                dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                shutil.copy2(local_frame, dst)
+                frames_copied += 1
+            elif tunnel:
+                # Download from API server
+                try:
+                    frame_url = f"{tunnel.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
+                    r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
+                    if r.ok:
+                        dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                        with open(dst, 'wb') as f:
+                            f.write(r.content)
+                        frames_copied += 1
+                except Exception as e:
+                    print(f"⚠️  Failed to download frame {frame_idx}: {e}")
+
+        if frames_copied == 0:
+            raise RuntimeError(f"No frames downloaded for segment {seg_idx}")
+
+        print(f"   ✅ Downloaded {frames_copied} frames")
+
+        # Crop frames
+        print(f"   ✂️  Cropping frames...")
+        self.update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Cropping frames'})
+
+        for frame_idx in range(frames_copied):
+            frame_file = f"{frame_idx:04d}.png"
+            frame_path = os.path.join(seg_frames_dir, frame_file)
+            frame = cv2.imread(frame_path)
+            if frame is not None:
+                cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
+
+        # Download and crop masks
+        masks_copied = 0
+        for frame_idx in range(start_frame, end_frame + 1):
+            mask_file = f"{frame_idx:04d}.png"
+            local_mask = os.path.join(shared_mask_dir, mask_file) if shared_mask_dir else None
+
+            if local_mask and os.path.exists(local_mask):
+                mask = cv2.imread(local_mask, cv2.IMREAD_GRAYSCALE)
+                if mask is not None:
+                    cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
+                    masks_copied += 1
+            elif tunnel:
+                try:
+                    mask_url = f"{tunnel.rstrip('/')}/temp/propainter_masks/{base_name}_{video_id}/{mask_file}"
+                    r = requests.get(mask_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
+                    if r.ok:
+                        mask_data = np.frombuffer(r.content, dtype=np.uint8)
+                        mask = cv2.imdecode(mask_data, cv2.IMREAD_GRAYSCALE)
+                        if mask is not None:
+                            cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                            cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
+                            masks_copied += 1
+                except Exception as e:
+                    print(f"⚠️  Failed to download mask {frame_idx}: {e}")
+
+        print(f"   ✅ Prepared {masks_copied} masks")
+
+        # Run ProPainter on this segment
+        print(f"   🎨 Running ProPainter...")
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
+
+        try:
+            faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+            if faster_propainter_path not in sys.path:
+                sys.path.insert(0, faster_propainter_path)
+            from watermark import pipeline as faster_propainter_pipeline
+
+            import torch
+            use_fp16 = torch.cuda.is_available()
+
+            faster_propainter_pipeline(
+                video=seg_cropped_dir,
+                mask=seg_mask_dir,
+                output=seg_output_dir,
+                resize_ratio=1.0,
+                mask_dilation=4,
+                ref_stride=10,
+                neighbor_length=20,
+                subvideo_length=80,
+                raft_iter=20,
+                mode="video_inpainting",
+                save_frames=True,
+                fp16=use_fp16
+            )
+
+            print(f"   ✅ ProPainter complete for segment {seg_idx+1}")
+        except Exception as e:
+            print(f"❌ ProPainter failed on segment {seg_idx}: {e}")
+            raise
+        finally:
+            clear_gpu_memory()
+
+        # Merge cleaned region back to full frames
+        print(f"   🔗 Merging cleaned region...")
+        self.update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
+
+        seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
+        if not os.path.exists(seg_propainter_frames):
+            raise RuntimeError(f"ProPainter output not found for segment {seg_idx}")
+
+        for frame_idx in range(seg_duration):
+            frame_file = f"{frame_idx:04d}.png"
+            original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+            cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+
+            if cleaned_crop is not None and original is not None:
+                result_frame = original.copy()
+                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+            elif original is not None:
+                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+
+        # Encode segment to video
+        print(f"   🎞️  Encoding segment...")
+        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': f'Encoding video'})
+
+        seg_video_path = os.path.join(RESULT_DIR, f"{seg_prefix}.mp4")
+        encode_cmd = [
+            'ffmpeg', '-y', '-framerate', str(fps),
+            '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-pix_fmt', 'yuv420p', '-profile:v', 'main',
+            seg_video_path
+        ]
+        subprocess.run(encode_cmd, capture_output=True, check=True)
+
+        # Upload segment video back to shared storage
+        if tunnel:
+            try:
+                upload_url = f"{tunnel.rstrip('/')}/api/upload-segment"
+                print(f"   ⬆️  Uploading segment {seg_idx+1} to API server...")
+                with open(seg_video_path, 'rb') as f:
+                    resp = requests.post(
+                        upload_url,
+                        headers={'ngrok-skip-browser-warning': 'true'},
+                        files={'file': (os.path.basename(seg_video_path), f, 'video/mp4')},
+                        data={'video_id': video_id, 'seg_idx': seg_idx},
+                        timeout=120
+                    )
+                if resp.ok:
+                    print(f"   ✅ Segment {seg_idx+1} uploaded successfully")
+            except Exception as e:
+                print(f"⚠️  Failed to upload segment: {e}")
+
+        # Cleanup temp directories
+        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+            shutil.rmtree(path, ignore_errors=True)
+
+        result = {
+            'seg_idx': seg_idx,
+            'video_path': seg_video_path,
+            'start_frame': start_frame,
+            'end_frame': end_frame,
+            'frames_processed': seg_duration,
+        }
+
+        print(f"✅ Segment {seg_idx+1}/{total_segments} complete!")
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': f'Segment {seg_idx+1} complete'})
+        return result
+
+    except Exception as e:
+        print(f"❌ Error processing segment {seg_idx}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.finalize_video')
+def finalize_video_task(self, segment_results, prepare_result):
+    """
+    Phase 3: Finalize video after all segments are processed
+    - Collect all segment videos
+    - Concatenate in correct order
+    - Merge audio from original
+    - Upload final result
+    """
+    try:
+        video_id = prepare_result['video_id']
+        base_name = prepare_result['base_name']
+        video_path = prepare_result['video_path']
+        fps = prepare_result['fps']
+        total_segments = prepare_result['total_segments']
+
+        print(f"\n🎬 Finalizing video: {base_name} ({total_segments} segments)")
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Finalizing video'})
+
+        # Sort segments by index
+        segment_results = sorted(segment_results, key=lambda x: x['seg_idx'])
+
+        # Download segment videos if needed
+        tunnel = os.getenv('TUNNEL_URL')
+        segment_videos = []
+
+        print(f"📥 Collecting {total_segments} segment videos...")
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Collecting segments'})
+
+        for seg_result in segment_results:
+            seg_video_path = seg_result['video_path']
+
+            # Check if segment exists locally
+            if os.path.exists(seg_video_path):
+                segment_videos.append(seg_video_path)
+            elif tunnel:
+                # Download from API server
+                try:
+                    seg_filename = os.path.basename(seg_video_path)
+                    download_url = f"{tunnel.rstrip('/')}/results/{seg_filename}"
+                    print(f"   ⬇️  Downloading segment {seg_result['seg_idx']+1}...")
+
+                    import requests
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                    r.raise_for_status()
+
+                    local_path = os.path.join(TEMP_DIR, seg_filename)
+                    with open(local_path, 'wb') as f:
+                        f.write(r.content)
+                    segment_videos.append(local_path)
+                except Exception as e:
+                    raise Exception(f"Failed to download segment {seg_result['seg_idx']}: {e}")
+            else:
+                raise Exception(f"Segment video not found: {seg_video_path}")
+
+        if len(segment_videos) != total_segments:
+            raise RuntimeError(f"Expected {total_segments} segments, got {len(segment_videos)}")
+
+        print(f"✅ All {total_segments} segments collected")
+
+        # Concatenate segments
+        print(f"🔗 Concatenating segments...")
+        self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Concatenating segments'})
+
+        concat_list_file = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
+        with open(concat_list_file, 'w') as f:
+            for seg_video in segment_videos:
+                f.write(f"file '{seg_video}'\n")
+
+        temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
+
+        import subprocess
+        concat_cmd = [
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+            '-i', concat_list_file,
+            '-c', 'copy',
+            temp_processed
+        ]
+        subprocess.run(concat_cmd, capture_output=True, check=True)
+
+        print(f"✅ Segments concatenated")
+
+        # Merge audio from original video
+        print(f"🎵 Merging audio...")
+        self.update_state(state='PROCESSING', meta={'progress': 70, 'status': 'Merging audio'})
+
+        final_output = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
+
+        # Check if original has audio
+        check_audio_cmd = [
+            'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            video_path
+        ]
+        has_audio_check = subprocess.run(check_audio_cmd, capture_output=True, text=True, timeout=10)
+        has_audio = 'audio' in has_audio_check.stdout
+
+        if has_audio:
+            merge_cmd = [
+                'ffmpeg', '-y',
+                '-i', temp_processed,
+                '-i', video_path,
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                '-pix_fmt', 'yuv420p', '-profile:v', 'main',
+                '-c:a', 'aac', '-b:a', '192k',
+                '-shortest',
+                final_output
+            ]
+        else:
+            merge_cmd = [
+                'ffmpeg', '-y',
+                '-i', temp_processed,
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                '-pix_fmt', 'yuv420p', '-profile:v', 'main',
+                final_output
+            ]
+
+        audio_result = subprocess.run(merge_cmd, capture_output=True, text=True, timeout=300)
+        if audio_result.returncode != 0:
+            print("⚠️  Audio merge failed, using video without audio")
+            final_output = temp_processed
+        else:
+            os.remove(temp_processed)
+
+        # Cleanup
+        print(f"🧹 Cleaning up...")
+        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Cleaning up'})
+
+        for seg_video in segment_videos:
+            if os.path.exists(seg_video):
+                os.remove(seg_video)
+        os.remove(concat_list_file)
+
+        # Cleanup shared directories
+        shared_mask_dir = prepare_result.get('shared_mask_dir')
+        shared_frames_dir = prepare_result.get('shared_frames_dir')
+        if shared_mask_dir:
+            shutil.rmtree(shared_mask_dir, ignore_errors=True)
+        if shared_frames_dir:
+            shutil.rmtree(shared_frames_dir, ignore_errors=True)
+
+        # Upload final result
+        uploaded_path = None
+        if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
+            try:
+                upload_url = f"{tunnel.rstrip('/')}/api/upload-result"
+                print(f"⬆️  Uploading final result to API server...")
+                with open(final_output, 'rb') as f:
+                    resp = requests.post(
+                        upload_url,
+                        headers={'ngrok-skip-browser-warning': 'true'},
+                        files={'file': (os.path.basename(final_output), f, 'video/mp4')},
+                        timeout=120
+                    )
+                if resp.ok:
+                    j = resp.json()
+                    if j.get('status') == 'success' and j.get('result_url'):
+                        uploaded_path = j['result_url']
+                        print(f"✅ Final result uploaded")
+            except Exception as e:
+                print(f"⚠️  Upload failed: {e}")
+
+        result = {
+            'path': uploaded_path or final_output,
+            'metadata': {
+                'video_id': video_id,
+                'total_segments': total_segments,
+                'total_frames': prepare_result['total_frames'],
+                'frames_with_watermark': prepare_result['frames_with_watermark'],
+                'fps': fps,
+                'width': prepare_result['width'],
+                'height': prepare_result['height'],
+            }
+        }
+
+        print(f"✅ Video finalized: {final_output}")
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
+        return result
+
+    except Exception as e:
+        print(f"❌ Error finalizing video: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.remove_video_distributed')
+def process_video_distributed_task(self, video_path):
+    """
+    DISTRIBUTED VIDEO PROCESSING - Main entry point
+
+    This task coordinates multiple workers across different machines to process
+    one video together. It uses Celery's chord pattern to:
+    1. Prepare video (YOLO detection, segmentation) - runs on one worker
+    2. Process segments in parallel - distributes across ALL available workers/GPUs
+    3. Finalize video (concatenate, merge audio) - runs on one worker
+
+    All workers (across all computers) will collaborate on the same video job.
+    """
+    try:
+        from celery import chain, chord, group
+
+        print(f"🚀 Starting DISTRIBUTED video processing: {video_path}")
+        print(f"   All available workers will collaborate on this video")
+
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Initializing distributed processing'})
+
+        # Phase 1: Prepare video (runs on one worker)
+        print("📋 Phase 1: Preparing video for distribution...")
+        prepare_result = prepare_video_task.apply_async(args=[video_path]).get()
+
+        if not prepare_result or 'segments' not in prepare_result:
+            raise RuntimeError("Video preparation failed")
+
+        segments = prepare_result['segments']
+        total_segments = len(segments)
+
+        print(f"✅ Video prepared: {total_segments} segments ready for distributed processing")
+        print(f"🌐 Distributing segments across all available workers...")
+
+        self.update_state(
+            state='PROCESSING',
+            meta={'progress': 50, 'status': f'Distributing {total_segments} segments across workers'}
+        )
+
+        # Add total_segments to each segment data
+        for seg_data in segments:
+            seg_data['total_segments'] = total_segments
+
+        # Phase 2: Process segments in parallel (distributes across ALL workers)
+        # Using chord: when all segment tasks complete, finalize task runs automatically
+        print(f"🔥 Phase 2: Processing {total_segments} segments in parallel...")
+
+        workflow = chord(
+            # Header: All segment processing tasks (run in parallel across all workers)
+            group([
+                process_segment_task.s(seg_data)
+                for seg_data in segments
+            ]),
+            # Callback: Finalization task (runs when all segments complete)
+            finalize_video_task.s(prepare_result)
+        )
+
+        # Execute the distributed workflow
+        result = workflow.apply_async()
+
+        print(f"📊 Workflow submitted:")
+        print(f"   - {total_segments} segment tasks queued")
+        print(f"   - Tasks will be picked up by ANY available worker")
+        print(f"   - Finalization will run automatically when all segments complete")
+
+        # Wait for the entire workflow to complete
+        final_result = result.get(timeout=3600)  # 1 hour timeout
+
+        print(f"✅ DISTRIBUTED processing complete!")
+        print(f"   Final video: {final_result.get('path')}")
+
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Distributed processing complete'})
+
+        return final_result
+
+    except Exception as e:
+        print(f"❌ Distributed processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+# ============================================================================
+# ORIGINAL MONOLITHIC TASKS (kept for backward compatibility)
+# ============================================================================
+
 @celery.task(bind=True, name='watermark.remove_image')
 def process_image_task(self, image_path):
     """
@@ -478,7 +1429,9 @@ def process_image_task(self, image_path):
         unique_suffix = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
 
         self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Detecting watermark'})
-        detections = det.detect(img, confidence_threshold=0.25, padding=0)
+        detection_start = performance_checkpoint("YOLO Detection")
+        detections = det.detect(img, confidence_threshold=0.20, padding=0)  # Lower threshold for faint watermarks (Sora optimized)
+        performance_checkpoint("YOLO Detection", detection_start)
 
         # If no detections, return original
         if not detections:
@@ -500,7 +1453,7 @@ def process_image_task(self, image_path):
             frame_path = os.path.join(frame_dir, f"{i:04d}.png")
             cv2.imwrite(frame_path, img)
 
-        # Generate mask
+        # Generate mask - precise detection like YOLO GOOD version
         mask = det.create_mask(img, detections)
         if mask is None or mask.size == 0:
             out_name = base_name + '_clean.png'
@@ -520,40 +1473,50 @@ def process_image_task(self, image_path):
             mask_path = os.path.join(mask_dir, f"{i:04d}.png")
             cv2.imwrite(mask_path, mask)
 
-        self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Running ProPainter with FP16'})
+        self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Running faster-propainter pipeline'})
 
-        # Run ProPainter on the frame sequence with FP16 optimization + speed settings
-        cmd = [
-            sys.executable,
-            PROPAINTER_SCRIPT,
-            '-i', frame_dir,
-            '-m', mask_dir,
-            '-o', PROPAINTER_OUTPUT_ROOT,
-            '--save_frames',  # Save individual frames
-            '--neighbor_length', '10',  # More neighbors than 3, images need less than video
-            '--ref_stride', '20',       # Reference stride tuned for coherence
-        ]
-
-        # Enable FP16 for 2x speedup
+        # Use direct faster-propainter pipeline instead of subprocess for 3x speedup
+        pipeline_start = performance_checkpoint("faster-propainter Pipeline")
         try:
+            # Import faster-propainter pipeline at runtime
+            import sys
+            faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+            if faster_propainter_path not in sys.path:
+                sys.path.insert(0, faster_propainter_path)
+            from watermark import pipeline as faster_propainter_pipeline
+            
             import torch
-            if torch.cuda.is_available():
-                cmd.append('--fp16')
-                print("✓ ProPainter optimized: FP16 + neighbor_length=10 + ref_stride=20")
-        except Exception:
-            print("✓ ProPainter optimized: neighbor_length=10 + ref_stride=20")
-            pass
-
-        print(f"Launching ProPainter for image: {' '.join(cmd)}")
-
-        import subprocess
-        result = subprocess.run(cmd, capture_output=True, text=True)
-
-        if result.returncode != 0:
-            print("❌ ProPainter failed")
-            print(result.stdout)
-            print(result.stderr)
-            raise RuntimeError("ProPainter inference failed")
+            use_fp16 = torch.cuda.is_available()
+            
+            print(f"🚀 Running direct faster-propainter pipeline: FP16={use_fp16} + neighbor_length=20 + ref_stride=10 + subvideo_length=80")
+            
+            # Direct pipeline call - TRUE FASTER-PROPAINTER SETTINGS
+            faster_propainter_pipeline(
+                video=frame_dir,                    # Input frame directory
+                mask=mask_dir,                      # Mask directory  
+                output=PROPAINTER_OUTPUT_ROOT,      # Output directory
+                resize_ratio=1.0,                   # Keep original resolution for images
+                mask_dilation=4,                    # faster-propainter: standard mask dilation
+                ref_stride=10,                      # faster-propainter: reduce references
+                neighbor_length=20,                 # faster-propainter: recommended neighbors for quality
+                subvideo_length=80,                 # faster-propainter: standard subvideo length
+                raft_iter=20,                       # faster-propainter: standard optical flow
+                mode="video_inpainting",            # Standard inpainting mode
+                save_frames=True,                   # Save individual frames
+                fp16=use_fp16                       # Enable FP16 if available
+            )
+            
+            print("✅ faster-propainter pipeline completed successfully")
+            performance_checkpoint("faster-propainter Pipeline", pipeline_start)
+            
+        except Exception as e:
+            print(f"❌ faster-propainter pipeline failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(f"faster-propainter pipeline failed: {e}")
+        finally:
+            # Clear GPU memory after processing
+            clear_gpu_memory()
 
         # Extract middle frame (frame 0001 out of 0000, 0001, 0002)
         # Frame directory name from ProPainter is the basename of input dir
@@ -696,10 +1659,10 @@ def process_video_task(self, video_path):
         last_valid_bbox = None
         frames_processed = 0
         frames_with_watermark = 0
-        detect_interval = 25  # Ultra-speed: detect every 25th frame
+        detect_interval = 3   # Detect every 3rd frame to catch movements
         warmup_frames = 60    # Detect every frame for first N frames or until first hit
         hit_found = False
-        det_conf = 0.15       # Aggressive: lower confidence threshold to catch faint logos
+        det_conf = 0.15       # Balanced confidence like YOLO GOOD version
 
         # Track bbox per frame for segmentation
         bboxes_per_frame = []
@@ -720,7 +1683,7 @@ def process_video_task(self, video_path):
 
             # Only run YOLO detection every Nth frame, but always during warmup until first hit
             if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
-                detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
+                detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)  # Precise detection like YOLO GOOD
                 active_detections = detections
                 actual_detections = actual_detections + 1 if 'actual_detections' in locals() else 1
 
@@ -759,6 +1722,7 @@ def process_video_task(self, video_path):
         print(f"   🎯 YOLO detections: {detections_run}/{frames_processed} frames (detect_interval={detect_interval})")
         print(f"   💧 Frames with watermark: {frames_with_watermark}")
 
+        # Detect position segments for smart cropping
         from segment_detector import detect_segments, merge_adjacent_segments, should_use_cropping
 
         segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
@@ -773,7 +1737,6 @@ def process_video_task(self, video_path):
 
         if use_cropping and segments:
             print("🚀 Smart cropping enabled - processing segments individually")
-            from crop_utils import calculate_crop_region, estimate_speedup
             import subprocess
 
             # Extract original frames once for merging later
@@ -784,131 +1747,159 @@ def process_video_task(self, video_path):
             extract_cmd = [
                 'ffmpeg', '-i', video_path,
                 '-qscale:v', '2',
+                '-start_number', '0',  # Start numbering at 0 to match frame indices
                 os.path.join(original_frames_dir, '%04d.png')
             ]
             subprocess.run(extract_cmd, capture_output=True, check=True)
 
-            segment_videos = []
+            segment_context = {
+                'base_name': base_name,
+                'unique_suffix': unique_suffix,
+                'width': width,
+                'height': height,
+                'fps': fps,
+                'mask_dir': mask_dir,
+                'original_frames_dir': original_frames_dir,
+            }
 
-            # Process each segment
-            for seg_idx, (start_frame, end_frame, seg_bbox) in enumerate(segments):
-                seg_duration = end_frame - start_frame + 1
-                print(f"\n🎬 Processing segment {seg_idx+1}/{len(segments)}: frames {start_frame}-{end_frame} ({seg_duration} frames)")
+            # Phase 1: ProPainter processing (GPU-bound, parallel across multiple GPUs)
+            segment_cleaned_dirs = [None] * len(segments)
+            segment_temp_dirs = [None] * len(segments)
 
-                # Calculate crop region with padding
-                crop_region = calculate_crop_region(seg_bbox, width, height, padding_ratio=0.2, min_size=128)
-                crop_x, crop_y, crop_w, crop_h = crop_region
-                speedup = estimate_speedup((width, height), (crop_w, crop_h))
-                print(f"   📐 Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h} (estimated {speedup:.1f}x speedup)")
+            # Determine number of GPUs available
+            num_gpus = min(SEGMENT_WORKERS, len(segments))
 
-                # Create directories for this segment
-                seg_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_frames")
-                seg_cropped_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_cropped")
-                seg_mask_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_masks")
-                seg_output_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_output")
-                seg_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}_cleaned")
+            print(f"🎨 Phase 1: ProPainter processing ({len(segments)} segments across {num_gpus} GPUs)")
+            print(f"   🚀 Each segment gets its own GPU for true parallel processing")
+            self.update_state(
+                state='PROCESSING',
+                meta={'progress': 55, 'status': f'ProPainter processing ({num_gpus} GPUs)'}
+            )
 
-                os.makedirs(seg_frames_dir, exist_ok=True)
-                os.makedirs(seg_cropped_dir, exist_ok=True)
-                os.makedirs(seg_mask_dir, exist_ok=True)
-                os.makedirs(seg_output_dir, exist_ok=True)
-                os.makedirs(seg_cleaned_dir, exist_ok=True)
+            if num_gpus > 1:
+                # Parallel processing with GPU assignment
+                completed = 0
+                print(f"🔥 Processing {len(segments)} segments in parallel across {num_gpus} GPUs...")
 
-                # Copy segment frames from original_frames_dir
-                for frame_idx in range(start_frame, end_frame + 1):
-                    src = os.path.join(original_frames_dir, f"{frame_idx:04d}.png")
-                    dst = os.path.join(seg_frames_dir, f"{frame_idx-start_frame:04d}.png")
-                    shutil.copy2(src, dst)
+                # Create process pool with GPU initialization
+                with ProcessPoolExecutor(max_workers=num_gpus) as executor:
+                    # Submit all segments with GPU assignment
+                    futures = {}
+                    for seg_idx in range(len(segments)):
+                        gpu_id = seg_idx % num_gpus  # Round-robin GPU assignment
+                        # Initialize worker with GPU, then process segment
+                        future = executor.submit(
+                            lambda idx, gpu, seg, ctx: (_init_gpu_worker(gpu), _process_propainter_segment(idx, len(segments), seg, ctx))[1],
+                            seg_idx,
+                            gpu_id,
+                            segments[seg_idx],
+                            segment_context
+                        )
+                        futures[future] = seg_idx
 
-                # Crop frames to watermark region
-                print(f"   ✂️  Cropping {seg_duration} frames to {crop_w}x{crop_h}...")
-                for frame_idx in range(seg_duration):
-                    frame_file = f"{frame_idx:04d}.png"
-                    frame = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-                    cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                    cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
+                    try:
+                        for future in as_completed(futures):
+                            seg_idx = futures[future]
+                            _, cleaned_dir, crop_info, temp_dirs = future.result()
+                            segment_cleaned_dirs[seg_idx] = cleaned_dir
+                            segment_temp_dirs[seg_idx] = temp_dirs
+                            completed += 1
+                            progress = 55 + int((completed / len(segments)) * 15)
+                            self.update_state(
+                                state='PROCESSING',
+                                meta={'progress': progress, 'status': f'ProPainter {completed}/{len(segments)} complete'}
+                            )
+                            print(f"✅ ProPainter segment {seg_idx+1}/{len(segments)} complete ({completed}/{len(segments)} total)")
+                    except Exception:
+                        for pending in futures:
+                            if not pending.done():
+                                pending.cancel()
+                        raise
+            else:
+                # Sequential fallback
+                for seg_idx, segment in enumerate(segments):
+                    _, cleaned_dir, crop_info, temp_dirs = _process_propainter_segment(seg_idx, len(segments), segment, segment_context)
+                    segment_cleaned_dirs[seg_idx] = cleaned_dir
+                    segment_temp_dirs[seg_idx] = temp_dirs
+                    progress = 55 + int(((seg_idx + 1) / len(segments)) * 15)
+                    self.update_state(
+                        state='PROCESSING',
+                        meta={'progress': progress, 'status': f'ProPainter segment {seg_idx+1}/{len(segments)}'}
+                    )
+                    print(f"✅ ProPainter segment {seg_idx+1}/{len(segments)} complete")
 
-                # Crop masks to watermark region
-                for frame_idx in range(start_frame, end_frame + 1):
-                    mask_file = f"{frame_idx:04d}.png"
-                    mask_src = os.path.join(mask_dir, mask_file)
-                    if os.path.exists(mask_src):
-                        mask = cv2.imread(mask_src, cv2.IMREAD_GRAYSCALE)
-                        cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                        cv2.imwrite(os.path.join(seg_mask_dir, f"{frame_idx-start_frame:04d}.png"), cropped_mask)
+            if any(d is None for d in segment_cleaned_dirs):
+                raise RuntimeError("One or more segments failed ProPainter processing")
 
-                # Run ProPainter on cropped segment
-                print(f"   🎨 Running ProPainter on cropped segment...")
-                progress = 55 + int((seg_idx / len(segments)) * 25)
-                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'ProPainter segment {seg_idx+1}/{len(segments)}'})
+            # Clear GPU memory after all ProPainter processing completes
+            print("🧹 Clearing GPU memory after ProPainter phase...")
+            clear_gpu_memory()
 
-                cmd = [
-                    sys.executable, PROPAINTER_SCRIPT,
-                    '-i', seg_cropped_dir,
-                    '-m', seg_mask_dir,
-                    '-o', seg_output_dir,
-                    '--save_frames',
-                    '--neighbor_length', '20',  # faster-propainter setting
-                    '--ref_stride', '10',       # faster-propainter setting
-                    '--raft_iter', '20',        # faster-propainter setting
-                    '--subvideo_length', '80',  # faster-propainter setting
-                ]
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        cmd.append('--fp16')
-                except Exception:
-                    pass
+            # Phase 2: Video encoding (CPU-bound, parallel)
+            max_workers = min(4, len(segments))  # Use up to 4 threads for encoding
+            print(f"\n🎞️  Phase 2: Video encoding ({len(segments)} segments in parallel, {max_workers} workers)")
+            self.update_state(
+                state='PROCESSING',
+                meta={'progress': 70, 'status': f'Encoding segments'}
+            )
 
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    print(f"❌ ProPainter failed on segment {seg_idx}")
-                    print(result.stderr)
-                    raise RuntimeError(f"ProPainter failed on segment {seg_idx}")
+            segment_videos = [None] * len(segments)
+            encode_context = {
+                'base_name': base_name,
+                'unique_suffix': unique_suffix,
+                'fps': fps
+            }
 
-                # Find ProPainter output frames
-                seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
-                if not os.path.exists(seg_propainter_frames):
-                    raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
+            if max_workers > 1:
+                completed = 0
+                print(f"🧵 Encoding {len(segments)} segments in parallel...")
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            _encode_segment,
+                            seg_idx,
+                            len(segments),
+                            segment_cleaned_dirs[seg_idx],
+                            encode_context,
+                            segment_temp_dirs[seg_idx]
+                        ): seg_idx
+                        for seg_idx in range(len(segments))
+                    }
+                    try:
+                        for future in as_completed(futures):
+                            seg_idx = futures[future]
+                            _, seg_video_path = future.result()
+                            segment_videos[seg_idx] = seg_video_path
+                            completed += 1
+                            progress = 70 + int((completed / len(segments)) * 10)
+                            self.update_state(
+                                state='PROCESSING',
+                                meta={'progress': progress, 'status': f'Encoding {completed}/{len(segments)} complete'}
+                            )
+                            print(f"✅ Encoded segment {seg_idx+1}/{len(segments)} ({completed}/{len(segments)} total)")
+                    except Exception:
+                        for pending in futures:
+                            if not pending.done():
+                                pending.cancel()
+                        raise
+            else:
+                for seg_idx in range(len(segments)):
+                    _, seg_video_path = _encode_segment(
+                        seg_idx,
+                        len(segments),
+                        segment_cleaned_dirs[seg_idx],
+                        encode_context,
+                        segment_temp_dirs[seg_idx]
+                    )
+                    segment_videos[seg_idx] = seg_video_path
+                    progress = 70 + int(((seg_idx + 1) / len(segments)) * 10)
+                    self.update_state(
+                        state='PROCESSING',
+                        meta={'progress': progress, 'status': f'Encoding segment {seg_idx+1}/{len(segments)}'}
+                    )
 
-                # Merge cleaned crops back to full frames
-                print(f"   🔗 Merging cleaned region back to full frames...")
-                for frame_idx in range(seg_duration):
-                    frame_file = f"{frame_idx:04d}.png"
-                    original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-                    cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
-
-                    if cleaned_crop is not None:
-                        result_frame = original.copy()
-                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
-                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
-                    else:
-                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
-
-                # Convert segment frames to video
-                seg_video_path = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}.mp4")
-                print(f"   🎞️  Encoding segment to video...")
-                encode_cmd = [
-                    'ffmpeg', '-y', '-framerate', str(fps),
-                    '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
-                    seg_video_path
-                ]
-                subprocess.run(encode_cmd, capture_output=True, check=True)
-                segment_videos.append(seg_video_path)
-
-                # Cleanup segment temp dirs
-                shutil.rmtree(seg_frames_dir, ignore_errors=True)
-                shutil.rmtree(seg_cropped_dir, ignore_errors=True)
-                shutil.rmtree(seg_mask_dir, ignore_errors=True)
-                shutil.rmtree(seg_output_dir, ignore_errors=True)
-                shutil.rmtree(seg_cleaned_dir, ignore_errors=True)
-
-                try:
-                    import torch
-                    torch.cuda.empty_cache()
-                except Exception:
-                    pass
+            if any(path is None for path in segment_videos):
+                raise RuntimeError("One or more segments failed encoding")
 
             # Concatenate all segments
             print(f"\n🎬 Concatenating {len(segment_videos)} segments...")
@@ -947,41 +1938,53 @@ def process_video_task(self, video_path):
 
             self.update_state(
                 state='PROCESSING',
-                meta={'progress': 55, 'status': 'Running ProPainter'}
+                meta={'progress': 55, 'status': 'Running faster-propainter pipeline'}
             )
 
-            cmd = [
-                sys.executable,
-                PROPAINTER_SCRIPT,
-                '-i', video_path,
-                '-m', mask_dir,
-                '-o', PROPAINTER_OUTPUT_ROOT,
-                '--save_fps', str(fps),
-                '--neighbor_length', '6',   # Ultra speed preset
-                '--ref_stride', '50',       # Very sparse references
-                '--raft_iter', '5',         # Minimal optical flow refinement
-                '--subvideo_length', '80',  # Faster subvideo length from faster-propainter
-                # No resize_ratio - full resolution for faster-propainter cropping
-            ]
             try:
+                # Import faster-propainter pipeline at runtime
+                import sys
+                faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+                if faster_propainter_path not in sys.path:
+                    sys.path.insert(0, faster_propainter_path)
+                from watermark import pipeline as faster_propainter_pipeline
+                
                 import torch
-                if torch.cuda.is_available():
-                    cmd.append('--fp16')
-                    print("✓ ProPainter ultra: FP16 + neighbor_length=6 + ref_stride=50 + raft_iter=5 + subvideo_length=80")
-            except Exception:
-                print("✓ ProPainter ultra: neighbor_length=6 + ref_stride=50 + raft_iter=5 + subvideo_length=80")
-                pass
-
-            print(f"Launching ProPainter: {' '.join(cmd)}")
-
-            import subprocess
-            result = subprocess.run(cmd, capture_output=True, text=True)
-
-            if result.returncode != 0:
-                print("❌ ProPainter failed")
-                print(result.stdout)
-                print(result.stderr)
-                raise RuntimeError("ProPainter inference failed")
+                use_fp16 = torch.cuda.is_available()
+                
+                # Dynamic optimization based on video resolution
+                dynamic_subvideo, _ = get_dynamic_subvideo_length(width, height)
+                
+                print(f"🚀 Direct faster-propainter pipeline: resolution={width}x{height}, FP16={use_fp16}")
+                print(f"   faster-propainter: neighbor_length=20 + ref_stride=10 + raft_iter=20 + subvideo_length=80 + flow_backend={PROPAINTER_FLOW_BACKEND}")
+                
+                # Direct pipeline call - TRUE FASTER-PROPAINTER SETTINGS
+                faster_propainter_pipeline(
+                    video=video_path,                   # Input video
+                    mask=mask_dir,                      # Mask directory
+                    output=PROPAINTER_OUTPUT_ROOT,      # Output directory
+                    resize_ratio=1.0,                   # Keep original resolution
+                    mask_dilation=4,                    # faster-propainter: standard mask dilation
+                    ref_stride=10,                      # faster-propainter: reduce references
+                    neighbor_length=20,                 # faster-propainter: recommended neighbors for quality
+                    subvideo_length=80,                 # faster-propainter: standard subvideo length
+                    raft_iter=20,                       # faster-propainter: standard optical flow
+                    mode="video_inpainting",            # Standard inpainting
+                    save_fps=fps,                       # Preserve original FPS
+                    save_frames=False,                  # Only save video, not frames
+                    fp16=use_fp16                       # FP16 if available
+                )
+                
+                print("✅ faster-propainter pipeline completed successfully")
+                
+            except Exception as e:
+                print(f"❌ faster-propainter pipeline failed: {e}")
+                import traceback
+                traceback.print_exc()
+                raise RuntimeError(f"faster-propainter pipeline failed: {e}")
+            finally:
+                # Clear GPU memory after full video processing
+                clear_gpu_memory()
 
             save_root = os.path.join(PROPAINTER_OUTPUT_ROOT, base_name)
             produced_video = os.path.join(save_root, 'inpaint_out.mp4')
@@ -1019,7 +2022,11 @@ def process_video_task(self, video_path):
                     '-i', video_path,
                     '-map', '0:v:0',
                     '-map', '1:a:0',
-                    '-c:v', 'copy',
+                    '-c:v', 'libx264',      # Re-encode video to ensure H.264
+                    '-preset', 'fast',      # Good balance of speed and quality
+                    '-crf', '18',           # High quality encoding
+                    '-pix_fmt', 'yuv420p',  # Windows Media Player compatibility
+                    '-profile:v', 'main',   # Broad compatibility profile
                     '-c:a', 'aac',
                     '-b:a', '192k',
                     '-shortest',
@@ -1030,7 +2037,11 @@ def process_video_task(self, video_path):
                     'ffmpeg',
                     '-y',
                     '-i', temp_processed,
-                    '-c', 'copy',
+                    '-c:v', 'libx264',      # Re-encode video to ensure H.264
+                    '-preset', 'fast',      # Good balance of speed and quality
+                    '-crf', '18',           # High quality encoding
+                    '-pix_fmt', 'yuv420p',  # Windows Media Player compatibility
+                    '-profile:v', 'main',   # Broad compatibility profile
                     final_output
                 ]
 
@@ -1909,6 +2920,77 @@ def upload_result():
         return jsonify({'status': 'success', 'result_url': f'/results/{safe_name}'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/upload-segment', methods=['POST', 'OPTIONS'])
+def upload_segment():
+    """
+    Upload a processed segment video from a distributed worker.
+    Used by process_segment_task to upload completed segment videos.
+
+    Request: multipart/form-data with 'file', 'video_id', 'seg_idx'
+    Response: { "status": "success", "segment_url": "/results/<filename>" }
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
+
+        video_id = request.form.get('video_id', '')
+        seg_idx = request.form.get('seg_idx', '')
+
+        safe_name = sanitize_filename(file.filename)
+        os.makedirs(RESULT_DIR, exist_ok=True)
+        dest = os.path.join(RESULT_DIR, safe_name)
+        file.save(dest)
+
+        print(f"✅ Received segment upload: video_id={video_id}, seg_idx={seg_idx}, file={safe_name}")
+
+        return jsonify({
+            'status': 'success',
+            'segment_url': f'/results/{safe_name}',
+            'video_id': video_id,
+            'seg_idx': seg_idx
+        })
+    except Exception as e:
+        print(f"❌ Segment upload error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/temp/<path:filepath>')
+def serve_temp_file(filepath):
+    """
+    Serve temporary files for distributed workers.
+    Allows workers to download shared frames, masks, etc.
+
+    Security: Only serve from TEMP_DIR, block path traversal
+    """
+    try:
+        # Sanitize path to prevent directory traversal
+        safe_path = os.path.normpath(filepath).lstrip('/')
+        full_path = os.path.join(TEMP_DIR, safe_path)
+
+        # Verify path is within TEMP_DIR
+        if not os.path.abspath(full_path).startswith(os.path.abspath(TEMP_DIR)):
+            return jsonify({'error': 'Access denied'}), 403
+
+        if not os.path.exists(full_path):
+            return jsonify({'error': 'File not found'}), 404
+
+        if os.path.isfile(full_path):
+            return send_file(full_path)
+        else:
+            return jsonify({'error': 'Not a file'}), 400
+
+    except Exception as e:
+        print(f"❌ Error serving temp file {filepath}: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/privacy')
