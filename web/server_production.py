@@ -2928,13 +2928,17 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
-                # Orchestrator task will replace itself with the workflow and
-                # keep this task id for status tracking and final result.
-                result = celery.send_task(
-                    'watermark.remove_video_distributed',
+                # Build chain on the server so the returned task_id tracks
+                # prepare -> segments (chord) -> finalize without in-task .get()
+                from celery import chain
+                sig_prepare = celery.signature(
+                    'watermark.prepare_video',
                     args=[video_path],
                     kwargs={'api_base': base, 'temp_base': base}
                 )
+                sig_launch = celery.signature('watermark._launch_segments')
+                workflow = chain(sig_prepare, sig_launch)
+                result = workflow.apply_async()
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
