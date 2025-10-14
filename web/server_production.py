@@ -2832,7 +2832,8 @@ def process_video():
             if ext in image_exts:
                 result = celery.send_task('watermark.remove_image', args=[video_path])
             else:
-                result = celery.send_task('watermark.remove_video', args=[video_path])
+                # Use distributed processing for videos (multiple workers collaborate on segments)
+                result = celery.send_task('watermark.remove_video_distributed', args=[video_path])
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
