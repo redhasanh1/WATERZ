@@ -1082,10 +1082,11 @@ def process_video_task(self, video_path):
             clear_gpu_memory()
 
             # Phase 2: Video encoding (CPU-bound, parallel)
-            print(f"\n🎞️  Phase 2: Video encoding ({len(segments)} segments in parallel)")
+            max_workers = min(4, len(segments))  # Use up to 4 threads for encoding
+            print(f"\n🎞️  Phase 2: Video encoding ({len(segments)} segments in parallel, {max_workers} workers)")
             self.update_state(
                 state='PROCESSING',
-                meta={'progress': 70, 'status': f'Encoding segments (workers={max_workers})'}
+                meta={'progress': 70, 'status': f'Encoding segments'}
             )
 
             segment_videos = [None] * len(segments)
