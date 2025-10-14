@@ -73,7 +73,7 @@ curl -L "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.
 
 # 7. SET ENVIRONMENT AND START WORKER
 export REDIS_URL=redis://:watermarkz_secure_2024@6.tcp.ngrok.io:11553/0
-python3 -m celery -A server_production.celery worker --loglevel=info --concurrency=1 --pool=solo
+python3 -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1
 
 STEP-BY-STEP DETAILED INSTRUCTIONS
 ===================================
@@ -181,7 +181,7 @@ STEP 8: START THE OPTIMIZED CLOUD WORKER
 Launch the worker with optimal settings:
 
 export REDIS_URL=redis://:watermarkz_secure_2024@6.tcp.ngrok.io:11553/0
-python3 -m celery -A server_production.celery worker --loglevel=info --concurrency=1 --pool=solo
+python3 -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1
 
 The worker should start and show:
 ✅ YOLO detector ready!

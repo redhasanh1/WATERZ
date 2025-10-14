@@ -2829,11 +2829,29 @@ def process_video():
             # Decide pipeline based on extension
             ext = os.path.splitext(video_path)[1].lower()
             image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+            # Resolve public base URL dynamically so workers can fetch uploads and temp files
+            def _current_public_base():
+                # Prefer env var, else read tunnel_url.txt endpoint/file logic used by the app
+                env_url = os.getenv('TUNNEL_URL')
+                if env_url:
+                    return env_url.strip()
+                try:
+                    # Try reading the file used by /tunnel_url.txt
+                    tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
+                    if os.path.exists(tunnel_file):
+                        with open(tunnel_file, 'r') as f:
+                            return f.read().strip()
+                except Exception:
+                    pass
+                return 'http://localhost:9000'
+
+            base = _current_public_base()
+
             if ext in image_exts:
                 result = celery.send_task('watermark.remove_image', args=[video_path])
             else:
                 # Use distributed processing for videos (multiple workers collaborate on segments)
-                result = celery.send_task('watermark.remove_video_distributed', args=[video_path])
+                result = celery.send_task('watermark.remove_video_distributed', args=[video_path], kwargs={'api_base': base, 'temp_base': base})
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 

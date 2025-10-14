@@ -550,6 +550,21 @@ def save_detection_debug(image, mask, detections, prefix):
 celery = Celery(app.name, broker=app.config['broker_url'], backend=app.config['result_backend'])
 celery.conf.update(app.config)
 
+
+def _get_int_env(var_name: str, default: int) -> int:
+    """Safely parse integer environment variables with fallback."""
+    try:
+        return int(os.getenv(var_name, default))
+    except (TypeError, ValueError):
+        print(f"⚠️  Invalid value for {var_name}, using default {default}")
+        return default
+
+
+CELERY_WORKER_POOL = os.getenv('CELERY_WORKER_POOL', 'threads')
+CELERY_WORKER_CONCURRENCY = _get_int_env('CELERY_WORKER_CONCURRENCY', 1)
+CELERY_WORKER_HEARTBEAT = _get_int_env('CELERY_WORKER_HEARTBEAT', 120)
+CELERY_WORKER_PROC_ALIVE_TIMEOUT = _get_int_env('CELERY_WORKER_PROC_ALIVE_TIMEOUT', max(CELERY_WORKER_HEARTBEAT * 2, 180))
+
 # Celery configuration for production
 celery.conf.update(
     task_serializer='json',
@@ -569,6 +584,15 @@ celery.conf.update(
     result_backend_transport_options={'socket_connect_timeout': 3},
     task_ignore_result=False,  # We need results for status tracking
     task_acks_late=True,
+    worker_pool=CELERY_WORKER_POOL,
+    worker_concurrency=CELERY_WORKER_CONCURRENCY,
+    worker_heartbeat=CELERY_WORKER_HEARTBEAT,
+    worker_proc_alive_timeout=CELERY_WORKER_PROC_ALIVE_TIMEOUT,
+)
+
+print(
+    f"⚙️  Celery worker pool: {CELERY_WORKER_POOL} "
+    f"(concurrency={CELERY_WORKER_CONCURRENCY}, heartbeat={CELERY_WORKER_HEARTBEAT}s)"
 )
 
 # Global model instances (lazy loaded)
@@ -673,7 +697,7 @@ def get_detector():
 # ============================================================================
 
 @celery.task(bind=True, name='watermark.prepare_video')
-def prepare_video_task(self, video_path):
+def prepare_video_task(self, video_path, api_base=None, temp_base=None):
     """
     Phase 1: Prepare video for distributed processing
     - Download video if needed
@@ -693,7 +717,8 @@ def prepare_video_task(self, video_path):
 
         # Download video if on remote worker
         if not os.path.exists(video_path):
-            tunnel = os.getenv('TUNNEL_URL')
+            # Prefer api_base supplied by caller (dynamic), else env TUNNEL_URL
+            tunnel = api_base or os.getenv('TUNNEL_URL')
             if tunnel:
                 try:
                     from urllib.parse import urljoin
@@ -811,16 +836,18 @@ def prepare_video_task(self, video_path):
             segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
             print("📊 No segments detected - processing entire video as one segment")
 
-        # Upload shared data to API server for other workers
-        tunnel = os.getenv('TUNNEL_URL')
-        if tunnel:
-            print(f"⬆️  Uploading shared data to API server for distributed access...")
-            # We'll use a simple approach: workers will download what they need via TUNNEL_URL
-            # No explicit upload needed - masks and frames are already in shared directories
+        # Provide a base URL so OTHER workers can fetch frames/masks
+        # Prefer explicit temp_base (from caller), else TEMP_BASE_URL env, else TUNNEL_URL
+        temp_base_url = temp_base or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
+        if temp_base_url:
+            print(f"🌐 Shared temp base set for workers: {temp_base_url.rstrip('/')}/temp/")
+        else:
+            print("⚠️  No TEMP_BASE_URL/TUNNEL_URL set; only the preparing worker can read local frames.")
 
         # Prepare segment data for distribution
         segment_tasks_data = []
         for seg_idx, (start_frame, end_frame, bbox) in enumerate(segments):
+            upload_filename = os.path.basename(video_path)
             segment_tasks_data.append({
                 'seg_idx': seg_idx,
                 'start_frame': start_frame,
@@ -833,6 +860,8 @@ def prepare_video_task(self, video_path):
                 'fps': fps,
                 'shared_mask_dir': shared_mask_dir,
                 'shared_frames_dir': shared_frames_dir,
+                'temp_base_url': temp_base_url,
+                'upload_filename': upload_filename,
             })
 
         result = {
@@ -848,6 +877,8 @@ def prepare_video_task(self, video_path):
             'frames_with_watermark': frames_with_watermark,
             'shared_mask_dir': shared_mask_dir,
             'shared_frames_dir': shared_frames_dir,
+            'api_base': api_base or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL'),
+            'temp_base_url': temp_base_url,
         }
 
         print(f"✅ Video prepared for distributed processing: {len(segments)} segments ready")
@@ -905,7 +936,8 @@ def process_segment_task(self, segment_data):
             os.makedirs(path, exist_ok=True)
 
         # Download required frames and masks from shared storage
-        tunnel = os.getenv('TUNNEL_URL')
+        # Use origin host's base URL (where prepare_video_task ran) if provided
+        origin_base = segment_data.get('temp_base_url') or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
         shared_mask_dir = segment_data.get('shared_mask_dir')
         shared_frames_dir = segment_data.get('shared_frames_dir')
 
@@ -923,10 +955,10 @@ def process_segment_task(self, segment_data):
                 dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
                 shutil.copy2(local_frame, dst)
                 frames_copied += 1
-            elif tunnel:
-                # Download from API server
+            elif origin_base:
+                # Download from the origin host (serving /temp/)
                 try:
-                    frame_url = f"{tunnel.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
+                    frame_url = f"{origin_base.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
                     r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
                     if r.ok:
                         dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
@@ -937,7 +969,45 @@ def process_segment_task(self, segment_data):
                     print(f"⚠️  Failed to download frame {frame_idx}: {e}")
 
         if frames_copied == 0:
-            raise RuntimeError(f"No frames downloaded for segment {seg_idx}")
+            # Fallback: fetch original video from API uploads and extract needed frames
+            api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
+            upload_filename = segment_data.get('upload_filename')
+            if api_base and upload_filename:
+                try:
+                    import requests
+                    video_url = f"{api_base.rstrip('/')}/uploads/{upload_filename}"
+                    print(f"   ⬇️  Fallback: downloading original for local extraction: {video_url}")
+                    r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                    r.raise_for_status()
+                    local_video = os.path.join(TEMP_DIR, f"seg_{seg_idx}_{upload_filename}")
+                    with open(local_video, 'wb') as f:
+                        f.write(r.content)
+
+                    # Extract only the needed frames [start_frame, end_frame]
+                    cap2 = cv2.VideoCapture(local_video)
+                    if not cap2.isOpened():
+                        raise RuntimeError("Fallback video open failed")
+                    idx = 0
+                    cur = 0
+                    while True:
+                        ret, frame = cap2.read()
+                        if not ret:
+                            break
+                        if cur > end_frame:
+                            break
+                        if cur >= start_frame:
+                            dst = os.path.join(seg_frames_dir, f"{idx:04d}.png")
+                            cv2.imwrite(dst, frame)
+                            idx += 1
+                    cap2.release()
+                    frames_copied = idx
+                    print(f"   ✅ Extracted {frames_copied} frames locally from original")
+                except Exception as e:
+                    print(f"❌ Fallback extraction failed: {e}")
+                    pass
+
+        if frames_copied == 0:
+            raise RuntimeError(f"No frames available for segment {seg_idx}")
 
         print(f"   ✅ Downloaded {frames_copied} frames")
 
@@ -965,9 +1035,9 @@ def process_segment_task(self, segment_data):
                     cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                     cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
                     masks_copied += 1
-            elif tunnel:
+            elif origin_base:
                 try:
-                    mask_url = f"{tunnel.rstrip('/')}/temp/propainter_masks/{base_name}_{video_id}/{mask_file}"
+                    mask_url = f"{origin_base.rstrip('/')}/temp/propainter_masks/{base_name}_{video_id}/{mask_file}"
                     r = requests.get(mask_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
                     if r.ok:
                         mask_data = np.frombuffer(r.content, dtype=np.uint8)
@@ -978,6 +1048,14 @@ def process_segment_task(self, segment_data):
                             masks_copied += 1
                 except Exception as e:
                     print(f"⚠️  Failed to download mask {frame_idx}: {e}")
+
+        if masks_copied == 0:
+            # Fallback: synthesize simple masks covering the cropped region
+            print("   ⚠️  No masks found; synthesizing rectangular masks over crop region")
+            for i in range(seg_duration):
+                synthetic = np.full((crop_h, crop_w), 255, dtype=np.uint8)
+                cv2.imwrite(os.path.join(seg_mask_dir, f"{i:04d}.png"), synthetic)
+            masks_copied = seg_duration
 
         print(f"   ✅ Prepared {masks_copied} masks")
 
@@ -1114,7 +1192,8 @@ def finalize_video_task(self, segment_results, prepare_result):
         segment_results = sorted(segment_results, key=lambda x: x['seg_idx'])
 
         # Download segment videos if needed
-        tunnel = os.getenv('TUNNEL_URL')
+        # Prefer api_base captured during prepare for consistent downloads
+        tunnel = prepare_result.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL')
         segment_videos = []
 
         print(f"📥 Collecting {total_segments} segment videos...")
@@ -1281,7 +1360,7 @@ def finalize_video_task(self, segment_results, prepare_result):
 
 
 @celery.task(bind=True, name='watermark.remove_video_distributed')
-def process_video_distributed_task(self, video_path):
+def process_video_distributed_task(self, video_path, api_base=None, temp_base=None):
     """
     DISTRIBUTED VIDEO PROCESSING - Main entry point
 
@@ -1303,7 +1382,7 @@ def process_video_distributed_task(self, video_path):
 
         # Phase 1: Prepare video (runs on one worker)
         print("📋 Phase 1: Preparing video for distribution...")
-        prepare_result = prepare_video_task.apply_async(args=[video_path]).get()
+        prepare_result = prepare_video_task.apply_async(args=[video_path], kwargs={'api_base': api_base, 'temp_base': temp_base}).get()
 
         if not prepare_result or 'segments' not in prepare_result:
             raise RuntimeError("Video preparation failed")
