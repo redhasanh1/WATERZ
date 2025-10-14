@@ -326,11 +326,11 @@ def performance_checkpoint(stage_name, start_time=None):
 def _process_propainter_segment(seg_idx, total_segments, segment, context):
     """
     Process a single smart-cropped segment with faster-propainter.
+    Returns frames directory ready for encoding.
 
-    Returns a tuple (seg_idx, segment_video_path).
+    Returns a tuple (seg_idx, seg_cleaned_dir, crop_info, temp_dirs_to_cleanup).
     """
     from crop_utils import calculate_crop_region, estimate_speedup
-    import subprocess
 
     start_frame, end_frame, seg_bbox = segment
     seg_duration = end_frame - start_frame + 1
@@ -339,7 +339,6 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
     unique_suffix = context['unique_suffix']
     width = context['width']
     height = context['height']
-    fps = context['fps']
     mask_dir = context['mask_dir']
     original_frames_dir = context['original_frames_dir']
 
@@ -356,7 +355,6 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
     seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
     seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
     seg_cleaned_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cleaned")
-    seg_video_path = os.path.join(TEMP_DIR, f"{seg_prefix}.mp4")
 
     for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
         os.makedirs(path, exist_ok=True)
@@ -430,8 +428,6 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
             import traceback
             traceback.print_exc()
             raise RuntimeError(f"faster-propainter failed on segment {seg_idx}: {exc}") from exc
-        finally:
-            clear_gpu_memory()
 
         seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
         if not os.path.exists(seg_propainter_frames):
@@ -450,7 +446,36 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
             elif original is not None:
                 cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
 
-        print(f"   🎞️  Encoding segment to video...")
+        # Return cleaned frames directory for later encoding
+        temp_dirs = [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir]
+        return seg_idx, seg_cleaned_dir, {'fps': context['fps']}, temp_dirs
+
+    except Exception as e:
+        # Cleanup on error
+        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+            shutil.rmtree(path, ignore_errors=True)
+        raise
+
+
+def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs_to_cleanup):
+    """
+    Encode a segment's cleaned frames to video (CPU-bound, runs in parallel).
+
+    Returns a tuple (seg_idx, seg_video_path).
+    """
+    import subprocess
+
+    base_name = context['base_name']
+    unique_suffix = context['unique_suffix']
+    fps = context['fps']
+
+    seg_prefix = f"{base_name}_{unique_suffix}_seg{seg_idx}"
+    seg_video_path = os.path.join(TEMP_DIR, f"{seg_prefix}.mp4")
+
+    seg_label = f"{seg_idx + 1}/{total_segments}"
+    print(f"   🎞️  Encoding segment {seg_label} to video...")
+
+    try:
         encode_cmd = [
             'ffmpeg', '-y', '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
@@ -461,13 +486,13 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
         ]
         subprocess.run(encode_cmd, capture_output=True, check=True)
 
+        print(f"   ✅ Segment {seg_label} encoded successfully")
         return seg_idx, seg_video_path
+
     finally:
-        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+        # Cleanup temp directories after encoding
+        for path in temp_dirs_to_cleanup + [seg_cleaned_dir]:
             shutil.rmtree(path, ignore_errors=True)
-        clear_gpu_memory()
-        import gc
-        gc.collect()
 
 
 def save_detection_debug(image, mask, detections, prefix):
@@ -1019,18 +1044,22 @@ def process_video_task(self, video_path):
                 'mask_dir': mask_dir,
                 'original_frames_dir': original_frames_dir,
             }
-            segment_videos = [None] * len(segments)
+
+            # Phase 1: ProPainter processing (GPU-bound, parallel)
+            segment_cleaned_dirs = [None] * len(segments)
+            segment_temp_dirs = [None] * len(segments)
             max_workers = min(SEGMENT_WORKERS, len(segments))
 
             print(f"⚙️  Segment worker pool size: {max_workers}")
+            print(f"🎨 Phase 1: ProPainter processing ({len(segments)} segments in parallel)")
             self.update_state(
                 state='PROCESSING',
-                meta={'progress': 55, 'status': f'faster-propainter segments (workers={max_workers})'}
+                meta={'progress': 55, 'status': f'ProPainter processing (workers={max_workers})'}
             )
 
             if max_workers > 1:
                 completed = 0
-                print(f"🧵 Processing {len(segments)} segments in parallel...")
+                print(f"🧵 Processing {len(segments)} segments with ProPainter in parallel...")
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
                         executor.submit(
@@ -1045,15 +1074,16 @@ def process_video_task(self, video_path):
                     try:
                         for future in as_completed(futures):
                             seg_idx = futures[future]
-                            _, seg_video_path = future.result()
-                            segment_videos[seg_idx] = seg_video_path
+                            _, cleaned_dir, crop_info, temp_dirs = future.result()
+                            segment_cleaned_dirs[seg_idx] = cleaned_dir
+                            segment_temp_dirs[seg_idx] = temp_dirs
                             completed += 1
-                            progress = 55 + int((completed / len(segments)) * 25)
+                            progress = 55 + int((completed / len(segments)) * 15)
                             self.update_state(
                                 state='PROCESSING',
-                                meta={'progress': progress, 'status': f'faster-propainter segments {completed}/{len(segments)}'}
+                                meta={'progress': progress, 'status': f'ProPainter {completed}/{len(segments)} complete'}
                             )
-                            print(f"✅ Segment {seg_idx+1}/{len(segments)} finished ({completed}/{len(segments)} total)")
+                            print(f"✅ ProPainter segment {seg_idx+1}/{len(segments)} complete ({completed}/{len(segments)} total)")
                     except Exception:
                         for pending in futures:
                             if not pending.done():
@@ -1061,16 +1091,86 @@ def process_video_task(self, video_path):
                         raise
             else:
                 for seg_idx, segment in enumerate(segments):
-                    _, seg_video_path = _process_propainter_segment(seg_idx, len(segments), segment, segment_context)
-                    segment_videos[seg_idx] = seg_video_path
-                    progress = 55 + int(((seg_idx + 1) / len(segments)) * 25)
+                    _, cleaned_dir, crop_info, temp_dirs = _process_propainter_segment(seg_idx, len(segments), segment, segment_context)
+                    segment_cleaned_dirs[seg_idx] = cleaned_dir
+                    segment_temp_dirs[seg_idx] = temp_dirs
+                    progress = 55 + int(((seg_idx + 1) / len(segments)) * 15)
                     self.update_state(
                         state='PROCESSING',
-                        meta={'progress': progress, 'status': f'faster-propainter segment {seg_idx+1}/{len(segments)}'}
+                        meta={'progress': progress, 'status': f'ProPainter segment {seg_idx+1}/{len(segments)}'}
+                    )
+
+            if any(d is None for d in segment_cleaned_dirs):
+                raise RuntimeError("One or more segments failed ProPainter processing")
+
+            # Clear GPU memory after all ProPainter processing completes
+            print("🧹 Clearing GPU memory after ProPainter phase...")
+            clear_gpu_memory()
+
+            # Phase 2: Video encoding (CPU-bound, parallel)
+            print(f"\n🎞️  Phase 2: Video encoding ({len(segments)} segments in parallel)")
+            self.update_state(
+                state='PROCESSING',
+                meta={'progress': 70, 'status': f'Encoding segments (workers={max_workers})'}
+            )
+
+            segment_videos = [None] * len(segments)
+            encode_context = {
+                'base_name': base_name,
+                'unique_suffix': unique_suffix,
+                'fps': fps
+            }
+
+            if max_workers > 1:
+                completed = 0
+                print(f"🧵 Encoding {len(segments)} segments in parallel...")
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            _encode_segment,
+                            seg_idx,
+                            len(segments),
+                            segment_cleaned_dirs[seg_idx],
+                            encode_context,
+                            segment_temp_dirs[seg_idx]
+                        ): seg_idx
+                        for seg_idx in range(len(segments))
+                    }
+                    try:
+                        for future in as_completed(futures):
+                            seg_idx = futures[future]
+                            _, seg_video_path = future.result()
+                            segment_videos[seg_idx] = seg_video_path
+                            completed += 1
+                            progress = 70 + int((completed / len(segments)) * 10)
+                            self.update_state(
+                                state='PROCESSING',
+                                meta={'progress': progress, 'status': f'Encoding {completed}/{len(segments)} complete'}
+                            )
+                            print(f"✅ Encoded segment {seg_idx+1}/{len(segments)} ({completed}/{len(segments)} total)")
+                    except Exception:
+                        for pending in futures:
+                            if not pending.done():
+                                pending.cancel()
+                        raise
+            else:
+                for seg_idx in range(len(segments)):
+                    _, seg_video_path = _encode_segment(
+                        seg_idx,
+                        len(segments),
+                        segment_cleaned_dirs[seg_idx],
+                        encode_context,
+                        segment_temp_dirs[seg_idx]
+                    )
+                    segment_videos[seg_idx] = seg_video_path
+                    progress = 70 + int(((seg_idx + 1) / len(segments)) * 10)
+                    self.update_state(
+                        state='PROCESSING',
+                        meta={'progress': progress, 'status': f'Encoding segment {seg_idx+1}/{len(segments)}'}
                     )
 
             if any(path is None for path in segment_videos):
-                raise RuntimeError("One or more segments failed to produce output")
+                raise RuntimeError("One or more segments failed encoding")
 
             # Concatenate all segments
             print(f"\n🎬 Concatenating {len(segment_videos)} segments...")
