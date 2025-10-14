@@ -1329,6 +1329,37 @@ def finalize_video_task(self, segment_results, prepare_result):
         raise
 
 
+@celery.task(bind=True, name='watermark._launch_segments')
+def launch_segments_task(self, prepare_result):
+    """Create a chord of segment tasks and replace this task with it.
+    The final result from finalize_video_task becomes this task's result.
+    """
+    try:
+        from celery import chord, group
+
+        if not prepare_result or 'segments' not in prepare_result:
+            raise RuntimeError("Video preparation failed")
+
+        segments = prepare_result['segments']
+        total_segments = len(segments)
+
+        # Add total_segments to each segment data
+        for seg in segments:
+            seg['total_segments'] = total_segments
+
+        print(f"🔥 Launching chord: {total_segments} segments in parallel...")
+        header = group([process_segment_task.s(seg) for seg in segments])
+        callback = finalize_video_task.s(prepare_result)
+
+        # Replace this task with the chord so its result becomes ours
+        raise self.replace(chord(header, callback))
+
+    except Exception as e:
+        print(f"❌ Segment launch failed: {e}")
+        import traceback; traceback.print_exc()
+        raise
+
+
 @celery.task(bind=True, name='watermark.remove_video_distributed')
 def process_video_distributed_task(self, video_path):
     """
