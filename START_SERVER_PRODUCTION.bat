@@ -27,6 +27,17 @@ echo WatermarkAI - Production API (Waitress)
 echo ================================================================
 echo Using PYTHONPATH: %PYTHONPATH%
 echo Using REDIS_URL : %REDIS_URL%
+REM Auto-load public base URL for workers (optional)
+if "%TUNNEL_URL%"=="" (
+  if exist "web\tunnel_url.txt" (
+    for /f "usebackq delims=" %%i in ("web\tunnel_url.txt") do set "TUNNEL_URL=%%i"
+  )
+)
+if not "%TUNNEL_URL%"=="" (
+  set "API_BASE_URL=%TUNNEL_URL%"
+  set "TEMP_BASE_URL=%TUNNEL_URL%"
+  echo Using TUNNEL_URL : %TUNNEL_URL%
+)
 echo.
 
 REM Activate venv if present
