@@ -1051,60 +1051,28 @@ def process_video_task(self, video_path):
                 'original_frames_dir': original_frames_dir,
             }
 
-            # Phase 1: ProPainter processing (GPU-bound, parallel)
+            # Phase 1: ProPainter processing (GPU-bound, sequential for model reuse)
             segment_cleaned_dirs = [None] * len(segments)
             segment_temp_dirs = [None] * len(segments)
-            max_workers = min(SEGMENT_WORKERS, len(segments))
 
-            print(f"⚙️  Segment worker pool size: {max_workers}")
-            print(f"🎨 Phase 1: ProPainter processing ({len(segments)} segments in parallel)")
+            print(f"🎨 Phase 1: ProPainter processing ({len(segments)} segments sequentially)")
+            print(f"   💡 Sequential processing allows model reuse and avoids CUDA contention")
             self.update_state(
                 state='PROCESSING',
-                meta={'progress': 55, 'status': f'ProPainter processing (workers={max_workers})'}
+                meta={'progress': 55, 'status': f'ProPainter processing'}
             )
 
-            if max_workers > 1:
-                completed = 0
-                print(f"🚀 Processing {len(segments)} segments with ProPainter in parallel (multi-process)...")
-                with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {
-                        executor.submit(
-                            _process_propainter_segment,
-                            seg_idx,
-                            len(segments),
-                            segments[seg_idx],
-                            segment_context
-                        ): seg_idx
-                        for seg_idx in range(len(segments))
-                    }
-                    try:
-                        for future in as_completed(futures):
-                            seg_idx = futures[future]
-                            _, cleaned_dir, crop_info, temp_dirs = future.result()
-                            segment_cleaned_dirs[seg_idx] = cleaned_dir
-                            segment_temp_dirs[seg_idx] = temp_dirs
-                            completed += 1
-                            progress = 55 + int((completed / len(segments)) * 15)
-                            self.update_state(
-                                state='PROCESSING',
-                                meta={'progress': progress, 'status': f'ProPainter {completed}/{len(segments)} complete'}
-                            )
-                            print(f"✅ ProPainter segment {seg_idx+1}/{len(segments)} complete ({completed}/{len(segments)} total)")
-                    except Exception:
-                        for pending in futures:
-                            if not pending.done():
-                                pending.cancel()
-                        raise
-            else:
-                for seg_idx, segment in enumerate(segments):
-                    _, cleaned_dir, crop_info, temp_dirs = _process_propainter_segment(seg_idx, len(segments), segment, segment_context)
-                    segment_cleaned_dirs[seg_idx] = cleaned_dir
-                    segment_temp_dirs[seg_idx] = temp_dirs
-                    progress = 55 + int(((seg_idx + 1) / len(segments)) * 15)
-                    self.update_state(
-                        state='PROCESSING',
-                        meta={'progress': progress, 'status': f'ProPainter segment {seg_idx+1}/{len(segments)}'}
-                    )
+            # Process segments sequentially to reuse loaded models
+            for seg_idx, segment in enumerate(segments):
+                _, cleaned_dir, crop_info, temp_dirs = _process_propainter_segment(seg_idx, len(segments), segment, segment_context)
+                segment_cleaned_dirs[seg_idx] = cleaned_dir
+                segment_temp_dirs[seg_idx] = temp_dirs
+                progress = 55 + int(((seg_idx + 1) / len(segments)) * 15)
+                self.update_state(
+                    state='PROCESSING',
+                    meta={'progress': progress, 'status': f'ProPainter segment {seg_idx+1}/{len(segments)}'}
+                )
+                print(f"✅ ProPainter segment {seg_idx+1}/{len(segments)} complete")
 
             if any(d is None for d in segment_cleaned_dirs):
                 raise RuntimeError("One or more segments failed ProPainter processing")
