@@ -2914,8 +2914,6 @@ def process_video():
             else:
                 # Use distributed processing for videos (multiple workers collaborate on segments)
                 # Build a Celery canvas chain on the server side to avoid any in-task blocking
-                from celery import chain
-
                 def _current_public_base():
                     env_url = os.getenv('TUNNEL_URL')
                     if env_url:
@@ -2930,15 +2928,13 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
-
-                sig_prepare = celery.signature(
-                    'watermark.prepare_video',
+                # Orchestrator task will replace itself with the workflow and
+                # keep this task id for status tracking and final result.
+                result = celery.send_task(
+                    'watermark.remove_video_distributed',
                     args=[video_path],
                     kwargs={'api_base': base, 'temp_base': base}
                 )
-                sig_launch = celery.signature('watermark._launch_segments')
-                workflow = chain(sig_prepare, sig_launch)
-                result = workflow.apply_async()
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
