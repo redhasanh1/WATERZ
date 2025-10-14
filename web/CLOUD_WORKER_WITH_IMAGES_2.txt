@@ -323,10 +323,21 @@ def performance_checkpoint(stage_name, start_time=None):
     return current_time
 
 
+def _init_gpu_worker(gpu_id):
+    """
+    Initialize worker process with specific GPU assignment.
+    Each worker gets exclusive access to one GPU.
+    """
+    import os
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    print(f"Worker initialized with GPU {gpu_id}")
+
+
 def _process_propainter_segment(seg_idx, total_segments, segment, context):
     """
     Process a single smart-cropped segment with faster-propainter.
     Returns frames directory ready for encoding.
+    Runs in separate process with assigned GPU via CUDA_VISIBLE_DEVICES.
 
     Returns a tuple (seg_idx, seg_cleaned_dir, crop_info, temp_dirs_to_cleanup).
     """
@@ -1051,28 +1062,71 @@ def process_video_task(self, video_path):
                 'original_frames_dir': original_frames_dir,
             }
 
-            # Phase 1: ProPainter processing (GPU-bound, sequential for model reuse)
+            # Phase 1: ProPainter processing (GPU-bound, parallel across multiple GPUs)
             segment_cleaned_dirs = [None] * len(segments)
             segment_temp_dirs = [None] * len(segments)
 
-            print(f"🎨 Phase 1: ProPainter processing ({len(segments)} segments sequentially)")
-            print(f"   💡 Sequential processing allows model reuse and avoids CUDA contention")
+            # Determine number of GPUs available
+            num_gpus = min(SEGMENT_WORKERS, len(segments))
+
+            print(f"🎨 Phase 1: ProPainter processing ({len(segments)} segments across {num_gpus} GPUs)")
+            print(f"   🚀 Each segment gets its own GPU for true parallel processing")
             self.update_state(
                 state='PROCESSING',
-                meta={'progress': 55, 'status': f'ProPainter processing'}
+                meta={'progress': 55, 'status': f'ProPainter processing ({num_gpus} GPUs)'}
             )
 
-            # Process segments sequentially to reuse loaded models
-            for seg_idx, segment in enumerate(segments):
-                _, cleaned_dir, crop_info, temp_dirs = _process_propainter_segment(seg_idx, len(segments), segment, segment_context)
-                segment_cleaned_dirs[seg_idx] = cleaned_dir
-                segment_temp_dirs[seg_idx] = temp_dirs
-                progress = 55 + int(((seg_idx + 1) / len(segments)) * 15)
-                self.update_state(
-                    state='PROCESSING',
-                    meta={'progress': progress, 'status': f'ProPainter segment {seg_idx+1}/{len(segments)}'}
-                )
-                print(f"✅ ProPainter segment {seg_idx+1}/{len(segments)} complete")
+            if num_gpus > 1:
+                # Parallel processing with GPU assignment
+                completed = 0
+                print(f"🔥 Processing {len(segments)} segments in parallel across {num_gpus} GPUs...")
+
+                # Create process pool with GPU initialization
+                with ProcessPoolExecutor(max_workers=num_gpus) as executor:
+                    # Submit all segments with GPU assignment
+                    futures = {}
+                    for seg_idx in range(len(segments)):
+                        gpu_id = seg_idx % num_gpus  # Round-robin GPU assignment
+                        # Initialize worker with GPU, then process segment
+                        future = executor.submit(
+                            lambda idx, gpu, seg, ctx: (_init_gpu_worker(gpu), _process_propainter_segment(idx, len(segments), seg, ctx))[1],
+                            seg_idx,
+                            gpu_id,
+                            segments[seg_idx],
+                            segment_context
+                        )
+                        futures[future] = seg_idx
+
+                    try:
+                        for future in as_completed(futures):
+                            seg_idx = futures[future]
+                            _, cleaned_dir, crop_info, temp_dirs = future.result()
+                            segment_cleaned_dirs[seg_idx] = cleaned_dir
+                            segment_temp_dirs[seg_idx] = temp_dirs
+                            completed += 1
+                            progress = 55 + int((completed / len(segments)) * 15)
+                            self.update_state(
+                                state='PROCESSING',
+                                meta={'progress': progress, 'status': f'ProPainter {completed}/{len(segments)} complete'}
+                            )
+                            print(f"✅ ProPainter segment {seg_idx+1}/{len(segments)} complete ({completed}/{len(segments)} total)")
+                    except Exception:
+                        for pending in futures:
+                            if not pending.done():
+                                pending.cancel()
+                        raise
+            else:
+                # Sequential fallback
+                for seg_idx, segment in enumerate(segments):
+                    _, cleaned_dir, crop_info, temp_dirs = _process_propainter_segment(seg_idx, len(segments), segment, segment_context)
+                    segment_cleaned_dirs[seg_idx] = cleaned_dir
+                    segment_temp_dirs[seg_idx] = temp_dirs
+                    progress = 55 + int(((seg_idx + 1) / len(segments)) * 15)
+                    self.update_state(
+                        state='PROCESSING',
+                        meta={'progress': progress, 'status': f'ProPainter segment {seg_idx+1}/{len(segments)}'}
+                    )
+                    print(f"✅ ProPainter segment {seg_idx+1}/{len(segments)} complete")
 
             if any(d is None for d in segment_cleaned_dirs):
                 raise RuntimeError("One or more segments failed ProPainter processing")
