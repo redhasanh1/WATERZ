@@ -1413,6 +1413,14 @@ def process_video_distributed_task(self, video_path, api_base=None, temp_base=No
         raise self.replace(workflow)
 
     except Exception as e:
+        # When using self.replace Celery raises Ignore to signal replacement.
+        # Don't log that as a failure to avoid confusion in logs.
+        try:
+            from celery.exceptions import Ignore
+            if isinstance(e, Ignore):
+                raise
+        except Exception:
+            pass
         print(f"❌ Distributed processing failed: {e}")
         import traceback; traceback.print_exc()
         raise
