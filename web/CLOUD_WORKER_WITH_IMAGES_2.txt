@@ -407,25 +407,23 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
 
             print(f"   🚀 Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=20, ref_stride=10, subvideo_length=80, FP16={use_fp16}")
 
-            # Acquire GPU lock to serialize ProPainter processing (prevents model reloading)
-            print(f"   ⏳ Waiting for GPU access...")
-            with GPU_SEMAPHORE:
-                print(f"   🔓 GPU acquired, processing segment {seg_idx+1}")
-                faster_propainter_pipeline(
-                    video=seg_cropped_dir,
-                    mask=seg_mask_dir,
-                    output=seg_output_dir,
-                    resize_ratio=1.0,
-                    mask_dilation=4,
-                    ref_stride=10,
-                    neighbor_length=20,
-                    subvideo_length=80,
-                    raft_iter=20,
-                    mode="video_inpainting",
-                    save_frames=True,
-                    fp16=use_fp16
-                )
-                print(f"   ✅ faster-propainter segment {seg_idx+1} completed, releasing GPU")
+            # Each process gets its own CUDA context for true parallel processing
+            faster_propainter_pipeline(
+                video=seg_cropped_dir,
+                mask=seg_mask_dir,
+                output=seg_output_dir,
+                resize_ratio=1.0,
+                mask_dilation=4,
+                ref_stride=10,
+                neighbor_length=20,
+                subvideo_length=80,
+                raft_iter=20,
+                mode="video_inpainting",
+                save_frames=True,
+                fp16=use_fp16
+            )
+
+            print(f"   ✅ faster-propainter segment {seg_idx+1} completed")
 
         except Exception as exc:
             print(f"❌ faster-propainter failed on segment {seg_idx}: {exc}")
@@ -566,9 +564,9 @@ celery.conf.update(
 detector = None
 propainter_ready = False
 
-# Global ProPainter GPU lock (serialize GPU access to prevent model reloading)
-# Only 1 thread can use GPU at a time to avoid CUDA contention
-GPU_SEMAPHORE = threading.Semaphore(1)
+# Use multiprocessing for true parallel GPU processing
+# Each process gets its own CUDA context and model instances
+from concurrent.futures import ProcessPoolExecutor
 
 # File cleanup - delete files older than 1 hour
 def cleanup_old_files():
@@ -1067,8 +1065,8 @@ def process_video_task(self, video_path):
 
             if max_workers > 1:
                 completed = 0
-                print(f"🧵 Processing {len(segments)} segments with ProPainter in parallel...")
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                print(f"🚀 Processing {len(segments)} segments with ProPainter in parallel (multi-process)...")
+                with ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
                         executor.submit(
                             _process_propainter_segment,
