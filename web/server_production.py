@@ -799,7 +799,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
         ]
         subprocess.run(extract_cmd, capture_output=True, check=True)
 
-        # Detect segments
+        # Detect segments (by watermark position changes)
         from segment_detector import detect_segments, merge_adjacent_segments
         segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
         if segments:
@@ -811,6 +811,36 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
             # No segments detected - treat entire video as one segment
             segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
             print("📊 No segments detected - processing entire video as one segment")
+
+        # Optional: force time-based splitting to ensure multi-GPU distribution
+        try:
+            import math
+            min_segments = int(os.getenv('MIN_SEGMENTS', '0'))
+            min_chunk_frames = int(os.getenv('MIN_CHUNK_FRAMES', '60'))
+        except Exception:
+            min_segments = 0
+            min_chunk_frames = 60
+
+        if min_segments and len(segments) < min_segments and frames_processed >= min_chunk_frames:
+            # Split the longest segment or the only segment into at least min_segments time chunks
+            # Use its bbox (or last_valid_bbox or full-frame) for all chunks
+            base_seg = max(segments, key=lambda s: (s[1]-s[0]+1)) if segments else (0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])
+            s0, e0, bb = base_seg
+            duration = e0 - s0 + 1
+            num_chunks = min_segments
+            chunk = max(min_chunk_frames, math.ceil(duration / num_chunks))
+            new_segments = []
+            cur = s0
+            while cur <= e0:
+                end = min(e0, cur + chunk - 1)
+                new_segments.append((cur, end, bb if bb else [0,0,width,height]))
+                cur = end + 1
+                if len(new_segments) >= num_chunks and end < e0:
+                    # If more frames remain after hitting desired count, extend last chunk
+                    new_segments[-1] = (new_segments[-1][0], e0, new_segments[-1][2])
+                    break
+            segments = new_segments
+            print(f"🪓 Force-split enabled: created {len(segments)} time chunks (chunk≈{chunk} frames)")
 
         # Provide a base URL so OTHER workers can fetch frames/masks from this host
         temp_base_url = temp_base or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
@@ -2931,13 +2961,11 @@ def process_video():
                 # Build chain on the server so the returned task_id tracks
                 # prepare -> segments (chord) -> finalize without in-task .get()
                 from celery import chain
-                sig_prepare = celery.signature(
-                    'watermark.prepare_video',
-                    args=[video_path],
-                    kwargs={'api_base': base, 'temp_base': base}
+                # Use bound task signatures to avoid unknown-task issues
+                workflow = chain(
+                    prepare_video_task.s(video_path, api_base=base, temp_base=base),
+                    launch_segments_task.s(),
                 )
-                sig_launch = celery.signature('watermark._launch_segments')
-                workflow = chain(sig_prepare, sig_launch)
                 result = workflow.apply_async()
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})

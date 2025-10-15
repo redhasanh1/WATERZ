@@ -836,6 +836,33 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
             segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
             print("📊 No segments detected - processing entire video as one segment")
 
+        # Optional: force time-based splitting to ensure multi-GPU distribution
+        try:
+            import math
+            min_segments = int(os.getenv('MIN_SEGMENTS', '0'))
+            min_chunk_frames = int(os.getenv('MIN_CHUNK_FRAMES', '60'))
+        except Exception:
+            min_segments = 0
+            min_chunk_frames = 60
+
+        if min_segments and len(segments) < min_segments and frames_processed >= min_chunk_frames:
+            base_seg = max(segments, key=lambda s: (s[1]-s[0]+1)) if segments else (0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])
+            s0, e0, bb = base_seg
+            duration = e0 - s0 + 1
+            num_chunks = min_segments
+            chunk = max(min_chunk_frames, math.ceil(duration / num_chunks))
+            new_segments = []
+            cur = s0
+            while cur <= e0:
+                end = min(e0, cur + chunk - 1)
+                new_segments.append((cur, end, bb if bb else [0,0,width,height]))
+                cur = end + 1
+                if len(new_segments) >= num_chunks and end < e0:
+                    new_segments[-1] = (new_segments[-1][0], e0, new_segments[-1][2])
+                    break
+            segments = new_segments
+            print(f"🪓 Force-split enabled: created {len(segments)} time chunks (chunk≈{chunk} frames)")
+
         # Provide a base URL so OTHER workers can fetch frames/masks
         # Prefer explicit temp_base (from caller), else TEMP_BASE_URL env, else TUNNEL_URL
         temp_base_url = temp_base or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
