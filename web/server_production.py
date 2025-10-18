@@ -3000,12 +3000,13 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
-                # Use distributed task which coordinates: prepare -> [segments in parallel] -> finalize
-                # This task handles the entire workflow and returns when complete
-                result = process_video_distributed_task.apply_async(
-                    args=[video_path],
-                    kwargs={'api_base': base, 'temp_base': base}
-                )
+                # Use Celery chain pattern for distributed processing:
+                # prepare_video_task → launch_segments_task (creates chord) → [segments in parallel] → finalize_video_task
+                from celery import chain
+                result = chain(
+                    prepare_video_task.s(video_path, api_base=base, temp_base=base),
+                    launch_segments_task.s()
+                ).apply_async()
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
