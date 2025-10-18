@@ -1229,7 +1229,9 @@ def process_segment_task(self, segment_data):
         }
 
         print(f"✅ Segment {seg_idx+1}/{total_segments} complete!")
-        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': f'Segment {seg_idx+1} complete'})
+
+        # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
+        # Celery automatically sets state to SUCCESS when the task returns normally
 
         # Track completion in Redis for manual coordination
         tracking_key = segment_data.get('tracking_key')
@@ -1304,6 +1306,14 @@ def finalize_video_task(self, segment_results, prepare_result):
     - Upload final result
     """
     try:
+        # DEBUG: Log what we received
+        print(f"\n🔍 DEBUG finalize_video_task:")
+        print(f"   segment_results type: {type(segment_results)}")
+        print(f"   segment_results length: {len(segment_results) if isinstance(segment_results, list) else 'N/A'}")
+        if isinstance(segment_results, list) and len(segment_results) > 0:
+            print(f"   First result type: {type(segment_results[0])}")
+            print(f"   First result: {segment_results[0]}")
+
         video_id = prepare_result['video_id']
         base_name = prepare_result['base_name']
         video_path = prepare_result['video_path']
