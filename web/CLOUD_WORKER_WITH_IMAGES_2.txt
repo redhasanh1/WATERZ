@@ -906,29 +906,35 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
 
         print(f"✅ Video prepared for distributed processing: {len(segments)} segments ready")
 
-        # Launch chord directly to distribute segments across all workers
-        from celery import chord, group
+        # Manually dispatch each segment task to guarantee they all get queued
+        # This is more reliable than chord with solo pool
+        print(f"🔥 Dispatching {len(segments)} segment tasks manually across all workers...")
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
 
         # Add total_segments to each segment data
         for seg in segment_tasks_data:
             seg['total_segments'] = len(segments)
 
-        print(f"🔥 Launching chord: {len(segments)} segments in parallel across all workers...")
-        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Launching {len(segments)} parallel tasks'})
+        # Dispatch each segment task individually - guarantees queue delivery
+        segment_tasks = []
+        for seg_data in segment_tasks_data:
+            task = process_segment_task.apply_async(args=[seg_data])
+            segment_tasks.append(task.id)
+            print(f"   ✅ Segment {seg_data['seg_idx']+1} task queued: {task.id}")
 
-        # Create chord: all segment tasks run in parallel, then finalize runs when all complete
-        header = group([process_segment_task.s(seg) for seg in segment_tasks_data])
-        callback = finalize_video_task.s(result)
+        print(f"✅ All {len(segments)} segment tasks dispatched to queue!")
+        print(f"   Workers will grab and process them in parallel")
 
-        # Apply the chord asynchronously - this dispatches tasks to queue immediately
-        chord_result = chord(header, callback).apply_async()
+        # Launch coordinator task that waits for all segments then calls finalize
+        coordinator_result = coordinate_segments_task.apply_async(
+            args=[segment_tasks, result]
+        )
 
-        print(f"✅ Chord launched with task ID: {chord_result.id}")
-        print(f"   Segment tasks dispatched to queue - workers will grab them")
+        print(f"✅ Coordinator task launched: {coordinator_result.id}")
 
-        # Return chord ID for frontend tracking
+        # Return coordinator ID for frontend tracking
         return {
-            'chord_id': chord_result.id,
+            'chord_id': coordinator_result.id,
             'status': 'processing',
             'message': f'Distributed processing started: {len(segments)} segments across all workers'
         }
@@ -1401,6 +1407,56 @@ def finalize_video_task(self, segment_results, prepare_result):
 
     except Exception as e:
         print(f"❌ Error finalizing video: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.coordinate_segments')
+def coordinate_segments_task(self, segment_task_ids, prepare_result):
+    """
+    Coordinator task that waits for all segment tasks to complete,
+    then triggers finalize_video_task.
+
+    This replaces chord functionality with reliable manual coordination.
+    """
+    try:
+        from celery.result import AsyncResult
+
+        total_segments = len(segment_task_ids)
+        print(f"📊 Coordinator: Waiting for {total_segments} segment tasks to complete...")
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': f'Waiting for {total_segments} segments'})
+
+        # Wait for all segment tasks to complete
+        segment_results = []
+        for i, task_id in enumerate(segment_task_ids):
+            print(f"   ⏳ Waiting for segment task {i+1}/{total_segments}: {task_id}")
+            task_result = AsyncResult(task_id, app=celery)
+
+            # Wait for this segment to complete (blocks, but doesn't block workers from processing)
+            result = task_result.get(timeout=3600)  # 1 hour timeout per segment
+            segment_results.append(result)
+
+            progress = int((i + 1) / total_segments * 80)
+            self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'{i+1}/{total_segments} segments complete'})
+            print(f"   ✅ Segment {i+1}/{total_segments} complete!")
+
+        print(f"✅ All {total_segments} segments complete! Launching finalize task...")
+        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Finalizing video'})
+
+        # All segments done - now finalize
+        final_result = finalize_video_task.apply_async(args=[segment_results, prepare_result])
+
+        # Wait for finalize to complete
+        final_output = final_result.get(timeout=600)  # 10 minute timeout
+
+        print(f"✅ Video processing complete!")
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
+
+        return final_output
+
+    except Exception as e:
+        print(f"❌ Coordinator failed: {e}")
         import traceback
         traceback.print_exc()
         raise
