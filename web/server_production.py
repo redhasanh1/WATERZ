@@ -179,8 +179,7 @@ def health_check():
     """Basic health endpoint for monitoring."""
     return jsonify({
         'status': 'ok',
-        'detector_loaded': detector is not None,
-        'propainter_ready': _check_propainter_assets()
+        'message': 'Flask API server running - workers handle processing'
     })
 
 # Security headers middleware
@@ -661,6 +660,7 @@ def _check_propainter_assets() -> bool:
 def get_detector():
     """
     Lazy load the YOLO detector (TensorRT if available).
+    Note: This is used by Celery workers on cloud machines, not the local Flask server.
     """
     global detector
 
@@ -674,6 +674,7 @@ def get_detector():
         print("✅ YOLO detector ready!")
         print("=" * 60)
 
+    # Check ProPainter assets (only matters on cloud workers)
     _check_propainter_assets()
     return detector
 
@@ -2438,6 +2439,7 @@ def get_status(task_id):
                     chord_id = result_data['chord_id']
                     print(f"🔄 Prepare task complete, switching to chord tracking: {chord_id}")
                     # Tell frontend to switch to tracking the chord instead
+                    # Frontend expects HTTP 409 status code to detect task switching
                     response['state'] = 'PROCESSING'
                     response['progress'] = result_data.get('message', 'Processing segments in parallel')
                     response['info'] = {
@@ -2446,7 +2448,7 @@ def get_status(task_id):
                     }
                     response['stale'] = True  # Frontend recognizes this pattern
                     response['current_task_id'] = chord_id  # Frontend will switch to this task_id
-                    return jsonify(response)
+                    return jsonify(response), 409  # HTTP 409 Conflict - task superseded
 
                 result_path = result_data.get('path')
                 if not result_path:
