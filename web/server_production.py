@@ -902,8 +902,35 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
         }
 
         print(f"✅ Video prepared for distributed processing: {len(segments)} segments ready")
-        self.update_state(state='SUCCESS', meta={'progress': 50, 'status': 'Ready for processing'})
-        return result
+
+        # Launch chord directly to distribute segments across all workers
+        from celery import chord, group
+
+        # Add total_segments to each segment data
+        for seg in segment_tasks_data:
+            seg['total_segments'] = len(segments)
+
+        print(f"🔥 Launching chord: {len(segments)} segments in parallel across all workers...")
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Launching {len(segments)} parallel tasks'})
+
+        # Create chord: all segment tasks run in parallel, then finalize runs when all complete
+        header = group([process_segment_task.s(seg) for seg in segment_tasks_data])
+        callback = finalize_video_task.s(result)
+
+        # Apply the chord and return its task ID
+        # This will distribute segment tasks to all available workers immediately
+        chord_result = chord(header, callback).apply_async()
+
+        print(f"✅ Chord launched with task ID: {chord_result.id}")
+        print(f"   Segment tasks will be distributed to all available workers")
+
+        # Return a dict with the chord_id so the API can track it
+        # The chord will handle the actual processing and return the final video
+        return {
+            'chord_id': chord_result.id,
+            'status': 'processing',
+            'message': f'Distributed processing started: {len(segments)} segments across all workers'
+        }
 
     except Exception as e:
         print(f"❌ Error preparing video: {e}")
