@@ -906,9 +906,32 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
 
         print(f"✅ Video prepared for distributed processing: {len(segments)} segments ready")
 
-        # Return the result dict with all segment data
-        # The caller (process_video_distributed_task) will create the chord
-        return result
+        # Launch chord directly to distribute segments across all workers
+        from celery import chord, group
+
+        # Add total_segments to each segment data
+        for seg in segment_tasks_data:
+            seg['total_segments'] = len(segments)
+
+        print(f"🔥 Launching chord: {len(segments)} segments in parallel across all workers...")
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Launching {len(segments)} parallel tasks'})
+
+        # Create chord: all segment tasks run in parallel, then finalize runs when all complete
+        header = group([process_segment_task.s(seg) for seg in segment_tasks_data])
+        callback = finalize_video_task.s(result)
+
+        # Apply the chord asynchronously - this dispatches tasks to queue immediately
+        chord_result = chord(header, callback).apply_async()
+
+        print(f"✅ Chord launched with task ID: {chord_result.id}")
+        print(f"   Segment tasks dispatched to queue - workers will grab them")
+
+        # Return chord ID for frontend tracking
+        return {
+            'chord_id': chord_result.id,
+            'status': 'processing',
+            'message': f'Distributed processing started: {len(segments)} segments across all workers'
+        }
 
     except Exception as e:
         print(f"❌ Error preparing video: {e}")
@@ -3012,13 +3035,12 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
-                # Use Celery chain pattern for distributed processing:
-                # prepare_video_task → launch_segments_task (creates chord) → [segments in parallel] → finalize_video_task
-                from celery import chain
-                result = chain(
-                    prepare_video_task.s(video_path, api_base=base, temp_base=base),
-                    launch_segments_task.s()
-                ).apply_async()
+                # Call prepare_video_task which creates the chord internally
+                # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize
+                result = prepare_video_task.apply_async(
+                    args=[video_path],
+                    kwargs={'api_base': base, 'temp_base': base}
+                )
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
