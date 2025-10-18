@@ -1124,50 +1124,35 @@ def process_segment_task(self, segment_data):
 
         print(f"   ✅ Prepared {masks_copied} masks")
 
-        # Run ProPainter on this segment using subprocess wrapper
-        # This allows the Celery worker to immediately return to polling the queue
-        # for more tasks while ProPainter runs in a separate process
-        print(f"   🎨 Running ProPainter (subprocess)...")
+        # Run ProPainter on this segment - threads pool allows parallel task pickup
+        print(f"   🎨 Running ProPainter...")
         self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
 
         try:
+            faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+            if faster_propainter_path not in sys.path:
+                sys.path.insert(0, faster_propainter_path)
+            from watermark import pipeline as faster_propainter_pipeline
+
             import torch
             use_fp16 = torch.cuda.is_available()
 
-            # Build subprocess command
-            propainter_subprocess = os.path.join(SCRIPT_DIR, 'run_propainter_subprocess.py')
-            cmd = [
-                sys.executable,
-                propainter_subprocess,
-                '--frames_dir', seg_cropped_dir,
-                '--masks_dir', seg_mask_dir,
-                '--output_dir', seg_output_dir,
-                '--flow_backend', PROPAINTER_FLOW_BACKEND,
-                '--neighbor_length', '10',
-                '--ref_stride', '10',
-                '--raft_iter', '20',
-            ]
-            if use_fp16:
-                cmd.append('--fp16')
-
-            print(f"   🚀 Spawning ProPainter subprocess...")
-            print(f"      Command: {' '.join(cmd)}")
-
-            # Run in subprocess - worker is now free to poll queue for more tasks!
-            import subprocess
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-
-            if result.returncode != 0:
-                print(f"❌ ProPainter subprocess failed (exit code {result.returncode})")
-                print(f"STDOUT:\n{result.stdout}")
-                print(f"STDERR:\n{result.stderr}")
-                raise RuntimeError(f"ProPainter subprocess failed with exit code {result.returncode}")
+            faster_propainter_pipeline(
+                video=seg_cropped_dir,
+                mask=seg_mask_dir,
+                output=seg_output_dir,
+                resize_ratio=1.0,
+                mask_dilation=4,
+                ref_stride=10,
+                neighbor_length=20,
+                subvideo_length=80,
+                raft_iter=20,
+                mode="video_inpainting",
+                save_frames=True,
+                fp16=use_fp16
+            )
 
             print(f"   ✅ ProPainter complete for segment {seg_idx+1}")
-
-        except subprocess.TimeoutExpired:
-            print(f"❌ ProPainter subprocess timed out after 600 seconds")
-            raise RuntimeError(f"ProPainter subprocess timed out")
         except Exception as e:
             print(f"❌ ProPainter failed on segment {seg_idx}: {e}")
             raise
