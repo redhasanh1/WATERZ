@@ -39,11 +39,17 @@ echo ""
 echo "Starting worker in 3 seconds..."
 sleep 3
 
-# Start worker with threads pool
+# Start worker with prefork pool (BEST for distributed GPU processing)
+# Benefits:
+# - Non-blocking task pickup (workers immediately grab next task)
+# - Isolated processes (no CUDA memory conflicts)
+# - Better queue polling (fixes stuck segment issue)
+# - Visibility timeout works correctly (5 min instead of 1 hour)
 celery -A server_production.celery worker \
   --loglevel=info \
-  --pool=threads \
+  --pool=prefork \
   --concurrency=1 \
+  --max-tasks-per-child=10 \
   -n worker1@%h \
   --without-gossip \
   --without-mingle \
@@ -52,6 +58,6 @@ celery -A server_production.celery worker \
 # Alternative: with heartbeat for cluster coordination
 # celery -A server_production.celery worker \
 #   --loglevel=info \
-#   --pool=threads \
+#   --pool=prefork \
 #   --concurrency=1 \
 #   -n worker1@%h

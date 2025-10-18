@@ -338,12 +338,16 @@ celery.conf.update(
     worker_max_tasks_per_child=100,  # Restart worker after 100 tasks (prevent memory leaks)
     result_expires=3600,  # Results expire after 1 hour
     broker_connection_retry_on_startup=True,
-    # Fix connection hanging
+    # Fix connection hanging and task pickup blocking
     broker_pool_limit=None,  # Allow each worker its own connection (was 1, caused task pickup blocking)
     broker_connection_timeout=10,  # 10 second timeout for broker connection (increased from 3)
+    broker_transport_options={
+        'visibility_timeout': 300,  # 5 minutes (default 3600) - tasks become visible again after 5min if worker crashes
+    },
     result_backend_transport_options={'socket_connect_timeout': 10},
     task_ignore_result=False,  # We need results for status tracking
     task_acks_late=True,
+    worker_disable_rate_limits=True,  # Disable rate limiting to prevent task pickup delays
 )
 
 # Global model instances (lazy loaded)

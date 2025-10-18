@@ -39,9 +39,12 @@ echo ""
 echo "Starting worker in 3 seconds..."
 sleep 3
 
-# Start worker with prefork pool (more stable for GPU/CUDA)
-# Using prefork instead of threads to avoid "double free" memory errors
-# Prefork creates isolated processes → no memory conflicts
+# Start worker with prefork pool (BEST for distributed GPU processing)
+# Benefits:
+# - Non-blocking task pickup (workers immediately grab next task)
+# - Isolated processes (no CUDA memory conflicts)
+# - Better queue polling (fixes stuck segment issue)
+# - Visibility timeout works correctly (5 min instead of 1 hour)
 celery -A server_production.celery worker \
   --loglevel=info \
   --pool=prefork \
@@ -56,13 +59,5 @@ celery -A server_production.celery worker \
 # celery -A server_production.celery worker \
 #   --loglevel=info \
 #   --pool=prefork \
-#   --concurrency=1 \
-#   -n worker2@%h
-
-# If prefork doesn't work, try threads with memory isolation:
-# export OPENBLAS_NUM_THREADS=1
-# export OMP_NUM_THREADS=1
-# celery -A server_production.celery worker \
-#   --pool=threads \
 #   --concurrency=1 \
 #   -n worker2@%h
