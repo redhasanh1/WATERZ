@@ -906,34 +906,9 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
 
         print(f"✅ Video prepared for distributed processing: {len(segments)} segments ready")
 
-        # Launch chord directly to distribute segments across all workers
-        from celery import chord, group
-
-        # Add total_segments to each segment data
-        for seg in segment_tasks_data:
-            seg['total_segments'] = len(segments)
-
-        print(f"🔥 Launching chord: {len(segments)} segments in parallel across all workers...")
-        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Launching {len(segments)} parallel tasks'})
-
-        # Create chord: all segment tasks run in parallel, then finalize runs when all complete
-        header = group([process_segment_task.s(seg) for seg in segment_tasks_data])
-        callback = finalize_video_task.s(result)
-
-        # Apply the chord and return its task ID
-        # This will distribute segment tasks to all available workers immediately
-        chord_result = chord(header, callback).apply_async()
-
-        print(f"✅ Chord launched with task ID: {chord_result.id}")
-        print(f"   Segment tasks will be distributed to all available workers")
-
-        # Return a dict with the chord_id so the API can track it
-        # The chord will handle the actual processing and return the final video
-        return {
-            'chord_id': chord_result.id,
-            'status': 'processing',
-            'message': f'Distributed processing started: {len(segments)} segments across all workers'
-        }
+        # Return the result dict with all segment data
+        # The caller (process_video_distributed_task) will create the chord
+        return result
 
     except Exception as e:
         print(f"❌ Error preparing video: {e}")
@@ -1439,7 +1414,7 @@ def launch_segments_task(self, prepare_result):
 
 
 @celery.task(bind=True, name='watermark.remove_video_distributed')
-def process_video_distributed_task(self, video_path):
+def process_video_distributed_task(self, video_path, api_base=None, temp_base=None):
     """
     DISTRIBUTED VIDEO PROCESSING - Main entry point
 
@@ -1461,7 +1436,10 @@ def process_video_distributed_task(self, video_path):
 
         # Phase 1: Prepare video (runs on one worker)
         print("📋 Phase 1: Preparing video for distribution...")
-        prepare_result = prepare_video_task.apply_async(args=[video_path]).get()
+        prepare_result = prepare_video_task.apply_async(
+            args=[video_path],
+            kwargs={'api_base': api_base, 'temp_base': temp_base}
+        ).get()
 
         if not prepare_result or 'segments' not in prepare_result:
             raise RuntimeError("Video preparation failed")
@@ -3022,15 +3000,12 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
-                # Call prepare_video_task which will launch the chord internally and return chord_id in result
-                # This creates: prepare -> [segment1, segment2, ...] (parallel) -> finalize
-                # The prepare task returns quickly with chord_id, then chord handles the heavy processing
-                result = prepare_video_task.apply_async(
+                # Use distributed task which coordinates: prepare -> [segments in parallel] -> finalize
+                # This task handles the entire workflow and returns when complete
+                result = process_video_distributed_task.apply_async(
                     args=[video_path],
                     kwargs={'api_base': base, 'temp_base': base}
                 )
-                # Return prepare task ID - when it completes, check result for chord_id to track actual progress
-                # Frontend should poll this task, and when it's SUCCESS, switch to tracking the chord_id
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
