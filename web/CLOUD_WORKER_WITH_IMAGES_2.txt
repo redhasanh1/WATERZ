@@ -1259,11 +1259,18 @@ def process_segment_task(self, segment_data):
                         if task_id:
                             # Get result from Celery's result backend
                             from celery.result import AsyncResult
-                            task_result = AsyncResult(task_id.decode() if isinstance(task_id, bytes) else task_id, app=celery)
+                            task_id_str = task_id.decode() if isinstance(task_id, bytes) else task_id
+                            task_result = AsyncResult(task_id_str, app=celery)
+
+                            # DEBUG: Log what we got
+                            print(f"   DEBUG: Segment {i} task_id={task_id_str}, ready={task_result.ready()}, successful={task_result.successful()}")
+
                             if task_result.ready() and task_result.successful():
-                                segment_results.append(task_result.result)
+                                result_data = task_result.result
+                                print(f"   DEBUG: Segment {i} result type={type(result_data)}, keys={result_data.keys() if isinstance(result_data, dict) else 'N/A'}")
+                                segment_results.append(result_data)
                             else:
-                                print(f"⚠️  Segment {i} task not ready or failed")
+                                print(f"⚠️  Segment {i} task not ready or failed: state={task_result.state}")
 
                     # Get prepare result
                     prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
