@@ -935,6 +935,10 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
 
             task = process_segment_task.apply_async(args=[seg_data])
             segment_tasks.append(task.id)
+
+            # Store task ID in Redis for result collection later
+            celery.backend.set(f"{tracking_key}:task_{seg_data['seg_idx']}", task.id, 3600)
+
             print(f"   ✅ Segment {seg_data['seg_idx']+1} task queued: {task.id}")
 
         print(f"✅ All {len(segments)} segment tasks dispatched to queue!")
@@ -1227,8 +1231,53 @@ def process_segment_task(self, segment_data):
         print(f"✅ Segment {seg_idx+1}/{total_segments} complete!")
         self.update_state(state='SUCCESS', meta={'progress': 100, 'status': f'Segment {seg_idx+1} complete'})
 
-        # Return result - Celery's chord will automatically collect all segment results
-        # and pass them to finalize_video_task when all segments complete
+        # Track completion in Redis for manual coordination
+        tracking_key = segment_data.get('tracking_key')
+        if tracking_key:
+            import json
+
+            # Increment counter atomically
+            completed = celery.backend.client.incr(tracking_key)
+            total = int(celery.backend.get(f"{tracking_key}:total") or 0)
+
+            print(f"📊 Tracking: {completed}/{total} segments complete")
+
+            # Check if this is the last segment
+            if completed >= total:
+                # Use atomic lock to ensure only ONE worker triggers finalize
+                lock_key = f"{tracking_key}:finalize_lock"
+                if celery.backend.client.setnx(lock_key, 1):
+                    # This worker won the race - trigger finalize
+                    celery.backend.client.expire(lock_key, 60)  # Lock expires in 60s
+
+                    print(f"🎉 All segments complete! This worker triggering finalize...")
+
+                    # Collect all segment results from Celery result backend
+                    segment_results = []
+                    for i in range(total):
+                        task_id = celery.backend.get(f"{tracking_key}:task_{i}")
+                        if task_id:
+                            # Get result from Celery's result backend
+                            from celery.result import AsyncResult
+                            task_result = AsyncResult(task_id.decode() if isinstance(task_id, bytes) else task_id, app=celery)
+                            if task_result.ready() and task_result.successful():
+                                segment_results.append(task_result.result)
+                            else:
+                                print(f"⚠️  Segment {i} task not ready or failed")
+
+                    # Get prepare result
+                    prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
+                    if prepare_result_json:
+                        prepare_result = json.loads(prepare_result_json)
+
+                        if len(segment_results) == total:
+                            finalize_video_task.apply_async(args=[segment_results, prepare_result])
+                            print(f"✅ Finalize task triggered with {len(segment_results)} segment results!")
+                        else:
+                            print(f"❌ Cannot finalize: expected {total} segments, got {len(segment_results)}")
+                else:
+                    print(f"⏭️  Another worker already triggered finalize")
+
         return result
 
     except Exception as e:
