@@ -702,6 +702,8 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
     Returns: dict with video_id, segments, metadata for distributed processing
     """
     try:
+        import json
+
         self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Preparing video'})
 
         detector = get_detector()
@@ -915,26 +917,32 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
         for seg in segment_tasks_data:
             seg['total_segments'] = len(segments)
 
+        # Create a tracking key in Redis for this video
+        tracking_key = f"segments:{video_id}"
+        celery.backend.set(tracking_key, 0)  # Initialize counter to 0
+        celery.backend.set(f"{tracking_key}:total", len(segments))  # Store total
+        celery.backend.set(f"{tracking_key}:prepare_result", json.dumps(result))  # Store prepare result
+
         # Dispatch each segment task individually - guarantees queue delivery
         segment_tasks = []
         for seg_data in segment_tasks_data:
+            # Add tracking info to segment data
+            seg_data['tracking_key'] = tracking_key
+
             task = process_segment_task.apply_async(args=[seg_data])
             segment_tasks.append(task.id)
             print(f"   ✅ Segment {seg_data['seg_idx']+1} task queued: {task.id}")
 
         print(f"✅ All {len(segments)} segment tasks dispatched to queue!")
         print(f"   Workers will grab and process them in parallel")
+        print(f"   Tracking progress with key: {tracking_key}")
 
-        # Launch coordinator task that waits for all segments then calls finalize
-        coordinator_result = coordinate_segments_task.apply_async(
-            args=[segment_tasks, result]
-        )
+        # Create a fake task ID for frontend tracking (we'll track the segments)
+        tracking_task_id = f"distributed_{video_id}"
 
-        print(f"✅ Coordinator task launched: {coordinator_result.id}")
-
-        # Return coordinator ID for frontend tracking
+        # Return tracking ID for frontend
         return {
-            'chord_id': coordinator_result.id,
+            'chord_id': tracking_task_id,
             'status': 'processing',
             'message': f'Distributed processing started: {len(segments)} segments across all workers'
         }
@@ -1214,6 +1222,32 @@ def process_segment_task(self, segment_data):
 
         print(f"✅ Segment {seg_idx+1}/{total_segments} complete!")
         self.update_state(state='SUCCESS', meta={'progress': 100, 'status': f'Segment {seg_idx+1} complete'})
+
+        # Increment completion counter in Redis
+        tracking_key = segment_data.get('tracking_key')
+        if tracking_key:
+            import json
+            # Increment counter atomically
+            completed = celery.backend.client.incr(tracking_key)
+            total = int(celery.backend.get(f"{tracking_key}:total") or 0)
+
+            print(f"📊 Tracking: {completed}/{total} segments complete")
+
+            # Check if this is the last segment
+            if completed >= total:
+                print(f"🎉 All segments complete! Triggering finalize...")
+
+                # Retrieve prepare result from Redis
+                prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
+                if prepare_result_json:
+                    prepare_result = json.loads(prepare_result_json)
+
+                    # Collect all segment results (we'll query them)
+                    # For now, trigger finalize - it will collect segment videos from disk
+                    finalize_video_task.apply_async(args=[[], prepare_result])
+
+                    print(f"✅ Finalize task triggered!")
+
         return result
 
     except Exception as e:
