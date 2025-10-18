@@ -868,6 +868,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
 
         # Prepare segment data for distribution
         segment_tasks_data = []
+        api_base_url = api_base or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL')
         for seg_idx, (start_frame, end_frame, bbox) in enumerate(segments):
             segment_tasks_data.append({
                 'seg_idx': seg_idx,
@@ -882,6 +883,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
                 'shared_mask_dir': shared_mask_dir,
                 'shared_frames_dir': shared_frames_dir,
                 'temp_base_url': temp_base_url,
+                'api_base': api_base_url,
                 'upload_filename': os.path.basename(video_path),
             })
 
@@ -1175,9 +1177,10 @@ def process_segment_task(self, segment_data):
         subprocess.run(encode_cmd, capture_output=True, check=True)
 
         # Upload segment video back to shared storage
-        if tunnel:
+        api_base = segment_data.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
+        if api_base:
             try:
-                upload_url = f"{tunnel.rstrip('/')}/api/upload-segment"
+                upload_url = f"{api_base.rstrip('/')}/api/upload-segment"
                 print(f"   ⬆️  Uploading segment {seg_idx+1} to API server...")
                 with open(seg_video_path, 'rb') as f:
                     resp = requests.post(
