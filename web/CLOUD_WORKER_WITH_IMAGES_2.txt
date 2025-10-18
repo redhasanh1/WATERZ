@@ -1227,42 +1227,8 @@ def process_segment_task(self, segment_data):
         print(f"✅ Segment {seg_idx+1}/{total_segments} complete!")
         self.update_state(state='SUCCESS', meta={'progress': 100, 'status': f'Segment {seg_idx+1} complete'})
 
-        # Store this segment's result in Redis and increment counter
-        tracking_key = segment_data.get('tracking_key')
-        if tracking_key:
-            import json
-
-            # Store this segment's result
-            segment_result_key = f"{tracking_key}:seg_{seg_idx}"
-            celery.backend.set(segment_result_key, json.dumps(result), 3600)  # 1 hour TTL
-
-            # Increment counter atomically
-            completed = celery.backend.client.incr(tracking_key)
-            total = int(celery.backend.get(f"{tracking_key}:total") or 0)
-
-            print(f"📊 Tracking: {completed}/{total} segments complete")
-
-            # Check if this is the last segment
-            if completed >= total:
-                print(f"🎉 All segments complete! Triggering finalize...")
-
-                # Retrieve prepare result from Redis
-                prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
-                if prepare_result_json:
-                    prepare_result = json.loads(prepare_result_json)
-
-                    # Collect all segment results from Redis
-                    segment_results = []
-                    for i in range(total):
-                        seg_result_json = celery.backend.get(f"{tracking_key}:seg_{i}")
-                        if seg_result_json:
-                            segment_results.append(json.loads(seg_result_json))
-
-                    # Trigger finalize with collected results
-                    finalize_video_task.apply_async(args=[segment_results, prepare_result])
-
-                    print(f"✅ Finalize task triggered with {len(segment_results)} segment results!")
-
+        # Return result - Celery's chord will automatically collect all segment results
+        # and pass them to finalize_video_task when all segments complete
         return result
 
     except Exception as e:
