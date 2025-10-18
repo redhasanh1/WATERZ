@@ -579,9 +579,9 @@ celery.conf.update(
     result_expires=3600,  # Results expire after 1 hour
     broker_connection_retry_on_startup=True,
     # Fix connection hanging
-    broker_pool_limit=1,  # Limit connection pool
-    broker_connection_timeout=3,  # 3 second timeout for broker connection
-    result_backend_transport_options={'socket_connect_timeout': 3},
+    broker_pool_limit=None,  # Allow each worker its own connection (was 1, caused task pickup blocking)
+    broker_connection_timeout=10,  # 10 second timeout for broker connection (increased from 3)
+    result_backend_transport_options={'socket_connect_timeout': 10},
     task_ignore_result=False,  # We need results for status tracking
     task_acks_late=True,
 )
