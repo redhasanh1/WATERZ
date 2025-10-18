@@ -14,8 +14,12 @@ set PYTHONPATH=%~dp0python_packages
 REM Add TensorRT DLLs to PATH
 set PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%~dp0TensorRT-10.7.0.23\lib;%PATH%
 
+REM Redis URL is now auto-loaded by server_production.py from redis_url.txt
+REM No need to set REDIS_URL environment variable - Python code handles it
+
 echo Starting Celery worker (GPU processing)...
 echo Using packages from: %PYTHONPATH%
+echo Note: Redis URL auto-loaded from redis_url.txt by Python
 echo.
 
 REM Disable Python output buffering to prevent hanging

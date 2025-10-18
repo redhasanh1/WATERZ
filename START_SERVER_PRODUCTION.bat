@@ -17,10 +17,8 @@ REM Prefer vendored packages if present
 set "PYTHONPATH=%~dp0python_packages;%~dp0web\python_packages"
 set "PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%~dp0TensorRT-10.7.0.23\lib;%PATH%"
 
-REM Configure Redis broker (override here if needed)
-if "%REDIS_URL%"=="" (
-  set "REDIS_URL=redis://:watermarkz_secure_2024@6.tcp.ngrok.io:11553/0"
-)
+REM Redis URL is now auto-loaded by server_production.py from redis_url.txt
+REM No need to set REDIS_URL environment variable - Python code handles it
 
 echo ================================================================
 echo WatermarkAI - Production API (Waitress)

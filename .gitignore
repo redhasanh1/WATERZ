@@ -32,4 +32,8 @@ python_packages/
 # OS
 .DS_Store
 Thumbs.db
-node_modules/ 
+node_modules/
+
+# Auto-generated config files (ngrok URLs)
+redis_url.txt
+web/tunnel_url.txt 

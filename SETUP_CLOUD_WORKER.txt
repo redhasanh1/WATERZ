@@ -72,7 +72,7 @@ mkdir -p /app/runs/detect/new_sora_watermark/weights
 curl -L "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt" -o /app/yolov8n.pt
 
 # 7. SET ENVIRONMENT AND START WORKER
-export REDIS_URL=redis://:watermarkz_secure_2024@6.tcp.ngrok.io:11553/0
+export REDIS_URL=redis://:watermarkz_secure_2024@0.tcp.ngrok.io:14761/0
 python3 -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1
 
 STEP-BY-STEP DETAILED INSTRUCTIONS
@@ -163,7 +163,7 @@ STEP 7: CONFIGURE REDIS CONNECTION
 ----------------------------------
 Set your Redis connection URL (update with your actual ngrok tunnel):
 
-export REDIS_URL=redis://:watermarkz_secure_2024@6.tcp.ngrok.io:11553/0
+export REDIS_URL=redis://:watermarkz_secure_2024@0.tcp.ngrok.io:14761/0
 
 Test Redis connection:
 python3 -c "
@@ -180,7 +180,7 @@ STEP 8: START THE OPTIMIZED CLOUD WORKER
 ----------------------------------------
 Launch the worker with optimal settings:
 
-export REDIS_URL=redis://:watermarkz_secure_2024@6.tcp.ngrok.io:11553/0
+export REDIS_URL=redis://:watermarkz_secure_2024@0.tcp.ngrok.io:14761/0
 python3 -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1
 
 The worker should start and show:
