@@ -52,15 +52,19 @@ def main():
     print(f"  FP16: {args.fp16}")
 
     try:
-        # Run ProPainter
-        faster_propainter_pipeline.run_propainter(
-            frames_path=args.frames_dir,
-            masks_path=args.masks_dir,
-            output_dir=args.output_dir,
-            flow_backend=args.flow_backend,
-            neighbor_length=args.neighbor_length,
+        # Run ProPainter - pipeline is the function itself
+        faster_propainter_pipeline(
+            video=args.frames_dir,
+            mask=args.masks_dir,
+            output=args.output_dir,
+            resize_ratio=1.0,
+            mask_dilation=4,
             ref_stride=args.ref_stride,
+            neighbor_length=args.neighbor_length,
+            subvideo_length=80,
             raft_iter=args.raft_iter,
+            mode="video_inpainting",
+            save_frames=True,
             fp16=args.fp16
         )
 
