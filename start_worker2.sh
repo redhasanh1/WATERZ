@@ -39,17 +39,12 @@ echo ""
 echo "Starting worker in 3 seconds..."
 sleep 3
 
-# Start worker with prefork pool (BEST for distributed GPU processing)
-# Benefits:
-# - Non-blocking task pickup (workers immediately grab next task)
-# - Isolated processes (no CUDA memory conflicts)
-# - Better queue polling (fixes stuck segment issue)
-# - Visibility timeout works correctly (5 min instead of 1 hour)
+# Start worker with solo pool (REQUIRED for CUDA/GPU processing)
+# Solo pool runs tasks in main process - no forking, CUDA works correctly
+# With broker_pool_limit=10 fix, task pickup is reliable
 celery -A server_production.celery worker \
   --loglevel=info \
-  --pool=prefork \
-  --concurrency=1 \
-  --max-tasks-per-child=10 \
+  --pool=solo \
   -n worker2@%h \
   --without-gossip \
   --without-mingle \
@@ -58,6 +53,5 @@ celery -A server_production.celery worker \
 # Alternative: with heartbeat for cluster coordination
 # celery -A server_production.celery worker \
 #   --loglevel=info \
-#   --pool=prefork \
-#   --concurrency=1 \
+#   --pool=solo \
 #   -n worker2@%h

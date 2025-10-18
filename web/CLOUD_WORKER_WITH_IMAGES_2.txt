@@ -579,7 +579,7 @@ celery.conf.update(
     result_expires=3600,  # Results expire after 1 hour
     broker_connection_retry_on_startup=True,
     # Fix connection hanging and task pickup blocking
-    broker_pool_limit=None,  # Allow each worker its own connection (was 1, caused task pickup blocking)
+    broker_pool_limit=10,  # Celery default - stable connection pool (was 1 = too restrictive, None = connection churn)
     broker_connection_timeout=10,  # 10 second timeout for broker connection (increased from 3)
     broker_transport_options={
         'visibility_timeout': 300,  # 5 minutes (default 3600) - tasks become visible again after 5min if worker crashes
