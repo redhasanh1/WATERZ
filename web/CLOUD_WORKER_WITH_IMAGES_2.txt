@@ -1238,7 +1238,11 @@ def process_segment_task(self, segment_data):
         if tracking_key:
             import json
 
-            # Increment counter atomically
+            # FIRST: Store this segment's result in Redis (before incrementing counter)
+            # This prevents race condition where counter = total but results aren't ready yet
+            celery.backend.client.setex(f"{tracking_key}:result_{seg_idx}", 3600, json.dumps(result))
+
+            # THEN: Increment counter atomically
             completed = celery.backend.client.incr(tracking_key)
             total = int(celery.backend.get(f"{tracking_key}:total") or 0)
 
@@ -1254,25 +1258,17 @@ def process_segment_task(self, segment_data):
 
                     print(f"🎉 All segments complete! This worker triggering finalize...")
 
-                    # Collect all segment results from Celery result backend
+                    # Collect all segment results from Redis (stored before counter increment)
+                    # This avoids race conditions with AsyncResult
                     segment_results = []
                     for i in range(total):
-                        task_id = celery.backend.get(f"{tracking_key}:task_{i}")
-                        if task_id:
-                            # Get result from Celery's result backend
-                            from celery.result import AsyncResult
-                            task_id_str = task_id.decode() if isinstance(task_id, bytes) else task_id
-                            task_result = AsyncResult(task_id_str, app=celery)
-
-                            # DEBUG: Log what we got
-                            print(f"   DEBUG: Segment {i} task_id={task_id_str}, ready={task_result.ready()}, successful={task_result.successful()}")
-
-                            if task_result.ready() and task_result.successful():
-                                result_data = task_result.result
-                                print(f"   DEBUG: Segment {i} result type={type(result_data)}, keys={result_data.keys() if isinstance(result_data, dict) else 'N/A'}")
-                                segment_results.append(result_data)
-                            else:
-                                print(f"⚠️  Segment {i} task not ready or failed: state={task_result.state}")
+                        result_json = celery.backend.get(f"{tracking_key}:result_{i}")
+                        if result_json:
+                            result_data = json.loads(result_json)
+                            segment_results.append(result_data)
+                            print(f"   ✅ Collected segment {i} result: {result_data['video_path']}")
+                        else:
+                            print(f"⚠️  Segment {i} result not found in Redis")
 
                     # Get prepare result
                     prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
@@ -1306,14 +1302,6 @@ def finalize_video_task(self, segment_results, prepare_result):
     - Upload final result
     """
     try:
-        # DEBUG: Log what we received
-        print(f"\n🔍 DEBUG finalize_video_task:")
-        print(f"   segment_results type: {type(segment_results)}")
-        print(f"   segment_results length: {len(segment_results) if isinstance(segment_results, list) else 'N/A'}")
-        if isinstance(segment_results, list) and len(segment_results) > 0:
-            print(f"   First result type: {type(segment_results[0])}")
-            print(f"   First result: {segment_results[0]}")
-
         video_id = prepare_result['video_id']
         base_name = prepare_result['base_name']
         video_path = prepare_result['video_path']
