@@ -1384,8 +1384,8 @@ def finalize_video_task(self, segment_results, prepare_result):
 
 @celery.task(bind=True, name='watermark._launch_segments')
 def launch_segments_task(self, prepare_result):
-    """Create a chord of segment tasks and replace this task with it.
-    The final result from finalize_video_task becomes this task's result.
+    """Create a chord of segment tasks and launch them.
+    Returns the chord result for tracking.
     """
     try:
         from celery import chord, group
@@ -1400,12 +1400,24 @@ def launch_segments_task(self, prepare_result):
         for seg in segments:
             seg['total_segments'] = total_segments
 
-        print(f"🔥 Launching chord: {total_segments} segments in parallel...")
+        print(f"🔥 Launching chord: {total_segments} segments in parallel across all workers...")
+
+        # Create the chord
         header = group([process_segment_task.s(seg) for seg in segments])
         callback = finalize_video_task.s(prepare_result)
 
-        # Replace this task with the chord so its result becomes ours
-        raise self.replace(chord(header, callback))
+        # Apply the chord asynchronously - this dispatches tasks immediately
+        chord_result = chord(header)(callback)
+
+        print(f"✅ Chord dispatched: {total_segments} segment tasks queued")
+        print(f"   Workers will pick up tasks and process in parallel")
+
+        # Wait for the chord to complete and return the final result
+        # This blocks this task but doesn't block workers from processing segments
+        final_result = chord_result.get(timeout=3600)
+
+        print(f"✅ All segments processed and finalized!")
+        return final_result
 
     except Exception as e:
         print(f"❌ Segment launch failed: {e}")
