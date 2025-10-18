@@ -1038,16 +1038,17 @@ def process_segment_task(self, segment_data):
                         ret, frame = cap2.read()
                         if not ret:
                             break
-                        if cur > end_frame:
+                        if cur > end_frame:  # Stop after segment end
                             break
-                        if cur >= start_frame:
+                        if cur >= start_frame:  # Only save frames in segment range
                             dst = os.path.join(seg_frames_dir, f"{idx:04d}.png")
                             cv2.imwrite(dst, frame)
                             idx += 1
                         cur += 1
                     cap2.release()
+                    os.remove(local_video)  # Clean up downloaded video
                     frames_copied = idx
-                    print(f"   ✅ Extracted {frames_copied} frames locally from original")
+                    print(f"   ✅ Extracted {frames_copied} frames from segment ({start_frame}-{end_frame})")
                 except Exception as e:
                     print(f"❌ Fallback extraction failed: {e}")
                     pass
@@ -1096,11 +1097,11 @@ def process_segment_task(self, segment_data):
                     print(f"⚠️  Failed to download mask {frame_idx}: {e}")
 
         if masks_copied == 0:
-            print("   ⚠️  No masks found; synthesizing rectangular masks over crop region")
-            for i in range(seg_duration):
+            print(f"   ⚠️  No masks found; synthesizing {frames_copied} rectangular masks over crop region")
+            for i in range(frames_copied):
                 synthetic = np.full((crop_h, crop_w), 255, dtype=np.uint8)
                 cv2.imwrite(os.path.join(seg_mask_dir, f"{i:04d}.png"), synthetic)
-            masks_copied = seg_duration
+            masks_copied = frames_copied
 
         print(f"   ✅ Prepared {masks_copied} masks")
 
