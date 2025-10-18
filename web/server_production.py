@@ -2401,11 +2401,26 @@ def get_status(task_id):
             response['progress'] = info.get('status', 'Processing...')
             response['info'] = {'progress': info.get('progress', 50), 'status': info.get('status', 'Processing...')}
         elif task.state == 'SUCCESS':
-            # task.result is a dict with 'path' and 'metadata'
+            # task.result is a dict with 'path' and 'metadata' OR 'chord_id' for distributed tasks
             result_data = task.result
             print(f"🔍 DEBUG - task.result type: {type(result_data)}, value: {result_data}")
 
             if isinstance(result_data, dict):
+                # Check if this is a prepare task that returned chord_id
+                if 'chord_id' in result_data:
+                    chord_id = result_data['chord_id']
+                    print(f"🔄 Prepare task complete, switching to chord tracking: {chord_id}")
+                    # Tell frontend to switch to tracking the chord instead
+                    response['state'] = 'PROCESSING'
+                    response['progress'] = result_data.get('message', 'Processing segments in parallel')
+                    response['info'] = {
+                        'progress': 50,
+                        'status': 'Segments processing in parallel'
+                    }
+                    response['stale'] = True  # Frontend recognizes this pattern
+                    response['current_task_id'] = chord_id  # Frontend will switch to this task_id
+                    return jsonify(response)
+
                 result_path = result_data.get('path')
                 if not result_path:
                     print(f"❌ Task {task_id} SUCCESS but no path in result: {result_data}")
@@ -2974,15 +2989,15 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
-                # Build chain on the server so the returned task_id tracks
-                # prepare -> segments (chord) -> finalize without in-task .get()
-                from celery import chain
-                # Use bound task signatures to avoid unknown-task issues
-                workflow = chain(
-                    prepare_video_task.s(video_path, api_base=base, temp_base=base),
-                    launch_segments_task.s(),
+                # Call prepare_video_task which will launch the chord internally and return chord_id in result
+                # This creates: prepare -> [segment1, segment2, ...] (parallel) -> finalize
+                # The prepare task returns quickly with chord_id, then chord handles the heavy processing
+                result = prepare_video_task.apply_async(
+                    args=[video_path],
+                    kwargs={'api_base': base, 'temp_base': base}
                 )
-                result = workflow.apply_async()
+                # Return prepare task ID - when it completes, check result for chord_id to track actual progress
+                # Frontend should poll this task, and when it's SUCCESS, switch to tracking the chord_id
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
