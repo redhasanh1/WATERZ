@@ -965,7 +965,8 @@ def process_segment_task(self, segment_data):
         print(f"\n🎬 Worker processing segment {seg_idx+1}/{total_segments}: frames {start_frame}-{end_frame}")
         self.update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
 
-        # Import crop utilities
+        # Import required modules
+        import subprocess
         from crop_utils import calculate_crop_region
 
         seg_duration = end_frame - start_frame + 1
