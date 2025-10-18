@@ -936,8 +936,8 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
             task = process_segment_task.apply_async(args=[seg_data])
             segment_tasks.append(task.id)
 
-            # Store task ID in Redis for result collection later
-            celery.backend.set(f"{tracking_key}:task_{seg_data['seg_idx']}", task.id, 3600)
+            # Store task ID in Redis for result collection later (1 hour TTL)
+            celery.backend.client.setex(f"{tracking_key}:task_{seg_data['seg_idx']}", 3600, task.id)
 
             print(f"   ✅ Segment {seg_data['seg_idx']+1} task queued: {task.id}")
 
