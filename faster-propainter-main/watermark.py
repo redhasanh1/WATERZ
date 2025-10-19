@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
+
+PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+REPO_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, ".."))
+for _pth in (PACKAGE_ROOT, REPO_ROOT):
+    if _pth not in sys.path:
+        sys.path.insert(0, _pth)
 
 from tqdm import tqdm
 import cv2
@@ -16,6 +23,39 @@ from model.propainter import InpaintGenerator
 from utils.download_util import load_file_from_url
 from core.utils import to_tensors
 from model.misc import get_device
+
+
+def _load_rfcnet_tensorrt(engine_path: str, device: str):
+    raise RuntimeError("RFCNet TensorRT runner not implemented yet")
+
+
+def load_rfcnet_backend(weights_path: str, device: str):
+    engine_env = os.getenv("RFCNET_TRT_ENGINE")
+    default_engine = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "engines",
+        "rfcnet",
+        "rfcnet_fp16.engine",
+    )
+    engine_path = None
+    for candidate in (engine_env, default_engine):
+        if candidate and os.path.exists(candidate):
+            engine_path = candidate
+            break
+
+    if engine_path:
+        try:
+            print(f"[RFCNet] Using TensorRT engine: {engine_path}")
+            return _load_rfcnet_tensorrt(engine_path, device)
+        except Exception as exc:
+            print(f"[RFCNet] TensorRT load failed ({exc}); falling back to PyTorch.")
+
+    model = RecurrentFlowCompleteNet(weights_path)
+    for p in model.parameters():
+        p.requires_grad = False
+    model.to(device)
+    model.eval()
+    return model
 
 # from mytimer import timer_decorator
 
@@ -293,11 +333,7 @@ def pipeline(
         progress=True,
         file_name=None,
     )
-    fix_flow_complete = RecurrentFlowCompleteNet(ckpt_path)
-    for p in fix_flow_complete.parameters():
-        p.requires_grad = False
-    fix_flow_complete.to(device)
-    fix_flow_complete.eval()
+    fix_flow_complete = load_rfcnet_backend(ckpt_path, device)
 
     ##############################################
     # set up ProPainter model

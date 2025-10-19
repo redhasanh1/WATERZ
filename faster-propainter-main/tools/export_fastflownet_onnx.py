@@ -52,7 +52,7 @@ def build_model(device: torch.device):
             "`pip install ptlflow` before running this script."
         ) from exc
 
-    inner_model = ptlflow.get_model("fastflownet", pretrained_ckpt="things")
+    inner_model = ptlflow.get_model("fastflownet", ckpt_path="things")
     inner_model.to(device)
     inner_model.eval()
 
@@ -101,7 +101,7 @@ def export_fastflownet(args: argparse.Namespace) -> None:
         dynamic_axes=dynamic_axes,
     )
 
-    print(f"✅ FastFlowNet ONNX exported to {output_path}")
+    print(f"[OK] FastFlowNet ONNX exported to {output_path}")
     if args.min_shape or args.opt_shape or args.max_shape:
         print(
             "   Exported with dynamic axes; remember to pass matching "
@@ -125,8 +125,8 @@ def main():
     parser.add_argument(
         "--opset",
         type=int,
-        default=12,
-        help="ONNX opset to use (>= 12 recommended for TensorRT).",
+        default=17,
+        help="ONNX opset to use (>= 16 required for grid_sample; 17 recommended).",
     )
     parser.add_argument(
         "--min-shape",
@@ -154,4 +154,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

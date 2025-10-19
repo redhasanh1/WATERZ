@@ -25,7 +25,7 @@ trtexec ^
     --onnx="%ONNX_PATH%" ^
     --saveEngine="%ENGINE_PATH%" ^
     --fp16 ^
-    --workspace=4096 ^
+    --memPoolSize=workspace:4096 ^
     --minShapes=images:1x2x3x128x128 ^
     --optShapes=images:1x2x3x256x256 ^
     --maxShapes=images:1x2x3x640x640 ^
@@ -41,4 +41,3 @@ if errorlevel 1 (
 echo FastFlowNet TensorRT engine saved to %ENGINE_PATH%
 endlocal
 exit /b 0
-
