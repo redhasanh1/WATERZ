@@ -1,0 +1,20 @@
+export SEGMENT_WORKERS=1
+export CUDA_VISIBLE_DEVICES=0
+export MIN_SEGMENTS=2
+export MIN_CHUNK_FRAMES=60
+
+celery -A server_production.celery worker \
+  --loglevel=info \
+  --pool=threads \
+  --concurrency=1 \
+  -n worker1@%h
+
+///////////////
+ # Download ProPainter model weights
+  mkdir -p /app/weights
+  cd /app/weights
+  curl -L "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/raft-things.pth" -o raft-things.pth
+  curl -L "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/recurrent_flow_completion.pth" -o recurrent_flow_completion.pth
+  curl -L "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/ProPainter.pth" -o ProPainter.pth
+
+///////

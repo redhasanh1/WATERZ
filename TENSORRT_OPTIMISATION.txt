@@ -1,0 +1,609 @@
+TENSORRT OPTIMISATION (ENGINES ONLY)
+
+Root
+- Workspace root: D:\github\RoomFinderAI\watermarkz
+
+Conventions
+- Paths are workspace-relative unless starting with D:\ or ..\
+- Goal: Produce .engine files and wire them in. Only TensorRT steps here.
+
+Artifacts To Produce (one-by-one)
+
+1) YOLOv8 Detector → TensorRT Engine
+- Source model (.pt):
+  - Preferred: runs/detect/new_sora_watermark/weights/best.pt
+  - Alternate (existing): web/yolo_weights/sora_best.pt
+- Detector code using it: yolo_detector.py:12
+  - Already searches for TensorRT engines under runs/detect/new_sora_watermark/weights/
+- Engine output path(s):
+  - runs/detect/new_sora_watermark/weights/best_fp16.engine
+  - runs/detect/new_sora_watermark/weights/best_int8.engine (optional if INT8 calibration is done)
+
+How To Build (Option A: ONNX + trtexec)
+1. Export ONNX (Ultralytics):
+   yolo export model="runs/detect/new_sora_watermark/weights/best.pt" format=onnx imgsz=640 dynamic=True opset=12 simplify=True
+   Output: runs/detect/new_sora_watermark/weights/best.onnx
+
+2. Build FP16 engine (fast path):
+   trtexec --onnx=runs/detect/new_sora_watermark/weights/best.onnx \
+           --saveEngine=runs/detect/new_sora_watermark/weights/best_fp16.engine \
+           --fp16 --workspace=4096 --useSpinWait \
+           --tacticSources=+CUBLAS,+CUDNN \
+           --timingCacheFile=runs/detect/new_sora_watermark/weights/trt_timing_cache
+
+3. Build INT8 engine (optional, needs calibration):
+   - Prepare calibration data: put ~500 representative images at web/cache/calib/yolo/ (create folder)
+   - Recommended: generate a Q/DQ quantized ONNX (PTQ or QAT) then:
+     trtexec --onnx=runs/detect/new_sora_watermark/weights/best_qdq.onnx \
+             --saveEngine=runs/detect/new_sora_watermark/weights/best_int8.engine \
+             --int8 --fp16 --workspace=8192 --useSpinWait \
+             --tacticSources=+CUBLAS,+CUDNN \
+             --timingCacheFile=runs/detect/new_sora_watermark/weights/trt_timing_cache
+
+How To Build (Option B: Ultralytics direct engine export)
+   yolo export model="runs/detect/new_sora_watermark/weights/best.pt" format=engine imgsz=640 half=True
+   - Move/rename produced engine to: runs/detect/new_sora_watermark/weights/best_fp16.engine
+
+Wire-In (no code change needed if engine path matches):
+- Set env: YOLO_REQUIRE_TENSORRT=1
+- Optional: point directly to engine:
+  YOLO_TENSORRT_ENGINE=runs/detect/new_sora_watermark/weights/best_fp16.engine
+
+
+2) FasterProPainter — RAFT (Optical Flow) → TensorRT Engine
+- Source Python module: faster-propainter-main/model/modules/flow_comp_raft.py (class RAFT_bi)
+- Weights: web/weights/raft-things.pth (also downloaded via faster-propainter-main/watermark.py:282)
+- Engine output path(s): faster-propainter-main/engines/raft/raft_fp16.engine
+  (Create directory: faster-propainter-main/engines/raft/)
+
+How To Build (FP16, ONNX + trtexec)
+1. Write exporter (file to create): faster-propainter-main/tools/export_raft_onnx.py
+   Outline:
+   - Load RAFT_bi, load_state_dict from web/weights/raft-things.pth
+   - Set model.eval().half().cuda()
+   - Dummy inputs: two frames (N=1,C=3,H,W), same size, FP16
+   - torch.onnx.export with dynamic axes for H,W; opset 12/13
+   Command to run:
+     python faster-propainter-main/tools/export_raft_onnx.py \
+            --weights web/weights/raft-things.pth \
+            --out faster-propainter-main/engines/raft/raft.onnx \
+            --minshape 1x3x128x128 --optshape 1x3x256x256 --maxshape 1x3x640x640
+
+2. Build engine:
+   trtexec --onnx=faster-propainter-main/engines/raft/raft.onnx \
+           --saveEngine=faster-propainter-main/engines/raft/raft_fp16.engine \
+           --fp16 --workspace=4096 --useSpinWait --tacticSources=+CUBLAS,+CUDNN
+
+Notes
+- Keep crop sizes divisible by 8/16. Use limited dynamic profiles to reduce engine size and build time.
+- If ONNX export blocks on an op: use Torch-TensorRT as an interim (see item 5), still producing a TRT-optimized module.
+
+
+3) FasterProPainter — Recurrent Flow Completion (RFCNet) → TensorRT Engine
+- Source module: faster-propainter-main/model/recurrent_flow_completion.py
+- Weights: web/weights/recurrent_flow_completion.pth (referenced by faster-propainter-main/watermark.py:290)
+- Engine output path(s): faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
+  (Create directory: faster-propainter-main/engines/rfcnet/)
+
+How To Build (FP16, ONNX + trtexec)
+1. Write exporter (file to create): faster-propainter-main/tools/export_rfcnet_onnx.py
+   Outline:
+   - Load RFCNet, load_state_dict from web/weights/recurrent_flow_completion.pth
+   - Model.eval().half().cuda()
+   - Define representative inputs (flow tensors + masks; match forward signature in the model)
+   - torch.onnx.export with dynamic H,W
+   Command to run:
+     python faster-propainter-main/tools/export_rfcnet_onnx.py \
+            --weights web/weights/recurrent_flow_completion.pth \
+            --out faster-propainter-main/engines/rfcnet/rfcnet.onnx \
+            --minshape 1x2x128x128 --optshape 1x2x256x256 --maxshape 1x2x640x640
+
+2. Build engine:
+   trtexec --onnx=faster-propainter-main/engines/rfcnet/rfcnet.onnx \
+           --saveEngine=faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine \
+           --fp16 --workspace=4096 --useSpinWait
+
+Notes
+- RFCNet input channels/shapes depend on the exact forward used. Inspect faster-propainter-main/model/recurrent_flow_completion.py for the forward signature and adjust dummy inputs accordingly in the exporter.
+
+
+4) FasterProPainter — Inpaint Generator (ProPainter) → TensorRT Engine
+- Source module: faster-propainter-main/model/propainter.py (class InpaintGenerator)
+- Weights: web/weights/ProPainter.pth (referenced by faster-propainter-main/watermark.py:305)
+- Engine output path(s): faster-propainter-main/engines/propainter/propainter_fp16.engine
+  (Create directory: faster-propainter-main/engines/propainter/)
+
+How To Build (FP16, ONNX + trtexec)
+1. Write exporter (file to create): faster-propainter-main/tools/export_propainter_onnx.py
+   Outline:
+   - Load InpaintGenerator, load_state_dict from web/weights/ProPainter.pth
+   - Model.eval().half().cuda()
+   - Define inputs consistent with pipeline usage: current frame tensor, neighbor/reference features, and binary mask; start with minimal viable forward (frame + mask) and expand as needed.
+   - torch.onnx.export with dynamic H,W
+   Command to run:
+     python faster-propainter-main/tools/export_propainter_onnx.py \
+            --weights web/weights/ProPainter.pth \
+            --out faster-propainter-main/engines/propainter/propainter.onnx \
+            --minshape 1x3x128x128 --optshape 1x3x256x256 --maxshape 1x3x640x640
+
+2. Build engine:
+   trtexec --onnx=faster-propainter-main/engines/propainter/propainter.onnx \
+           --saveEngine=faster-propainter-main/engines/propainter/propainter_fp16.engine \
+           --fp16 --workspace=4096 --useSpinWait
+
+Notes
+- This module uses deformable conv and other advanced ops; ONNX export may need plugin implementations or simplifications. If blocked, use Torch-TensorRT path (item 5) initially.
+
+
+5) FasterProPainter (Interim) — Torch-TensorRT Compilation (no .engine files, still TRT-optimized)
+- When ONNX export is blocked, compile models directly with Torch-TensorRT.
+- Source: faster-propainter-main/watermark.py (after loading each torch module and weights)
+- Action: insert compile calls for FP16, limited dynamic shapes.
+  Example (pseudo-code to add into watermark.py):
+    import torch_tensorrt as trt
+    raft = raft.eval().half().cuda()
+    raft_trt = trt.compile(raft, inputs=[trt.Input([1,3,256,256]), trt.Input([1,3,256,256])], enabled_precisions={torch.float16}, workspace_size=2<<30)
+    # repeat for RFCNet and InpaintGenerator with their input signatures
+- Persist (if supported by your Torch-TRT version) to:
+  - faster-propainter-main/engines/raft/raft_torchtrt.ts
+  - faster-propainter-main/engines/rfcnet/rfcnet_torchtrt.ts
+  - faster-propainter-main/engines/propainter/propainter_torchtrt.ts
+
+
+6) Engine Loading — Integration Points
+- YOLO (already handled): yolo_detector.py
+  - Env to enforce TRT: YOLO_REQUIRE_TENSORRT=1
+  - Path auto-detected: runs/detect/new_sora_watermark/weights/*.engine
+
+- FasterProPainter (to add): faster-propainter-main/watermark.py
+  - Detection logic:
+    - If faster-propainter-main/engines/raft/raft_fp16.engine exists → init TRT RAFT runner
+    - Else if raft_torchtrt.ts exists → load Torch-TRT module
+    - Else → fallback to PyTorch module
+  - Repeat for rfcnet and propainter modules with analogous engine paths
+
+- Worker import path fix (ensures Python can find faster-propainter code):
+  - File: web/CLOUD_WORKER_WITH_IMAGES_2.txt (inside _process_propainter_segment)
+  - Ensure sys.path includes: os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main')
+
+
+7) INT8 Calibration (Optional, advanced)
+- YOLO: prefer Q/DQ ONNX export for robust INT8
+  - Place calibration set here: web/cache/calib/yolo/
+  - Build engine from Q/DQ ONNX as shown in 1)
+
+- ProPainter sub-nets (RAFT/RFCNet/Inpaint):
+  - Due to visual sensitivity, start with FP16. If INT8 is desired, use PTQ with Q/DQ and verify quality.
+  - Place sample crops here:
+    - web/cache/calib/raft/
+    - web/cache/calib/rfcnet/
+    - web/cache/calib/propainter/
+
+
+8) Version/Environment Requirements (for all builds)
+- NVIDIA Driver supporting CUDA 12.x
+- CUDA Toolkit 12.x, cuDNN matching
+- TensorRT 8.6+ or 10.x matching CUDA
+- PyTorch (CUDA build) matching the above (for exporters)
+- Ultralytics (>= 8.1.x)
+- Optional: Torch-TensorRT matching your PyTorch/CUDA
+
+
+Quick Checklist
+- [ ] Build YOLO best_fp16.engine at runs/detect/new_sora_watermark/weights/
+- [ ] (Optional) Build YOLO best_int8.engine at same folder
+- [ ] Create faster-propainter-main/engines/{raft,rfcnet,propainter}/
+- [ ] Export and build raft_fp16.engine
+- [ ] Export and build rfcnet_fp16.engine
+- [ ] Export and build propainter_fp16.engine
+- [ ] Add Torch-TensorRT compile fallback in faster-propainter-main/watermark.py
+- [ ] Ensure worker sys.path points to ..\faster-propainter-main
+- [ ] Set YOLO_REQUIRE_TENSORRT=1 in runtime
+
+
+DEEP DIVE — OPS, PLUGINS, AND TRT COMPATIBILITY
+
+Purpose
+- Enumerate TensorRT-sensitive ops by module with exact file locations, and prescribe plugin or fallback strategies. Windows-first guidance (.dll) with Linux notes.
+
+Summary Of Sensitive Ops (by file:line)
+1) Deformable Convolution (requires plugin)
+   - faster-propainter-main/model/propainter.py:67 uses torchvision.ops.deform_conv2d
+   - faster-propainter-main/model/recurrent_flow_completion.py:42 uses torchvision.ops.deform_conv2d
+   What to do:
+   - Preferred plugin: DCNv2 (DeformableConv2d v2) TensorRT plugin. Sources commonly provided by mmcv/mmdeploy or community DCNv2-TensorRT projects.
+   - Ship a Windows build (dcnv2_trt_plugin.dll) and place it on PATH; for Linux, .so on LD_LIBRARY_PATH.
+   - In ONNX, this op typically does NOT export cleanly; plan Track A (Torch-TensorRT) first. Track B requires replacing calls with a wrapper module backed by the TRT plugin and/or exporting a custom ONNX op with plugin registry.
+
+2) Grid Sample / Flow Warp (requires plugin in ONNX)
+   - faster-propainter-main/RAFT/utils/utils.py: bilinear_sampler uses F.grid_sample (line ~23)
+   - faster-propainter-main/model/modules/flow_loss_utils.py: F.grid_sample in flow_warp (line ~25)
+   What to do:
+   - TensorRT OSS provides a GridSampler plugin (via nvinfer_plugin built from OSS). Ensure you are using a TensorRT build that includes this plugin.
+   - On Windows, confirm nvinfer_plugin.dll is from the OSS build containing GridSampler. Add its directory to PATH.
+   - With Torch-TensorRT, grid_sample can be lowered internally in some versions; validate. If blocked, keep flow warp in Torch (fallback) while the rest is TRT.
+
+3) Unfold/Fold (im2col/col2im)
+   - faster-propainter-main/RAFT/raft.py: upsample_flow uses F.unfold (line ~54)
+   - faster-propainter-main/model/modules/sparse_transformer.py: SoftSplit uses nn.Unfold; SoftComp uses F.fold
+   What to do:
+   - TRT does not have native Unfold/Fold ops. Options:
+     a) Replace RAFT upsample_flow with a precomputed, depthwise-conv based equivalent (common RAFT TRT trick). OR
+     b) Implement a lightweight plugin for im2col/col2im. OR
+     c) Keep this subgraph in Torch-TRT fallback.
+   - For SparseTransformer (propainter), prefer Track A (Torch-TRT). For strict ONNX, expect plugin work.
+
+4) Attention and Large Linear Blocks
+   - faster-propainter-main/model/modules/sparse_transformer.py: linear projections and attention windows
+   What to do:
+   - TRT supports Linear + MatMul well; keep shapes bounded (windowed) and use FP16. Ensure dynamic shapes are profiled (min/opt/max H/W per ROI set).
+
+5) 3D Convolution
+   - faster-propainter-main/model/recurrent_flow_completion.py: P3DBlock Conv3d layers
+   What to do:
+   - Supported by TRT. Keep channel dims aligned to Tensor Core multiples for best speed (8/16). Use FP16.
+
+6) Correlation/Cost Volume
+   - faster-propainter-main/RAFT/corr.py: CorrBlock uses matmul + bilinear_sampler; AlternateCorrBlock uses alt_cuda_corr (PyTorch CUDA extension)
+   What to do:
+   - Avoid AlternateCorrBlock (no ONNX/engine path). Keep args.alternate_corr=False (default).
+   - CorrBlock path exports better (matrix ops + grid_sample plugin). If blocked by grid_sample, keep CorrBlock subgraph in Torch-TRT or add GridSampler plugin.
+
+
+Recommended Strategy Per Sub-net (Practical)
+RAFT/Flow
+- Use ptlflow fastflownet backend already wired in RAFT_bi (faster-propainter-main/model/modules/flow_comp_raft.py: RAFT_bi.__init__). It calls ptlflow.get_model("fastflownet", pretrained_ckpt="things").
+  - Advantage: typically simpler ONNX graph than RAFT; fewer exotic ops.
+  - Export path: load ptlflow fastflownet and export to ONNX, then build TRT FP16 engine as in Section 2 (update shapes to [1,3,H,W] + second frame).
+- If staying with RAFT:
+  - Keep CorrBlock (no alt_cuda_corr).
+  - Provide GridSampler (grid_sample) plugin.
+  - Rewrite upsample_flow to remove F.unfold, or keep that small part in Torch fallback.
+
+RFCNet (Recurrent Flow Completion)
+- Uses deformable alignment via torchvision.ops.deform_conv2d (recurrent_flow_completion.py:42).
+- Options:
+  - Track A: Torch-TensorRT compile and run in FP16 (fastest to integrate).
+  - Track B: Replace with DCNv2 ONNX-friendly module and wire TensorRT DCNv2 plugin in exporter + engine build.
+
+InpaintGenerator (ProPainter)
+- Uses deformable alignment (propainter.py:67), SparseWindowAttention, SoftSplit/SoftComp (unfold/fold), grid_sample (via flow_warp).
+- Options:
+  - Track A: Torch-TensorRT with FP16; constrain ROI size to a small profile set.
+  - Track B: Mixed approach: export most conv/linear blocks to ONNX+TRT, keep deformable + grid_sample + fold/unfold in Torch via segmentation of the model (advanced). Typically not worth initial effort; prefer Torch-TRT.
+
+
+Plugins And Binaries Checklist (Windows)
+- nvinfer.dll / nvinfer_plugin.dll (TensorRT runtime + plugins)
+  - Ensure version includes OSS plugins (GridSampler). If not, build TensorRT OSS and replace nvinfer_plugin.dll.
+- DCNv2 TensorRT plugin (for deform_conv2d)
+  - dcnv2_trt_plugin.dll (name varies) placed into a folder included in PATH before starting Python.
+  - If using mmdeploy’s plugins, include its plugin .dll as well.
+- Torch-TensorRT
+  - pip install torch_tensorrt that matches your PyTorch and CUDA.
+- Verify availability at runtime:
+  - In Python: try to import and run a minimal grid_sample TRT engine; check that TensorRT logs show GridSampler plugin being registered.
+
+
+Exporter Details (Files to Create Under faster-propainter-main/tools/)
+- export_raft_onnx.py
+  - Inputs: two images [1,3,H,W] each; output: flow [1,2,H,W]
+  - Keep CorrBlock path; no alt_cuda_corr. Ensure GridSampler plugin available for grid_sample.
+- export_rfcnet_onnx.py
+  - Inputs: feature tensors per RFC forward; inspect faster-propainter-main/model/recurrent_flow_completion.py to mirror forward signature.
+  - If deform_conv2d blocks ONNX, abort to Torch-TRT.
+- export_propainter_onnx.py
+  - Inputs: current frame [1,3,H,W], mask [1,1,H,W], plus any required temporal/context features.
+  - Expect deform_conv2d and fold/unfold to block; prefer Torch-TRT first.
+
+
+Engine Build Flags (trtexec)
+- Common flags:
+  --fp16 --workspace=4096 --useSpinWait --tacticSources=+CUBLAS,+CUDNN --profilingVerbosity=detailed
+- If plugins are external:
+  --plugins="D:\\path\\to\\dcnv2_trt_plugin.dll"  (repeatable)
+- For dynamic shapes:
+  --minShapes=input:1x3x128x128 --optShapes=input:1x3x256x256 --maxShapes=input:1x3x640x640
+- Timing cache:
+  --timingCacheFile=PATH\\trt_timing_cache
+
+
+Dynamic Profile Sets (ROI shapes)
+- Use a small bounded set to maximize kernel tuning:
+  - {128x128, 160x160, 192x192, 256x256, 320x320, 384x384}
+- Apply consistently across RAFT/RFCNet/Inpaint generators to avoid frequent re-optimization.
+
+
+Fallback Policy (Strongly Recommended)
+- Priority order at runtime per sub-net:
+  1) Load ONNX + TRT engine if exists and plugin deps satisfied.
+  2) Else try Torch-TensorRT compiled module (TS file) from faster-propainter-main/engines/.../*.ts
+  3) Else run native PyTorch FP16 module.
+- Keep this logic in faster-propainter-main/watermark.py (load-and-dispatch layer) with clear logs.
+
+
+Package And Version Pins (Windows CUDA 12.x)
+- CUDA Toolkit 12.x, cuDNN matching
+- TensorRT 10.x (or 8.6+) with OSS plugins built (GridSampler) — update nvinfer_plugin.dll
+- PyTorch CUDA build matching CUDA 12.x (e.g., 2.1/2.2 with cu121)
+- torch_tensorrt matching the PyTorch/CUDA combo
+- Ultralytics >= 8.1.x (for YOLO export)
+- ptlflow (for fastflownet backend)
+- Optional: mmcv/mmdeploy runtime for DCNv2 TRT plugin builds
+
+
+Validation Targets
+- Verify YOLO engine picked: yolo_detector.py: logs show “TensorRT engine loaded”.
+- RAFT fastflownet: validate ONNX export and TRT build on [1,3,256,256] pairs; compare EPE against Torch.
+- RFCNet and Inpaint: start with Torch-TRT FP16; measure speed; only pursue ONNX+TRT if needed.
+
+
+MODEL FOLDER MAP + PER-FILE TENSORRT NOTES
+
+Base Directory: faster-propainter-main/
+
+Core runtime (used by worker):
+- faster-propainter-main/watermark.py  ← Pipeline entry, loads weights at lines ~282 (raft-things), ~290 (recurrent_flow_completion), ~305 (ProPainter). All TensorRT loader hooks belong here.
+- faster-propainter-main/globals.py    ← Device helpers; ensure TORCH_HOME points to web/cache.
+
+Key submodules (inferencing path) with file references:
+1) model/modules/
+   - flow_comp_raft.py             ← RAFT_bi wrapper around ptlflow fastflownet; line 12 imports ptlflow.
+   - flow_loss_utils.py            ← Contains flow_warp (grid_sample), fbConsistencyCheck.
+   - deformconv.py                 ← Placeholder of ModulatedDeformConv2d (forward not implemented here; actual usage via torchvision.ops).
+   - sparse_transformer.py         ← SoftSplit/SoftComp/FusionFeedForward/SparseWindowAttention; heavy fold/unfold + attention.
+   - base_module.py                ← BaseNetwork building block (conv stacks, spectral norm). Ensure spectral_norm wrappers are exported correctly.
+   - misc.py                       ← Utility functions (get_device etc.) use register_buffer semantics—check for dynamic control flow.
+
+2) model/propainter.py
+   - Main InpaintGenerator; references above modules. Contains BidirectionalPropagation (line ~80) with DeformableAlignment (line ~59). Evaluate loops: for-range over frames (dynamic length). For export, fix max timesteps or unroll loops by padding sequences to fixed length per profile.
+   - TemporalSparseTransformerBlock (imported from modules/sparse_transformer.py) sits in this class; check for dynamic shape interplay.
+
+3) model/recurrent_flow_completion.py
+   - RFCNet with SecondOrderDeformableAlignment (line ~14) relying on torchvision.ops.deform_conv2d.
+   - Contains Conv3d P3DBlock and deconv (upsample by bilinear + conv). Ensure align_corners usage consistent for export.
+
+4) RAFT/ directory
+   - raft.py                   ← Original RAFT implementation. If we stick to fastflownet (ptlflow) the majority of this file becomes inactive, but its utilities (BasicEncoder, CorrBlock) may still be imported when RAFT_bi fallback path is used. For TensorRT, avoid alt_cuda_corr by keeping args.alternate_corr=False.
+   - corr.py                   ← CorrBlock uses matmul + bilinear_sampler; ensure plugin coverage for grid_sample.
+   - utils/utils.py           ← bilinear_sampler (grid_sample) + upflow8 (F.interpolate, F.unfold). Plan plugin or rewrite.
+   - extractor.py/update.py   ← Standard conv stacks; 1x1 + 3x3 conv sequences; safe for TRT once flows are exported.
+
+5) propainter/ directory (reference copy of original implementation)
+   - Mirror of model/ tree. We optimize the active model/ tree; keep propainter/ for reference but ensure both remain synced if we modify modules.
+
+6) utils/ directory
+   - download_util.py          ← Responsible for downloading weights (torch.hub). For TRT packaging, pre-bundle weights to avoid runtime downloads.
+
+7) core/ directory (training components, usually not in inference path)
+   - Contains dataset, loss, trainer definitions. Not needed for runtime TensorRT, but note they import same modules—avoid breaking them when patching.
+
+
+PER-FILE OPTIMISATION ACTIONS (TensorRT Readiness)
+
+flow_comp_raft.py
+- Lines 8–12: Imports ptlflow.fastflownet. Confirm installed version supports ONNX export (ptlflow 0.4+ recommended).
+- RAFT_bi.forward (line ~24) stacks frames (torch.stack) and uses fastflownet(
+  {"images": torch.stack((gtlf_1, gtlf_2), dim=1)} ). Ensure we patch exporter to mimic this call signature with static batch=1, time windows 2.
+- Suggestion: Lock sequence length to 5 frames (neighbor_length) to bound loops; use `frames_per_inference` constant. Document these assumptions in exporter scripts.
+
+flow_loss_utils.py
+- flow_warp uses F.grid_sample (line ~26). For TRT: either rely on GridSampler plugin or rewrite warp using custom kernel (PyCUDA) and bypass TRT.
+- create_mask uses F.pad with dynamic paddings; ensure exporter uses constant padding for specific shapes or rewrite with slicing.
+
+propainter.py (InpaintGenerator)
+- DeformableAlignment.forward (line ~53) calls torchvision.ops.deform_conv2d. For TRT:
+  - Option 1: Replace with custom ModulatedDeformConv2d implementation using DCNv2 plugin. Implementation file: add new module under model/modules/dcn_trt.py referencing plugin ID.
+  - Option 2: Partition graph: run deform_conv2d in PyTorch (TorchScript) while rest executes in TRT via Torch-TensorRT segmentation. Document this fallback.
+- BidirectionalPropagation forward (line ~100 onwards): Contains Python loops over frames with conditionals. TRT requires static loop bounds; restructure by converting loops into tensor operations (e.g., using `torch.arange` and `torch.gather`) or pre-padding sequences to fixed length (via config NEIGHBOR_FRAMES=10). Document that `seg_duration` should be clamped to <= subvideo_length (web/CLOUD_WORKER_WITH_IMAGES_2.txt:437). For exporters, supply `--max-t` argument.
+- Encoder layers (line ~140) use dynamic group conv (groups=1,2,4,8). TRT supports grouped conv; ensure channel counts multiples of 8.
+- TemporalSparseTransformerBlock imported here relies on SoftSplit/SoftComp (fold/unfold). On Windows, confirm plugin or keep this block in Torch fallback.
+
+recurrent_flow_completion.py
+- SecondOrderDeformableAlignment.forward (line ~27) → deform_conv2d (same plugin strategy as above).
+- BidirectionalPropagation.forward (line ~54) uses loops with list operations; same fix as InpaintGenerator: enforce static time length.
+- deconv.forward (line ~92) uses F.interpolate(..., align_corners=True). TRT supports bilinear upsample; ensure align_corners is consistent.
+- EdgeDetection.forward (line ~123) simple conv stack; safe.
+
+model/modules/sparse_transformer.py
+- SoftSplit.forward (line ~12) uses nn.Unfold with dynamic `f_h`, `f_w`. To export, ensure `kernel_size`, `stride`, `padding` constants and H/W part of profile. Document recommended ROI multiples for compatibility (32x32 increments).
+- SoftComp.forward (line ~39) uses F.fold and view permutations; treat as plugin requirement. Options: (A) Torch-TensorRT fallback; (B) implement fold plugin (im2col). Document in exporter instructions.
+- SparseWindowAttention.forward (line ~77) uses view/permutation shaped by `self.window_size`. Bound window size to static values (e.g., (8,8) or (12,12)). Document profile definitions.
+
+RAFT utilities
+- corr.CorrBlock.corr uses torch.matmul (safe). CorrBlock.__call__ builds meshgrid (torch.linspace) on CPU per frame; for TRT, restructure to precompute delta tensor (constant) and register as buffer. Consider rewriting to avoid runtime Python loops when exporting.
+- utils/utils.py: upflow8 uses F.interpolate + multiply. Replace with dedicated upsample module to avoid F.unfold (line ~40) or rewrite using `torch.nn.functional.interpolate` only (TRT supports). Document patch plan.
+
+
+SUGGESTED CODE REFACTORING FOR TENSORRT FRIENDLINESS
+
+- Static Loop Bounds: Introduce constants in faster-propainter-main/watermark.py controlling max frames per segment (neighbor_length, ref_stride, subvideo_length). In model modules, replace Python `for` over variable `t` with loops over fixed `MAX_T`, using `torch.where` to mask padded frames.
+- Precompute Offsets: In DeformableAlignment and SecondOrderDeformableAlignment, move `torch.cat` + `torch.tanh` to separate submodule so exporter can trace easier.
+- Buffer Registration: For all fixed tensors (e.g., mask templates, pooling filters), register as buffers in `__init__` rather than creating in forward (example: sparse_transformer SoftSplit uses calculations every call; precompute with maximum shape and index with slicing).
+- Replace torchvision.ops.deform_conv2d: implement module `model/modules/deform_conv_trt.py` with fallback to torchvision when plugin missing. Document plugin ID and expected weights ordering.
+- Avoid python lists accumulation: Many forward methods append to python lists and convert to tensors at the end. Swap to `torch.jit.annotate` style or direct tensor stack operations to keep graph static.
+
+
+TARGETED EXPORTER ARGUMENTS (per module)
+
+- export_fastflownet_onnx.py (recommended new script)
+  - Inputs: image_pair = torch.zeros(1,2,3,H,W)
+  - CLI arguments:
+    --weights faster-propainter-main/weights/fastflownet.pth (downloaded by ptlflow)
+    --minshape 1x2x3x128x128 --optshape 1x2x3x256x256 --maxshape 1x2x3x640x640
+
+- export_rfcnet_onnx.py
+  - Provide `--max-t 12` to fix sequence length.
+  - Accept masks/flows as inputs sized [1,T,2,H,W] and [1,T,1,H,W]; pad shorter sequences.
+
+- export_propainter_onnx.py
+  - Provide `--neighbor-length 12 --window-size 8 8` to freeze attention windows.
+  - Accept features [1,T,C,H,W]; pad to T=12.
+
+Document these script parameters inside the tools/ *.py docstrings for reproducibility.
+
+
+PACKAGE + BUILD TOOLS FOR MODEL REWRITE
+
+- PyTorch (CUDA) 2.1+ for exporting newer ops (grid_sample with `align_corners=True`).
+- torchvision 0.16+ (provides deform_conv2d); for plugin replacement compile against same version.
+- ptlflow >= 0.4 for fastflownet ONNX support.
+- TensorRT OSS build (grid sampler) — use nv-tensorrt repo tag matching your TRT version.
+- DCNv2 TensorRT plugin (e.g., from mmdeploy’s `mmdeploy/backend/tensorrt/custom_ops/`) compiled with CUDA 12 toolchain.
+- Torch-TensorRT nightly if needing fold/unfold lowering.
+
+
+TEST PLAN FOR MODEL-INTERNAL CHANGES
+
+1) Unit tests per module (PyTorch vs TensorRT):
+   - Write tests under faster-propainter-main/tests/ (new directory) to run inference with sample data and compare outputs (L2 norm) between original PyTorch and TRT/Torch-TRT outputs.
+   - Files: tests/test_raft.py, test_rfcnet.py, test_propainter.py.
+
+2) Visual regression:
+   - Process small sample video (web/demos/before.mp4) with TRT path enabled; compare to baseline outputs using PSNR/SSIM.
+
+3) Runtime logging:
+   - Extend faster-propainter-main/watermark.py to log which backend is active per module (TRT engine vs Torch-TRT vs PyTorch) with file path references.
+
+
+ADVANCED OPTIMISATION IDEAS — LAYER BY LAYER
+
+Goal: push beyond straightforward TensorRT conversion by altering the model itself for Tensor Core dominance, minimizing memory movement, and enabling future INT4/custom kernel paths.
+
+1) Flow Backbone (flow_comp_raft.py, ptlflow fastflownet)
+   - Replace fastflownet with a custom lightweight flow estimator tuned for Tensor Cores:
+     • File target: faster-propainter-main/model/modules/flow_comp_raft.py: RAF T_bi.__init__
+     • Idea: integrate `spynet` or `gma` variants that export cleanly to TRT.
+     • RAFT fallback is optional; if you stay on FastFlowNet only, ensure exporter + engine exist so the fallback path is never hit.
+     • Write exporter + builder in tools/export_flow_backbone.py with dynamic profile sets.
+     • For INT4 trials: quantize convolutions in the flow backbone using TensorRT Q/DQ networks (per-channel scales). Calibrate with motion-heavy clips.
+   - Fuse frame stacking and normalization into a single custom CUDA kernel to avoid intermediate tensors (PyCUDA or Triton script under web/cuda_ops.py).
+
+2) Deformable Alignment Blocks (propainter.py: DeformableAlignment; recurrent_flow_completion.py: SecondOrderDeformableAlignment)
+   - Strategy A: swap to standard convolution + learned offsets approximated via grouped conv (makes export trivial, enables INT8).
+     • Introduce config flag `USE_APPROX_DEFORMABLE=1` in faster-propainter-main/watermark.py.
+     • Implement in model/modules/deformconv_approx.py with static weight tables.
+   - Strategy B: implement fused CUDA kernel (Triton or custom C++/CUDA)
+     • Create extension under faster-propainter-main/custom_ops/deform/ with bindings.
+     • Expose TensorRT plugin (register in C++). Document plugin builder CLI in docs.
+   - Mixed Precision: ensure offsets/masks stay FP16 while weights are either FP16 or INT8; maintain FP32 accumulate.
+
+3) Sparse Transformer (model/modules/sparse_transformer.py)
+   - Replace SoftSplit/SoftComp (unfold/fold) with equivalent convolution + reshape pipeline so TRT sees only conv + matmul.
+     • For example, convert SoftSplit into `nn.Conv2d` with stride/ks + flatten, eliminating nn.Unfold.
+     • Replace SoftComp with transposed conv layer (ConvTranspose2d) plus reshape.
+   - Attention: port SparseWindowAttention to use FlashAttention-like kernel (xFormers) or TensorRT’s EfficientAttention plugin (if available in TRT 10).
+     • Create wrapper module in model/modules/attention_trt.py selecting best backend.
+   - Document new invariants: window_size fixed {8,8}, n_head divisible by 8 for Tensor Cores.
+
+4) Temporal Loops (propainter.py BidirectionalPropagation, recurrent_flow_completion.py BidirectionalPropagation)
+   - Convert Python loops into tensorized operations:
+     • Precompute flow indices (torch.arange) and use `torch.roll` + `torch.where` to replace iterative propagation.
+     • Benefits: fewer control-flow edges -> easier for TorchScript/TensorRT.
+   - If loops must remain, cap `seg_duration` to fixed `MAX_T` and pad sequences with sentinel frames; store mask for valid timesteps. Document constants in faster-propainter-main/config_runtime.py (new file).
+
+5) Flow Warp (model/modules/flow_loss_utils.py, RAFT/utils/utils.py)
+   - Instead of generic grid_sample, implement specialized warp for small displacements using bilinear interpolation coded as custom kernel (Triton). This cuts plugin dependency and can run in INT8/FP16.
+     • Create file: faster-propainter-main/custom_ops/warp/warp_triton.py
+     • Provide fallback to PyTorch grid_sample.
+   - Provide TensorRT plugin for large-displacement warp if necessary (register with plugin name `CustomGridSampler`).
+
+6) Encoder/Decoder Blocks (propainter.py Encoder, deconv; recurrent_flow_completion.py deconv)
+   - Fuse Conv + Activation using TensorRT tactic (or convert to `nn.Conv2d` with bias + activation fused). Document which layers run best in FP16 vs INT8.
+   - Align channel counts to multiples of 64 for Tensor Cores. If not, add 1x1 conv to pad channels (store in config).
+   - Use group normalization to avoid dynamic BN during inference.
+
+7) Mask Handling (created in web/CLOUD_WORKER_WITH_IMAGES_2.txt; used in model modules)
+   - Introduce GPU mask pre/post pipeline (cv-cuda). Ensure mask dtype is uint8 to minimize transfers.
+   - For in-model mask usage, convert to float16 early and keep on device.
+
+
+TENSOR CORE UTILISATION PLAN
+
+- Precision tiers:
+  • YOLO: INT8 (with Q/DQ) or FP16 fallback.
+  • Flow backbone: FP16 main, INT8 candidate after calibration.
+  • RFCNet + Inpaint: FP16 main, partial INT8 (conv only) if quality holds. Keep deformable offsets FP16.
+  • Attention: FP16 only unless EfficientAttention plugin supports INT8.
+
+- Alignment requirements:
+  • Channel dims divisible by 8 (prefer 32/64) — adjust `channel` in propainter Encoder (~line 146) to multiples of 64.
+  • Sequence length (T) multiples of 2 or 4 for fused kernels.
+  • ROI spatial dims multiples of 16 (already enforced by calculate_crop_region). Document this invariance in config.
+
+- Memory planning:
+  • Pre-allocate workspace buffers in faster-propainter-main/watermark.py after loading engines (using torch.empty with `device='cuda', dtype=torch.float16`).
+  • For TensorRT engines, set builder workspace > 4GB if GPU allows for better tactic selection.
+
+
+CUSTOM KERNEL ROADMAP (PyCUDA/Triton)
+
+1) ROI Crop + Paste (web/CLOUD_WORKER_WITH_IMAGES_2.txt loops at ~474–626)
+   - Implement Triton kernel `crop_kernel` to read frames/masks directly from contiguous GPU frames buffer.
+   - Maintain module in web/cuda_ops.py with class GPUCropPaste.
+
+2) Mask Dilation & Refinement
+   - Use Triton to implement morphological ops for masks, avoiding CPU OpenCV. Keep 2D shared memory tile.
+   - Expose as `mask_ops.dilate(mask, iterations)` in model path.
+
+3) Warp + Blend
+   - Implement `warp_blend_kernel` combining flow warp + mask blend in one pass. Use float16 accum, fallback to float32 if needed.
+   - Hook inside BidirectionalPropagation when merging warped frames.
+
+4) Temporal Attention Softmax
+   - For SparseWindowAttention, write Triton kernel performing Q*K^T + softmax + V multiply per window to replace PyTorch matmul (reduces memory).
+   - Keep plugin bridging to TensorRT EfficientAttention when available.
+
+
+QUANTISATION + PRUNING OPTIONS
+
+- Per-layer decisions (document in runtime config):
+  • Flow backbone convs: per-channel INT8 (TensorRT Q/DQ). Evaluate INT4 using research preview (requires custom plugin).
+  • RFCNet conv3d: keep FP16 (sensitive). Optionally prune channels (structured) by L1-norm to reduce compute before exporting.
+  • Inpaint generator: apply channel pruning guided by magnitude (Torch pruning). After pruning, retrain briefly, then re-export.
+
+- Tools:
+  • Use `torch.fx` to capture graph, apply pruning transforms, then export to ONNX.
+  • For INT4 experiments, integrate `mqbench` or custom calibration to produce Q/DQ nodes; implement TensorRT plugin for INT4 convolution.
+
+
+MANAGED CONFIGURATION
+
+- Create new config file: faster-propainter-main/runtime_config.py with structure:
+  ```python
+  RUNTIME_CONFIG = {
+      'max_segment_frames': 12,
+      'roi_padding_ratio': 0.12,
+      'tensor_precision': {
+          'flow': 'fp16',
+          'rfcnet': 'fp16',
+          'inpaint': 'fp16',
+          'attention': 'fp16',
+      },
+      'plugins': {
+          'deform_conv': 'dcnv2_trt_plugin.dll',
+          'grid_sampler': 'nvinfer_plugin.dll',
+      }
+  }
+  ```
+  - Reference this config in faster-propainter-main/watermark.py and exporter scripts to ensure consistent assumptions.
+
+
+AI-ASSISTED CODE GENERATION (MANUAL KERNELS)
+
+- Consider leveraging Triton (OpenAI) to auto-generate specialized kernels for:
+  • Mask dilation
+  • Flow warp
+  • Attention softmax
+  Provide prompts referencing specific loops in propainter.py and recurrent_flow_completion.py to ensure shape alignment.
+
+- Framework: maintain `auto_kernels/` directory with prompts + generated .py kernels. Each kernel accompanied by unit test verifying numerics against PyTorch reference.
+
+
+PIPELINE VERIFICATION (Continuous Integration)
+
+- Add CI job (GitHub Actions or local script) executing:
+  1. `python tools/export_raft_onnx.py --check`
+  2. `trtexec --loadEngine=... --dryRun`
+  3. Unit tests comparing outputs.
+- Store engine hashes to detect rebuild necessity.

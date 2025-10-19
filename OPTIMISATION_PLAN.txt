@@ -1,0 +1,278 @@
+WATERMARKZ OPTIMISATION PLAN — TensorRT First, Then CPU, Then PyCUDA
+
+Workspace Root
+- Root: D:\github\RoomFinderAI\watermarkz
+- All paths below are relative to the workspace root unless prefixed otherwise.
+
+Key Directories And Files (Current Layout)
+- web/ (serving + worker entry + assets)
+  - web/CLOUD_WORKER_WITH_IMAGES_2.txt  ← Main “cloud worker 2” server/worker file
+  - web/app.py, web/gradio_app.py, web/config.js, web/js/, web/css/
+  - web/yolo_weights/sora_best.pt  ← Local YOLO .pt weight
+  - web/START_WORKERS.md, web/README.md, web/requirements.txt
+  - Runtime dirs (created by code):
+    - web/temp
+    - web/cache              ← TORCH_HOME and caches point here
+    - web/uploads
+    - web/results
+    - web/results/debug_masks
+    - web/python_packages
+  - Expected (classic ProPainter fallback):
+    - web/ProPainter/inference_propainter.py
+    - web/weights/ProPainter.pth
+    - web/weights/raft-things.pth
+    - web/weights/recurrent_flow_completion.pth
+
+- FasterProPainter (primary inpainting pipeline)
+  - faster-propainter-main/  ← At repo root (NOT under web/)
+    - faster-propainter-main/watermark.py  ← Pipeline entry used by worker
+    - faster-propainter-main/model/
+      - modules/flow_comp_raft.py (RAFT_bi)
+      - propainter.py (InpaintGenerator)
+      - recurrent_flow_completion.py (RFCNet)
+    - faster-propainter-main/propainter/ (reference copy of model code)
+    - faster-propainter-main/RAFT/ (RAFT reference impl)
+    - faster-propainter-main/utils/download_util.py (weight downloads)
+    - CREATE for TensorRT engines:
+      - faster-propainter-main/engines/raft/
+      - faster-propainter-main/engines/propainter/
+      - faster-propainter-main/engines/rfcnet/
+
+- YOLO Detector
+  - yolo_detector.py  ← Loads TensorRT engine if present; falls back to .pt
+  - Engines and weights expected by code:
+    - runs/detect/new_sora_watermark/weights/best.engine (or best_fp16.engine, best_int8.engine)
+    - runs/detect/new_sora_watermark/weights/best.pt (fallback)
+    - runs/detect/sora_watermark/weights/… (legacy fallback)
+
+- Calibration Data (to create)
+  - web/cache/calib/   ← Place INT8 calibration frames/masks here for TRT
+
+
+Phase 0 — Baseline Fixes And Engine Folders
+1) Fix FasterProPainter import path in worker (currently assumes web/faster-propainter-main but code lives at repo root):
+   - File: web/CLOUD_WORKER_WITH_IMAGES_2.txt:429 (inside _process_propainter_segment)
+     - Ensure this path is used: os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main')
+     - Current snippet shows:
+       faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')  ← change to parent
+       if faster_propainter_path not in sys.path: sys.path.insert(0, faster_propainter_path)
+
+2) Create engine and cache directories:
+   - runs/detect/new_sora_watermark/weights/                  ← YOLO TRT engines
+   - faster-propainter-main/engines/{raft,propainter,rfcnet}/ ← ProPainter sub-net engines
+   - web/cache/calib/                                         ← INT8 calibration cache
+
+
+Phase 1 — YOLOv8 To TensorRT (FP16/INT8)
+Files and locations:
+- Model (.pt): web/yolo_weights/sora_best.pt (or runs/detect/new_sora_watermark/weights/best.pt)
+- Detector code: yolo_detector.py:12 (auto-picks TRT if engine exists; respects env)
+- Engine destination directory: runs/detect/new_sora_watermark/weights/
+
+Export and build:
+1) Export YOLO to ONNX (Ultralytics):
+   - Command example (PowerShell):
+     yolo export model="runs/detect/new_sora_watermark/weights/best.pt" format=onnx dynamic=True opset=12 imgsz=640 simplify=True
+   - Output: runs/detect/new_sora_watermark/weights/best.onnx
+
+2) Build TensorRT engine(s) with trtexec:
+   - FP16 engine:
+     trtexec --onnx=runs/detect/new_sora_watermark/weights/best.onnx ^
+             --saveEngine=runs/detect/new_sora_watermark/weights/best_fp16.engine ^
+             --fp16 --workspace=4096 --useSpinWait ^
+             --tacticSources=+CUBLAS,+CUDNN --timingCacheFile=runs/detect/new_sora_watermark/weights/trt_timing_cache
+
+   - INT8 engine (requires calibration cache):
+     trtexec --onnx=runs/detect/new_sora_watermark/weights/best.onnx ^
+             --saveEngine=runs/detect/new_sora_watermark/weights/best_int8.engine ^
+             --int8 --calib=web/cache/calib/yolo.calib ^
+             --fp16 --workspace=8192 --useSpinWait ^
+             --tacticSources=+CUBLAS,+CUDNN --timingCacheFile=runs/detect/new_sora_watermark/weights/trt_timing_cache
+
+3) Force engine use in production:
+   - Environment variables:
+     - YOLO_REQUIRE_TENSORRT=1
+     - Optional explicit engine path: YOLO_TENSORRT_ENGINE=runs/detect/new_sora_watermark/weights/best_int8.engine
+
+Notes:
+- Prefer exporter variants that fuse NMS as a TensorRT plugin (Ultralytics supports TRT-friendly export). If not embedded, use TRT-YOLO NMS plugin.
+- Expected latency on RTX 4090 (batch=1): INT8 ≈ 1–2 ms @ 640, FP16 ≈ 2–3.5 ms.
+
+
+Phase 2 — FasterProPainter Sub-nets To TensorRT
+Targets and source files:
+- RAFT (optical flow): faster-propainter-main/model/modules/flow_comp_raft.py (class RAFT_bi)
+- Recurrent Flow Completion: faster-propainter-main/model/recurrent_flow_completion.py
+- Inpaint Generator: faster-propainter-main/model/propainter.py
+- Pipeline entry: faster-propainter-main/watermark.py (loads all three; see lines ~16, 282, 290, 305 for weights)
+- Engine output dirs:
+  - faster-propainter-main/engines/raft/
+  - faster-propainter-main/engines/rfcnet/
+  - faster-propainter-main/engines/propainter/
+
+Track A (fast iteration): Torch-TensorRT compile
+1) Install torch_tensorrt matching your PyTorch/CUDA.
+2) In faster-propainter-main/watermark.py, after model load and .eval().cuda(), compile modules:
+   - Example (concept):
+     import torch_tensorrt as trt
+     raft_trt = trt.compile(raft_module, inputs=[trt.Input([1,3,H,W]), trt.Input([1,3,H,W])], enabled_precisions={torch.float16}, workspace_size=2<<30)
+     gen_trt  = trt.compile(inpaint_gen, inputs=[trt.Input([1,3,H,W]), trt.Input([1,1,H,W])], enabled_precisions={torch.float16})
+     rfc_trt  = trt.compile(rfc_module,   inputs=[...], enabled_precisions={torch.float16})
+   - Persist compiled engines (if supported): save to faster-propainter-main/engines/... for reuse.
+3) Keep input shapes divisible by 8/16 and limit dynamic profiles to a small set: {128,160,192,256,320,384} for ROI crops.
+
+Track B (max performance): ONNX + TensorRT per sub-net
+1) Write exporters (new scripts under faster-propainter-main/tools/) to load weights and export ONNX for each module with dynamic H/W (bounded profiles).
+   - Example outputs:
+     - faster-propainter-main/engines/raft/raft.onnx
+     - faster-propainter-main/engines/rfcnet/rfcnet.onnx
+     - faster-propainter-main/engines/propainter/propainter.onnx
+2) Build with trtexec (FP16 first, consider INT8 for inpaint convs):
+   - RAFT FP16:
+     trtexec --onnx=faster-propainter-main/engines/raft/raft.onnx ^
+             --saveEngine=faster-propainter-main/engines/raft/raft_fp16.engine ^
+             --fp16 --workspace=4096 --useSpinWait --tacticSources=+CUBLAS,+CUDNN
+   - RFCNet FP16:
+     trtexec --onnx=faster-propainter-main/engines/rfcnet/rfcnet.onnx ^
+             --saveEngine=faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine ^
+             --fp16 --workspace=4096
+   - Inpaint Generator FP16:
+     trtexec --onnx=faster-propainter-main/engines/propainter/propainter.onnx ^
+             --saveEngine=faster-propainter-main/engines/propainter/propainter_fp16.engine ^
+             --fp16 --workspace=4096
+3) Integration hook: in faster-propainter-main/watermark.py, wrap calls to prefer TRT runners when engine files exist; fallback to PyTorch module if not.
+4) Plugins: if deformable conv or exotic ops block export, either:
+   - Replace with plugin kernels, or
+   - Keep those layers in Torch-TRT fallback, or
+   - Use simplified approximations for speed-critical use cases.
+
+Expected ProPainter segment latency:
+- With aggressive smart-crop (ROI 192–384), FP16 engines and reduced neighbor/ref settings, single-digit millisecond windows per frame chunk are achievable on high-end GPUs.
+
+
+Phase 3 — Pre/Post On GPU (CV-CUDA, NVENC/NVDEC)
+Files/locations to change:
+- Encoding: web/CLOUD_WORKER_WITH_IMAGES_2.txt:500–540 region (_encode_segment)
+  - Current ffmpeg args (CPU): "-c:v libx264 -preset fast -crf 18"
+  - Replace with NVENC (GPU):
+    ffmpeg -y -hwaccel cuda -hwaccel_output_format cuda -framerate {fps} ^
+           -i {seg_cleaned_dir}/%04d.png -c:v h264_nvenc -preset p4 -rc vbr -cq 19 -pix_fmt yuv420p {seg_video_path}
+
+- Cropping/Merging CPU loops (offload to GPU): web/CLOUD_WORKER_WITH_IMAGES_2.txt:
+  - ~474–515 (frame crops) → CV-CUDA resize/crop or PyCUDA kernel
+  - ~532–565 (mask crop)   → CV-CUDA morphology or PyCUDA kernel
+  - ~603–626 (paste/merge) → PyCUDA copy kernel with ROI bounds
+
+- Add a helper module (GPU ops):
+  - web/cuda_ops.py  ← Wrap CV-CUDA/PyCUDA kernels (crop, paste, dilate, blend)
+
+
+Phase 4 — Pipeline Shaping For 1ms-class ROI
+Tighten compute domain:
+- In web/CLOUD_WORKER_WITH_IMAGES_2.txt:_process_propainter_segment (around 461): reduce padding_ratio from 0.2 → 0.12 (start) to shrink ROI.
+- Adjust faster_propainter_pipeline params (calls at ~437, ~1144, ~1791, ~2259):
+  - neighbor_length: 20 → 8–12 (motion dependent)
+  - ref_stride: 10 → 24–32 (fewer refs)
+  - subvideo_length: 80 → dynamic via get_dynamic_subvideo_length(width,height)
+
+Concurrency and memory:
+- Separate CUDA streams: YOLO, RAFT, Inpaint, pre/post
+- Pre-allocate device buffers; use pinned host memory for H2D/D2H
+- Consider CUDA Graphs for recurrent sequences
+- torch.backends.cudnn.benchmark = True (if any torch remains)
+
+
+Phase 5 — CPU Optimisations (for non-TRT paths)
+- Threading/pinning:
+  - Set OMP_NUM_THREADS and MKL_NUM_THREADS to match CPU cores
+  - Pin memory for transfers
+- I/O:
+  - Avoid intermediate PNG writes; prefer in-memory pipelines when feasible
+- Process separation:
+  - Offload Celery/HTTP handling to different processes than GPU workers
+
+
+Phase 6 — PyCUDA-Only Accelerations (where TRT cannot help)
+Kernels to implement (in web/cuda_ops.py):
+- roi_crop(src, x, y, w, h) → cropped buffer
+- roi_paste(dst, src_crop, x, y) → merge cleaned crop
+- mask_dilate(mask, iters) → morphology
+- alpha_blend(base, overlay, alpha_mask) → composite
+
+Integration points:
+- Replace OpenCV CPU loops at web/CLOUD_WORKER_WITH_IMAGES_2.txt lines ~474–515, ~532–565, ~603–626 with GPU kernels.
+- Overlap kernels with TRT inference using CUDA streams.
+
+
+Phase 7 — INT8 Calibration & Quality Gates
+- Place representative frames/masks in: web/cache/calib/
+- Generate calibration caches for:
+  - YOLO: web/cache/calib/yolo.calib
+  - (Optional) ProPainter sub-nets: web/cache/calib/raft.calib, rfcnet.calib, propainter.calib
+- Compare FP16 vs INT8 outputs on motion/texture stress scenes; keep RAFT FP16 if INT8 degrades flow.
+
+
+Phase 8 — Environment, Dependencies, And Versions
+Dependencies (pin to CUDA/TensorRT stack):
+- NVIDIA CUDA Toolkit (≥ 12.x) + cuDNN (matching driver)
+- TensorRT (8.6+ or 10.x matching CUDA)
+- PyTorch + CUDA build compatible with TensorRT
+- Torch-TensorRT (matching PyTorch/CUDA)
+- Ultralytics (≥ 8.1.x)
+- CV-CUDA (preferred) or OpenCV with CUDA
+- PyCUDA (for custom kernels)
+- FFmpeg with NVENC enabled (or NVIDIA Video Processing Framework/PyNvCodec)
+- Optional: DALI, onnx, onnx-simplifier, onnxruntime-gpu (for validation only)
+
+Runtime env variables:
+- YOLO_REQUIRE_TENSORRT=1
+- YOLO_TENSORRT_ENGINE=runs/detect/new_sora_watermark/weights/best_int8.engine (optional)
+- TORCH_HOME=web/cache  (already set in worker)
+- XDG_CACHE_HOME=web/cache (already set)
+- CUDA_VISIBLE_DEVICES (controlled per worker)
+
+
+Concrete Code Touchpoints (Summary)
+- web/CLOUD_WORKER_WITH_IMAGES_2.txt
+  - 24: PROPAINTER_SCRIPT path → keep for fallback
+  - 429: Ensure sys.path uses ..\faster-propainter-main
+  - 437/1144/1791/2259: faster_propainter_pipeline(...) speed params (neighbor_length/ref_stride/raft_iter/subvideo_length)
+  - ~461: padding_ratio in calculate_crop_region → 0.12–0.15
+  - ~500–540: switch ffmpeg to h264_nvenc encode
+  - ~474–626: replace CPU crop/mask/merge loops with GPU ops (CV-CUDA/PyCUDA)
+
+- yolo_detector.py
+  - Prefers TensorRT engines in runs/detect/new_sora_watermark/weights/; enforce via env
+
+- faster-propainter-main/watermark.py
+  - Insert Torch-TensorRT compilation (Track A) or TRT engine runners (Track B)
+  - Weights auto-download to web/cache/checkpoints due to TORCH_HOME
+
+- Engine/weight locations to maintain:
+  - YOLO TRT engines: runs/detect/new_sora_watermark/weights/best_fp16.engine, best_int8.engine
+  - ProPainter sub-net engines: faster-propainter-main/engines/{raft,propainter,rfcnet}/*.engine
+  - Classic ProPainter fallback: web/ProPainter/inference_propainter.py; web/weights/*.pth
+  - Calibration: web/cache/calib/
+
+
+Validation And Targets
+- Detection stage (YOLO): INT8 1–2 ms @ 640, FP16 2–3.5 ms
+- ProPainter segment (cropped ROI 192–384): single-digit ms windows with FP16 engines and tight params
+- End-to-end per-ROI pass: aim for ≤ 3–6 ms on high-end GPUs; total per video depends on segments and overlap.
+
+
+Next Actions (Practical Order)
+1) Fix sys.path import for faster-propainter in web/CLOUD_WORKER_WITH_IMAGES_2.txt.
+2) Export YOLO ONNX and build TRT FP16/INT8 engines into runs/detect/new_sora_watermark/weights/.
+3) Set YOLO_REQUIRE_TENSORRT=1 and run a smoke test.
+4) Switch ffmpeg encode to NVENC in _encode_segment.
+5) Tighten padding_ratio and faster_propainter params; validate quality on sample videos.
+6) Add Torch-TensorRT compile stubs in faster-propainter-main/watermark.py; measure speed.
+7) Replace CPU crop/mask/merge with CV-CUDA/PyCUDA; overlap with TRT stages.
+8) If needed, graduate to ONNX+TRT engines for RAFT/RFCNet/Inpaint and add plugins for unsupported ops.
+
+
+Notes
+- The 1 ms goal is realistic for small ROIs and specific stages (e.g., YOLO detect); full-frame ProPainter cannot hit 1 ms—winning strategy is minimizing ROI and overlapping all stages on the GPU.
+- Keep classic ProPainter assets for fallback compatibility but route hot path through FasterProPainter + TRT.
+
