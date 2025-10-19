@@ -829,7 +829,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
             segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
             print(f"📊 Detected {len(segments)} segments for distributed processing")
             for i, (start, end, bbox) in enumerate(segments):
-                print(f"   Segment {i+1}: frames {start}-{end} ({end-start+1} frames)")
+                print(f"   Segment {i+1}: frames {start}-{end} ({end-start+1} frames), bbox={bbox}")
         else:
             # No segments detected - treat entire video as one segment
             segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
@@ -1095,6 +1095,7 @@ def process_segment_task(self, segment_data):
 
         # Generate masks locally from bbox (INSTANT - no network dependency!)
         print(f"   ⚙️  Generating {frames_copied} masks locally from bbox...")
+        print(f"   🔍 DEBUG: bbox={bbox}, crop=({crop_x}, {crop_y}, {crop_w}, {crop_h})")
         masks_copied = 0
 
         for i in range(frames_copied):
@@ -1105,6 +1106,9 @@ def process_segment_task(self, segment_data):
             # bbox is [x1, y1, x2, y2] in FULL frame coordinates
             bbox_w = max(1, bbox[2] - bbox[0])  # x2 - x1 (actual width)
             bbox_h = max(1, bbox[3] - bbox[1])  # y2 - y1 (actual height)
+
+            if i == 0:  # Only log first frame to avoid spam
+                print(f"   🔍 DEBUG: bbox_w={bbox_w}, bbox_h={bbox_h} (watermark size in full frame)")
 
             # Translate bbox top-left to crop coordinates
             bbox_x_in_crop = max(0, bbox[0] - crop_x)
@@ -1117,6 +1121,12 @@ def process_segment_task(self, segment_data):
             # Final clipped dimensions
             bbox_w_clipped = max(0, bbox_x_end - bbox_x_in_crop)
             bbox_h_clipped = max(0, bbox_y_end - bbox_y_in_crop)
+
+            if i == 0:  # Only log first frame
+                print(f"   🔍 DEBUG: bbox_in_crop=({bbox_x_in_crop}, {bbox_y_in_crop}, {bbox_w_clipped}, {bbox_h_clipped})")
+                mask_area = bbox_w_clipped * bbox_h_clipped
+                crop_area = crop_w * crop_h
+                print(f"   🔍 DEBUG: mask_area={mask_area} pixels, crop_area={crop_area} pixels, ratio={mask_area/crop_area*100:.1f}%")
 
             # Ensure bbox is within crop bounds
             if bbox_w_clipped > 0 and bbox_h_clipped > 0:
