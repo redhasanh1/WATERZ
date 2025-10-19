@@ -2580,7 +2580,17 @@ def get_status(task_id):
                 })
             else:
                 # All segments done, finalize should be complete or completing
-                result_filename = f"{video_id}_propainter.mp4"
+                # Get base_name from prepare_result to construct correct filename
+                import json
+                prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
+                if prepare_result_json:
+                    prepare_result = json.loads(prepare_result_json)
+                    base_name = prepare_result.get('base_name', video_id)
+                    result_filename = f"{base_name}_propainter.mp4"
+                else:
+                    # Fallback if prepare_result not found
+                    result_filename = f"{video_id}_propainter.mp4"
+
                 return jsonify({
                     'state': 'SUCCESS',
                     'result': {'result_url': f'/results/{result_filename}'},
