@@ -2514,6 +2514,45 @@ def get_status(task_id):
         }
     """
     try:
+        # Special handling for distributed tasks (manual Redis tracking)
+        if task_id.startswith('distributed_'):
+            video_id = task_id.replace('distributed_', '')
+            tracking_key = f"segments:{video_id}"
+
+            # Check if tracking exists
+            total_bytes = celery.backend.get(f"{tracking_key}:total")
+            if not total_bytes:
+                return jsonify({
+                    'state': 'PENDING',
+                    'progress': 'Task is waiting in queue...',
+                    'info': {'progress': 0, 'status': 'Waiting in queue...'}
+                })
+
+            # Get completion status
+            completed_bytes = celery.backend.get(tracking_key) or b'0'
+            total = int(total_bytes)
+            completed = int(completed_bytes)
+
+            print(f"📊 Distributed task status - {task_id}: {completed}/{total} segments complete")
+
+            if completed < total:
+                # Still processing segments
+                progress = int((completed / total) * 90)  # 0-90%
+                return jsonify({
+                    'state': 'PROCESSING',
+                    'progress': f'Processing segments: {completed}/{total}',
+                    'info': {'progress': progress, 'status': f'Segment {completed}/{total} complete'}
+                })
+            else:
+                # All segments done, finalize should be complete or completing
+                result_filename = f"{video_id}_propainter.mp4"
+                return jsonify({
+                    'state': 'SUCCESS',
+                    'result': {'result_url': f'/results/{result_filename}'},
+                    'metadata': {'total_segments': total}
+                })
+
+        # Regular Celery task handling
         from celery.result import AsyncResult
 
         task = AsyncResult(task_id, app=celery)
