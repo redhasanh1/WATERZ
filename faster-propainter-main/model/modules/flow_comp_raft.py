@@ -1,6 +1,4 @@
 import argparse
-import os
-from typing import Optional, Tuple
 
 import ptlflow
 import torch
@@ -27,217 +25,31 @@ def initialize_RAFT(model_path='weights/raft-things.pth', device='cuda'):
 
     return model
 
-class FastFlowNetTRTEngine:
-    """
-    Thin TensorRT wrapper for the exported FastFlowNet engine.
-
-    Falls back to raising RuntimeError if TensorRT Python libraries are missing.
-    """
-
-    def __init__(self, engine_path: str):
-        try:
-            import tensorrt as trt  # noqa: F401
-            from cuda import cudart  # noqa: F401
-        except ImportError as exc:  # pragma: no cover - environment specific
-            raise RuntimeError("TensorRT Python modules not available") from exc
-
-        import tensorrt as trt
-        from cuda import cudart
-
-        self._cudart = cudart
-        logger = trt.Logger(trt.Logger.WARNING)
-        runtime = trt.Runtime(logger)
-        with open(engine_path, "rb") as f:
-            engine_bytes = f.read()
-        self._engine = runtime.deserialize_cuda_engine(engine_bytes)
-        if self._engine is None:
-            raise RuntimeError(f"Failed to deserialize engine: {engine_path}")
-        self._context = self._engine.create_execution_context()
-        if self._context is None:
-            raise RuntimeError("Failed to create TensorRT execution context")
-
-        # Create a dedicated CUDA stream
-        error, stream = self._cudart.cudaStreamCreate()
-        if error != self._cudart.cudaError_t.cudaSuccess:
-            raise RuntimeError(f"cudaStreamCreate failed with error {error}")
-        self._stream = stream
-
-        # Cache binding indices
-        self._input_binding = None
-        self._output_binding = None
-        for idx in range(self._engine.num_bindings):
-            if self._engine.binding_is_input(idx):
-                self._input_binding = idx
-            else:
-                self._output_binding = idx
-
-    def infer(self, images_np: "np.ndarray") -> "np.ndarray":
-        import numpy as np
-
-        cudart = self._cudart
-
-        if self._input_binding is None or self._output_binding is None:
-            raise RuntimeError("Invalid engine bindings detected")
-
-        images_np = np.ascontiguousarray(images_np.astype(np.float32))
-        self._context.set_binding_shape(self._input_binding, images_np.shape)
-        output_shape = tuple(self._context.get_binding_shape(self._output_binding))
-        output_np = np.empty(output_shape, dtype=np.float32)
-
-        # Allocate device buffers
-        error, d_input = cudart.cudaMalloc(images_np.nbytes)
-        if error != cudart.cudaError_t.cudaSuccess:
-            raise RuntimeError(f"cudaMalloc input failed with error {error}")
-
-        error, d_output = cudart.cudaMalloc(output_np.nbytes)
-        if error != cudart.cudaError_t.cudaSuccess:
-            cudart.cudaFree(d_input)
-            raise RuntimeError(f"cudaMalloc output failed with error {error}")
-
-        try:
-            cudart.cudaMemcpyAsync(
-                d_input,
-                images_np.ctypes.data,
-                images_np.nbytes,
-                cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
-                self._stream,
-            )
-
-            bindings = [0] * self._engine.num_bindings
-            bindings[self._input_binding] = int(d_input)
-            bindings[self._output_binding] = int(d_output)
-
-            if not self._context.execute_async_v2(bindings, self._stream):
-                raise RuntimeError("TensorRT execute_async_v2 returned False")
-
-            cudart.cudaMemcpyAsync(
-                output_np.ctypes.data,
-                d_output,
-                output_np.nbytes,
-                cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
-                self._stream,
-            )
-            cudart.cudaStreamSynchronize(self._stream)
-        finally:
-            cudart.cudaFree(d_input)
-            cudart.cudaFree(d_output)
-
-        return output_np
-
-    def __del__(self):  # pragma: no cover - best effort cleanup
-        try:
-            if hasattr(self, "_cudart") and hasattr(self, "_stream"):
-                self._cudart.cudaStreamDestroy(self._stream)
-        except Exception:
-            pass
-
-
-# using fastflownet to replace raft with optional TensorRT acceleration
+# using fastflownet to replace raft
 class RAFT_bi(nn.Module):
     """Flow completion loss"""
 
-    def __init__(
-        self,
-        model_path: str = "weights/raft-things.pth",
-        device: str = "cuda",
-        *,
-        trt_engine_path: Optional[str] = None,
-    ):
+    def __init__(self, model_path="weights/raft-things.pth", device="cuda"):
         super().__init__()
+        self.fix_raft = ptlflow.get_model(
+            "fastflownet", pretrained_ckpt="things"
+        )  # using any model in ptlflow
+        self.fix_raft.to(device)
 
-        self._device = device
-        self._trt_runner: Optional[FastFlowNetTRTEngine] = None
-
-        if trt_engine_path is None:
-            module_dir = os.path.dirname(os.path.abspath(__file__))
-            default_engine = os.path.abspath(
-                os.path.join(module_dir, "..", "..", "engines", "raft", "raft_fp16.engine")
-            )
-            trt_engine_path = os.getenv("FASTFLOWNET_TRT_ENGINE", default_engine)
-
-        trt_engine_path = (
-            trt_engine_path if trt_engine_path and os.path.exists(trt_engine_path) else None
-        )
-
-        if trt_engine_path:
-            try:
-                self._trt_runner = FastFlowNetTRTEngine(trt_engine_path)
-                print(
-                    f"[FastFlowNet] Using TensorRT engine for flow estimation: {trt_engine_path}"
-                )
-            except Exception as exc:  # pragma: no cover - environment dependent
-                print(
-                    f"[FastFlowNet] TensorRT engine load failed ({exc}); "
-                    "falling back to PyTorch implementation."
-                )
-                self._trt_runner = None
-
-        if self._trt_runner is None:
-            self.fix_raft = ptlflow.get_model(
-                "fastflownet", pretrained_ckpt="things"
-            )
-            self.fix_raft.to(device)
-            for p in self.fix_raft.parameters():
-                p.requires_grad = False
+        for p in self.fix_raft.parameters():
+            p.requires_grad = False
 
         self.l1_criterion = nn.L1Loss()
         self.eval()
 
-    def _run_trt(
-        self, frames_t: torch.Tensor, frames_tp1: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        import numpy as np
-
-        if self._trt_runner is None:
-            raise RuntimeError("TensorRT runner is not initialized")
-
-        pair_forward = (
-            torch.stack((frames_t, frames_tp1), dim=0)
-            .unsqueeze(0)
-            .detach()
-            .cpu()
-            .numpy()
-        )
-        pair_backward = (
-            torch.stack((frames_tp1, frames_t), dim=0)
-            .unsqueeze(0)
-            .detach()
-            .cpu()
-            .numpy()
-        )
-
-        flows_forward = self._trt_runner.infer(pair_forward)
-        flows_backward = self._trt_runner.infer(pair_backward)
-
-        flows_forward_t = torch.from_numpy(np.asarray(flows_forward)).to(
-            frames_t.device, dtype=frames_t.dtype
-        )
-        flows_backward_t = torch.from_numpy(np.asarray(flows_backward)).to(
-            frames_t.device, dtype=frames_t.dtype
-        )
-
-        return flows_forward_t, flows_backward_t
-
     def forward(self, gt_local_frames, iters=20):
         b, l_t, c, h, w = gt_local_frames.size()
-
-        if self._trt_runner is not None:
-            flows_f = []
-            flows_b = []
-            for idx in range(l_t - 1):
-                flow_f, flow_b = self._run_trt(
-                    gt_local_frames[0, idx], gt_local_frames[0, idx + 1]
-                )
-                flows_f.append(flow_f)
-                flows_b.append(flow_b)
-
-            gt_flows_forward = torch.stack(flows_f, dim=0).view(b, l_t - 1, 2, h, w)
-            gt_flows_backward = torch.stack(flows_b, dim=0).view(b, l_t - 1, 2, h, w)
-            return gt_flows_forward, gt_flows_backward
+        # print(gt_local_frames.shape)
 
         with torch.no_grad():
-            gtlf_1 = gt_local_frames[0, :-1, :, :, :]
+            gtlf_1 = gt_local_frames[0, :-1, :, :, :]  # t-1 c h w
             gtlf_2 = gt_local_frames[0, 1:, :, :, :]
+            # print(gtlf_1.shape)
 
             gt_flows_forward = self.fix_raft(
                 {"images": torch.stack((gtlf_1, gtlf_2), dim=1)}

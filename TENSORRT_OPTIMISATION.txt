@@ -82,15 +82,8 @@ Notes
 3) FasterProPainter — Recurrent Flow Completion (RFCNet) → TensorRT Engine
 - Source module: faster-propainter-main/model/recurrent_flow_completion.py
 - Weights: web/weights/recurrent_flow_completion.pth (referenced by faster-propainter-main/watermark.py:290)
- - Engine output path(s): faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
+- Engine output path(s): faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
   (Create directory: faster-propainter-main/engines/rfcnet/)
-- Export helper: faster-propainter-main/tools/export_rfcnet_onnx.py (requires MAX_T padding, defaults to 60 frames)
-- Current blocker: ONNX export hits unsupported `torchvision::deform_conv2d`. Needs DCNv2 TensorRT plugin or PyTorch fallback partitioning.
-
-4) ProPainter Inpaint Generator → TensorRT Engine (future)
-- Source module: faster-propainter-main/model/propainter.py (class InpaintGenerator)
-- Export skeleton: faster-propainter-main/tools/export_propainter_onnx.py (currently documents input shapes and plugin requirements; implementation pending deformable-conv & sparse transformer support)
-- Expected challenges: deformable alignment (`torchvision::deform_conv2d`), SoftSplit/SoftComp fold-unfold, temporal transformers, control flow over sequence length.
 
 How To Build (FP16, ONNX + trtexec)
 1. Write exporter (file to create): faster-propainter-main/tools/export_rfcnet_onnx.py
@@ -605,19 +598,6 @@ AI-ASSISTED CODE GENERATION (MANUAL KERNELS)
   Provide prompts referencing specific loops in propainter.py and recurrent_flow_completion.py to ensure shape alignment.
 
 - Framework: maintain `auto_kernels/` directory with prompts + generated .py kernels. Each kernel accompanied by unit test verifying numerics against PyTorch reference.
-
-
-RUNTIME USAGE & BENCHMARKING
-
-- Environment variables:
-  • `FASTFLOWNET_TRT_ENGINE` → override default engine path (`faster-propainter-main/engines/raft/raft_fp16.engine`) for RAFT_bi.
-- Latency benchmark:
-  • `python tools/benchmark_fastflownet.py --trtexec "D:\github\RoomFinderAI\watermarkz\TensorRT-10.7.0.23\bin\trtexec.exe" --shape 256 --iters 200`
-    (reports PyTorch vs TensorRT timings; PyTorch benchmark falls back to CPU if CUDA is unavailable).
-- Runtime logging: RAFT_bi prints whether the TensorRT engine was loaded or the PyTorch fallback is active.
-- Export/build helpers:
-  • FastFlowNet: `tools\EXPORT_FASTFLOWNET_ONNX.bat`, `tools\BUILD_FASTFLOWNET_TRT.bat`
-  • RFCNet: `tools\EXPORT_RFCNET_ONNX.bat` (runs but requires deform_conv plugin before engine build), `tools\BUILD_RFCNET_TRT.bat`
 
 
 PIPELINE VERIFICATION (Continuous Integration)
