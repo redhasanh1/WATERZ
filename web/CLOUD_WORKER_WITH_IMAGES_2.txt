@@ -1160,18 +1160,10 @@ def process_segment_task(self, segment_data):
 
             import torch
 
-            # Only use FP16 on GPUs with good tensor cores (RTX series)
-            # GTX series produces poor quality with FP16 (black spots)
-            use_fp16 = False  # Default to FP32 (safe for all GPUs)
-
-            if torch.cuda.is_available():
-                gpu_name = torch.cuda.get_device_name(0).lower()
-                # Enable FP16 only on RTX/A100/V100 (good tensor cores)
-                if 'rtx' in gpu_name or 'a100' in gpu_name or 'v100' in gpu_name or 'tesla' in gpu_name:
-                    use_fp16 = True
-                    print(f"   ✅ Using FP16 precision on {torch.cuda.get_device_name(0)}")
-                else:
-                    print(f"   ⚠️  Using FP32 precision on {torch.cuda.get_device_name(0)} (GTX/lower-end GPU for quality)")
+            # Use FP16 for speed (hybrid: RAFT in FP16, inpainting in FP32 for quality)
+            use_fp16 = torch.cuda.is_available()
+            if use_fp16:
+                print(f"   ⚡ Using hybrid precision (FP16 RAFT + FP32 inpainting) on {torch.cuda.get_device_name(0)}")
 
             faster_propainter_pipeline(
                 video=seg_cropped_dir,

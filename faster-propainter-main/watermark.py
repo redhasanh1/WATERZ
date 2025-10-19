@@ -360,7 +360,8 @@ def pipeline(
             )
             gt_flows_bi = (gt_flows_bi[0].half(), gt_flows_bi[1].half())
             fix_flow_complete = fix_flow_complete.half()
-            model = model.half()
+            # SKIP model.half() - keep inpainting model in FP32 for quality on GTX GPUs
+            # model = model.half()
 
         # ---- complete flow ----
         flow_length = gt_flows_bi[0].size(1)
