@@ -111,6 +111,7 @@ class YOLOWatermarkDetector:
                     # Check multiple possible paths (prioritize new_sora_watermark)
                     possible_paths = [
                         'runs/detect/new_sora_watermark/weights/best.pt',  # NEW trained model
+                        '/app/runs/detect/new_sora_watermark/weights/best.pt',  # Cloud GPU absolute path
                         '../runs/detect/new_sora_watermark/weights/best.pt',
                         '/app/waterz/WATERZ/runs/detect/new_sora_watermark/weights/best.pt',  # Docker/production path
                         'D:/github/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.pt',
