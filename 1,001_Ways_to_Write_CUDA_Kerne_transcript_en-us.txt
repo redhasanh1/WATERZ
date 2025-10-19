@@ -1,0 +1,1850 @@
+Transcript Powered by AI
+
+1,001 Ways to Write CUDA Kernels in Python
+
+
+00:00
+Thank you, everyone.
+
+00:03
+Thank you for attending, my name is Leo Fang and I'm the
+
+00:06
+CUDA Python tech lead and today I'm going to show you a number of ways
+
+00:12
+to write CUDA kernels in Python.
+
+00:14
+Right, so as you may have noticed, this is a series of talks we are
+
+00:18
+building this year for GTC for all the CUDA and Python talks, so this
+
+00:23
+is the third talk in a row talking about all things CUDA Python
+
+00:28
+and this talk is particularly focusing on writing kernels.
+
+00:33
+So by now I'm sure most of you have seen this stack diagram
+
+00:40
+talking about all things in CUDA Python stack, all the
+
+00:42
+way from the runtime, compiler, kernel authoring capabilities,
+
+00:46
+to device library, all the way up to frameworks and DSLs.
+
+00:50
+So what it means is that we really want to support the
+
+00:54
+whole CUDA Python ecosystem, and what it entails in particular
+
+00:59
+for Python users and developers is that all the things in this chart
+
+01:03
+should be able to be mixed and matched, just like with your normal
+
+01:06
+Python packages, you want to import multiple Python packages and use
+
+01:09
+them together in your user code.
+
+01:12
+So this is an important mission that we are building, and
+
+01:16
+for this talk in particular, I'm going to walk you through
+
+01:18
+from the bottom up of the stack how you can develop kernels in a number
+
+01:22
+of different ways, and to do so...
+
+01:27
+I want to use a pedagogical example, which is segmented
+
+01:31
+reduction, to show how we can write kernels to solve
+
+01:37
+the same problem in different ways.
+
+01:40
+The problem statement is as follows.
+
+01:42
+We have a 1D buffer.
+
+01:46
+All values, basically hosting all these different number of segments,
+
+01:51
+red, blue, yellow, and we want to do reduction over each different
+
+01:56
+segment, so that the red segment gives us number 10, we sum them
+
+02:00
+up, and we sum the blue segment up, and we get 26, and so on.
+
+02:05
+So this is a problem statement.
+
+02:07
+So assuming you haven't heard of any modern education talks
+
+02:12
+we are giving this year or all these new materials, you
+
+02:15
+may have been wondering that how do I do this with CUDA, right?
+
+02:18
+You may be attempting to follow some online resources and
+
+02:23
+try to write your own CUDA kernel in C++, which...
+
+02:28
+As you will see, it's not the only way now today.
+
+02:31
+Assuming we do this, what we would do is we include thrusts
+
+02:38
+to populate the input-output vectors, and we define the
+
+02:44
+problem size, and...
+
+02:46
+Prepare the input-output buffers on the device, and then launch
+
+02:51
+our own kernels to do this computation, synchronize over
+
+02:54
+after the kernel, and then copy the data back from device
+
+02:58
+to host to do a post-processing or verification, and so on.
+
+03:03
+So really, the question is, how do we write this kernel?
+
+03:09
+So there are many ways you can do this.
+
+03:12
+This is one of the ways you can do it, in which we assign
+
+03:17
+one segment to a block.
+
+03:19
+So if we have
+
+03:20
+We have three segments, we launch three blocks, we have
+
+03:22
+a million segments, we launch a million blocks, and so on.
+
+03:25
+And to make it as general as possible, I write this
+
+03:28
+kernel as a C++ template kernel, so I can templateize over the input
+
+03:34
+data types, the offset types, and also I can encode the block size
+
+03:40
+and number of items per thread as a template parameter so that they
+
+03:44
+can be specified at compile time.
+
+03:48
+So, for simplicity, throughout this talk, I assume that the
+
+03:56
+segment size is multiple of the block size that we specified.
+
+04:01
+So what we do, what we do is that we allocate shared memory because
+
+04:05
+we want all threads in the block to communicate with each other
+
+04:07
+and work with each other later.
+
+04:10
+And then what we do next is that we compute the indexes
+
+04:15
+that we need later, which is where I am as a thread inside
+
+04:19
+this block and where I am as a segment inside a batch of segments.
+
+04:24
+So with these two numbers we can compute an offset and load the
+
+04:27
+data for each thread to load the specified data into the register
+
+04:34
+and then do a partial aggregation because we assume that the segment
+
+04:38
+size may be much longer than the block size so that we need to cover
+
+04:43
+the entire segment by this block.
+
+04:46
+And after that, each thread will have its own partial aggregate
+
+04:50
+that we want to write them into a shared memory and then synchronize
+
+04:53
+over all the threads in a block.
+
+04:56
+And finally, we do a partial reduction using
+
+04:59
+the shared memory data.
+
+05:01
+Basically, that means that half of the block will be
+
+05:04
+using the data it owns, as well as the other half of the
+
+05:08
+block owns, and do the computation and write it to shared memory.
+
+05:12
+And then a quarter of the block does the same thing, and an eighth
+
+05:14
+of the block does the same thing.
+
+05:15
+Eventually, there's only one thread that produces the final
+
+05:18
+data, which is what we need, and we write it back to the global memory.
+
+05:23
+So we'll come back to this diagram later.
+
+05:26
+So this is a pedagogical example, it does solve the problem,
+
+05:30
+it works just fine and the performance is not bad.
+
+05:35
+For performance-related talks, you can refer to my colleague
+
+05:39
+George's talk in this session but earlier today.
+
+05:42
+Thank you for watching!
+
+05:45
+You can see, in order to write such a kernel, you need to
+
+05:48
+know a number of things.
+
+05:50
+Such as things related to CUDA programming model, CUDA
+
+05:54
+thread and memory hierarchy, and the GPU architecture in
+
+05:56
+order to make it performant.
+
+05:58
+And the other thing is that you also need to express your
+
+06:01
+algorithm on top of this GPU machinery so that you can
+
+06:06
+do the computation inside a kernel.
+
+06:08
+And finally, as you grow your sites beyond just a
+
+06:11
+toy code, you want to...
+
+06:13
+Know the C++ compilation workflow so that you know how to build
+
+06:17
+your project and how to ship your project to your users.
+
+06:20
+So it's a lot to learn, but the one point I want to highlight is that
+
+06:26
+I won't dive into the performance details of these things because
+
+06:29
+they've been covered by various excellent talks by my colleagues.
+
+06:33
+But there are things you learn from a program model, they
+
+06:37
+are transferable across languages, so it doesn't matter if you
+
+06:40
+learn it from a C++ talk or from a Python talk, as long as
+
+06:43
+you learn it, you know how it works and those things are transferable.
+
+06:48
+And so if you are a C++ developer, you are comfortable writing
+
+06:53
+C++ codes like the one I showed you, it is great and we have
+
+06:58
+more C++ talks for you that was just given by my colleagues
+
+07:02
+Georgie and Bryce earlier today, so you can go check out the
+
+07:05
+recording if you haven't attended.
+
+07:09
+The point of this talk is that we want to stay productive,
+
+07:13
+and we want to stay in Python.
+
+07:16
+But how does staying in Python help you to make
+
+07:21
+your development life easier?
+
+07:25
+Here I'm contrasting the typical workflow of a Python project
+
+07:30
+that allows a user kernel to be launched on GPU.
+
+07:35
+On the Python side,
+
+07:37
+In order to not depend on all this NVCC machinery, which
+
+07:41
+relies on the host compiler, GCC or MCVC, depending on if it's on
+
+07:46
+Linux or Windows, we have to have a number of different ways to compile
+
+07:51
+your user code, user kernel, to a
+
+07:55
+To a machine code that can be launched on GPU and all these black
+
+07:58
+box represent such a machinery and this black box is Determined and
+
+08:04
+implement in a different ways by different number different projects
+
+08:08
+there can be a mix and match of LLVM related stack, MLIR related
+
+08:12
+compiler passes and optimizations or first-party compiler libraries
+
+08:18
+including MVRTC, NVGLink and NVVN
+
+08:22
+But the point is that because we have all this online compilation or
+
+08:26
+JIT compilation of machineries, we no longer need C++ host compilers,
+
+08:30
+and this is key to ship your Python projects because you don't want
+
+08:34
+to ask users to pre-install GCC or MCVC, which is not pip installable
+
+08:40
+or contactless installable, and it is a lot of fun to install
+
+08:44
+and set up a working environment.
+
+08:48
+And so to illustrate the problem further, on the C++ side, if we
+
+08:53
+had a kernel we just wrote before and we as a library developer
+
+08:57
+want to support multiple data types, I just mentioned that our
+
+09:01
+kernel is general enough to support double or float or integer values
+
+09:06
+stored in the segments, right?
+
+09:08
+So you may write a dispatcher like this on the right that attempt
+
+09:13
+to dispatch to different data types depending on the container type.
+
+09:18
+But what it means is that all these types have to be
+
+09:23
+pre-instantiated at compile time or build time of your project.
+
+09:27
+Compared to what you would do in Python, typically you
+
+09:31
+only instantiate and you only compile what you need.
+
+09:35
+And in Python's world, what you need depends
+
+09:39
+on the input arguments.
+
+09:40
+If you provide an array to the kernel that's...
+
+09:43
+Flow64, then we will only compile our kernel for Flow64 and so on.
+
+09:48
+So JIT compilation allows us to reduce the binary size
+
+09:52
+and reduce the compile time because you don't necessarily need
+
+09:56
+to build the whole world at once.
+
+09:58
+You can build up your kernels gradually as you need it and
+
+10:02
+then catch the final output.
+
+10:05
+So to further illustrate this point, I want to use the cudacore,
+
+10:09
+which is one of our new projects, to highlight a point.
+
+10:12
+And cudacore is our new way of accessing CUDA APIs and CUDA
+
+10:17
+functionalities from within Python.
+
+10:19
+It provides you all these common CUDA objects for starters,
+
+10:23
+for example, stream, event, device, and memory allocation.
+
+10:28
+And on top of that, we also support all the...
+
+10:31
+online compiler toolchains including MVRTC and NVJLink
+
+10:35
+and later NVVM so that you can write You can you can compile
+
+10:40
+your code with using cudacore functionalities and what entails on
+
+10:44
+the right here is that The same C++ code I just wrote in the header.
+
+10:48
+I can just load it as a Python string right and then I can specify
+
+10:53
+What the kernel specialization, template specialization, I
+
+10:57
+want to instantiate.
+
+10:59
+I want to instantiate flow with int and a certain block
+
+11:02
+size and items per thread.
+
+11:03
+Then I can compile this particular kernel and load it to a device
+
+11:07
+and launch it on a GPU.
+
+11:11
+And I can even compare with a reference implementation, which is
+
+11:14
+from CooPy, to check the results.
+
+11:17
+So this is a very nice machinery because it means that all these C++
+
+11:21
+compile-time information such as template parameters, constexpr, and
+
+11:25
+so on, they become Python jit time information that can be determined
+
+11:31
+at runtime within Python.
+
+11:34
+So all the C++ template kernels in this example, they become
+
+11:38
+runtime instantiated.
+
+11:40
+So, even if you are a C++ developer and you want to develop
+
+11:43
+C++ kernels, I highly recommend that you try it out, develop
+
+11:47
+in Python to iterate over it quickly, and then once you are done
+
+11:50
+with your code, you can move your code back to your C++ codebase.
+
+11:55
+And as I said, it covers a lot of CUDA functionalities,
+
+11:58
+and we are growing this project, and currently it's already
+
+12:01
+pip and conda installable, support everywhere CUDA runs,
+
+12:05
+including Linux and Windows, and we support the latest two CUDA major
+
+12:10
+versions, which is 11 and 12 today.
+
+12:14
+But if you look at this code, we have a house of Python
+
+12:17
+developers here, we really don't want to write C++ if possible.
+
+12:21
+It has a lot of things you need to learn.
+
+12:25
+If possible, we really prefer to stay within Python.
+
+12:28
+So what do we do?
+
+12:30
+So here is the way you can write CUDA kernels in Python,
+
+12:35
+which is using numba-cuda.
+
+12:36
+It has been an open-source project created and supported
+
+12:42
+by the Numba team at Anaconda.
+
+12:46
+We are working closely with the Numba team to move the
+
+12:49
+CUDA target out of an upstream Numba project so that we can help
+
+12:53
+reduce the maintenance burden of the Numba team, as well as evolve
+
+12:57
+this project faster, decoupling it from the Numba release cycle.
+
+13:02
+So here is a simple code that I'm showing in C++, which is basically
+
+13:07
+taking the input array and square each element of it and write
+
+13:13
+it to the output array in C++.
+
+13:16
+And the same way down here, we can see that we can use
+
+13:18
+numba-cuda to write the same code with cleaner syntax and Pythonic
+
+13:23
+syntax, including, for example, star-star-2 as done in Python
+
+13:28
+to indicate the power of two.
+
+13:32
+So with numba-cuda, let's revisit this code.
+
+13:35
+We claim that this code is hard to write, it's a lot you need
+
+13:39
+to know about so that you can write this code and check the performance
+
+13:44
+and check the clinics and so on.
+
+13:46
+And so, what if we rewrite it in numba-cuda?
+
+13:50
+How does it look like? Well, this is how it looks like.
+
+13:54
+I just mentioned that all these template parameters, they become...
+
+13:58
+These are runtime parameters in Python, so you can specify the
+
+14:02
+block size, the items per thread upfront before the kernel, and then
+
+14:06
+you use them inside the kernel.
+
+14:08
+But otherwise, the logic stays the same, you still have to
+
+14:11
+load data, do the computation, and know how to write a parallel
+
+14:15
+tree reduction, and so on.
+
+14:18
+So, did we get rid of C++?
+
+14:20
+Absolutely, yes. This is a fully Python example now, and
+
+14:24
+you can plug this kernel back to the CUDA core example I just showed
+
+14:27
+you, then this is fully Python.
+
+14:30
+But is it easier to write?
+
+14:32
+Not necessarily.
+
+14:34
+Like I said, you just need to know a lot of things for
+
+14:37
+CUDA, for GPU architectures, and so on, to write it nicely and cleanly.
+
+14:42
+So, in particular, there are two pieces of this code I
+
+14:46
+really want to get rid of.
+
+14:48
+I wish someone else has done the job for me, so that I don't have
+
+14:51
+to know how to load performantly, I don't need to know how to load
+
+14:56
+in a coalesced fashion, or even do vectorized load here, and also
+
+15:01
+use instruction-level parallelism.
+
+15:04
+And same for reduction.
+
+15:06
+I really don't want to learn about tree reduction.
+
+15:09
+So, what can I do?
+
+15:12
+Previously, this involves writing all this code as device
+
+15:19
+functions so that we can abstract all this logic out and provide
+
+15:23
+device function libraries.
+
+15:24
+But previously, there is a problem with that.
+
+15:26
+The problem is that the only way we could support Python device
+
+15:30
+libraries were either through C++, which has a lot of overhead.
+
+15:34
+We want to hook it back to Python.
+
+15:36
+Or we want to ship it as a PTX.
+
+15:39
+It doesn't support CUDA minor version compatibility, so
+
+15:43
+you will have trouble depending on the user drive version.
+
+15:45
+It may not be loadable, it may not be linkable.
+
+15:51
+Starting CUDA 12.0, there's a new library called NVGLink down below
+
+15:55
+that solves the problem finally for us, and the logic is as follows.
+
+16:01
+If you are shipping device libraries, either in C++ or
+
+16:06
+Python, you want to compile it down to this format called LTOIR.
+
+16:11
+This is a format that's recognized by NVGLink.
+
+16:14
+And it allows NVG Link to link together multiple pieces
+
+16:17
+together, including your user kernel, user-defined device
+
+16:22
+functions, and third-party or first-party device libraries.
+
+16:26
+Link them all together and inline all these device functions,
+
+16:29
+so that there is no additional function call overhead, and so on.
+
+16:33
+And this allows us to generate a kernel as performant as
+
+16:37
+the C++ counterpart.
+
+16:39
+And so, basically,
+
+16:42
+This kind of extends the life of a numba kernel that Greg Markle has
+
+16:46
+nicely put together to explain the internal pipeline of numba-cuda.
+
+16:51
+So now we have a final complete piece to supply
+
+16:55
+Python device libraries.
+
+16:57
+And here are the two examples I'm going to show you.
+
+17:01
+The first example is this new CUDA Python project, what
+
+17:04
+we call CUDA Corruptive.
+
+17:07
+It is based on the CUP C++ library, providing a high-performance C++
+
+17:11
+parallel algorithm, and we figured out a way to use this machinery
+
+17:17
+to hook it up and then make it exposed to a number of CUDA users.
+
+17:21
+So what you would do is, again, you specify all these
+
+17:24
+template parameters and the type you want to work on.
+
+17:27
+Then you define your load device function using these parameters.
+
+17:32
+And under the hood, there's ALTIR generated.
+
+17:35
+And same for reduction, we want to define the binary operation.
+
+17:39
+In this case, it's just A plus B. We want to do the performance
+
+17:42
+sum over segments, right?
+
+17:44
+And with this user-defined Python function, we can use
+
+17:49
+CUDA Corruptive to generate LTIR under the hood and then
+
+17:53
+generate a device function that does a block-wide reduction.
+
+17:57
+Then, my user kernel, which was one full page, now it's only half
+
+18:04
+a page on my slide, and it becomes very clean and very manageable.
+
+18:08
+You just load the data into a local register and then
+
+18:12
+prepare a shared memory for the algorithm to use and call
+
+18:16
+the block reduce to do block-wide reduction, and finally write
+
+18:20
+the data back to the global memory.
+
+18:26
+This library is still being constructed.
+
+18:28
+We haven't made any beta releases yet, but it's developed
+
+18:31
+fully in the public.
+
+18:32
+So today, you can already clone the repo and then build
+
+18:37
+from source and give it a try.
+
+18:40
+The nicest feature about this approach is that not only does it
+
+18:44
+allow us to support building data types in float, doubles, and so on.
+
+18:50
+It also allows us to support custom data types and custom
+
+18:55
+operators defined in Python, right.
+
+18:59
+And because it's JIT-compiled, the whole package, if you
+
+19:02
+package up, build a HWI over it, this CUDA-corruptive
+
+19:04
+project is very small, and it's open-sourced, right.
+
+19:08
+And under HWI, you use block load and block reduce.
+
+19:13
+So give us feedbacks and we will work on the packaging
+
+19:16
+and stuff to make it easier to install, easier to use.
+
+19:19
+But most importantly, we want to know what you need
+
+19:23
+from this library.
+
+19:24
+So give it a try.
+
+19:26
+And here's the observation, right?
+
+19:28
+This is a plot I just showed you earlier, where I have
+
+19:31
+multiple threads in the yellow arrow working together and
+
+19:36
+then produce a final outcome.
+
+19:38
+And if you decompose these steps, you will see that there are
+
+19:43
+parallel steps, there are serial steps performed by each thread, and
+
+19:47
+all the threads run in parallel.
+
+19:49
+But eventually, all the threads need to work together.
+
+19:52
+To produce the final output, this is a co-operative sum part, and
+
+19:56
+it means that when you write what we call CUDA SIMT kernel, single
+
+20:02
+instruction, multiple data, this is a programming model that we use for
+
+20:06
+Namba CUDA and for the C++ side.
+
+20:09
+When you write such a SIMT kernel, you still need the co-operative
+
+20:12
+APIs to help you generate...
+
+20:16
+The final output performs non-trivial tasks such as
+
+20:19
+sort, scan, reduction, or metmode.
+
+20:25
+Speaking of metmode, this is another way of viewing
+
+20:28
+the same problem and exploring different machinery.
+
+20:31
+Segment reduction happens to be a
+
+20:35
+Matrix-vector multiplication, if you think of this range
+
+20:40
+of segments as a 2D matrix and multiplying a vector of ones,
+
+20:44
+then this is the same problem, but cast in a different way.
+
+20:47
+But why would we think about it this way, right?
+
+20:50
+The reason we want to think about it this way is that it allows you
+
+20:53
+to explore different machineries, different device libraries.
+
+20:56
+And in this case, I'm using nvmath-device to perform matmode
+
+21:01
+in my Nambakuda kernel.
+
+21:04
+So what happens is that it's the same, I declare the chunk size,
+
+21:08
+the data type of array, and then I declare the matmode-device function
+
+21:12
+using nvmath-device matmode.
+
+21:15
+And it will give me the ultimate...
+
+21:17
+For the shared memory size, I need to allocate inside my kernel.
+
+21:20
+So inside my kernel, I can just allocate, same as all
+
+21:21
+the math modes you've done before, you allocate shared
+
+21:22
+memories for A, B, C, and you want to compute C equal to A times B.
+
+21:24
+And then for the matrix A, we want to load data from the 2D matrix,
+
+21:26
+consists by multiple segments.
+
+21:27
+And for the main, uh, for the main, uh, for the main, uh,
+
+21:28
+for the main, uh, for the main, uh, for the main, uh, for the main, uh,
+
+21:30
+for the main, uh, for the main, uh, for the main, uh, for the main, uh,
+
+21:31
+for the main, uh, for the main, uh, for the main, uh, for the main, uh,
+
+21:34
+for the main, uh, for the main, uh, for the main, uh, for the main, uh,
+
+21:36
+for the main, uh, for the main, uh, for the main, uh, for the main, uh,
+
+21:37
+for the main, uh, for the main, uh, for the main, uh, for the main, uh,
+
+21:39
+for the main, uh, for the main, uh, for the main, uh, for the main, uh,
+
+21:41
+for the main, uh, for the main, uh, for the main, uh, for the main, uh,
+
+21:43
+for the main, uh, for the main, uh,
+
+21:44
+With matrix B, you don't even need to load anything, right?
+
+21:48
+We know up-hand that this is all just all ones.
+
+21:51
+So we can just initialize the shared memory with ones.
+
+21:55
+We don't even need to materialize an array in global memory.
+
+21:58
+And then we synchronize over all the threads in the block because
+
+22:03
+we are preparing shared memory.
+
+22:04
+Then we call this matmode API to compute C equal to A times
+
+22:08
+B. And then we synchronize again.
+
+22:11
+Finally, we can write the data in the shared memory
+
+22:13
+C back into the output array.
+
+22:16
+So it allows us to express the problem in a different
+
+22:21
+way and use the Matmode machinery to compute the same problem.
+
+22:25
+And the best thing here is that it uses tensor cores to
+
+22:29
+do the computation under the hood.
+
+22:33
+So, we've seen a lot of these corruptive cases, matmo is
+
+22:39
+corruptive, sum is corruptive, we knew all the threads need
+
+22:43
+to participate and produce the final result.
+
+22:46
+So, with this understanding, we are introducing a new programming
+
+22:53
+model called CooTile that has this notion of corruptive nature
+
+22:57
+built in in the programming model.
+
+22:59
+So, instead of controlling
+
+23:02
+Instead of controlling all the individual threads,
+
+23:05
+we're controlling what we call a tile block.
+
+23:08
+So each tile block loads a chunk of data into the registers,
+
+23:13
+and then we perform operations over the loaded tiles using
+
+23:18
+non-py-like operations.
+
+23:19
+You can do A plus B, and they will do element-wise summation over
+
+23:23
+all the elements in the two tiles.
+
+23:26
+And then we store the entire tile back too.
+
+23:29
+Global memory.
+
+23:30
+So it allows you to write very clean code, three lines
+
+23:33
+of code for this particular case, load and then sum over less
+
+23:37
+axis and store the final tile back.
+
+23:40
+And for more tile talks, my colleague Steven Jones talked
+
+23:44
+about it in a talk yesterday in introducing CUDA new features.
+
+23:48
+And so please go check it out if you're interested.
+
+23:52
+So this is a contrast of the new and old programming model.
+
+23:57
+It's both supported, CUDA tile is an extension of CUDA,
+
+24:01
+and it allows you to decouple the thread multiplication logic and
+
+24:09
+from data loading logic so that...
+
+24:12
+You don't need to control all the individual threads
+
+24:13
+and worry about how to do pointer arithmetic, how to
+
+24:16
+do offsets into a global array and so on, because all these things are
+
+24:20
+handled by the compiler for you.
+
+24:22
+And as I said, the cooperative nature is important.
+
+24:26
+So with this tile programming model, it's basically NumPy-like.
+
+24:30
+All these tiles can be think of as tile arrays.
+
+24:33
+They are just arrays in the kernel, and it allows you
+
+24:38
+to express all the ideas I just talked about, scan, sort.
+
+24:44
+It allows you to write NumPy-like code in the CUDA kernel.
+
+24:52
+Later this year, we will release a CUDA tile and you can test it out.
+
+24:59
+So previously we showed this square kernel in C++ and Numbakuda
+
+25:06
+in the Sinti programming model.
+
+25:08
+Now with the Tile programming model we can do the same thing.
+
+25:11
+We can load the data from global memory and then to the square
+
+25:20
+of it and then write the output Tile back to the global memory.
+
+25:27
+So, for those who are familiar with NVIDIA Warp, NVIDIA Warp
+
+25:33
+is a differential framework allowing you to write kernels
+
+25:38
+for geometric simulations, spatial computing, and AI workloads.
+
+25:45
+And so,
+
+25:47
+The gist of this new library, Warp, is that Warp has the capability
+
+25:54
+of synthesizing reverse-mode auto-differentiable kernels for
+
+26:00
+you when you write your kernels.
+
+26:01
+So when you write a kernel like this on the screen, you
+
+26:04
+will synthesize a backward kernel for you so that you
+
+26:07
+can just plug it in in your machine learning or simulation workloads
+
+26:12
+and then have the back prod.
+
+26:15
+So you don't have to write preprogram yourself anymore.
+
+26:19
+And recently Warp also introduced this new tile programming
+
+26:23
+model so that you can write the same tile-like code inside
+
+26:28
+a Warp kernel and do pretty much the same thing I just talked about.
+
+26:33
+So please go check it out.
+
+26:34
+And Warp has now changed his license to Apache 2.0, and
+
+26:39
+it's open source on GitHub.
+
+26:43
+Right, but I mentioned Tensor Core earlier, right?
+
+26:46
+NvMath Python allows you to utilize Tensor Core.
+
+26:49
+But if you are a ninja of a ninja, you really want to have
+
+26:52
+full control over Tensor Cores, Cutlass team this year will be also
+
+26:57
+announcing Cutlass Python support so that you can write Cutlass
+
+27:02
+DSL in the Python process and then
+
+27:06
+It can have all the knobs exposed to you to control
+
+27:09
+Tensor Core and then write a speed of light kernel to get maximum
+
+27:13
+performance out of our GPUs.
+
+27:15
+And the best thing here is that, again, because there's
+
+27:18
+no C++ machinery anymore, there's no C++ template parsing and
+
+27:24
+compiling, it allows you to drop the compile time significantly.
+
+27:28
+So that the compile time is very fast, it allows you to
+
+27:31
+iterate over your kernels very quickly and productively in Python
+
+27:35
+and still get the same performance.
+
+27:38
+So please go check it out, the Cutlass talks are on Friday
+
+27:41
+and you will be learning more from the Cutlass team.
+
+27:46
+Right, so at this point I've introduced you a number of
+
+27:49
+tools to write those kernels, and those tools currently
+
+27:52
+are from NVIDIA, but there are also community tools that allow you
+
+27:56
+to write, to express the same idea.
+
+27:58
+So, for example, you can use cupy reduction kernel to write the same
+
+28:02
+segment reduction, or use cupygit to write the CUDA syntax kernel
+
+28:07
+using the cupygit syntax, which is pretty much similar to number CUDA.
+
+28:12
+Or you can use Triton, right, use Triton block...
+
+28:15
+You can also manually compute pointer offsets and then write
+
+28:21
+a kernel in this way, and you can do the same thing with Triton.
+
+28:26
+So there are really a ton of tools out there, first party,
+
+28:29
+third party, we all support them.
+
+28:31
+And so the question is really, which tool is the best choice
+
+28:35
+to write my kernel?
+
+28:36
+There are so many things I can pick.
+
+28:41
+And the answer is, of course, it depends.
+
+28:43
+There is no clean and short answer for you, unfortunately.
+
+28:47
+But because there are just so many constraints you need
+
+28:50
+to think about, right?
+
+28:52
+Maybe you already have a dependency hell you need to solve.
+
+28:55
+So you really want to utilize existing packages, maybe some
+
+28:58
+of them already provide you a way to write kernels, maybe
+
+29:02
+you should try them first.
+
+29:04
+Or if you have a big support matrix and some packages don't
+
+29:07
+support the support matrix you want to cover, for example, different
+
+29:11
+Python versions, different CUDA versions, driver versions,
+
+29:14
+operating systems, and CPU-GPU architectures, you might also
+
+29:18
+have to take that into account.
+
+29:20
+Also, it depends on how you want to package and deploy your Python
+
+29:23
+projects, and what's the user experience of your project, right?
+
+29:27
+And maybe your organization or company has a preference
+
+29:31
+or allow list for certain packages you cannot use, and
+
+29:35
+those things also need to be factored in your decision-making.
+
+29:40
+And of course, there's always performance considerations
+
+29:43
+I couldn't cover today, but the point is...
+
+29:46
+The best choice here, there are so many things you need
+
+29:48
+to consider, so the best choice is really if you can avoid
+
+29:52
+writing kernels at all, right?
+
+29:55
+We just tell you that there are so many libraries and
+
+29:59
+packages out there, and they offer solutions for us.
+
+30:03
+So maybe someone else already considered your problem and built
+
+30:06
+a performance solution for you.
+
+30:08
+So really you want to look at what's going on in the
+
+30:11
+community, what's out there in the wild, and see if someone
+
+30:16
+else has solved a problem for you, and you just use them, instead
+
+30:19
+of rolling out your own kernel, which is highly non-trivial.
+
+30:25
+So this is a new project that we created for what we call
+
+30:31
+CUDA parallel, allowing you to not write your kernels but
+
+30:34
+still get the same functionality and performance as C++ counterpart.
+
+30:40
+And in this case, this is based on Thrust's C++ library.
+
+30:45
+So that you can write thrust-like code in Python and get access
+
+30:52
+to all these parallel algorithms exposed by thrust and cuP.
+
+30:55
+And in this case, you create iterators and you kind of
+
+30:59
+define your problem and fuse in all these...
+
+31:02
+These are iterators into your problem definition and then finally
+
+31:06
+launch the algorithm on host.
+
+31:09
+So the entire library here provides you host APIs to write the same
+
+31:14
+kernels and get good performance.
+
+31:17
+And under the hood, it's again based on the ALT-IR and NVG
+
+31:21
+link to give you good kernels.
+
+31:26
+This is open development and so please go check it out
+
+31:29
+and we will do the packaging related work soon to release
+
+31:33
+it for you to easily install.
+
+31:34
+But before that we still want to hear your feedbacks.
+
+31:38
+And we just talked about NVMath, Python, and they have device
+
+31:42
+APIs, but they also have host APIs.
+
+31:44
+So we can do the same thing, matrix vector multiplication, using NVMath
+
+31:48
+or any of these Python packages.
+
+31:51
+And the only price you pay in this case is that you actually have to
+
+31:55
+materialize the vector of ones in a global memory so that you can do
+
+32:00
+this matrix vector multiplication.
+
+32:02
+But maybe you already have this one somewhere in your workload.
+
+32:06
+So in this case, it's probably a very cheap operation.
+
+32:11
+But finally, for those of you who are familiar with array
+
+32:16
+programming in Python and look at the problem definition and even the
+
+32:23
+Verification code I show in one of the code snippets.
+
+32:26
+At this point, you probably already noticed that this
+
+32:28
+is nothing but sum over the C-continuous rows of a 2D
+
+32:34
+matrix, and you can perform it in one line of code, which is xp.sum,
+
+32:40
+with x is equal to minus one.
+
+32:43
+And why is it cool?
+
+32:45
+This is cool because this is actually portable.
+
+32:48
+This is portable according to the Array API standard
+
+32:51
+because there are a number of Python Array libraries out there.
+
+32:54
+KooPy, numpy, Dask, Desk, PyTorch, they all follow Python
+
+33:00
+Array API standard.
+
+33:01
+So it means that if you write this code once, you can try
+
+33:04
+it with different Array libraries.
+
+33:05
+You can change your import from import-kuppi as xp to import-torch
+
+33:12
+as xp and then see how it goes.
+
+33:14
+Then it allows you to explore across all these different
+
+33:17
+array libraries very quickly.
+
+33:21
+And finally, going back to the original C++ solution, C++ problem
+
+33:25
+that we had, we really just want to replace this handwritten kernel by
+
+33:30
+a cup device segmented reduction.
+
+33:34
+So, in summary, we provide you a number of tools for you to write
+
+33:40
+your kernels so that you can gain productivity, you can iterate over
+
+33:45
+very quickly in Python, but still keep the same C++ performance.
+
+33:49
+Right, and this is not possible without the modern compiler
+
+33:53
+technologies, such as MLIR or NVGLink, all these things.
+
+34:00
+And so finally, Python device libraries is a thing now.
+
+34:03
+We can actually ship Python device libraries.
+
+34:06
+And the new CUDA tile programming model takes this one step further
+
+34:09
+and allows a lot of cooperative device APIs to be considered
+
+34:14
+as part of a programming model.
+
+34:17
+But the bad thing is that if you can avoid writing any kernels at
+
+34:20
+all, if there is already a solution somewhere in the wild, you should
+
+34:23
+give it a try and see how it goes before you jump down and roll your
+
+34:28
+sleeves and write your kernels.
+
+34:30
+So mix and match all these tools of choice and...
+
+34:34
+Taking into account the considerations for the constraints,
+
+34:40
+performance targets, personal taste, and so on.
+
+34:43
+And we are here for you to ask questions.
+
+34:45
+In fact, this afternoon we will have a connect with expert
+
+34:49
+session for you to talk with us.
+
+34:51
+And so we can answer your questions and provide some
+
+34:54
+feedbacks and guidance.
+
+34:55
+And we also want to hear from you if you need anything from
+
+34:58
+the CUDA Python team.
+
+35:02
+So this year is really different because we are building a
+
+35:05
+lot of developer-related content and different talks and tracks
+
+35:10
+to cover all these different
+
+35:13
+topics in CUDA programming.
+
+35:16
+So please go check it out.
+
+35:18
+If you miss any of the talks, you can watch a recording afterwards.
+
+35:24
+So finally, I want to thank all the team members.
+
+35:28
+We have a big team and
+
+35:32
+With multiple teams working together to generate all
+
+35:35
+these contents and give us very nice and friendly
+
+35:40
+Python solutions to Python users.
+
+35:42
+So I want to thank the team, I want to thank you for your attention.
+
+35:53
+Thanks, Leo. We have time for a few questions.
+
+35:59
+With Blackwell, you introduced FP4, which is a scaled block type.
+
+36:05
+I've seen nobody talking about how I would use that in Python.
+
+36:09
+Uh-huh.
+
+36:11
+You are referring to MXFP8?
+
+36:15
+Or FP4, which is basically a scale factor and then a... Right, I think
+
+36:20
+recently NVMAT Python team rolled out a 0.3.0 support for MXFV8, but
+
+36:27
+I think the FP4 is on the roadmap, right, so we will get there, right.
+
+36:32
+Okay, in another version of this, I'd like to see
+
+36:35
+an example of using it.
+
+36:37
+Yes, absolutely.
+
+36:41
+With this, what's the story if I wanted to author my kernels
+
+36:46
+in Python, but then use them and precompile them or link
+
+36:50
+into a C++ or other application?
+
+36:55
+Right, it involves how you would cache those kernels
+
+36:59
+in Python, because eventually you could generate PTX or Kubin, right?
+
+37:06
+My recommendation is to generate Kubin directly.
+
+37:09
+But you need to have a way to identify which kernel is
+
+37:14
+this coupon for, right?
+
+37:17
+You need to be able to correlate the output artifact with the
+
+37:22
+kernel you want to replace in C++.
+
+37:25
+So if you need to have this way to identify, you can load them
+
+37:29
+back using the driver API, right?
+
+37:38
+Hey, thanks for the talk.
+
+37:40
+Another very popular tile library in Python is Triton.
+
+37:43
+And I was wondering if you could tell us how QTile is different
+
+37:46
+from Triton, or what problem it tried to solve that Triton
+
+37:50
+doesn't solve, or things like that.
+
+37:55
+Sorry, what was the question again?
+
+37:58
+Which library? There is a very popular library from
+
+38:00
+OpenAI called Triton.
+
+38:01
+That's already where you write things on tiles of your data.
+
+38:05
+And I was wondering how QTile differs from that.
+
+38:09
+I actually don't know about that library, so I need to look it
+
+38:12
+up and then have a better... Huh?
+
+38:16
+You were saying Triton?
+
+38:19
+I think it's just a different programming model.
+
+38:22
+Different way of writing kernels.
+

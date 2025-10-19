@@ -1120,13 +1120,49 @@ def process_segment_task(self, segment_data):
                     print(f"⚠️  Failed to download mask {frame_idx}: {e}")
 
         if masks_copied == 0:
-            print(f"   ⚠️  No masks found; synthesizing {frames_copied} rectangular masks over crop region")
+            print(f"   ⚙️  Generating masks locally from bbox (INSTANT - no network needed!)")
+
             for i in range(frames_copied):
-                synthetic = np.full((crop_h, crop_w), 255, dtype=np.uint8)
-                cv2.imwrite(os.path.join(seg_mask_dir, f"{i:04d}.png"), synthetic)
-            masks_copied = frames_copied
+                # Create black mask background
+                mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
+
+                # Calculate watermark position within THIS cropped region
+                # bbox is in FULL frame coordinates, need to translate to crop coordinates
+                bbox_x_in_crop = max(0, bbox[0] - crop_x)
+                bbox_y_in_crop = max(0, bbox[1] - crop_y)
+                bbox_w_clipped = min(crop_w - bbox_x_in_crop, bbox[2])
+                bbox_h_clipped = min(crop_h - bbox_y_in_crop, bbox[3])
+
+                # Ensure bbox is within crop bounds
+                if bbox_x_in_crop >= 0 and bbox_y_in_crop >= 0 and bbox_w_clipped > 0 and bbox_h_clipped > 0:
+                    # Mark ONLY watermark region as white (255 = inpaint this area)
+                    mask[bbox_y_in_crop:bbox_y_in_crop+bbox_h_clipped,
+                         bbox_x_in_crop:bbox_x_in_crop+bbox_w_clipped] = 255
+
+                cv2.imwrite(os.path.join(seg_mask_dir, f"{i:04d}.png"), mask)
+                masks_copied += 1
+
+            print(f"   ✅ Generated {masks_copied} local masks (bbox area marked for inpainting)")
 
         print(f"   ✅ Prepared {masks_copied} masks")
+
+        # VALIDATION: Check first mask to catch bugs early
+        if masks_copied > 0:
+            first_mask_path = os.path.join(seg_mask_dir, "0000.png")
+            if os.path.exists(first_mask_path):
+                test_mask = cv2.imread(first_mask_path, cv2.IMREAD_GRAYSCALE)
+                if test_mask is not None:
+                    white_pixels = np.sum(test_mask == 255)
+                    total_pixels = test_mask.size
+                    white_pct = (white_pixels / total_pixels) * 100
+
+                    print(f"   📊 Mask validation: {white_pct:.1f}% white pixels (target region)")
+
+                    # Warn if mask seems wrong
+                    if white_pct > 50:
+                        print(f"   ⚠️  WARNING: Mask is {white_pct:.1f}% white - suspicious! May cause black output.")
+                    elif white_pct < 0.1:
+                        print(f"   ⚠️  WARNING: Mask is {white_pct:.1f}% white - almost empty! No inpainting will occur.")
 
         # Run ProPainter on this segment - threads pool allows parallel task pickup
         print(f"   🎨 Running ProPainter...")
