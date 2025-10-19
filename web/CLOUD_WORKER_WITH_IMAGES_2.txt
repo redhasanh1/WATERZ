@@ -1159,11 +1159,7 @@ def process_segment_task(self, segment_data):
             from watermark import pipeline as faster_propainter_pipeline
 
             import torch
-
-            # Use FP16 for speed (hybrid: RAFT in FP16, inpainting in FP32 for quality)
             use_fp16 = torch.cuda.is_available()
-            if use_fp16:
-                print(f"   ⚡ Using hybrid precision (FP16 RAFT + FP32 inpainting) on {torch.cuda.get_device_name(0)}")
 
             faster_propainter_pipeline(
                 video=seg_cropped_dir,
