@@ -1333,6 +1333,10 @@ def finalize_video_task(self, segment_results, prepare_result):
     - Upload final result
     """
     try:
+        import requests
+        import subprocess
+        import shutil
+
         video_id = prepare_result['video_id']
         base_name = prepare_result['base_name']
         video_path = prepare_result['video_path']
