@@ -1102,14 +1102,24 @@ def process_segment_task(self, segment_data):
             mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
 
             # Calculate watermark position within THIS cropped region
-            # bbox is in FULL frame coordinates, need to translate to crop coordinates
+            # bbox is [x1, y1, x2, y2] in FULL frame coordinates
+            bbox_w = max(1, bbox[2] - bbox[0])  # x2 - x1 (actual width)
+            bbox_h = max(1, bbox[3] - bbox[1])  # y2 - y1 (actual height)
+
+            # Translate bbox top-left to crop coordinates
             bbox_x_in_crop = max(0, bbox[0] - crop_x)
             bbox_y_in_crop = max(0, bbox[1] - crop_y)
-            bbox_w_clipped = min(crop_w - bbox_x_in_crop, bbox[2])
-            bbox_h_clipped = min(crop_h - bbox_y_in_crop, bbox[3])
+
+            # Calculate where bbox ENDS within crop (clipped to crop bounds)
+            bbox_x_end = min(crop_w, bbox_x_in_crop + bbox_w)
+            bbox_y_end = min(crop_h, bbox_y_in_crop + bbox_h)
+
+            # Final clipped dimensions
+            bbox_w_clipped = max(0, bbox_x_end - bbox_x_in_crop)
+            bbox_h_clipped = max(0, bbox_y_end - bbox_y_in_crop)
 
             # Ensure bbox is within crop bounds
-            if bbox_x_in_crop >= 0 and bbox_y_in_crop >= 0 and bbox_w_clipped > 0 and bbox_h_clipped > 0:
+            if bbox_w_clipped > 0 and bbox_h_clipped > 0:
                 # Mark ONLY watermark region as white (255 = inpaint this area)
                 mask[bbox_y_in_crop:bbox_y_in_crop+bbox_h_clipped,
                      bbox_x_in_crop:bbox_x_in_crop+bbox_w_clipped] = 255
