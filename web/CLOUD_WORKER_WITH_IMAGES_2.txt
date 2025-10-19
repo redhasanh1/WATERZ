@@ -3,7 +3,7 @@ Production Server for Watermark Removal SaaS
 - Async queue processing with Celery + Redis
 - GPU-optimized YOLO detection + ProPainter inpainting
 - Keeps your PC usable while serving customers
-- Designed for $1M/month scale
+- Designed for $1Mi/month scale
 - ALL FILES STAY ON D DRIVE (inside watermarkz folder)
 """
 
