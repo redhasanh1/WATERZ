@@ -991,9 +991,10 @@ def process_segment_task(self, segment_data):
         import subprocess
         from crop_utils import calculate_crop_region
 
-        seg_duration = end_frame - start_frame + 1
         crop_x, crop_y, crop_w, crop_h = calculate_crop_region(bbox, width, height, padding_ratio=0.2, min_size=128)
         print(f"   📐 Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h}")
+
+        seg_duration = end_frame - start_frame + 1
 
         # Create local temp directories for this segment
         seg_prefix = f"{base_name}_{video_id}_seg{seg_idx}"
@@ -1093,51 +1094,39 @@ def process_segment_task(self, segment_data):
                 cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                 cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
 
-        # Generate masks locally from bbox (INSTANT - no network dependency!)
-        print(f"   ⚙️  Generating {frames_copied} masks locally from bbox...")
-        print(f"   🔍 DEBUG: bbox={bbox}, crop=({crop_x}, {crop_y}, {crop_w}, {crop_h})")
+        # Crop masks to watermark region (use pre-existing masks from detection pipeline)
+        print(f"   ✂️  Cropping masks from shared storage...")
         masks_copied = 0
 
-        for i in range(frames_copied):
-            # Create black mask background
-            mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
+        for frame_idx in range(start_frame, end_frame + 1):
+            mask_file = f"{frame_idx:04d}.png"
 
-            # Calculate watermark position within THIS cropped region
-            # bbox is [x1, y1, x2, y2] in FULL frame coordinates
-            bbox_w = max(1, bbox[2] - bbox[0])  # x2 - x1 (actual width)
-            bbox_h = max(1, bbox[3] - bbox[1])  # y2 - y1 (actual height)
+            # Try local shared mask dir first
+            mask_src = os.path.join(shared_mask_dir, mask_file) if shared_mask_dir else None
+            if mask_src and os.path.exists(mask_src):
+                mask = cv2.imread(mask_src, cv2.IMREAD_GRAYSCALE)
+                if mask is not None:
+                    # Simple crop to watermark region (working approach from 15481c6)
+                    cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
+                    masks_copied += 1
+            else:
+                # Fallback: try downloading from shared URL if local doesn't exist
+                if origin_base and shared_mask_dir:
+                    try:
+                        mask_url = f"{origin_base}/temp/masks/{base_name}_{video_id}/{mask_file}"
+                        r = requests.get(mask_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
+                        if r.status_code == 200:
+                            mask_array = np.frombuffer(r.content, dtype=np.uint8)
+                            mask = cv2.imdecode(mask_array, cv2.IMREAD_GRAYSCALE)
+                            if mask is not None:
+                                cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                                cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
+                                masks_copied += 1
+                    except Exception as e:
+                        print(f"   ⚠️  Could not download mask {mask_file}: {e}")
 
-            if i == 0:  # Only log first frame to avoid spam
-                print(f"   🔍 DEBUG: bbox_w={bbox_w}, bbox_h={bbox_h} (watermark size in full frame)")
-
-            # Translate bbox top-left to crop coordinates
-            bbox_x_in_crop = max(0, bbox[0] - crop_x)
-            bbox_y_in_crop = max(0, bbox[1] - crop_y)
-
-            # Calculate where bbox ENDS within crop (clipped to crop bounds)
-            bbox_x_end = min(crop_w, bbox_x_in_crop + bbox_w)
-            bbox_y_end = min(crop_h, bbox_y_in_crop + bbox_h)
-
-            # Final clipped dimensions
-            bbox_w_clipped = max(0, bbox_x_end - bbox_x_in_crop)
-            bbox_h_clipped = max(0, bbox_y_end - bbox_y_in_crop)
-
-            if i == 0:  # Only log first frame
-                print(f"   🔍 DEBUG: bbox_in_crop=({bbox_x_in_crop}, {bbox_y_in_crop}, {bbox_w_clipped}, {bbox_h_clipped})")
-                mask_area = bbox_w_clipped * bbox_h_clipped
-                crop_area = crop_w * crop_h
-                print(f"   🔍 DEBUG: mask_area={mask_area} pixels, crop_area={crop_area} pixels, ratio={mask_area/crop_area*100:.1f}%")
-
-            # Ensure bbox is within crop bounds
-            if bbox_w_clipped > 0 and bbox_h_clipped > 0:
-                # Mark ONLY watermark region as white (255 = inpaint this area)
-                mask[bbox_y_in_crop:bbox_y_in_crop+bbox_h_clipped,
-                     bbox_x_in_crop:bbox_x_in_crop+bbox_w_clipped] = 255
-
-            cv2.imwrite(os.path.join(seg_mask_dir, f"{i:04d}.png"), mask)
-            masks_copied += 1
-
-        print(f"   ✅ Generated {masks_copied} local masks (bbox area marked for inpainting)")
+        print(f"   ✅ Cropped {masks_copied} masks to segment region")
 
         print(f"   ✅ Prepared {masks_copied} masks")
 
