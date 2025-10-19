@@ -1093,56 +1093,31 @@ def process_segment_task(self, segment_data):
                 cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                 cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
 
-        # Download and crop masks
+        # Generate masks locally from bbox (INSTANT - no network dependency!)
+        print(f"   ⚙️  Generating {frames_copied} masks locally from bbox...")
         masks_copied = 0
-        for frame_idx in range(start_frame, end_frame + 1):
-            mask_file = f"{frame_idx:04d}.png"
-            local_mask = os.path.join(shared_mask_dir, mask_file) if shared_mask_dir else None
 
-            if local_mask and os.path.exists(local_mask):
-                mask = cv2.imread(local_mask, cv2.IMREAD_GRAYSCALE)
-                if mask is not None:
-                    cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                    cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
-                    masks_copied += 1
-            elif origin_base:
-                try:
-                    mask_url = f"{origin_base.rstrip('/')}/temp/propainter_masks/{base_name}_{video_id}/{mask_file}"
-                    r = requests.get(mask_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
-                    if r.ok:
-                        mask_data = np.frombuffer(r.content, dtype=np.uint8)
-                        mask = cv2.imdecode(mask_data, cv2.IMREAD_GRAYSCALE)
-                        if mask is not None:
-                            cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                            cv2.imwrite(os.path.join(seg_mask_dir, f"{masks_copied:04d}.png"), cropped_mask)
-                            masks_copied += 1
-                except Exception as e:
-                    print(f"⚠️  Failed to download mask {frame_idx}: {e}")
+        for i in range(frames_copied):
+            # Create black mask background
+            mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
 
-        if masks_copied == 0:
-            print(f"   ⚙️  Generating masks locally from bbox (INSTANT - no network needed!)")
+            # Calculate watermark position within THIS cropped region
+            # bbox is in FULL frame coordinates, need to translate to crop coordinates
+            bbox_x_in_crop = max(0, bbox[0] - crop_x)
+            bbox_y_in_crop = max(0, bbox[1] - crop_y)
+            bbox_w_clipped = min(crop_w - bbox_x_in_crop, bbox[2])
+            bbox_h_clipped = min(crop_h - bbox_y_in_crop, bbox[3])
 
-            for i in range(frames_copied):
-                # Create black mask background
-                mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
+            # Ensure bbox is within crop bounds
+            if bbox_x_in_crop >= 0 and bbox_y_in_crop >= 0 and bbox_w_clipped > 0 and bbox_h_clipped > 0:
+                # Mark ONLY watermark region as white (255 = inpaint this area)
+                mask[bbox_y_in_crop:bbox_y_in_crop+bbox_h_clipped,
+                     bbox_x_in_crop:bbox_x_in_crop+bbox_w_clipped] = 255
 
-                # Calculate watermark position within THIS cropped region
-                # bbox is in FULL frame coordinates, need to translate to crop coordinates
-                bbox_x_in_crop = max(0, bbox[0] - crop_x)
-                bbox_y_in_crop = max(0, bbox[1] - crop_y)
-                bbox_w_clipped = min(crop_w - bbox_x_in_crop, bbox[2])
-                bbox_h_clipped = min(crop_h - bbox_y_in_crop, bbox[3])
+            cv2.imwrite(os.path.join(seg_mask_dir, f"{i:04d}.png"), mask)
+            masks_copied += 1
 
-                # Ensure bbox is within crop bounds
-                if bbox_x_in_crop >= 0 and bbox_y_in_crop >= 0 and bbox_w_clipped > 0 and bbox_h_clipped > 0:
-                    # Mark ONLY watermark region as white (255 = inpaint this area)
-                    mask[bbox_y_in_crop:bbox_y_in_crop+bbox_h_clipped,
-                         bbox_x_in_crop:bbox_x_in_crop+bbox_w_clipped] = 255
-
-                cv2.imwrite(os.path.join(seg_mask_dir, f"{i:04d}.png"), mask)
-                masks_copied += 1
-
-            print(f"   ✅ Generated {masks_copied} local masks (bbox area marked for inpainting)")
+        print(f"   ✅ Generated {masks_copied} local masks (bbox area marked for inpainting)")
 
         print(f"   ✅ Prepared {masks_copied} masks")
 
