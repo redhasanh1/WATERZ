@@ -1208,21 +1208,49 @@ def process_segment_task(self, segment_data):
         self.update_state(state='PROCESSING', meta={'progress': 90, 'status': f'Encoding video'})
 
         seg_video_path = os.path.join(RESULT_DIR, f"{seg_prefix}.mp4")
-        encode_cmd = [
-            'ffmpeg', '-y', '-framerate', str(fps),
-            '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-            '-pix_fmt', 'yuv420p', '-profile:v', 'main',
-            seg_video_path
-        ]
+
+        # Use GPU encoding (h264_nvenc) for 10x speedup - critical for 1-core CPU!
+        import torch
+        use_gpu_encode = torch.cuda.is_available()
+
+        if use_gpu_encode:
+            # GPU encoding with NVENC (separate chip, won't affect ProPainter)
+            encode_cmd = [
+                'ffmpeg', '-y', '-framerate', str(fps),
+                '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+                '-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '5M',
+                '-pix_fmt', 'yuv420p',
+                seg_video_path
+            ]
+            print(f"   🚀 Using GPU encoding (NVENC)")
+        else:
+            # Fallback to CPU with ultrafast preset
+            encode_cmd = [
+                'ffmpeg', '-y', '-framerate', str(fps),
+                '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+                '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
+                '-pix_fmt', 'yuv420p',
+                seg_video_path
+            ]
+            print(f"   💻 Using CPU encoding (fallback)")
+
         subprocess.run(encode_cmd, capture_output=True, check=True)
 
-        # Upload segment video back to shared storage
+        # Skip upload if on same machine (save 1-2s per segment!)
         api_base = segment_data.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
-        if api_base:
+
+        # Check if API is on same machine
+        is_local = (
+            api_base is None or
+            'localhost' in (api_base or '').lower() or
+            '127.0.0.1' in (api_base or '')
+        )
+
+        if not is_local and api_base:
+            # Only upload if API is on different machine
             try:
                 upload_url = f"{api_base.rstrip('/')}/api/upload-segment"
-                print(f"   ⬆️  Uploading segment {seg_idx+1} to API server...")
+                print(f"   ⬆️  Uploading segment {seg_idx+1} to remote API...")
                 with open(seg_video_path, 'rb') as f:
                     resp = requests.post(
                         upload_url,
@@ -1235,6 +1263,8 @@ def process_segment_task(self, segment_data):
                     print(f"   ✅ Segment {seg_idx+1} uploaded successfully")
             except Exception as e:
                 print(f"⚠️  Failed to upload segment: {e}")
+        else:
+            print(f"   ✅ Segment {seg_idx+1} stored locally (skip upload)")
 
         # Cleanup temp directories
         for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
