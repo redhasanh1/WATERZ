@@ -1082,12 +1082,12 @@ def process_segment_task(self, segment_data):
                 print(f"   ⚠️  Mask download failed: {download_err} - will regenerate")
 
         # Fallback: Regenerate masks if not downloaded
+        detector = None
         if not masks_downloaded:
             print(f"   🎯 Regenerating masks with YOLO detection on {frames_copied} frames...")
             self.update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Detecting watermarks'})
 
             detector = get_detector()
-            zero_mask = np.zeros((height, width), dtype=np.uint8)
             last_valid_bbox = None
             frames_with_watermark = 0
             detect_interval = 3
@@ -1103,22 +1103,13 @@ def process_segment_task(self, segment_data):
                 if frame is None:
                     continue
 
-                # Detect watermark
+                # Detect watermark (don't create masks yet - will do after cropping)
                 if (frame_idx % detect_interval == 0) or (not hit_found and frame_idx < warmup_frames):
                     detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
                     if detections:
                         frames_with_watermark += 1
                         last_valid_bbox = detections[0]['bbox']
                         hit_found = True
-                        mask = detector.create_mask(frame, detections)
-                    else:
-                        mask = detector.create_mask(frame, [{'bbox': last_valid_bbox}]) if last_valid_bbox else zero_mask
-                else:
-                    mask = detector.create_mask(frame, [{'bbox': last_valid_bbox}]) if last_valid_bbox else zero_mask
-
-                # Save mask
-                mask_path = os.path.join(seg_mask_dir, f"{frame_idx:04d}.png")
-                cv2.imwrite(mask_path, mask)
 
             print(f"   ✅ Detection complete: {frames_with_watermark}/{frames_copied} frames with watermarks")
         else:
@@ -1134,7 +1125,7 @@ def process_segment_task(self, segment_data):
         else:
             print(f"   ℹ️  No watermark detected in this chunk - will skip ProPainter")
 
-        # Crop frames to detected watermark region
+        # Crop frames to detected watermark region AND create masks on cropped frames
         if last_valid_bbox:
             print(f"   ✂️  Cropping frames to watermark region...")
             for frame_idx in range(frames_copied):
@@ -1145,14 +1136,38 @@ def process_segment_task(self, segment_data):
                     cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                     cv2.imwrite(os.path.join(seg_cropped_dir, frame_file), cropped)
 
-            # Crop masks to same region
-            for frame_idx in range(frames_copied):
-                mask_file = f"{frame_idx:04d}.png"
-                mask_path = os.path.join(seg_mask_dir, mask_file)
-                mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-                if mask is not None:
-                    cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                    cv2.imwrite(mask_path, cropped_mask)  # Overwrite with cropped version
+            # Create masks on CROPPED frames (not full frames!)
+            print(f"   🎭 Creating masks on cropped frames...")
+            if not masks_downloaded and detector:
+                # Calculate bbox relative to cropped region
+                x1, y1, x2, y2 = last_valid_bbox
+                # Translate bbox from full frame coords to crop coords
+                crop_bbox_x1 = max(0, x1 - crop_x)
+                crop_bbox_y1 = max(0, y1 - crop_y)
+                crop_bbox_x2 = min(crop_w, x2 - crop_x)
+                crop_bbox_y2 = min(crop_h, y2 - crop_y)
+                crop_bbox = [crop_bbox_x1, crop_bbox_y1, crop_bbox_x2, crop_bbox_y2]
+
+                # Create masks on cropped frames
+                for frame_idx in range(frames_copied):
+                    frame_file = f"{frame_idx:04d}.png"
+                    cropped_frame_path = os.path.join(seg_cropped_dir, frame_file)
+                    cropped_frame = cv2.imread(cropped_frame_path)
+                    if cropped_frame is not None:
+                        # Create mask on cropped frame with relative bbox
+                        mask = detector.create_mask(cropped_frame, [{'bbox': crop_bbox}])
+                        mask_path = os.path.join(seg_mask_dir, frame_file)
+                        cv2.imwrite(mask_path, mask)
+            else:
+                # Masks were downloaded - crop them to the region
+                print(f"   ✂️  Cropping downloaded masks to region...")
+                for frame_idx in range(frames_copied):
+                    mask_file = f"{frame_idx:04d}.png"
+                    mask_path = os.path.join(seg_mask_dir, mask_file)
+                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                    if mask is not None:
+                        cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                        cv2.imwrite(mask_path, cropped_mask)
 
         print(f"   ✅ Prepared {frames_copied} frames and masks")
 
