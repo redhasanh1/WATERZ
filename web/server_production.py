@@ -1446,6 +1446,401 @@ def finalize_video_task(self, segment_results, prepare_result):
         raise
 
 
+@celery.task(bind=True, name='watermark.start_distributed_job')
+def start_distributed_job(self, video_path, api_base=None, temp_base=None, num_workers=2):
+    """
+    NEW REDIS-COORDINATED APPROACH:
+    Lightweight initiator that analyzes video once and creates segment queue in Redis.
+    Workers claim segments from queue and do independent preparation + processing.
+
+    Returns: video_id for tracking
+    """
+    try:
+        import json
+        import uuid
+
+        print(f"🚀 Starting Redis-coordinated distributed job: {video_path}")
+        print(f"   Workers will claim segments independently from Redis queue")
+
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Analyzing video'})
+
+        detector = get_detector()
+
+        # Download video if needed (for initial analysis only)
+        if not os.path.exists(video_path):
+            tunnel = api_base or os.getenv('TUNNEL_URL')
+            if tunnel:
+                try:
+                    from urllib.parse import urljoin
+                    import requests
+                    from pathlib import PureWindowsPath
+                    base_name = PureWindowsPath(video_path).name if '\\' in video_path else os.path.basename(video_path)
+                    download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+                    print(f"🌐 Downloading video for analysis: {download_url}")
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                    r.raise_for_status()
+                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                    video_path = os.path.join(UPLOAD_DIR, base_name)
+                    with open(video_path, 'wb') as f:
+                        f.write(r.content)
+                    print(f"✅ Video downloaded for analysis")
+                except Exception as e:
+                    raise Exception(f"Failed to download video: {e}")
+            else:
+                raise Exception(f"Video not found: {video_path}")
+
+        print(f"🔍 Analyzing video: {video_path}")
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise Exception(f"Failed to open video: {video_path}")
+
+        fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+
+        base_name = Path(video_path).stem
+        video_id = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
+
+        print(f"🎯 Running YOLO detection to find segment boundaries...")
+
+        last_valid_bbox = None
+        frames_processed = 0
+        frames_with_watermark = 0
+        detect_interval = 3
+        warmup_frames = 60
+        hit_found = False
+        det_conf = 0.15
+        bboxes_per_frame = []
+
+        # Quick detection pass (don't save frames/masks)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
+                detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
+                if detections:
+                    frames_with_watermark += 1
+                    last_valid_bbox = detections[0]['bbox']
+                    hit_found = True
+                    bboxes_per_frame.append(last_valid_bbox)
+                elif last_valid_bbox:
+                    bboxes_per_frame.append(last_valid_bbox)
+                else:
+                    bboxes_per_frame.append(None)
+            else:
+                bboxes_per_frame.append(last_valid_bbox)
+
+            frames_processed += 1
+
+        cap.release()
+
+        print(f"✅ Analysis complete: {frames_processed} frames, {frames_with_watermark} with watermarks")
+
+        # Detect segments
+        from segment_detector import detect_segments, merge_adjacent_segments
+        segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
+        if segments:
+            segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
+        else:
+            segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
+
+        # Force time-based splitting for multi-worker distribution
+        try:
+            import math
+            min_segments = max(num_workers, int(os.getenv('MIN_SEGMENTS', str(num_workers))))
+            min_chunk_frames = int(os.getenv('MIN_CHUNK_FRAMES', '60'))
+        except Exception:
+            min_segments = num_workers
+            min_chunk_frames = 60
+
+        if len(segments) < min_segments and frames_processed >= min_chunk_frames:
+            base_seg = max(segments, key=lambda s: (s[1]-s[0]+1)) if segments else (0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])
+            s0, e0, bb = base_seg
+            duration = e0 - s0 + 1
+            num_chunks = min_segments
+            chunk = max(min_chunk_frames, math.ceil(duration / num_chunks))
+            new_segments = []
+            cur = s0
+            while cur <= e0:
+                end = min(e0, cur + chunk - 1)
+                new_segments.append((cur, end, bb if bb else [0,0,width,height]))
+                cur = end + 1
+                if len(new_segments) >= num_chunks and end < e0:
+                    new_segments[-1] = (new_segments[-1][0], e0, new_segments[-1][2])
+                    break
+            segments = new_segments
+            print(f"🪓 Force-split: created {len(segments)} chunks for {num_workers} workers")
+
+        print(f"📊 Total segments to process: {len(segments)}")
+        for i, (start, end, bbox) in enumerate(segments):
+            print(f"   Segment {i+1}: frames {start}-{end} ({end-start+1} frames)")
+
+        # Push segments to Redis queue
+        redis_client = celery.backend.client
+        segment_queue_key = f"job:{video_id}:segments"
+
+        api_base_url = api_base or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL')
+
+        for seg_idx, (start_frame, end_frame, bbox) in enumerate(segments):
+            segment_info = {
+                'seg_idx': seg_idx,
+                'start_frame': start_frame,
+                'end_frame': end_frame,
+                'bbox': bbox,
+                'video_id': video_id,
+                'base_name': base_name,
+                'width': width,
+                'height': height,
+                'fps': fps,
+                'api_base': api_base_url,
+                'upload_filename': os.path.basename(video_path),
+                'total_frames': frames_processed,
+                'frames_with_watermark': frames_with_watermark,
+                'total_segments': len(segments),
+            }
+            redis_client.rpush(segment_queue_key, json.dumps(segment_info))
+
+        # Set total segments counter
+        redis_client.set(f"job:{video_id}:total", len(segments))
+        redis_client.set(f"job:{video_id}:completed", 0)
+        redis_client.set(f"job:{video_id}:metadata", json.dumps({
+            'fps': fps,
+            'width': width,
+            'height': height,
+            'total_frames': frames_processed,
+            'frames_with_watermark': frames_with_watermark,
+            'base_name': base_name,
+        }))
+
+        print(f"✅ Segment queue created in Redis: {segment_queue_key}")
+        print(f"🚀 Launching {num_workers} coordinated workers...")
+
+        # Launch workers
+        for i in range(num_workers):
+            run_coordinated_segment_task.apply_async(args=[video_id])
+
+        return {
+            'video_id': video_id,
+            'total_segments': len(segments),
+            'status': 'workers_launched',
+        }
+
+    except Exception as e:
+        print(f"❌ Error starting distributed job: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.run_coordinated_segment')
+def run_coordinated_segment_task(self, video_id):
+    """
+    NEW REDIS-COORDINATED WORKER:
+    Claims a segment from Redis queue, does full preparation locally, processes it.
+    No downloading frames/masks between workers!
+    """
+    try:
+        import json
+        import subprocess
+
+        redis_client = celery.backend.client
+        segment_queue_key = f"job:{video_id}:segments"
+
+        # Claim a segment atomically
+        segment_json = redis_client.lpop(segment_queue_key)
+
+        if not segment_json:
+            print(f"ℹ️  No more segments to claim for job {video_id}")
+            return {'status': 'no_work'}
+
+        segment_info = json.loads(segment_json)
+        seg_idx = segment_info['seg_idx']
+        start_frame = segment_info['start_frame']
+        end_frame = segment_info['end_frame']
+        bbox = segment_info['bbox']
+        base_name = segment_info['base_name']
+        width = segment_info['width']
+        height = segment_info['height']
+        fps = segment_info['fps']
+        api_base = segment_info['api_base']
+        upload_filename = segment_info['upload_filename']
+        total_segments = segment_info['total_segments']
+
+        print(f"\n🎬 Worker claimed segment {seg_idx+1}/{total_segments} (frames {start_frame}-{end_frame})")
+
+        # Download original video locally
+        video_path = os.path.join(UPLOAD_DIR, upload_filename)
+        if not os.path.exists(video_path):
+            if api_base:
+                try:
+                    from urllib.parse import urljoin
+                    import requests
+                    download_url = urljoin(api_base.rstrip('/') + '/', f'uploads/{upload_filename}')
+                    print(f"   ⬇️  Downloading video: {download_url}")
+                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                    r.raise_for_status()
+                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                    with open(video_path, 'wb') as f:
+                        f.write(r.content)
+                    print(f"   ✅ Video downloaded")
+                except Exception as e:
+                    raise Exception(f"Failed to download video: {e}")
+            else:
+                raise Exception(f"Video not found and no API base provided")
+
+        # Create local directories for this segment
+        seg_work_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_seg{seg_idx}")
+        seg_frames_dir = os.path.join(seg_work_dir, 'frames')
+        seg_mask_dir = os.path.join(seg_work_dir, 'masks')
+        seg_result_dir = os.path.join(seg_work_dir, 'result')
+        os.makedirs(seg_frames_dir, exist_ok=True)
+        os.makedirs(seg_mask_dir, exist_ok=True)
+        os.makedirs(seg_result_dir, exist_ok=True)
+
+        print(f"   📥 Extracting frames {start_frame}-{end_frame}...")
+
+        # Extract ONLY this segment's frames
+        extract_cmd = [
+            'ffmpeg', '-i', video_path,
+            '-vf', f'select=between(n\\,{start_frame}\\,{end_frame})',
+            '-vsync', '0',
+            '-qscale:v', '2',
+            '-start_number', '0',
+            os.path.join(seg_frames_dir, '%04d.png')
+        ]
+        subprocess.run(extract_cmd, capture_output=True, check=True)
+
+        # Count extracted frames
+        extracted_frames = sorted([f for f in os.listdir(seg_frames_dir) if f.endswith('.png')])
+        print(f"   ✅ Extracted {len(extracted_frames)} frames")
+
+        # Run YOLO detection on THIS segment's frames only
+        print(f"   🎯 Running YOLO detection on segment frames...")
+        detector = get_detector()
+
+        zero_mask = np.zeros((height, width), dtype=np.uint8)
+        masks_generated = 0
+
+        for frame_file in extracted_frames:
+            frame_path = os.path.join(seg_frames_dir, frame_file)
+            frame = cv2.imread(frame_path)
+
+            # Use segment bbox as hint
+            if bbox:
+                detections = detector.detect(frame, confidence_threshold=0.15, padding=0)
+                if not detections:
+                    # Use segment bbox as fallback
+                    detections = [{'bbox': bbox}]
+            else:
+                detections = detector.detect(frame, confidence_threshold=0.15, padding=0)
+
+            mask = detector.create_mask(frame, detections) if detections else zero_mask
+            mask_path = os.path.join(seg_mask_dir, frame_file)
+            cv2.imwrite(mask_path, mask)
+            masks_generated += 1
+
+        print(f"   ✅ Generated {masks_generated} masks")
+
+        # Process segment with ProPainter
+        print(f"   🎨 Processing segment with ProPainter...")
+
+        if not _check_propainter_assets():
+            raise RuntimeError("ProPainter assets missing")
+
+        try:
+            propainter_cmd = [
+                sys.executable, PROPAINTER_SCRIPT,
+                '--video', seg_frames_dir,
+                '--mask', seg_mask_dir,
+                '--output', seg_result_dir,
+                '--height', str(height),
+                '--width', str(width),
+                '--fp16',
+                '--fast',
+                '--flow_backend', PROPAINTER_FLOW_BACKEND,
+            ]
+            result = subprocess.run(propainter_cmd, capture_output=True, text=True, timeout=3600)
+
+            if result.returncode != 0:
+                raise RuntimeError(f"ProPainter failed: {result.stderr}")
+
+            print(f"   ✅ ProPainter processing complete")
+
+        except Exception as e:
+            raise RuntimeError(f"ProPainter error: {e}")
+
+        # Encode segment video
+        print(f"   🎬 Encoding segment video...")
+        segment_output = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_seg{seg_idx:03d}.mp4")
+
+        encode_cmd = [
+            'ffmpeg', '-y',
+            '-framerate', str(fps),
+            '-i', os.path.join(seg_result_dir, '%04d.png'),
+            '-c:v', 'libx264',
+            '-preset', 'medium',
+            '-crf', '18',
+            '-pix_fmt', 'yuv420p',
+            segment_output
+        ]
+        subprocess.run(encode_cmd, capture_output=True, check=True)
+
+        print(f"   ✅ Segment video saved: {segment_output}")
+
+        # Clean up work directory
+        shutil.rmtree(seg_work_dir, ignore_errors=True)
+
+        # Atomically increment completed counter
+        completed = redis_client.incr(f"job:{video_id}:completed")
+        total = int(redis_client.get(f"job:{video_id}:total") or 0)
+
+        print(f"   ✅ Segment {seg_idx+1} complete ({completed}/{total})")
+
+        # If this was the last segment, trigger finalization
+        if completed == total:
+            print(f"\n🎉 All segments complete! Triggering finalization...")
+
+            # Gather all segment paths
+            segment_results = []
+            for i in range(total):
+                seg_path = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_seg{i:03d}.mp4")
+                if os.path.exists(seg_path):
+                    segment_results.append({'path': seg_path, 'seg_idx': i})
+
+            # Get metadata
+            metadata_json = redis_client.get(f"job:{video_id}:metadata")
+            metadata = json.loads(metadata_json) if metadata_json else {}
+
+            # Trigger finalize
+            prepare_result = {
+                'video_id': video_id,
+                'total_frames': segment_info.get('total_frames', 0),
+                'frames_with_watermark': segment_info.get('frames_with_watermark', 0),
+                'width': width,
+                'height': height,
+                'base_name': base_name,
+                'fps': fps,
+            }
+
+            finalize_video_task.apply_async(args=[segment_results, prepare_result])
+
+        return {
+            'status': 'completed',
+            'seg_idx': seg_idx,
+            'segment_output': segment_output,
+        }
+
+    except Exception as e:
+        print(f"❌ Error processing segment: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
 @celery.task(bind=True, name='watermark.coordinate_segments')
 def coordinate_segments_task(self, segment_task_ids, prepare_result):
     """
@@ -1542,80 +1937,82 @@ def launch_segments_task(self, prepare_result):
 @celery.task(bind=True, name='watermark.remove_video_distributed')
 def process_video_distributed_task(self, video_path, api_base=None, temp_base=None):
     """
-    DISTRIBUTED VIDEO PROCESSING - Main entry point
+    REDIS-COORDINATED DISTRIBUTED VIDEO PROCESSING - Main entry point
 
-    This task coordinates multiple workers across different machines to process
-    one video together. It uses Celery's chord pattern to:
-    1. Prepare video (YOLO detection, segmentation) - runs on one worker
-    2. Process segments in parallel - distributes across ALL available workers/GPUs
-    3. Finalize video (concatenate, merge audio) - runs on one worker
+    NEW APPROACH: Each worker independently prepares and processes segments.
+    No downloading frames/masks between workers!
 
-    All workers (across all computers) will collaborate on the same video job.
+    Flow:
+    1. Start distributed job (lightweight analysis, creates Redis queue)
+    2. Workers claim segments from queue, each does:
+       - Download original video
+       - Extract ONLY their segment's frames
+       - Run YOLO detection on those frames
+       - Process with ProPainter
+    3. Last worker triggers finalization
     """
     try:
-        from celery import chain, chord, group
+        print(f"🚀 Starting REDIS-COORDINATED distributed processing: {video_path}")
+        print(f"   Workers will independently prepare and process segments")
 
-        print(f"🚀 Starting DISTRIBUTED video processing: {video_path}")
-        print(f"   All available workers will collaborate on this video")
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Starting distributed job'})
 
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Initializing distributed processing'})
+        # Determine number of workers (default to 2, or use env variable)
+        try:
+            num_workers = int(os.getenv('SEGMENT_WORKERS', '2'))
+        except:
+            num_workers = 2
 
-        # Phase 1: Prepare video (runs on one worker)
-        print("📋 Phase 1: Preparing video for distribution...")
-        prepare_result = prepare_video_task.apply_async(
+        # Start the distributed job
+        result = start_distributed_job.apply_async(
             args=[video_path],
-            kwargs={'api_base': api_base, 'temp_base': temp_base}
+            kwargs={'api_base': api_base, 'temp_base': temp_base, 'num_workers': num_workers}
         ).get()
 
-        if not prepare_result or 'segments' not in prepare_result:
-            raise RuntimeError("Video preparation failed")
+        video_id = result['video_id']
+        total_segments = result['total_segments']
 
-        segments = prepare_result['segments']
-        total_segments = len(segments)
-
-        print(f"✅ Video prepared: {total_segments} segments ready for distributed processing")
-        print(f"🌐 Distributing segments across all available workers...")
+        print(f"✅ Distributed job started!")
+        print(f"   Video ID: {video_id}")
+        print(f"   Total segments: {total_segments}")
+        print(f"   Workers: {num_workers}")
+        print(f"   Workers will claim and process segments independently")
 
         self.update_state(
             state='PROCESSING',
-            meta={'progress': 50, 'status': f'Distributing {total_segments} segments across workers'}
+            meta={'progress': 50, 'status': f'{num_workers} workers processing {total_segments} segments'}
         )
 
-        # Add total_segments to each segment data
-        for seg_data in segments:
-            seg_data['total_segments'] = total_segments
+        # Monitor completion via Redis
+        redis_client = celery.backend.client
+        import time
 
-        # Phase 2: Process segments in parallel (distributes across ALL workers)
-        # Using chord: when all segment tasks complete, finalize task runs automatically
-        print(f"🔥 Phase 2: Processing {total_segments} segments in parallel...")
+        print(f"📊 Monitoring progress...")
+        while True:
+            completed = int(redis_client.get(f"job:{video_id}:completed") or 0)
+            total = int(redis_client.get(f"job:{video_id}:total") or total_segments)
 
-        workflow = chord(
-            # Header: All segment processing tasks (run in parallel across all workers)
-            group([
-                process_segment_task.s(seg_data)
-                for seg_data in segments
-            ]),
-            # Callback: Finalization task (runs when all segments complete)
-            finalize_video_task.s(prepare_result)
-        )
+            progress = 50 + int((completed / max(total, 1)) * 45)
+            self.update_state(
+                state='PROCESSING',
+                meta={'progress': progress, 'status': f'Processing segments ({completed}/{total} complete)'}
+            )
 
-        # Execute the distributed workflow
-        result = workflow.apply_async()
+            if completed >= total:
+                print(f"✅ All {total} segments complete!")
+                break
 
-        print(f"📊 Workflow submitted:")
-        print(f"   - {total_segments} segment tasks queued")
-        print(f"   - Tasks will be picked up by ANY available worker")
-        print(f"   - Finalization will run automatically when all segments complete")
+            time.sleep(5)  # Check every 5 seconds
 
-        # Wait for the entire workflow to complete
-        final_result = result.get(timeout=3600)  # 1 hour timeout
+        # Wait a bit for finalization to start
+        time.sleep(2)
 
-        print(f"✅ DISTRIBUTED processing complete!")
-        print(f"   Final video: {final_result.get('path')}")
-
-        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Distributed processing complete'})
-
-        return final_result
+        # Return tracking info
+        return {
+            'video_id': video_id,
+            'status': 'processing_complete',
+            'message': 'Finalization in progress',
+        }
 
     except Exception as e:
         print(f"❌ Distributed processing failed: {e}")
