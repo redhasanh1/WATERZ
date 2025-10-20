@@ -1180,9 +1180,11 @@ def process_segment_task(self, segment_data):
         ]
         subprocess.run(encode_cmd, capture_output=True, check=True)
 
-        # Upload segment video back to shared storage
+        # Skip upload if on same machine
         api_base = segment_data.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
-        if api_base:
+        is_local = api_base is None or 'localhost' in (api_base or '').lower() or '127.0.0.1' in (api_base or '')
+
+        if not is_local and api_base:
             try:
                 upload_url = f"{api_base.rstrip('/')}/api/upload-segment"
                 print(f"   ⬆️  Uploading segment {seg_idx+1} to API server...")
@@ -1198,6 +1200,8 @@ def process_segment_task(self, segment_data):
                     print(f"   ✅ Segment {seg_idx+1} uploaded successfully")
             except Exception as e:
                 print(f"⚠️  Failed to upload segment: {e}")
+        else:
+            print(f"   ✅ Segment {seg_idx+1} stored locally (skip upload)")
 
         # Cleanup temp directories
         for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
