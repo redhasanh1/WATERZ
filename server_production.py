@@ -1116,25 +1116,25 @@ def process_segment_task(self, segment_data):
             finally:
                 clear_gpu_memory()
 
-        # Merge cleaned region back to full frames
-        print(f"   🔗 Merging cleaned region...")
-        self.update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
+            # Merge cleaned region back to full frames
+            print(f"   🔗 Merging cleaned region...")
+            self.update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
 
-        seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
-        if not os.path.exists(seg_propainter_frames):
-            raise RuntimeError(f"ProPainter output not found for segment {seg_idx}")
+            seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
+            if not os.path.exists(seg_propainter_frames):
+                raise RuntimeError(f"ProPainter output not found for segment {seg_idx}")
 
-        for frame_idx in range(seg_duration):
-            frame_file = f"{frame_idx:04d}.png"
-            original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-            cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+            for frame_idx in range(seg_duration):
+                frame_file = f"{frame_idx:04d}.png"
+                original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
 
-            if cleaned_crop is not None and original is not None:
-                result_frame = original.copy()
-                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
-                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
-            elif original is not None:
-                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+                if cleaned_crop is not None and original is not None:
+                    result_frame = original.copy()
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+                elif original is not None:
+                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
 
         # Encode segment to video
         print(f"   🎞️  Encoding segment...")
