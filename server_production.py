@@ -1126,20 +1126,11 @@ def process_segment_task(self, segment_data):
             print(f"   📊 Using downloaded masks - extracting bbox info...")
             last_valid_bbox = bbox  # Use bbox from segment_data (from centralized detection)
 
-        # Update crop region based on detected bbox
+        # Update crop region based on detected bbox (calculate_crop_region handles min sizing)
         if last_valid_bbox:
-            x1, y1, x2, y2 = last_valid_bbox
-            crop_x, crop_y = x1, y1
-            crop_w, crop_h = x2 - x1, y2 - y1
+            # Recalculate crop region with detected bbox (includes min_size=128 expansion)
+            crop_x, crop_y, crop_w, crop_h = calculate_crop_region(last_valid_bbox, width, height, padding_ratio=0.2, min_size=128)
             print(f"   📐 Detected crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h}")
-
-            # RAFT requires minimum dimensions for pooling operations
-            MIN_CROP_SIZE = 128
-            if crop_w < MIN_CROP_SIZE or crop_h < MIN_CROP_SIZE:
-                print(f"   ⚠️  Crop region too small ({crop_w}x{crop_h}) for RAFT (min {MIN_CROP_SIZE}x{MIN_CROP_SIZE})")
-                print(f"   ⏭️  Skipping ProPainter - watermark too small to process safely")
-                last_valid_bbox = None  # Treat as no watermark
-                frames_with_watermark = 0
         else:
             print(f"   ℹ️  No watermark detected in this chunk - will skip ProPainter")
 
