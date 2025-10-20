@@ -1024,6 +1024,14 @@ def process_segment_task(self, segment_data):
             crop_x, crop_y = x1, y1
             crop_w, crop_h = x2 - x1, y2 - y1
             print(f"   📐 Detected crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h}")
+
+            # RAFT requires minimum dimensions for pooling operations
+            MIN_CROP_SIZE = 128
+            if crop_w < MIN_CROP_SIZE or crop_h < MIN_CROP_SIZE:
+                print(f"   ⚠️  Crop region too small ({crop_w}x{crop_h}) for RAFT (min {MIN_CROP_SIZE}x{MIN_CROP_SIZE})")
+                print(f"   ⏭️  Skipping ProPainter - watermark too small to process safely")
+                last_valid_bbox = None  # Treat as no watermark
+                frames_with_watermark = 0
         else:
             print(f"   ℹ️  No watermark detected in this chunk - will skip ProPainter")
 
