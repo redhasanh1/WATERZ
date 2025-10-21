@@ -1,6 +1,4 @@
 import argparse
-
-import ptlflow
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,16 +23,12 @@ def initialize_RAFT(model_path='weights/raft-things.pth', device='cuda'):
 
     return model
 
-# using fastflownet to replace raft
+
 class RAFT_bi(nn.Module):
     """Flow completion loss"""
-
-    def __init__(self, model_path="weights/raft-things.pth", device="cuda"):
+    def __init__(self, model_path='weights/raft-things.pth', device='cuda'):
         super().__init__()
-        self.fix_raft = ptlflow.get_model(
-            "fastflownet", pretrained_ckpt="things"
-        )  # using any model in ptlflow
-        self.fix_raft.to(device)
+        self.fix_raft = initialize_RAFT(model_path, device=device)
 
         for p in self.fix_raft.parameters():
             p.requires_grad = False
@@ -47,19 +41,16 @@ class RAFT_bi(nn.Module):
         # print(gt_local_frames.shape)
 
         with torch.no_grad():
-            gtlf_1 = gt_local_frames[0, :-1, :, :, :]  # t-1 c h w
-            gtlf_2 = gt_local_frames[0, 1:, :, :, :]
+            gtlf_1 = gt_local_frames[:, :-1, :, :, :].reshape(-1, c, h, w)
+            gtlf_2 = gt_local_frames[:, 1:, :, :, :].reshape(-1, c, h, w)
             # print(gtlf_1.shape)
 
-            gt_flows_forward = self.fix_raft(
-                {"images": torch.stack((gtlf_1, gtlf_2), dim=1)}
-            )["flows"]
-            gt_flows_backward = self.fix_raft(
-                {"images": torch.stack((gtlf_2, gtlf_1), dim=1)}
-            )["flows"]
+            _, gt_flows_forward = self.fix_raft(gtlf_1, gtlf_2, iters=iters, test_mode=True)
+            _, gt_flows_backward = self.fix_raft(gtlf_2, gtlf_1, iters=iters, test_mode=True)
 
-        gt_flows_forward = gt_flows_forward.view(b, l_t - 1, 2, h, w)
-        gt_flows_backward = gt_flows_backward.view(b, l_t - 1, 2, h, w)
+        
+        gt_flows_forward = gt_flows_forward.view(b, l_t-1, 2, h, w)
+        gt_flows_backward = gt_flows_backward.view(b, l_t-1, 2, h, w)
 
         return gt_flows_forward, gt_flows_backward
 
