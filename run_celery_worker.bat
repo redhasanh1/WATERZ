@@ -5,7 +5,7 @@ REM Optional first argument = worker name (defaults to w<random>)
 set "WORKER_NAME=%~1"
 if "%WORKER_NAME%"=="" set "WORKER_NAME=w%RANDOM%"
 
-REM Resolve repo root (this script sits inside watermarkz folder)
+REM Resolve repo root (this script lives inside watermarkz folder)
 cd /d "%~dp0"
 set "ROOT_DIR=%CD%"
 
@@ -21,16 +21,29 @@ set "OPENCV_TEMP_PATH=%ROOT_DIR%\temp"
 REM Share project + bundled packages on Python path
 set "PYTHONPATH=%ROOT_DIR%;%ROOT_DIR%\python_packages"
 
-REM Make sure TensorRT / Torch GPU DLLs are reachable
-set "PATH=%ROOT_DIR%\python_packages;%ROOT_DIR%\python_packages\torch\lib;%ROOT_DIR%\TensorRT-10.7.0.23\lib;%PATH%"
+REM Append TensorRT/Torch libs to PATH if present
+if exist "%ROOT_DIR%\TensorRT-10.7.0.23\lib" (
+    set "PATH=%ROOT_DIR%\TensorRT-10.7.0.23\lib;%PATH%"
+)
+if exist "%ROOT_DIR%\python_packages" (
+    set "PATH=%ROOT_DIR%\python_packages;%PATH%"
+)
+if exist "%ROOT_DIR%\python_packages\torch\lib" (
+    set "PATH=%ROOT_DIR%\python_packages\torch\lib;%PATH%"
+)
 
 REM Disable buffering so logs stream live into the console
 set "PYTHONUNBUFFERED=1"
+set "PYTHONIOENCODING=utf-8"
 
 echo ===========================================================
 echo  Starting Celery worker %WORKER_NAME%
 echo  Root: %ROOT_DIR%
-echo  Using TensorRT path: %ROOT_DIR%\TensorRT-10.7.0.23\lib
+if exist "%ROOT_DIR%\TensorRT-10.7.0.23\lib" (
+  echo  TensorRT libs: %ROOT_DIR%\TensorRT-10.7.0.23\lib
+) else (
+  echo  TensorRT libs: NOT FOUND (will fall back to PyTorch)
+)
 echo ===========================================================
 echo(
 
