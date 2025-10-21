@@ -812,6 +812,9 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
 
             mask_path = os.path.join(shared_mask_dir, f"{frames_processed:04d}.png")
             cv2.imwrite(mask_path, mask)
+            # Save frame to shared storage (workers will copy/download these)
+            frame_path = os.path.join(shared_frames_dir, f"{frames_processed:04d}.png")
+            cv2.imwrite(frame_path, frame)
             frames_processed += 1
 
         cap.release()
@@ -820,19 +823,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
             raise RuntimeError("No frames processed - video may be corrupted")
 
         print(f"✅ Detection complete: {frames_processed} frames, {frames_with_watermark} with watermarks")
-
-        # Extract ALL frames to shared location for workers to access
-        print(f"🎞️  Extracting all frames to shared storage...")
-        self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Extracting frames'})
-        import subprocess
-        extract_cmd = [
-            'ffmpeg', '-i', video_path,
-            '-qscale:v', '2',
-            '-start_number', '0',
-            os.path.join(shared_frames_dir, '%04d.png')
-        ]
-        subprocess.run(extract_cmd, capture_output=True, check=True)
-        print(f"✅ Extracted {frames_processed} frames to {shared_frames_dir}")
+        print(f"✅ Frames saved to shared storage: {shared_frames_dir}")
 
         # Detect segments (by watermark position changes)
         from segment_detector import detect_segments, merge_adjacent_segments
