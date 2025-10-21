@@ -6,6 +6,13 @@ import numpy as np
 import os
 try:
     import torch
+    # PyTorch 2.6+ compatibility: Allow loading custom YOLO models
+    if hasattr(torch.serialization, 'add_safe_globals'):
+        try:
+            from ultralytics.nn.tasks import DetectionModel
+            torch.serialization.add_safe_globals([DetectionModel])
+        except:
+            pass
 except Exception:
     torch = None
 
