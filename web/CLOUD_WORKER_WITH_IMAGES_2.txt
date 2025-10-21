@@ -1057,44 +1057,24 @@ def process_segment_task(self, segment_data):
         shared_mask_dir = segment_data.get('shared_mask_dir')
         shared_frames_dir = segment_data.get('shared_frames_dir')
 
-        print(f"   ⬇️  Downloading frames {start_frame}-{end_frame}...")
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading frames'})
+        # Multi-PC optimization: Skip frame sharing, download video directly in parallel
+        is_multi_pc = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
 
         import requests
         frames_copied = 0
-        for frame_idx in range(start_frame, end_frame + 1):
-            frame_file = f"{frame_idx:04d}.png"
 
-            # Try local first (if on same machine as prepare task)
-            local_frame = os.path.join(shared_frames_dir, frame_file) if shared_frames_dir else None
-            if local_frame and os.path.exists(local_frame):
-                dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
-                shutil.copy2(local_frame, dst)
-                frames_copied += 1
-            elif origin_base:
-                # Download individual frame from origin host (serving /temp/)
-                try:
-                    frame_url = f"{origin_base.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
-                    r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
-                    if r.ok:
-                        dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
-                        with open(dst, 'wb') as f:
-                            f.write(r.content)
-                        frames_copied += 1
-                except Exception as e:
-                    print(f"⚠️  Failed to download frame {frame_idx}: {e}")
+        if is_multi_pc:
+            # Multi-PC mode: Each worker downloads video directly (faster, no tunnel congestion)
+            print(f"   📦 Multi-PC mode: downloading video directly for frames {start_frame}-{end_frame}...")
+            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading video'})
 
-        if frames_copied == 0:
-            # Fallback: fetch original video from API uploads and extract only needed frames
-            print(f"   ⚠️  No frames found in shared storage, falling back to video download...")
             api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
             upload_filename = segment_data.get('upload_filename')
             video_url = segment_data.get('video_url')
             if (api_base or video_url) and upload_filename:
                 try:
-                    import requests
                     video_url = video_url or f"{api_base.rstrip('/')}/uploads/{upload_filename}"
-                    print(f"   ⬇️  Fallback: downloading original video for local extraction: {video_url}")
+                    print(f"   ⬇️  Downloading: {video_url}")
                     r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
                     r.raise_for_status()
                     local_video = os.path.join(TEMP_DIR, f"seg_{seg_idx}_{upload_filename}")
@@ -1102,7 +1082,7 @@ def process_segment_task(self, segment_data):
                         f.write(r.content)
                     cap2 = cv2.VideoCapture(local_video)
                     if not cap2.isOpened():
-                        raise RuntimeError("Fallback video open failed")
+                        raise RuntimeError("Video open failed")
                     current_frame = 0
                     while True:
                         ret, frame = cap2.read()
@@ -1118,9 +1098,73 @@ def process_segment_task(self, segment_data):
                     cap2.release()
                     os.remove(local_video)
                 except Exception as e:
-                    raise RuntimeError(f"Fallback frame extraction failed: {e}")
+                    raise RuntimeError(f"Video download failed: {e}")
             else:
-                raise RuntimeError(f"No frames available for segment {seg_idx}")
+                raise RuntimeError(f"No video URL available for segment {seg_idx}")
+        else:
+            # Single-PC mode: Try frame sharing first
+            print(f"   ⬇️  Downloading frames {start_frame}-{end_frame}...")
+            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading frames'})
+
+            for frame_idx in range(start_frame, end_frame + 1):
+                frame_file = f"{frame_idx:04d}.png"
+
+                # Try local first (if on same machine as prepare task)
+                local_frame = os.path.join(shared_frames_dir, frame_file) if shared_frames_dir else None
+                if local_frame and os.path.exists(local_frame):
+                    dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                    shutil.copy2(local_frame, dst)
+                    frames_copied += 1
+                elif origin_base:
+                    # Download individual frame from origin host (serving /temp/)
+                    try:
+                        frame_url = f"{origin_base.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
+                        r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
+                        if r.ok:
+                            dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                            with open(dst, 'wb') as f:
+                                f.write(r.content)
+                            frames_copied += 1
+                    except Exception as e:
+                        print(f"⚠️  Failed to download frame {frame_idx}: {e}")
+
+            if frames_copied == 0:
+                # Fallback: fetch original video from API uploads and extract only needed frames
+                print(f"   ⚠️  No frames found in shared storage, falling back to video download...")
+                api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
+                upload_filename = segment_data.get('upload_filename')
+                video_url = segment_data.get('video_url')
+                if (api_base or video_url) and upload_filename:
+                    try:
+                        import requests
+                        video_url = video_url or f"{api_base.rstrip('/')}/uploads/{upload_filename}"
+                        print(f"   ⬇️  Fallback: downloading original video for local extraction: {video_url}")
+                        r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                        r.raise_for_status()
+                        local_video = os.path.join(TEMP_DIR, f"seg_{seg_idx}_{upload_filename}")
+                        with open(local_video, 'wb') as f:
+                            f.write(r.content)
+                        cap2 = cv2.VideoCapture(local_video)
+                        if not cap2.isOpened():
+                            raise RuntimeError("Fallback video open failed")
+                        current_frame = 0
+                        while True:
+                            ret, frame = cap2.read()
+                            if not ret:
+                                break
+                            if current_frame > end_frame:
+                                break
+                            if current_frame >= start_frame:
+                                dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                                cv2.imwrite(dst, frame)
+                                frames_copied += 1
+                            current_frame += 1
+                        cap2.release()
+                        os.remove(local_video)
+                    except Exception as e:
+                        raise RuntimeError(f"Fallback frame extraction failed: {e}")
+                else:
+                    raise RuntimeError(f"No frames available for segment {seg_idx}")
 
         if frames_copied == 0:
             raise RuntimeError(f"No frames extracted for segment {seg_idx}")
