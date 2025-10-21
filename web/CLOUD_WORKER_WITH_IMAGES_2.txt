@@ -465,26 +465,57 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
         if not os.path.exists(seg_propainter_frames):
             raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
 
-        print(f"   🔗 Merging cleaned region back to full frames (in-memory)...")
-        # Load all frames into memory first (faster than disk I/O in loop)
-        original_frames = []
-        cleaned_frames = []
-        for frame_idx in range(seg_duration):
-            frame_file = f"{frame_idx:04d}.png"
-            orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-            clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
-            original_frames.append(orig)
-            cleaned_frames.append(clean)
+        print(f"   🔗 Merging cleaned region back to full frames (GPU-accelerated)...")
 
-        # Merge in memory and write in one pass
-        for frame_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
-            frame_file = f"{frame_idx:04d}.png"
-            if cleaned_crop is not None and original is not None:
-                result_frame = original.copy()
-                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
-                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
-            elif original is not None:
-                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+        # Try GPU-accelerated merge first, fallback to CPU if needed
+        try:
+            import torch
+            if torch.cuda.is_available():
+                # GPU-accelerated batch processing
+                print(f"   🚀 Using GPU for frame merging...")
+                for frame_idx in range(seg_duration):
+                    frame_file = f"{frame_idx:04d}.png"
+                    orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                    clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+
+                    if clean is not None and orig is not None:
+                        # Convert to GPU tensors (BGR to RGB not needed for merging)
+                        orig_gpu = torch.from_numpy(orig).cuda()
+                        clean_gpu = torch.from_numpy(clean).cuda()
+
+                        # Merge on GPU
+                        orig_gpu[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = clean_gpu
+
+                        # Copy back to CPU and save
+                        result_frame = orig_gpu.cpu().numpy()
+                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+                    elif orig is not None:
+                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), orig)
+
+                print(f"   ✅ GPU merge completed")
+            else:
+                raise RuntimeError("CUDA not available")
+        except Exception as e:
+            # Fallback to CPU merge
+            print(f"   ⚠️  GPU merge failed ({e}), falling back to CPU...")
+            original_frames = []
+            cleaned_frames = []
+            for frame_idx in range(seg_duration):
+                frame_file = f"{frame_idx:04d}.png"
+                orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+                original_frames.append(orig)
+                cleaned_frames.append(clean)
+
+            # Merge in memory and write in one pass
+            for frame_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
+                frame_file = f"{frame_idx:04d}.png"
+                if cleaned_crop is not None and original is not None:
+                    result_frame = original.copy()
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+                elif original is not None:
+                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
 
         # Return cleaned frames directory for later encoding
         temp_dirs = [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir]
@@ -499,7 +530,7 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
 
 def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs_to_cleanup):
     """
-    Encode a segment's cleaned frames to video (CPU-bound, runs in parallel).
+    Encode a segment's cleaned frames to video (GPU-accelerated with NVENC).
 
     Returns a tuple (seg_idx, seg_video_path).
     """
@@ -513,18 +544,29 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
     seg_video_path = os.path.join(TEMP_DIR, f"{seg_prefix}.mp4")
 
     seg_label = f"{seg_idx + 1}/{total_segments}"
-    print(f"   🎞️  Encoding segment {seg_label} to video...")
+    print(f"   🎞️  Encoding segment {seg_label} to video (GPU NVENC)...")
 
     try:
+        # Try faster preset p1 for maximum speed, fallback to p4 if fails
         encode_cmd = [
-            'ffmpeg', '-y', '-framerate', str(fps),
+            'ffmpeg', '-y',
+            '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '5M',
+            '-c:v', 'h264_nvenc',
+            '-preset', 'p1',  # Fastest NVENC preset (was p4)
+            '-b:v', '8M',  # Increased bitrate for better quality at higher speed
+            '-bufsize', '16M',
             '-pix_fmt', 'yuv420p',
             '-profile:v', 'main',
             seg_video_path
         ]
-        subprocess.run(encode_cmd, capture_output=True, check=True)
+        result = subprocess.run(encode_cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            # Fallback to p4 if p1 fails
+            print(f"   ⚠️  p1 preset failed, trying p4...")
+            encode_cmd[encode_cmd.index('-preset') + 1] = 'p4'
+            subprocess.run(encode_cmd, capture_output=True, check=True)
 
         print(f"   ✅ Segment {seg_label} encoded successfully")
         return seg_idx, seg_video_path
