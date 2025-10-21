@@ -821,6 +821,19 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
 
         print(f"✅ Detection complete: {frames_processed} frames, {frames_with_watermark} with watermarks")
 
+        # Extract ALL frames to shared location for workers to access
+        print(f"🎞️  Extracting all frames to shared storage...")
+        self.update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Extracting frames'})
+        import subprocess
+        extract_cmd = [
+            'ffmpeg', '-i', video_path,
+            '-qscale:v', '2',
+            '-start_number', '0',
+            os.path.join(shared_frames_dir, '%04d.png')
+        ]
+        subprocess.run(extract_cmd, capture_output=True, check=True)
+        print(f"✅ Extracted {frames_processed} frames to {shared_frames_dir}")
+
         # Detect segments (by watermark position changes)
         from segment_detector import detect_segments, merge_adjacent_segments
         segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
@@ -885,6 +898,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
                 'height': height,
                 'fps': fps,
                 'shared_mask_dir': shared_mask_dir,
+                'shared_frames_dir': shared_frames_dir,
                 'video_url': f"{api_base_url.rstrip('/')}/uploads/{os.path.basename(video_path)}",
                 'temp_base_url': temp_base_url,
                 'api_base': api_base_url,
@@ -1005,56 +1019,80 @@ def process_segment_task(self, segment_data):
         for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
             os.makedirs(path, exist_ok=True)
 
-        # Each worker extracts ONLY its assigned frames directly from video (parallel speedup!)
+        # Download frames from shared storage (smart: try local first, then individual frames, then video as fallback)
         origin_base = segment_data.get('temp_base_url') or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
         shared_mask_dir = segment_data.get('shared_mask_dir')
+        shared_frames_dir = segment_data.get('shared_frames_dir')
 
-        print(f"   📥 Extracting frames {start_frame}-{end_frame} from video...")
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Extracting assigned frames'})
+        print(f"   ⬇️  Downloading frames {start_frame}-{end_frame}...")
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading frames'})
 
-        video_url = segment_data.get('video_url')
-        if not video_url:
-            raise RuntimeError("No video_url provided in segment_data")
-
-        # Download video
-        print(f"   ⬇️  Downloading video: {video_url}")
         import requests
-        r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
-        r.raise_for_status()
-
-        upload_filename = segment_data.get('upload_filename', 'temp_video.mp4')
-        local_video = os.path.join(TEMP_DIR, f"seg_{seg_idx}_{upload_filename}")
-        with open(local_video, 'wb') as f:
-            f.write(r.content)
-
-        # Extract ONLY frames for this segment (start_frame to end_frame)
-        print(f"   🎬 Extracting frames {start_frame}-{end_frame}...")
-        cap = cv2.VideoCapture(local_video)
-        if not cap.isOpened():
-            raise RuntimeError("Failed to open downloaded video")
-
         frames_copied = 0
-        current_frame = 0
+        for frame_idx in range(start_frame, end_frame + 1):
+            frame_file = f"{frame_idx:04d}.png"
 
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if current_frame > end_frame:  # Stop after segment end
-                break
-            if current_frame >= start_frame:  # Only save frames in segment range
+            # Try local first (if on same machine as prepare task)
+            local_frame = os.path.join(shared_frames_dir, frame_file) if shared_frames_dir else None
+            if local_frame and os.path.exists(local_frame):
                 dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
-                cv2.imwrite(dst, frame)
+                shutil.copy2(local_frame, dst)
                 frames_copied += 1
-            current_frame += 1
+            elif origin_base:
+                # Download individual frame from origin host (serving /temp/)
+                try:
+                    frame_url = f"{origin_base.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
+                    r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
+                    if r.ok:
+                        dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                        with open(dst, 'wb') as f:
+                            f.write(r.content)
+                        frames_copied += 1
+                except Exception as e:
+                    print(f"⚠️  Failed to download frame {frame_idx}: {e}")
 
-        cap.release()
-        os.remove(local_video)  # Clean up downloaded video
+        if frames_copied == 0:
+            # Fallback: fetch original video from API uploads and extract only needed frames
+            print(f"   ⚠️  No frames found in shared storage, falling back to video download...")
+            api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
+            upload_filename = segment_data.get('upload_filename')
+            video_url = segment_data.get('video_url')
+            if (api_base or video_url) and upload_filename:
+                try:
+                    import requests
+                    video_url = video_url or f"{api_base.rstrip('/')}/uploads/{upload_filename}"
+                    print(f"   ⬇️  Fallback: downloading original video for local extraction: {video_url}")
+                    r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                    r.raise_for_status()
+                    local_video = os.path.join(TEMP_DIR, f"seg_{seg_idx}_{upload_filename}")
+                    with open(local_video, 'wb') as f:
+                        f.write(r.content)
+                    cap2 = cv2.VideoCapture(local_video)
+                    if not cap2.isOpened():
+                        raise RuntimeError("Fallback video open failed")
+                    current_frame = 0
+                    while True:
+                        ret, frame = cap2.read()
+                        if not ret:
+                            break
+                        if current_frame > end_frame:
+                            break
+                        if current_frame >= start_frame:
+                            dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                            cv2.imwrite(dst, frame)
+                            frames_copied += 1
+                        current_frame += 1
+                    cap2.release()
+                    os.remove(local_video)
+                except Exception as e:
+                    raise RuntimeError(f"Fallback frame extraction failed: {e}")
+            else:
+                raise RuntimeError(f"No frames available for segment {seg_idx}")
 
         if frames_copied == 0:
             raise RuntimeError(f"No frames extracted for segment {seg_idx}")
 
-        print(f"   ✅ Extracted {frames_copied} frames ({start_frame}-{end_frame})")
+        print(f"   ✅ Downloaded {frames_copied} frames ({start_frame}-{end_frame})")
 
         # Try to download masks from shared location (same PC) or regenerate them (different PC)
         masks_downloaded = False
