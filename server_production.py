@@ -465,12 +465,20 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
         if not os.path.exists(seg_propainter_frames):
             raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
 
-        print(f"   🔗 Merging cleaned region back to full frames...")
+        print(f"   🔗 Merging cleaned region back to full frames (in-memory)...")
+        # Load all frames into memory first (faster than disk I/O in loop)
+        original_frames = []
+        cleaned_frames = []
         for frame_idx in range(seg_duration):
             frame_file = f"{frame_idx:04d}.png"
-            original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-            cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+            orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+            clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+            original_frames.append(orig)
+            cleaned_frames.append(clean)
 
+        # Merge in memory and write in one pass
+        for frame_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
+            frame_file = f"{frame_idx:04d}.png"
             if cleaned_crop is not None and original is not None:
                 result_frame = original.copy()
                 result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
@@ -511,7 +519,7 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
         encode_cmd = [
             'ffmpeg', '-y', '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '5M',
             '-pix_fmt', 'yuv420p',
             '-profile:v', 'main',
             seg_video_path
@@ -1249,18 +1257,26 @@ def process_segment_task(self, segment_data):
                 clear_gpu_memory()
 
             # Merge cleaned region back to full frames
-            print(f"   🔗 Merging cleaned region...")
+            print(f"   🔗 Merging cleaned region (in-memory)...")
             self.update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
 
             seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
             if not os.path.exists(seg_propainter_frames):
                 raise RuntimeError(f"ProPainter output not found for segment {seg_idx}")
 
+            # Load all frames into memory first (faster than disk I/O in loop)
+            original_frames = []
+            cleaned_frames = []
             for frame_idx in range(seg_duration):
                 frame_file = f"{frame_idx:04d}.png"
-                original = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-                cleaned_crop = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+                orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+                original_frames.append(orig)
+                cleaned_frames.append(clean)
 
+            # Merge in memory and write in one pass
+            for frame_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
+                frame_file = f"{frame_idx:04d}.png"
                 if cleaned_crop is not None and original is not None:
                     result_frame = original.copy()
                     result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
@@ -1276,15 +1292,16 @@ def process_segment_task(self, segment_data):
         encode_cmd = [
             'ffmpeg', '-y', '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '5M',
             '-pix_fmt', 'yuv420p', '-profile:v', 'main',
             seg_video_path
         ]
         subprocess.run(encode_cmd, capture_output=True, check=True)
 
-        # Skip upload if on same machine
+        # Skip upload if on same machine (all workers on 1 GPU = same machine!)
         api_base = segment_data.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
-        is_local = api_base is None or 'localhost' in (api_base or '').lower() or '127.0.0.1' in (api_base or '')
+        # If no external API base or it's ngrok (same machine), skip upload
+        is_local = api_base is None or 'localhost' in (api_base or '').lower() or '127.0.0.1' in (api_base or '') or 'ngrok' in (api_base or '').lower()
 
         if not is_local and api_base:
             try:
@@ -1490,8 +1507,7 @@ def finalize_video_task(self, segment_results, prepare_result):
                 '-i', video_path,
                 '-map', '0:v:0',
                 '-map', '1:a:0',
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-                '-pix_fmt', 'yuv420p', '-profile:v', 'main',
+                '-c:v', 'copy',  # Don't re-encode video, just copy!
                 '-c:a', 'aac', '-b:a', '192k',
                 '-shortest',
                 final_output
@@ -1500,8 +1516,7 @@ def finalize_video_task(self, segment_results, prepare_result):
             merge_cmd = [
                 'ffmpeg', '-y',
                 '-i', temp_processed,
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-                '-pix_fmt', 'yuv420p', '-profile:v', 'main',
+                '-c:v', 'copy',  # No audio, just copy video stream
                 final_output
             ]
 
@@ -2412,11 +2427,7 @@ def process_video_task(self, video_path):
                     '-i', video_path,
                     '-map', '0:v:0',
                     '-map', '1:a:0',
-                    '-c:v', 'libx264',      # Re-encode video to ensure H.264
-                    '-preset', 'fast',      # Good balance of speed and quality
-                    '-crf', '18',           # High quality encoding
-                    '-pix_fmt', 'yuv420p',  # Windows Media Player compatibility
-                    '-profile:v', 'main',   # Broad compatibility profile
+                    '-c:v', 'copy',         # Don't re-encode, just copy video stream!
                     '-c:a', 'aac',
                     '-b:a', '192k',
                     '-shortest',
@@ -2427,11 +2438,7 @@ def process_video_task(self, video_path):
                     'ffmpeg',
                     '-y',
                     '-i', temp_processed,
-                    '-c:v', 'libx264',      # Re-encode video to ensure H.264
-                    '-preset', 'fast',      # Good balance of speed and quality
-                    '-crf', '18',           # High quality encoding
-                    '-pix_fmt', 'yuv420p',  # Windows Media Player compatibility
-                    '-profile:v', 'main',   # Broad compatibility profile
+                    '-c:v', 'copy',         # No audio, just copy video stream
                     final_output
                 ]
 
