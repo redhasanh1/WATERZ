@@ -10,7 +10,8 @@ try:
     if hasattr(torch.serialization, 'add_safe_globals'):
         try:
             from ultralytics.nn.tasks import DetectionModel
-            torch.serialization.add_safe_globals([DetectionModel])
+            from torch.nn.modules.container import Sequential
+            torch.serialization.add_safe_globals([DetectionModel, Sequential])
         except:
             pass
 except Exception:
@@ -138,7 +139,17 @@ class YOLOWatermarkDetector:
 
                     if sora_model:
                         print("Loading trained Sora watermark model...")
-                        self.model = YOLO(sora_model)
+                        # PyTorch 2.6 workaround: Temporarily allow all weights
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings('ignore')
+                            # Monkey-patch torch.load to use weights_only=False for YOLO
+                            original_load = torch.load
+                            torch.load = lambda *args, **kwargs: original_load(*args, **{**kwargs, 'weights_only': False})
+                            try:
+                                self.model = YOLO(sora_model)
+                            finally:
+                                torch.load = original_load
                         print(f"✅ Loaded trained Sora model: {sora_model}")
                     else:
                         print("⚠️  Trained Sora model not found!")
