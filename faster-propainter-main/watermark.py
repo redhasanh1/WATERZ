@@ -287,11 +287,6 @@ def pipeline(
     )
     fix_raft = RAFT_bi(ckpt_path, device)
 
-    # Enable FP16 for RAFT if requested for 4x speed boost
-    if use_half:
-        fix_raft = fix_raft.half()
-        print("🚀 RAFT model converted to FP16 for faster inference")
-
     ckpt_path = load_file_from_url(
         url=os.path.join(pretrain_model_url, "recurrent_flow_completion.pth"),
         model_dir="weights",
@@ -333,19 +328,28 @@ def pipeline(
         else:
             short_clip_len = 2
 
-        # Use FP16 for RAFT if enabled (4x faster!)
-        raft_frames = frames.half() if use_half else frames
+        # Use FP16 for RAFT with autocast (4x faster, no type errors!)
+        if use_half:
+            print("🚀 Using FP16 autocast for RAFT optical flow")
+
         if frames.size(1) > short_clip_len:
             gt_flows_f_list, gt_flows_b_list = [], []
             for f in tqdm(range(0, video_length, short_clip_len), desc="RAFT"):
             # for f in range(0, video_length, short_clip_len):
                 end_f = min(video_length, f + short_clip_len)
-                if f == 0:
-                    flows_f, flows_b = fix_raft(raft_frames[:, f:end_f], iters=raft_iter)
+
+                # Use autocast for automatic mixed precision if FP16 enabled
+                if use_half:
+                    with torch.cuda.amp.autocast():
+                        if f == 0:
+                            flows_f, flows_b = fix_raft(frames[:, f:end_f], iters=raft_iter)
+                        else:
+                            flows_f, flows_b = fix_raft(frames[:, f - 1 : end_f], iters=raft_iter)
                 else:
-                    flows_f, flows_b = fix_raft(
-                        raft_frames[:, f - 1 : end_f], iters=raft_iter
-                    )
+                    if f == 0:
+                        flows_f, flows_b = fix_raft(frames[:, f:end_f], iters=raft_iter)
+                    else:
+                        flows_f, flows_b = fix_raft(frames[:, f - 1 : end_f], iters=raft_iter)
 
                 gt_flows_f_list.append(flows_f)
                 gt_flows_b_list.append(flows_b)
@@ -355,7 +359,11 @@ def pipeline(
             gt_flows_b = torch.cat(gt_flows_b_list, dim=1)
             gt_flows_bi = (gt_flows_f, gt_flows_b)
         else:
-            gt_flows_bi = fix_raft(raft_frames, iters=raft_iter)
+            if use_half:
+                with torch.cuda.amp.autocast():
+                    gt_flows_bi = fix_raft(frames, iters=raft_iter)
+            else:
+                gt_flows_bi = fix_raft(frames, iters=raft_iter)
             torch.cuda.empty_cache()
 
         if use_half:
@@ -364,9 +372,7 @@ def pipeline(
                 flow_masks.half(),
                 masks_dilated.half(),
             )
-            # Flows already in FP16 from RAFT if use_half=True
-            if not use_half:
-                gt_flows_bi = (gt_flows_bi[0].half(), gt_flows_bi[1].half())
+            gt_flows_bi = (gt_flows_bi[0].half(), gt_flows_bi[1].half())
             fix_flow_complete = fix_flow_complete.half()
             model = model.half()
 

@@ -1810,6 +1810,36 @@ def run_coordinated_segment_task(self, video_id):
 
         print(f"   ✅ Segment video saved: {segment_output}")
 
+        # Upload segment to central server for multi-PC worker access
+        api_base = segment_info.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL')
+
+        # Determine if we need to upload (multi-PC setup) or can skip (same PC)
+        # Workers with different WORKER_ID = different PCs = need upload
+        # If api_base exists and is accessible, upload for distributed access
+        should_upload = api_base is not None
+
+        if should_upload:
+            try:
+                upload_url = f"{api_base.rstrip('/')}/api/upload-segment"
+                print(f"   ⬆️  Uploading segment {seg_idx+1} to API server for distributed access...")
+                with open(segment_output, 'rb') as f:
+                    resp = requests.post(
+                        upload_url,
+                        headers={'ngrok-skip-browser-warning': 'true'},
+                        files={'file': (os.path.basename(segment_output), f, 'video/mp4')},
+                        data={'video_id': video_id, 'seg_idx': seg_idx},
+                        timeout=120
+                    )
+                if resp.ok:
+                    print(f"   ✅ Segment {seg_idx+1} uploaded successfully")
+                else:
+                    print(f"   ⚠️  Upload failed ({resp.status_code}), segment saved locally only")
+            except Exception as e:
+                print(f"   ⚠️  Failed to upload segment {seg_idx+1}: {e}")
+                print(f"   📁 Segment saved locally, may fail in multi-PC setup")
+        else:
+            print(f"   ✅ Segment {seg_idx+1} stored locally (single-PC mode)")
+
         # Clean up work directory
         shutil.rmtree(seg_work_dir, ignore_errors=True)
 
