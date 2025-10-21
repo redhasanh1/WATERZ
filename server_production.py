@@ -654,7 +654,7 @@ def _check_propainter_assets() -> bool:
         return True
 
     required_paths = [
-        PROPAINTER_SCRIPT,
+        os.path.join(SCRIPT_DIR, 'faster-propainter-main', 'watermark.py'),
         os.path.join(SCRIPT_DIR, 'weights', 'ProPainter.pth'),
         os.path.join(SCRIPT_DIR, 'weights', 'raft-things.pth'),
         os.path.join(SCRIPT_DIR, 'weights', 'recurrent_flow_completion.pth'),
