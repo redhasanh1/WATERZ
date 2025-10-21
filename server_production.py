@@ -15,6 +15,9 @@ from pathlib import Path
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Ensure project root is importable (so `yolo_detector.py` resolves in workers)
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
 TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
 CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
 UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
