@@ -6,14 +6,15 @@ import numpy as np
 import os
 try:
     import torch
-    # PyTorch 2.6+ compatibility: Allow loading custom YOLO models
-    if hasattr(torch.serialization, 'add_safe_globals'):
-        try:
-            from ultralytics.nn.tasks import DetectionModel
-            from torch.nn.modules.container import Sequential
-            torch.serialization.add_safe_globals([DetectionModel, Sequential])
-        except:
-            pass
+    # PyTorch 2.6+ compatibility: Globally disable weights_only restriction
+    # This allows loading custom-trained YOLO models
+    if hasattr(torch, 'load'):
+        _original_torch_load = torch.load
+        def _patched_load(*args, **kwargs):
+            # Force weights_only=False for all torch.load calls
+            kwargs.setdefault('weights_only', False)
+            return _original_torch_load(*args, **kwargs)
+        torch.load = _patched_load
 except Exception:
     torch = None
 
@@ -139,17 +140,7 @@ class YOLOWatermarkDetector:
 
                     if sora_model:
                         print("Loading trained Sora watermark model...")
-                        # PyTorch 2.6 workaround: Temporarily allow all weights
-                        import warnings
-                        with warnings.catch_warnings():
-                            warnings.filterwarnings('ignore')
-                            # Monkey-patch torch.load to use weights_only=False for YOLO
-                            original_load = torch.load
-                            torch.load = lambda *args, **kwargs: original_load(*args, **{**kwargs, 'weights_only': False})
-                            try:
-                                self.model = YOLO(sora_model)
-                            finally:
-                                torch.load = original_load
+                        self.model = YOLO(sora_model)
                         print(f"✅ Loaded trained Sora model: {sora_model}")
                     else:
                         print("⚠️  Trained Sora model not found!")
