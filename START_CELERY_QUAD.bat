@@ -12,7 +12,7 @@ echo ===========================================================
 echo(
 
 for %%I in (1 2 3) do (
-    start "celery-w%%I" "%~dp0run_celery_worker.bat" w%%I
+    start "celery-w%%I" "%~dp0run_celery_worker.bat" w%%I 0
     REM Give Windows a beat so console titles stay ordered
     timeout /t 1 >nul
 )

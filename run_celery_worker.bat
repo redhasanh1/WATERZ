@@ -5,6 +5,9 @@ REM Optional first argument = worker name (defaults to w<random>)
 set "WORKER_NAME=%~1"
 if "%WORKER_NAME%"=="" set "WORKER_NAME=w%RANDOM%"
 
+REM Optional second argument = CUDA-visible GPU id (e.g., 0,1)
+set "GPU_ID=%~2"
+
 REM Resolve repo root (this script lives inside watermarkz folder)
 cd /d "%~dp0"
 set "ROOT_DIR=%CD%"
@@ -44,9 +47,15 @@ if exist "%ROOT_DIR%\TensorRT-10.7.0.23\lib" (
 ) else (
   echo  TensorRT libs: NOT FOUND (will fall back to PyTorch)
 )
+if not "%GPU_ID%"=="" (
+  set "CUDA_VISIBLE_DEVICES=%GPU_ID%"
+  echo  CUDA_VISIBLE_DEVICES=%GPU_ID%
+) else (
+  echo  CUDA_VISIBLE_DEVICES: auto (all GPUs visible)
+)
 echo ===========================================================
 echo(
 
-python -u -m celery -A server_production:celery worker -P solo -n %WORKER_NAME% -l INFO
+python -u -m celery -A server_production:celery worker -P solo --concurrency=1 -n %WORKER_NAME% -l INFO
 
 endlocal
