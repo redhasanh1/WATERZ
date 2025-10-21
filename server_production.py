@@ -1325,34 +1325,7 @@ def process_segment_task(self, segment_data):
             '-pix_fmt', 'yuv420p', '-profile:v', 'main',
             seg_video_path
         ]
-
-        try:
-            subprocess.run(encode_cmd, capture_output=True, check=True)
-        except subprocess.CalledProcessError as exc:
-            stderr_output = (exc.stderr or b'').decode('utf-8', errors='ignore').strip()
-            if stderr_output:
-                print(f"⚠️  NVENC encode failed (exit {exc.returncode}): {stderr_output}")
-            else:
-                print(f"⚠️  NVENC encode failed (exit {exc.returncode}) with no stderr output")
-
-            fallback_cmd = [
-                'ffmpeg', '-y', '-framerate', str(fps),
-                '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-                '-c:v', 'libx264', '-preset', 'medium', '-b:v', '5M',
-                '-pix_fmt', 'yuv420p', '-profile:v', 'high',
-                seg_video_path
-            ]
-            print("   🔁 Retrying encode with libx264 fallback...")
-
-            try:
-                subprocess.run(fallback_cmd, capture_output=True, check=True)
-                print("   ✅ Fallback encode succeeded with libx264")
-            except subprocess.CalledProcessError as fallback_exc:
-                fallback_stderr = (fallback_exc.stderr or b'').decode('utf-8', errors='ignore').strip()
-                error_details = fallback_stderr or f"exit code {fallback_exc.returncode}"
-                raise RuntimeError(
-                    f"ffmpeg failed for segment {seg_idx} with NVENC and libx264 fallback: {error_details}"
-                ) from fallback_exc
+        subprocess.run(encode_cmd, capture_output=True, check=True)
 
         # Skip upload if on same machine (all workers on 1 GPU = same machine!)
         api_base = segment_data.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
