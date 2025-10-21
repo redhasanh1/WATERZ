@@ -10,6 +10,7 @@ Production Server for Watermark Removal SaaS
 import sys
 import os
 import importlib
+import importlib.util
 import shutil
 from pathlib import Path
 
@@ -99,6 +100,23 @@ def _ensure_cuda_torch():
 
 
 _ensure_cuda_torch()
+
+
+def _import_local_module(module_name: str):
+    """Import a module, falling back to a file in SCRIPT_DIR if needed."""
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        module_file = Path(SCRIPT_DIR) / f"{module_name}.py"
+        if not module_file.exists():
+            raise
+        spec = importlib.util.spec_from_file_location(module_name, module_file)
+        if spec is None or spec.loader is None:
+            raise
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules[module_name] = module
+        return module
 
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
@@ -668,7 +686,8 @@ def get_detector():
         print("=" * 60)
         print("Loading YOLO detector...")
         print("=" * 60)
-        from yolo_detector import YOLOWatermarkDetector
+        yolo_module = _import_local_module('yolo_detector')
+        YOLOWatermarkDetector = getattr(yolo_module, 'YOLOWatermarkDetector')
         detector = YOLOWatermarkDetector()
         print("=" * 60)
         print("✅ YOLO detector ready!")
