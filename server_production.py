@@ -31,6 +31,10 @@ except ValueError:
     _segment_workers_env = 2
 SEGMENT_WORKERS = max(1, _segment_workers_env)
 
+# Force parallel segmentation for multi-GPU/multi-worker distribution
+os.environ.setdefault('MIN_SEGMENTS', '4')  # Split videos into at least 4 segments for parallel processing
+os.environ.setdefault('MIN_CHUNK_FRAMES', '30')  # Minimum frames per segment
+
 # Create directories
 for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR, PROPAINTER_OUTPUT_ROOT, PROPAINTER_MASK_ROOT]:
     os.makedirs(directory, exist_ok=True)
@@ -1211,10 +1215,14 @@ def process_segment_task(self, segment_data):
                 faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
                 if faster_propainter_path not in sys.path:
                     sys.path.insert(0, faster_propainter_path)
+
+                print(f"   📦 Importing ProPainter from: {faster_propainter_path}")
                 from watermark import pipeline as faster_propainter_pipeline
+                print(f"   ✅ ProPainter import successful")
 
                 import torch
                 use_fp16 = torch.cuda.is_available()
+                print(f"   🔧 GPU available: {use_fp16}, Running ProPainter pipeline...")
 
                 faster_propainter_pipeline(
                     video=seg_cropped_dir,
@@ -1234,6 +1242,8 @@ def process_segment_task(self, segment_data):
                 print(f"   ✅ ProPainter complete for segment {seg_idx+1}")
             except Exception as e:
                 print(f"❌ ProPainter failed on segment {seg_idx}: {e}")
+                import traceback
+                traceback.print_exc()
                 raise
             finally:
                 clear_gpu_memory()
