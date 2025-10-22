@@ -644,6 +644,101 @@ celery.conf.update(
     worker_disable_rate_limits=True,  # Disable rate limiting to prevent task pickup delays
 )
 
+# ============================================================================
+# REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
+# ============================================================================
+
+def start_redis_download_poller():
+    """
+    Background thread that polls Redis for video download signals.
+    When prepare_video sets 'video_download:{video_id}' key, this thread
+    detects it and downloads the video to cache immediately.
+
+    This enables ALL workers to download in parallel instead of sitting idle.
+    """
+    import threading
+    import time
+    import requests
+
+    def poll_redis():
+        print("🔍 Starting Redis video download poller...")
+        redis_client = celery.backend.client
+        checked_videos = set()  # Track videos we've already processed
+
+        while True:
+            try:
+                # Scan for all video_download:* keys
+                keys = redis_client.keys('video_download:*')
+
+                for key in keys:
+                    key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                    video_id = key_str.replace('video_download:', '')
+
+                    # Skip if we've already downloaded this video
+                    if video_id in checked_videos:
+                        continue
+
+                    # Get download URL from Redis
+                    download_url = redis_client.get(key)
+                    if not download_url:
+                        continue
+
+                    download_url = download_url.decode('utf-8') if isinstance(download_url, bytes) else download_url
+
+                    # Check if we already have this video cached
+                    cache_dir = os.path.join(TEMP_DIR, 'video_cache')
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cached_video = os.path.join(cache_dir, f"{video_id}.mp4")
+
+                    if os.path.exists(cached_video):
+                        print(f"✅ Worker {os.getpid()}: Video {video_id} already cached (skip)")
+                        checked_videos.add(video_id)
+                        continue
+
+                    # Download video to cache
+                    print(f"📥 Worker {os.getpid()}: Detected download signal for {video_id}")
+                    print(f"   ⬇️  Downloading: {download_url}")
+
+                    try:
+                        r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=120)
+                        r.raise_for_status()
+
+                        with open(cached_video, 'wb') as f:
+                            f.write(r.content)
+
+                        file_size = os.path.getsize(cached_video) / (1024 * 1024)
+                        print(f"   ✅ Worker {os.getpid()}: Downloaded and cached {video_id} ({file_size:.1f}MB)")
+                        checked_videos.add(video_id)
+
+                    except Exception as download_error:
+                        print(f"   ❌ Worker {os.getpid()}: Download failed for {video_id}: {download_error}")
+                        # Don't add to checked_videos so we can retry
+
+                # Clean up checked_videos if it gets too large (memory leak prevention)
+                if len(checked_videos) > 100:
+                    checked_videos.clear()
+
+            except Exception as e:
+                print(f"⚠️  Redis poller error: {e}")
+
+            # Poll every 1 second
+            time.sleep(1)
+
+    # Start polling thread
+    poller_thread = threading.Thread(target=poll_redis, daemon=True)
+    poller_thread.start()
+    print("✅ Redis video download poller started")
+
+
+# Start poller when Celery worker is ready
+from celery.signals import worker_ready
+
+@worker_ready.connect
+def on_worker_ready(sender=None, **kwargs):
+    """Called when Celery worker finishes initialization"""
+    start_redis_download_poller()
+
+
 # Global model instances (lazy loaded)
 detector = None
 propainter_ready = False
@@ -787,7 +882,7 @@ def broadcast_video_download(self, video_id, video_url, upload_filename):
 
 
 @celery.task(bind=True, name='watermark.prepare_video')
-def prepare_video_task(self, video_path, api_base=None, temp_base=None):
+def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id=None):
     """
     Phase 1: Prepare video for distributed processing
     - Download video if needed
@@ -845,7 +940,24 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
 
         base_name = Path(video_path).stem
-        video_id = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
+        # Use provided video_id (from upload task_id) for cache consistency, fallback to Celery task ID
+        video_id = video_id or (self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8])
+
+        # 🚀 REDIS SIGNAL: Tell ALL workers to download this video in parallel!
+        # This allows idle workers to start downloading immediately instead of waiting
+        try:
+            redis_client = celery.backend.client
+            # Construct download URL for workers to use
+            tunnel = api_base or temp_base or os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
+            if tunnel:
+                from urllib.parse import urljoin
+                video_filename = os.path.basename(video_path)
+                download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{video_filename}')
+                # Set Redis key with 5 minute expiry (workers will poll for this)
+                redis_client.setex(f'video_download:{video_id}', 300, download_url)
+                print(f"📡 Redis signal sent: video_download:{video_id} = {download_url}")
+        except Exception as e:
+            print(f"⚠️  Failed to send Redis download signal: {e}")
 
         # Create shared directories for distributed access
         shared_mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{video_id}")
