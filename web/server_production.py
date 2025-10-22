@@ -708,6 +708,57 @@ def get_detector():
 # on processing one video together by distributing segments across all GPUs
 # ============================================================================
 
+@celery.task(bind=True, name='watermark.broadcast_download')
+def broadcast_video_download(self, video_id, video_url, upload_filename):
+    """
+    Broadcast task: All workers download video simultaneously
+    This runs on ALL workers in parallel to pre-cache the video before processing starts.
+
+    When a video is uploaded to Flask, this task is broadcast to every worker,
+    ensuring they all have the video cached locally. This eliminates idle time
+    during the prepare phase.
+
+    Args:
+        video_id: Unique task ID for the video
+        video_url: Full URL to download the video from (e.g., https://...ngrok.../uploads/video.mp4)
+        upload_filename: Original filename of the uploaded video
+
+    Returns:
+        dict: {'status': 'cached'/'downloaded', 'path': local_path, 'size_mb': file_size}
+    """
+    import requests
+
+    # Setup cache directory
+    cache_dir = os.path.join(TEMP_DIR, 'video_cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    cached_video = os.path.join(cache_dir, f"{video_id}.mp4")
+
+    # Check if already cached
+    if os.path.exists(cached_video):
+        file_size = os.path.getsize(cached_video) / (1024 * 1024)
+        print(f"✅ Worker {os.getpid()}: Video already cached ({file_size:.1f}MB)")
+        return {'status': 'cached', 'path': cached_video, 'size_mb': file_size}
+
+    # Download video
+    print(f"📥 Worker {os.getpid()}: Downloading {video_url}...")
+    try:
+        r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=120)
+        r.raise_for_status()
+
+        # Write to cache
+        with open(cached_video, 'wb') as f:
+            f.write(r.content)
+
+        file_size = os.path.getsize(cached_video) / (1024 * 1024)
+        print(f"✅ Worker {os.getpid()}: Downloaded and cached ({file_size:.1f}MB)")
+
+        return {'status': 'downloaded', 'path': cached_video, 'size_mb': file_size}
+
+    except Exception as e:
+        print(f"❌ Worker {os.getpid()}: Download failed: {e}")
+        return {'status': 'error', 'message': str(e)}
+
+
 @celery.task(bind=True, name='watermark.prepare_video')
 def prepare_video_task(self, video_path, api_base=None, temp_base=None):
     """
@@ -729,29 +780,42 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
         if not _check_propainter_assets():
             raise RuntimeError("ProPainter assets missing")
 
-        # Download video if on remote worker
+        # Download video if on remote worker (CHECK CACHE FIRST from broadcast task!)
         if not os.path.exists(video_path):
-            # Prefer dynamic base provided by API, else env
-            tunnel = api_base or os.getenv('TUNNEL_URL')
-            if tunnel:
-                try:
-                    from urllib.parse import urljoin
-                    import requests
-                    from pathlib import PureWindowsPath
-                    base_name = PureWindowsPath(video_path).name if '\\' in video_path else os.path.basename(video_path)
-                    download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
-                    print(f"🌐 Downloading video: {download_url}")
-                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
-                    r.raise_for_status()
-                    os.makedirs(UPLOAD_DIR, exist_ok=True)
-                    video_path = os.path.join(UPLOAD_DIR, base_name)
-                    with open(video_path, 'wb') as f:
-                        f.write(r.content)
-                    print(f"✅ Video downloaded: {video_path}")
-                except Exception as e:
-                    raise Exception(f"Failed to download video: {e}")
+            # Extract video_id from path to check cache
+            from pathlib import PureWindowsPath
+            base_name = PureWindowsPath(video_path).name if '\\' in video_path else os.path.basename(video_path)
+            video_id = os.path.splitext(base_name)[0]  # Remove extension to get UUID
+
+            # Check if broadcast task already cached the video
+            cache_dir = os.path.join(TEMP_DIR, 'video_cache')
+            cached_video = os.path.join(cache_dir, f"{video_id}.mp4")
+
+            if os.path.exists(cached_video):
+                # Use cached video from broadcast task (instant, no download needed!)
+                print(f"✅ Using cached video from broadcast task: {cached_video}")
+                video_path = cached_video
             else:
-                raise Exception(f"Video not found: {video_path}")
+                # Cache miss - download manually (broadcast may have failed or not run)
+                # Prefer dynamic base provided by API, else env
+                tunnel = api_base or os.getenv('TUNNEL_URL')
+                if tunnel:
+                    try:
+                        from urllib.parse import urljoin
+                        import requests
+                        download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+                        print(f"🌐 Cache miss - downloading video: {download_url}")
+                        r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                        r.raise_for_status()
+                        os.makedirs(UPLOAD_DIR, exist_ok=True)
+                        video_path = os.path.join(UPLOAD_DIR, base_name)
+                        with open(video_path, 'wb') as f:
+                            f.write(r.content)
+                        print(f"✅ Video downloaded: {video_path}")
+                    except Exception as e:
+                        raise Exception(f"Failed to download video: {e}")
+                else:
+                    raise Exception(f"Video not found: {video_path}")
 
         print(f"📹 Preparing video: {video_path} ({os.path.getsize(video_path) / (1024 * 1024):.2f} MB)")
 
@@ -3624,8 +3688,27 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
+
+                # OPTIMIZATION: Broadcast video download to ALL workers in parallel
+                # This ensures all workers have the video cached before processing starts,
+                # eliminating idle time during the prepare phase
+                video_id = task_id
+                video_filename = os.path.basename(video_path)
+                video_url = f"{base.rstrip('/')}/uploads/{video_filename}"
+
+                print(f"📡 Broadcasting download to all workers: {video_url}")
+                from celery import group
+                try:
+                    # Broadcast to all workers - each will download and cache in parallel
+                    broadcast_group = group(broadcast_video_download.s(video_id, video_url, video_filename))
+                    broadcast_result = broadcast_group.apply_async()
+                    print(f"   ✅ Broadcast initiated to all workers (task: {broadcast_result.id})")
+                except Exception as e:
+                    print(f"   ⚠️  Broadcast failed (continuing anyway): {e}")
+
                 # Call prepare_video_task which creates the chord internally
                 # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize
+                # prepare_video will use the cached video from broadcast
                 result = prepare_video_task.apply_async(
                     args=[video_path],
                     kwargs={'api_base': base, 'temp_base': base}

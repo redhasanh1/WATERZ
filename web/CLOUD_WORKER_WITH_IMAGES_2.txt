@@ -747,6 +747,45 @@ def get_detector():
 # on processing one video together by distributing segments across all GPUs
 # ============================================================================
 
+@celery.task(bind=True, name='watermark.broadcast_download')
+def broadcast_video_download(self, video_id, video_url, upload_filename):
+    """
+    Broadcast task: All workers download video simultaneously
+    This runs on ALL workers in parallel to pre-cache the video
+    """
+    try:
+        print(f"\n📡 Broadcast download for video {video_id}")
+
+        # Create cache directory
+        cache_dir = os.path.join(TEMP_DIR, 'video_cache')
+        os.makedirs(cache_dir, exist_ok=True)
+        cached_video = os.path.join(cache_dir, f"{video_id}.mp4")
+
+        # Skip if already cached
+        if os.path.exists(cached_video):
+            print(f"   ✅ Video already cached")
+            return {'status': 'cached', 'path': cached_video}
+
+        # Download video
+        print(f"   ⬇️  Downloading: {video_url}")
+        import requests
+        r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=120)
+        r.raise_for_status()
+
+        # Save to cache
+        with open(cached_video, 'wb') as f:
+            f.write(r.content)
+
+        file_size = os.path.getsize(cached_video) / (1024 * 1024)
+        print(f"   ✅ Video downloaded and cached ({file_size:.2f} MB)")
+
+        return {'status': 'downloaded', 'path': cached_video, 'size_mb': file_size}
+
+    except Exception as e:
+        print(f"   ❌ Broadcast download failed: {e}")
+        return {'status': 'failed', 'error': str(e)}
+
+
 @celery.task(bind=True, name='watermark.prepare_video')
 def prepare_video_task(self, video_path, api_base=None, temp_base=None):
     """
@@ -3438,8 +3477,26 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
+
+                # OPTIMIZATION: Broadcast video download to ALL workers in parallel
+                # This pre-caches the video on all workers before processing starts
+                video_id = task_id  # Use task_id as video_id
+                video_filename = os.path.basename(video_path)
+                video_url = f"{base.rstrip('/')}/uploads/{video_filename}"
+
+                print(f"📡 Broadcasting download to all workers...")
+                # Use Celery group to send to all workers simultaneously
+                from celery import group
+                try:
+                    broadcast_group = group(broadcast_video_download.s(video_id, video_url, video_filename))
+                    broadcast_result = broadcast_group.apply_async()
+                    print(f"   ✅ Broadcast initiated to all workers")
+                except Exception as e:
+                    print(f"   ⚠️  Broadcast failed (continuing anyway): {e}")
+
                 # Call prepare_video_task which creates the chord internally
                 # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize
+                # prepare_video will use cached video if broadcast succeeded
                 result = prepare_video_task.apply_async(
                     args=[video_path],
                     kwargs={'api_base': base, 'temp_base': base}
