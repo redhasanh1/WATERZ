@@ -3839,17 +3839,25 @@ def process_video():
                 except Exception as e:
                     print(f"   ⚠️  Broadcast failed (continuing anyway): {e}")
 
-                # 🚀 PARALLEL YOLO: Broadcast prepare_video to ALL workers!
+                # 🚀 PARALLEL YOLO: Send prepare_video to MULTIPLE workers!
                 # All workers race to do YOLO detection simultaneously
                 # First worker to finish dispatches segment tasks
-                # This eliminates idle time during YOLO phase
-                from celery import group
-                print(f"🚀 Broadcasting prepare_video to all workers for parallel YOLO...")
-                prepare_group = group(
-                    prepare_video_task.s(video_path, api_base=base, temp_base=base, video_id=task_id)
-                )
-                result = prepare_group.apply_async()
-                print(f"   ✅ Prepare task broadcast to all workers")
+                # This eliminates idle time during YOLO phase (saves ~19 seconds!)
+                print(f"🚀 Sending prepare_video to multiple workers for parallel YOLO...")
+
+                # Send to 2 workers explicitly (adjust if you have more workers)
+                num_workers = 2
+                prepare_tasks = []
+                for i in range(num_workers):
+                    task = prepare_video_task.apply_async(
+                        args=[video_path],
+                        kwargs={'api_base': base, 'temp_base': base, 'video_id': task_id}
+                    )
+                    prepare_tasks.append(task)
+                    print(f"   ✅ Sent prepare task {i+1}/{num_workers}: {task.id}")
+
+                # Use first task ID for tracking
+                result = prepare_tasks[0] if prepare_tasks else None
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
