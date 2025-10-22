@@ -1073,13 +1073,25 @@ def process_segment_task(self, segment_data):
             video_url = segment_data.get('video_url')
             if (api_base or video_url) and upload_filename:
                 try:
-                    video_url = video_url or f"{api_base.rstrip('/')}/uploads/{upload_filename}"
-                    print(f"   ⬇️  Downloading: {video_url}")
-                    r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
-                    r.raise_for_status()
-                    local_video = os.path.join(TEMP_DIR, f"seg_{seg_idx}_{upload_filename}")
-                    with open(local_video, 'wb') as f:
-                        f.write(r.content)
+                    # Check cache first to avoid re-downloading for multiple segments
+                    cache_dir = os.path.join(TEMP_DIR, 'video_cache')
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cached_video = os.path.join(cache_dir, f"{video_id}.mp4")
+
+                    if os.path.exists(cached_video):
+                        print(f"   ✅ Using cached video (skip download)")
+                        local_video = cached_video
+                    else:
+                        video_url = video_url or f"{api_base.rstrip('/')}/uploads/{upload_filename}"
+                        print(f"   ⬇️  Downloading: {video_url}")
+                        r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                        r.raise_for_status()
+                        # Save to cache for future segments
+                        with open(cached_video, 'wb') as f:
+                            f.write(r.content)
+                        print(f"   💾 Video cached for future segments")
+                        local_video = cached_video
+
                     cap2 = cv2.VideoCapture(local_video)
                     if not cap2.isOpened():
                         raise RuntimeError("Video open failed")
@@ -1096,7 +1108,7 @@ def process_segment_task(self, segment_data):
                             frames_copied += 1
                         current_frame += 1
                     cap2.release()
-                    os.remove(local_video)
+                    # Don't delete - keep cached for other segments!
                 except Exception as e:
                     raise RuntimeError(f"Video download failed: {e}")
             else:
