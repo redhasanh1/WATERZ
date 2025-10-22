@@ -1103,6 +1103,27 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         print(f"✅ Video prepared for distributed processing: {len(segments)} segments ready")
 
+        # 🔒 REDIS LOCK: Only ONE worker should dispatch segments (others exit here)
+        # When multiple workers do YOLO in parallel, they all find the same segments
+        # Use Redis lock to ensure only the first one dispatches
+        redis_client = celery.backend.client
+        dispatch_lock_key = f"dispatch_lock:{video_id}"
+
+        # Try to acquire lock (set if not exists, 60 second expiry)
+        lock_acquired = redis_client.set(dispatch_lock_key, self.request.id, nx=True, ex=60)
+
+        if not lock_acquired:
+            # Another worker already dispatching segments - this worker's job is done!
+            print(f"🔓 Another worker already dispatching segments - exiting early (YOLO parallelization worked!)")
+            return {
+                'chord_id': f'distributed_{video_id}',
+                'status': 'processing',
+                'message': f'Parallel YOLO worker (segments being dispatched by another worker)'
+            }
+
+        # We got the lock! This worker will dispatch segments
+        print(f"🔒 Lock acquired - this worker will dispatch segments")
+
         # Manually dispatch each segment task to guarantee they all get queued
         # This is more reliable than chord with solo pool
         print(f"🔥 Dispatching {len(segments)} segment tasks manually across all workers...")
@@ -3818,14 +3839,17 @@ def process_video():
                 except Exception as e:
                     print(f"   ⚠️  Broadcast failed (continuing anyway): {e}")
 
-                # Call prepare_video_task which creates the chord internally
-                # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize
-                # prepare_video will use the cached video from broadcast
-                # Pass video_id to ensure cache path consistency across all tasks
-                result = prepare_video_task.apply_async(
-                    args=[video_path],
-                    kwargs={'api_base': base, 'temp_base': base, 'video_id': task_id}
+                # 🚀 PARALLEL YOLO: Broadcast prepare_video to ALL workers!
+                # All workers race to do YOLO detection simultaneously
+                # First worker to finish dispatches segment tasks
+                # This eliminates idle time during YOLO phase
+                from celery import group
+                print(f"🚀 Broadcasting prepare_video to all workers for parallel YOLO...")
+                prepare_group = group(
+                    prepare_video_task.s(video_path, api_base=base, temp_base=base, video_id=task_id)
                 )
+                result = prepare_group.apply_async()
+                print(f"   ✅ Prepare task broadcast to all workers")
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
