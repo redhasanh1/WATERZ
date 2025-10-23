@@ -279,13 +279,126 @@ def pipeline(
     ##############################################
     # set up RAFT and flow competition model
     ##############################################
-    ckpt_path = load_file_from_url(
-        url=os.path.join(pretrain_model_url, "raft-things.pth"),
-        model_dir="weights",
-        progress=True,
-        file_name=None,
-    )
-    fix_raft = RAFT_bi(ckpt_path, device)
+    # Try to use TensorRT FastFlowNet engine for optical flow; fallback to PyTorch RAFT
+    class _RAFTAdapter:
+        def __init__(self, device: torch.device, use_half: bool):
+            self.device = device
+            self.use_half = use_half and (device.type == "cuda")
+            self._trt_ready = False
+            self._ctx = None
+            self._engine = None
+            self._in_idx = None
+            self._out_idx = None
+            self._binding_dtype_in = None
+            self._binding_dtype_out = None
+
+            # Candidate engine paths (absolute + relative)
+            engine_candidates = [
+                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'raft', 'raft_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), 'engines', 'raft', 'raft_fp16.engine'),
+            ]
+            engine_path = None
+            for p in engine_candidates:
+                if os.path.exists(p):
+                    engine_path = p
+                    break
+
+            if engine_path and device.type == 'cuda':
+                try:
+                    # Ensure TensorRT DLLs are available on Windows
+                    trt_root = os.environ.get('TENSORRT_ROOT') or os.path.join(os.getcwd(), 'TensorRT-10.7.0.23')
+                    trt_lib = os.path.join(trt_root, 'lib')
+                    if os.name == 'nt' and os.path.isdir(trt_lib):
+                        try:
+                            os.add_dll_directory(trt_lib)
+                        except Exception:
+                            pass
+                    import tensorrt as trt
+                    logger = trt.Logger(trt.Logger.WARNING)
+                    runtime = trt.Runtime(logger)
+                    with open(engine_path, 'rb') as f:
+                        self._engine = runtime.deserialize_cuda_engine(f.read())
+                    if self._engine is None:
+                        raise RuntimeError('TRT engine deserialize failed')
+                    self._ctx = self._engine.create_execution_context()
+                    # Resolve bindings
+                    for i in range(self._engine.num_bindings):
+                        if self._engine.binding_is_input(i) and self._in_idx is None:
+                            self._in_idx = i
+                            self._binding_dtype_in = self._engine.get_binding_dtype(i)
+                        if (not self._engine.binding_is_input(i)) and self._out_idx is None:
+                            self._out_idx = i
+                            self._binding_dtype_out = self._engine.get_binding_dtype(i)
+                    assert self._in_idx is not None and self._out_idx is not None
+                    self._trt_ready = True
+                    print(f"Using TensorRT FastFlowNet engine: {engine_path}")
+                except Exception as e:
+                    print(f"⚠️  TensorRT RAFT engine load failed, falling back to PyTorch: {e}")
+                    self._trt_ready = False
+
+            if not self._trt_ready:
+                # Fallback: original RAFT_bi
+                ckpt_path = load_file_from_url(
+                    url=os.path.join(pretrain_model_url, "raft-things.pth"),
+                    model_dir="weights",
+                    progress=True,
+                    file_name=None,
+                )
+                self._raft = RAFT_bi(ckpt_path, device)
+
+        @torch.no_grad()
+        def __call__(self, frames_btchw: torch.Tensor, iters: int = 20):
+            # frames: [B, T, C, H, W]
+            if not self._trt_ready:
+                return self._raft(frames_btchw, iters=iters)
+
+            B, T, C, H, W = frames_btchw.shape
+            assert B == 1, "Adapter expects batch=1"
+
+            # Dtypes for engine bindings
+            import tensorrt as trt  # type: ignore
+            in_half = (self._binding_dtype_in == trt.DataType.HALF)
+            out_half = (self._binding_dtype_out == trt.DataType.HALF)
+
+            def _exec_pair(img0: torch.Tensor, img1: torch.Tensor) -> torch.Tensor:
+                # img0/img1: [B, C, H, W] on device
+                # Build input [B,2,3,H,W]
+                inp = torch.stack((img0, img1), dim=1)
+                if in_half:
+                    inp = inp.half()
+                else:
+                    inp = inp.float()
+                # Set shape and bind
+                self._ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
+                # Allocate output tensor [B,2,H,W]
+                out = torch.empty((B, 2, H, W), device=inp.device, dtype=torch.float16 if out_half else torch.float32)
+                bindings = [None] * self._engine.num_bindings
+                bindings[self._in_idx] = int(inp.data_ptr())
+                bindings[self._out_idx] = int(out.data_ptr())
+                # Synchronous execute on default stream
+                ok = self._ctx.execute_v2(bindings)
+                if not ok:
+                    raise RuntimeError('TRT execute_v2 failed')
+                return out
+
+            # Prepare frame tensors on device
+            dev_frames = frames_btchw.to(self.device)
+            if self.use_half:
+                dev_frames = dev_frames.half()
+            flows_f = []
+            flows_b = []
+            for t in range(T - 1):
+                f0 = dev_frames[:, t]
+                f1 = dev_frames[:, t + 1]
+                ff = _exec_pair(f0, f1)
+                fb = _exec_pair(f1, f0)
+                flows_f.append(ff)
+                flows_b.append(fb)
+            flows_f = torch.cat(flows_f, dim=0).unsqueeze(0)  # [1, T-1, 2, H, W]
+            flows_b = torch.cat(flows_b, dim=0).unsqueeze(0)
+            return flows_f, flows_b
+
+    fix_raft = _RAFTAdapter(device, use_half)
 
     ckpt_path = load_file_from_url(
         url=os.path.join(pretrain_model_url, "recurrent_flow_completion.pth"),
