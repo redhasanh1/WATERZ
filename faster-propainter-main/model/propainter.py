@@ -13,6 +13,7 @@ from model.modules.sparse_transformer import TemporalSparseTransformerBlock, Sof
 from model.modules.spectral_norm import spectral_norm as _spectral_norm
 from model.modules.flow_loss_utils import flow_warp
 from model.modules.deformconv import ModulatedDeformConv2d
+from triton_ops import fused_flow_warp_mask, triton_is_available
 
 from .misc import constant_init
 
@@ -77,6 +78,7 @@ class BidirectionalPropagation(nn.Module):
         self.channel = channel
         self.prop_list = ['backward_1', 'forward_1']
         self.learnable = learnable
+        self._use_triton_fused = triton_is_available()
 
         if self.learnable:
             for i, module in enumerate(self.prop_list):
@@ -156,9 +158,28 @@ class BidirectionalPropagation(nn.Module):
                         mask_prop_valid = self.binary_mask(mask_prop_valid)
 
                         union_vaild_mask = self.binary_mask(mask_current*flow_vaild_mask*(1-mask_prop_valid))
-                        feat_prop = union_vaild_mask * feat_warped + (1-union_vaild_mask) * feat_current
-                        # update mask
-                        mask_prop = self.binary_mask(mask_current*(1-(flow_vaild_mask*(1-mask_prop_valid))))
+                    if (
+                        self._use_triton_fused
+                        and feat_prop.is_cuda
+                        and flow_prop.is_cuda
+                        and union_vaild_mask.is_cuda
+                    ):
+                        masked_warp = fused_flow_warp_mask(
+                            feat_prop,
+                            flow_prop,
+                            union_vaild_mask,
+                            use_triton=True,
+                        )
+                        feat_prop = masked_warp + (1 - union_vaild_mask) * feat_current
+                    else:
+                        feat_warped = flow_warp(
+                            feat_prop,
+                            flow_prop.permute(0, 2, 3, 1),
+                            interpolation,
+                        )
+                        feat_prop = union_vaild_mask * feat_warped + (1 - union_vaild_mask) * feat_current
+                    # update mask
+                    mask_prop = self.binary_mask(mask_current*(1-(flow_vaild_mask*(1-mask_prop_valid))))
                 
                 # refine
                 if self.learnable:
