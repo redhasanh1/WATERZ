@@ -36,6 +36,7 @@ node_modules/
 
 # Ignore external ProPainter submodule/code until needed
 ProPainter/
+ProPainter-main/
 
 # Auto-generated config files (ngrok URLs)
 redis_url.txt
