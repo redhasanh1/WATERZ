@@ -1,0 +1,25 @@
+TensorRT Progress (concise)
+
+- Step 1 — YOLO engine: Complete
+  • FP16 engine present (fast path working)
+  • INT8: Pending
+
+- Step 2 — RAFT (flow) engine: Complete
+  • ONNX exported (opset 16)
+  • FP16 engine built at faster-propainter-main/engines/raft/raft_fp16.engine
+
+- Step 3 — RFCNet engine: In Progress
+  • ONNX exporter added
+  • Blocked on DCNv2 (deform conv) TensorRT plugin
+
+- Step 4 — ProPainter engine: Pending
+
+- Plugins / Tooling
+  • DCNv2 TRT plugin: Not built yet (requires VS + CUDA MSBuild integration)
+  • Torch‑TensorRT fallback: Optional (RFCNET_TORCHTRT=1)
+
+- Next Actions
+  1) Build DCNv2 plugin (Windows DLL)
+  2) Build RFCNet FP16 engine with plugin
+  3) (Optional) Wire engines + fallbacks into runtime
+

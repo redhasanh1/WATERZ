@@ -34,6 +34,9 @@ python_packages/
 Thumbs.db
 node_modules/
 
+# Ignore external ProPainter submodule/code until needed
+ProPainter/
+
 # Auto-generated config files (ngrok URLs)
 redis_url.txt
 web/tunnel_url.txt 

@@ -299,6 +299,24 @@ def pipeline(
     fix_flow_complete.to(device)
     fix_flow_complete.eval()
 
+    # Optional: accelerate RFCNet forward via Torch-TensorRT (Dynamo) if available
+    try:
+        from trt_runtime import maybe_compile_rfcnet
+        # size is (W, H); frames.size(1) is T
+        opt_w, opt_h = size
+        max_t = min(max(1, frames.size(1) - 1), 16)
+        maybe_compile_rfcnet(
+            fix_flow_complete,
+            device,
+            use_fp16=use_half,
+            min_hw=(128, 128),
+            opt_hw=(min(480, opt_w), min(480, opt_h)),
+            max_hw=(min(640, opt_w), min(640, opt_h)),
+            max_t=max_t,
+        )
+    except Exception as _trt_exc:
+        print(f"⚠️ RFCNet Torch-TensorRT acceleration skipped: {_trt_exc}")
+
     ##############################################
     # set up ProPainter model
     ##############################################

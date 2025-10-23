@@ -27,7 +27,7 @@ How To Build (Option A: ONNX + trtexec)
 2. Build FP16 engine (fast path):
    trtexec --onnx=runs/detect/new_sora_watermark/weights/best.onnx \
            --saveEngine=runs/detect/new_sora_watermark/weights/best_fp16.engine \
-           --fp16 --workspace=4096 --useSpinWait \
+           --fp16 --memPoolSize=workspace:4096M --useSpinWait \
            --tacticSources=+CUBLAS,+CUDNN \
            --timingCacheFile=runs/detect/new_sora_watermark/weights/trt_timing_cache
 
@@ -72,7 +72,7 @@ How To Build (FP16, ONNX + trtexec)
 2. Build engine:
    trtexec --onnx=faster-propainter-main/engines/raft/raft.onnx \
            --saveEngine=faster-propainter-main/engines/raft/raft_fp16.engine \
-           --fp16 --workspace=4096 --useSpinWait --tacticSources=+CUBLAS,+CUDNN
+           --fp16 --memPoolSize=workspace:4096M --useSpinWait --tacticSources=+CUBLAS,+CUDNN
 
 Notes
 - Keep crop sizes divisible by 8/16. Use limited dynamic profiles to reduce engine size and build time.
@@ -607,3 +607,59 @@ PIPELINE VERIFICATION (Continuous Integration)
   2. `trtexec --loadEngine=... --dryRun`
   3. Unit tests comparing outputs.
 - Store engine hashes to detect rebuild necessity.
+
+
+LOW-LEVEL TENSORRT TUNING ADDITIONS
+
+Shape Profiles (dynamic H/W)
+- Always bound shapes with 2–3 profiles to keep engines small and fast.
+- YOLO detector example:
+  trtexec --onnx=runs/detect/new_sora_watermark/weights/best.onnx \
+          --saveEngine=runs/detect/new_sora_watermark/weights/best_fp16.engine \
+          --fp16 --workspace=4096 --useSpinWait \
+          --minShapes=images:1x3x384x384 \
+          --optShapes=images:1x3x640x640 \
+          --maxShapes=images:1x3x1280x1280 \
+          --timingCacheFile=runs/detect/new_sora_watermark/weights/trt_timing_cache
+
+- RAFT example (FastFlowNet exporter uses key 'images'):
+  trtexec --onnx=faster-propainter-main/engines/raft/fastflownet.onnx \
+          --saveEngine=faster-propainter-main/engines/raft/raft_fp16.engine \
+          --fp16 --workspace=4096 --useSpinWait \
+          --minShapes=images:1x3x128x128 \
+          --optShapes=images:1x3x256x256 \
+          --maxShapes=images:1x3x640x640 \
+          --timingCacheFile=faster-propainter-main/engines/raft/trt_timing_cache
+
+Timing Cache
+- Reuse timing results across builds with --timingCacheFile to cut rebuild time.
+- Prime the cache on a fast box, commit the file, and share it team-wide.
+
+Tactic Sources and Heuristics
+- Prefer cublas/cudnn kernels first: --tacticSources=+CUBLAS,+CUDNN
+- If a layer is unstable across GPUs, lock shapes and reuse the timing cache instead of widening profiles.
+
+Precision Controls
+- FP16 baseline: add --fp16. For FP32 on Ampere+, enable TF32 via --tf32.
+- INT8 (optional): export Q/DQ ONNX and add --int8 --fp16 for mixed precision.
+- Structured sparsity (2:4): if weights are pruned appropriately, enable with --sparsity=enable.
+
+CUDA Graph Integration (runtime)
+- Reduce CPU launch overhead by capturing the steady-state inference loop in a CUDA Graph.
+- Verify with trtexec first: add --useCudaGraph when benchmarking to check stability.
+
+Profiling and Validation
+- Use --profilingVerbosity=detailed to dump per-layer timings; save logs next to engines.
+- Use --skipInference when you only want to build engines in CI.
+
+Windows Plugin/DLL Notes
+- Ensure TensorRT runtime and plugins (*.dll) are on PATH (INSTALL_TENSORRT_10.bat helps set this up).
+- GridSampler plugin ships in nvinfer_plugin.dll (OSS build). Put the directory containing it early in PATH.
+- For DeformableConv2d, ship a DCNv2 TensorRT plugin (e.g., dcnv2_trt_plugin.dll) and register at process start.
+
+Engine Naming and Locations
+- Keep engines near their consumers and follow consistent names:
+  • YOLO: runs/detect/new_sora_watermark/weights/best_fp16.engine
+  • RAFT: faster-propainter-main/engines/raft/raft_fp16.engine
+  • RFCNet: faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
+  • ProPainter: faster-propainter-main/engines/propainter/propainter_fp16.engine

@@ -52,7 +52,8 @@ def build_model(device: torch.device):
             "`pip install ptlflow` before running this script."
         ) from exc
 
-    inner_model = ptlflow.get_model("fastflownet", pretrained_ckpt="things")
+    # ptlflow >=0.6 uses ckpt_path to select pretrained weights
+    inner_model = ptlflow.get_model("fastflownet", ckpt_path="things")
     inner_model.to(device)
     inner_model.eval()
 
@@ -101,7 +102,7 @@ def export_fastflownet(args: argparse.Namespace) -> None:
         dynamic_axes=dynamic_axes,
     )
 
-    print(f"✅ FastFlowNet ONNX exported to {output_path}")
+    print(f"FastFlowNet ONNX exported to {output_path}")
     if args.min_shape or args.opt_shape or args.max_shape:
         print(
             "   Exported with dynamic axes; remember to pass matching "
