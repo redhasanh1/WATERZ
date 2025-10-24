@@ -6,7 +6,7 @@ if exist build-trt rmdir /s /q build-trt
 mkdir build-trt
 cd build-trt
 set "TENSORRT_DIR=D:\github\RoomFinderAI\watermarkz\TensorRT-10.7.0.23"
-set "CUDA_ROOT=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
+set "CUDA_ROOT=D:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
 cmake -G "Visual Studio 17 2022" -A x64 ^
   -D CMAKE_BUILD_TYPE=Release ^
   -D TensorRT_DIR=%TENSORRT_DIR% ^
