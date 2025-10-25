@@ -208,6 +208,8 @@ def pipeline(
     save_fps=24,
     save_frames=False,
     fp16=False,
+    frames_array=None,
+    masks_array=None,
 ):
 
     # Use fp16 precision during inference to reduce running memory cost
@@ -216,7 +218,28 @@ def pipeline(
     if device == torch.device("cpu"):
         use_half = False
 
-    frames, fps, size, video_name = read_frame_from_videos(video)
+    # 🔥 EXTREME SPEED: Use numpy arrays directly if provided (skip disk I/O!)
+    if frames_array is not None:
+        # Convert numpy arrays (BGR) to PIL Images (RGB)
+        frames = []
+        for frame_bgr in frames_array:
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            frames.append(Image.fromarray(frame_rgb))
+
+        # Derive metadata from arrays
+        fps = save_fps  # Use provided fps or default
+        size = (frames_array[0].shape[1], frames_array[0].shape[0])  # (W, H)
+
+        # Extract video_name from video parameter (like read_frame_from_videos does)
+        if video.endswith(("mp4", "mov", "avi", "MP4", "MOV", "AVI")):
+            video_name = os.path.basename(video)[:-4]
+        else:
+            video_name = os.path.basename(video)
+
+        print(f"⚡ Using {len(frames)} frames from memory (ZERO disk I/O!)")
+    else:
+        # Original disk-based loading
+        frames, fps, size, video_name = read_frame_from_videos(video)
     if not width == -1 and not height == -1:
         size = (width, height)
     if not resize_ratio == 1.0:
@@ -234,13 +257,57 @@ def pipeline(
 
     if mode == "video_inpainting":
         frames_len = len(frames)
-        flow_masks, masks_dilated = read_mask(
-            mask,
-            frames_len,
-            size,
-            flow_mask_dilates=mask_dilation,
-            mask_dilates=mask_dilation,
-        )
+
+        # 🔥 EXTREME SPEED: Use numpy mask arrays directly if provided (skip disk I/O!)
+        if masks_array is not None:
+            # Convert numpy arrays (grayscale) to PIL Images
+            # Apply dilation like read_mask() does
+            flow_masks = []
+            masks_dilated = []
+
+            for mask_np in masks_array:
+                # Ensure grayscale
+                if len(mask_np.shape) == 3:
+                    mask_np = cv2.cvtColor(mask_np, cv2.COLOR_BGR2GRAY)
+
+                # Resize if needed
+                if size is not None:
+                    mask_np = cv2.resize(mask_np, size, interpolation=cv2.INTER_NEAREST)
+
+                # Flow mask dilation
+                if mask_dilation > 0:
+                    flow_mask_img = scipy.ndimage.binary_dilation(
+                        mask_np, iterations=mask_dilation
+                    ).astype(np.uint8)
+                else:
+                    flow_mask_img = binary_mask(mask_np).astype(np.uint8)
+                flow_masks.append(Image.fromarray(flow_mask_img * 255))
+
+                # Regular mask dilation
+                if mask_dilation > 0:
+                    mask_img = scipy.ndimage.binary_dilation(
+                        mask_np, iterations=mask_dilation
+                    ).astype(np.uint8)
+                else:
+                    mask_img = binary_mask(mask_np).astype(np.uint8)
+                masks_dilated.append(Image.fromarray(mask_img * 255))
+
+            # If single mask, repeat for all frames
+            if len(masks_array) == 1:
+                flow_masks = flow_masks * frames_len
+                masks_dilated = masks_dilated * frames_len
+
+            print(f"⚡ Using {len(masks_array)} masks from memory (ZERO disk I/O!)")
+        else:
+            # Original disk-based loading
+            flow_masks, masks_dilated = read_mask(
+                mask,
+                frames_len,
+                size,
+                flow_mask_dilates=mask_dilation,
+                mask_dilates=mask_dilation,
+            )
+
         w, h = size
     elif mode == "video_outpainting":
         assert (
