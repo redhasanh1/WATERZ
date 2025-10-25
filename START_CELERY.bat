@@ -24,6 +24,9 @@ if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
 REM Force TensorRT-only mode for YOLO (no .pt fallback)
 set YOLO_REQUIRE_TENSORRT=1
 
+REM PyTorch CUDA memory management - reduce fragmentation for in-memory arrays
+set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 REM Use module form so we don't rely on a celery.exe script
 REM Use threads pool for Windows (allows concurrent tasks, unlike solo)
 REM concurrency=2 limits GPU segments to 2 at once (prevents CUDA OOM on 12GB RTX 5070)
