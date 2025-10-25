@@ -510,9 +510,9 @@ def pipeline(
                     self._ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
                     self._ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
                     if self._stream is not None:
-                        stream_ptr = self._stream.cuda_stream
+                        stream_ptr = int(self._stream.cuda_stream)
                     else:
-                        stream_ptr = torch.cuda.current_stream().cuda_stream
+                        stream_ptr = int(torch.cuda.current_stream().cuda_stream)
                     ok = self._ctx.execute_async_v3(stream_ptr)
                 if not ok:
                     raise RuntimeError('TRT execute failed')
