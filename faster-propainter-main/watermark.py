@@ -358,6 +358,14 @@ def pipeline(
             self._out_idx = None
             self._binding_dtype_in = None
             self._binding_dtype_out = None
+            self._in_name = None
+            self._out_name = None
+            self._use_v3 = False
+            self._stream = None
+            # Enforce TensorRT-only mode when requested (no PyTorch fallback)
+            def _parse_bool(val: str) -> bool:
+                return str(val).lower() in ("1", "true", "yes", "on")
+            self._force_trt = _parse_bool(os.getenv("FORCE_TRT_RAFT", "0"))
 
             # Candidate engine paths (absolute + relative)
             engine_candidates = [
@@ -369,6 +377,9 @@ def pipeline(
                 if os.path.exists(p):
                     engine_path = p
                     break
+
+            if not engine_path and self._force_trt:
+                raise RuntimeError("FORCE_TRT_RAFT=1 set but RAFT engine not found at expected locations")
 
             if engine_path and device.type == 'cuda':
                 try:
@@ -388,22 +399,53 @@ def pipeline(
                     if self._engine is None:
                         raise RuntimeError('TRT engine deserialize failed')
                     self._ctx = self._engine.create_execution_context()
-                    # Resolve bindings
-                    for i in range(self._engine.num_bindings):
-                        if self._engine.binding_is_input(i) and self._in_idx is None:
-                            self._in_idx = i
-                            self._binding_dtype_in = self._engine.get_binding_dtype(i)
-                        if (not self._engine.binding_is_input(i)) and self._out_idx is None:
-                            self._out_idx = i
-                            self._binding_dtype_out = self._engine.get_binding_dtype(i)
-                    assert self._in_idx is not None and self._out_idx is not None
+                    # Resolve bindings robustly (support legacy and TensorRT 10 v3 I/O)
+                    try:
+                        nb = self._engine.num_bindings  # may not exist on TRT 10
+                    except Exception:
+                        nb = None
+                    if isinstance(nb, int) and nb > 0:
+                        for i in range(nb):
+                            if self._engine.binding_is_input(i) and self._in_idx is None:
+                                self._in_idx = i
+                                self._binding_dtype_in = self._engine.get_binding_dtype(i)
+                            if (not self._engine.binding_is_input(i)) and self._out_idx is None:
+                                self._out_idx = i
+                                self._binding_dtype_out = self._engine.get_binding_dtype(i)
+                        assert self._in_idx is not None and self._out_idx is not None
+                    else:
+                        # TensorRT 10 v3 API uses named tensors
+                        self._use_v3 = True
+                        n_io = self._engine.num_io_tensors
+                        for i in range(n_io):
+                            name = self._engine.get_tensor_name(i)
+                            mode = self._engine.get_tensor_mode(name)
+                            if mode == trt.TensorIOMode.INPUT and self._in_name is None:
+                                self._in_name = name
+                                self._binding_dtype_in = self._engine.get_tensor_dtype(name)
+                            elif mode == trt.TensorIOMode.OUTPUT and self._out_name is None:
+                                self._out_name = name
+                                self._binding_dtype_out = self._engine.get_tensor_dtype(name)
+                        assert self._in_name is not None and self._out_name is not None
+                    # Create a dedicated CUDA stream to avoid default-stream sync penalties
+                    import torch as _torch
+                    if device.type == 'cuda':
+                        try:
+                            self._stream = _torch.cuda.Stream(device=device)
+                        except Exception:
+                            self._stream = None
                     self._trt_ready = True
                     print(f"Using TensorRT FastFlowNet engine: {engine_path}")
                 except Exception as e:
-                    print(f"⚠️  TensorRT RAFT engine load failed, falling back to PyTorch: {e}")
-                    self._trt_ready = False
+                    if self._force_trt:
+                        raise
+                    else:
+                        print(f"⚠️  TensorRT RAFT engine load failed, falling back to PyTorch: {e}")
+                        self._trt_ready = False
 
             if not self._trt_ready:
+                if self._force_trt:
+                    raise RuntimeError("FORCE_TRT_RAFT=1 set but TensorRT RAFT engine is not available")
                 # Fallback: original RAFT_bi
                 ckpt_path = load_file_from_url(
                     url=os.path.join(pretrain_model_url, "raft-things.pth"),
@@ -430,22 +472,50 @@ def pipeline(
             def _exec_pair(img0: torch.Tensor, img1: torch.Tensor) -> torch.Tensor:
                 # img0/img1: [B, C, H, W] on device
                 # Build input [B,2,3,H,W]
-                inp = torch.stack((img0, img1), dim=1)
-                if in_half:
-                    inp = inp.half()
+                if self._stream is not None:
+                    with torch.cuda.stream(self._stream):
+                        inp = torch.stack((img0, img1), dim=1)
+                        if in_half:
+                            inp = inp.half()
+                        else:
+                            inp = inp.float()
                 else:
-                    inp = inp.float()
-                # Set shape and bind
-                self._ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
+                    inp = torch.stack((img0, img1), dim=1)
+                    if in_half:
+                        inp = inp.half()
+                    else:
+                        inp = inp.float()
                 # Allocate output tensor [B,2,H,W]
-                out = torch.empty((B, 2, H, W), device=inp.device, dtype=torch.float16 if out_half else torch.float32)
-                bindings = [None] * self._engine.num_bindings
-                bindings[self._in_idx] = int(inp.data_ptr())
-                bindings[self._out_idx] = int(out.data_ptr())
-                # Synchronous execute on default stream
-                ok = self._ctx.execute_v2(bindings)
+                if self._stream is not None:
+                    with torch.cuda.stream(self._stream):
+                        out = torch.empty((B, 2, H, W), device=inp.device, dtype=torch.float16 if out_half else torch.float32)
+                else:
+                    out = torch.empty((B, 2, H, W), device=inp.device, dtype=torch.float16 if out_half else torch.float32)
+                # Execute depending on TRT API
+                if not getattr(self, '_use_v3', False):
+                    # Legacy bindings API
+                    self._ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
+                    # Query num_bindings safely
+                    try:
+                        nb = self._engine.num_bindings
+                    except Exception:
+                        nb = 2
+                    bindings = [None] * int(nb)
+                    bindings[self._in_idx] = int(inp.data_ptr())
+                    bindings[self._out_idx] = int(out.data_ptr())
+                    ok = self._ctx.execute_v2(bindings)
+                else:
+                    # TensorRT 10 v3 API
+                    self._ctx.set_input_shape(self._in_name, tuple(inp.shape))
+                    self._ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
+                    self._ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
+                    if self._stream is not None:
+                        stream_ptr = self._stream.cuda_stream
+                    else:
+                        stream_ptr = torch.cuda.current_stream().cuda_stream
+                    ok = self._ctx.execute_async_v3(stream_ptr)
                 if not ok:
-                    raise RuntimeError('TRT execute_v2 failed')
+                    raise RuntimeError('TRT execute failed')
                 return out
 
             # Prepare frame tensors on device
@@ -461,6 +531,9 @@ def pipeline(
                 fb = _exec_pair(f1, f0)
                 flows_f.append(ff)
                 flows_b.append(fb)
+            # Ensure TRT stream completes before consuming outputs on default stream
+            if self._stream is not None:
+                torch.cuda.current_stream().wait_stream(self._stream)
             flows_f = torch.cat(flows_f, dim=0).unsqueeze(0)  # [1, T-1, 2, H, W]
             flows_b = torch.cat(flows_b, dim=0).unsqueeze(0)
             return flows_f, flows_b

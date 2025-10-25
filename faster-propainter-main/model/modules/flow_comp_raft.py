@@ -41,9 +41,13 @@ class RAFT_bi(nn.Module):
         # print(gt_local_frames.shape)
 
         with torch.no_grad():
-            gtlf_1 = gt_local_frames[:, :-1, :, :, :].reshape(-1, c, h, w)
-            gtlf_2 = gt_local_frames[:, 1:, :, :, :].reshape(-1, c, h, w)
+            gtlf_1 = gt_local_frames[:, :-1, :, :, :].reshape(-1, c, h, w).contiguous()
+            gtlf_2 = gt_local_frames[:, 1:, :, :, :].reshape(-1, c, h, w).contiguous()
             # print(gtlf_1.shape)
+
+            # Ensure contiguous tensors for cuDNN compatibility
+            gtlf_1 = gtlf_1.contiguous()
+            gtlf_2 = gtlf_2.contiguous()
 
             _, gt_flows_forward = self.fix_raft(gtlf_1, gtlf_2, iters=iters, test_mode=True)
             _, gt_flows_backward = self.fix_raft(gtlf_2, gtlf_1, iters=iters, test_mode=True)

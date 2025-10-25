@@ -198,6 +198,37 @@ Quick Checklist
 - [ ] Export and build propainter_fp16.engine
 - [ ] Add Torch-TensorRT compile fallback in faster-propainter-main/watermark.py
 - [ ] Ensure worker sys.path points to ..\faster-propainter-main
+
+
+Step 2 Progress & Environment (RTX 5070)
+
+- Status
+  - RAFT (FastFlowNet) TensorRT engine integrated and enforced in runtime
+  - Fallback disabled: FORCE_TRT_RAFT=1 required; missing/failed engine raises
+  - Adapter supports TensorRT 10 v3 I/O (execute_async_v3) and non-default CUDA stream
+
+- Engine Paths
+  - RAFT engine: faster-propainter-main/engines/raft/raft_fp16.engine
+  - Timing cache: faster-propainter-main/engines/raft/trt_timing_cache (if present)
+
+- Start Script Flags (Windows)
+  - START_CELERY.bat sets:
+    - YOLO_REQUIRE_TENSORRT=1 (detector uses .engine)
+    - FORCE_TRT_RAFT=1 (no PyTorch RAFT fallback)
+  - Adds TensorRT libs to PATH via SETUP_TRT_ENV.bat
+
+- Runtime Versions (captured locally)
+  - Python: 3.11.9 [MSC v.1938 64-bit]
+  - PyTorch: 2.10.0.dev20251024+cu128
+  - CUDA (torch.version.cuda): 12.8
+  - cuDNN: 91002
+  - TensorRT (Python): 10.13.3.9
+  - GPU: NVIDIA GeForce RTX 5070
+
+- Notes
+  - RAFT TRT executes on a dedicated CUDA stream (no default-stream sync penalties)
+  - Adapter chooses v3 I/O automatically when num_bindings is absent
+  - Benchmark script: benchmark_raft.py (compares PyTorch RAFT_bi vs TRT engine)
 - [ ] Set YOLO_REQUIRE_TENSORRT=1 in runtime
 
 
@@ -663,3 +694,24 @@ Engine Naming and Locations
   • RAFT: faster-propainter-main/engines/raft/raft_fp16.engine
   • RFCNet: faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
   • ProPainter: faster-propainter-main/engines/propainter/propainter_fp16.engine
+
+9) Benchmark RAFT (Old vs New)
+
+- Purpose: compare legacy PyTorch RAFT_bi against the new TensorRT FastFlowNet engine on RTX 5070.
+- Inputs: any short video; benchmark uses the first N frames (default 120) resized to H=480 and divisible by 8.
+
+Commands
+- Windows batch (sets TRT env, runs Python):
+  BENCHMARK_RAFT.bat uploads\test_video.mp4
+
+- Direct Python (if PATH is configured):
+  python benchmark_raft.py uploads/test_video.mp4 --iters 20 --max_frames 120 --height 480
+
+Output
+- Prints per-variant totals and throughput (pairs/second):
+  - PyTorch RAFT_bi: end-to-end optical flow for the sequence using weights/raft-things.pth
+  - TensorRT FastFlowNet: runs faster-propainter-main/engines/raft/raft_fp16.engine bidirectionally
+
+Notes
+- Ensure TensorRT DLLs are on PATH (SETUP_TRT_ENV.bat). If the engine is missing, run BUILD_RAFT_ENGINE_FP16.bat first.
+- For apples-to-apples iteration counts, adjust --iters to match runtime expectations (default 20).
