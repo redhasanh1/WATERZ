@@ -250,6 +250,39 @@ def sanitize_filename(filename):
     filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
     return filename
 
+def get_tunnel_url():
+    """Get tunnel URL from environment variable or file"""
+    # Check environment variable first
+    env_url = os.getenv('TUNNEL_URL')
+    if env_url:
+        return env_url.strip()
+
+    # Check tunnel_output.txt (localtunnel format: "your url is: https://...")
+    tunnel_file = os.path.join(SCRIPT_DIR, 'tunnel_output.txt')
+    if os.path.exists(tunnel_file):
+        try:
+            with open(tunnel_file, 'r') as f:
+                for line in f:
+                    if 'your url is:' in line:
+                        url = line.split('your url is:')[1].strip()
+                        if url:
+                            return url
+        except Exception:
+            pass
+
+    # Check web/tunnel_url.txt (alternative format)
+    tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
+    if os.path.exists(tunnel_file):
+        try:
+            with open(tunnel_file, 'r') as f:
+                url = f.read().strip()
+                if url:
+                    return url
+        except Exception:
+            pass
+
+    return None
+
 def validate_url(url):
     """Validate and sanitize URLs to prevent SSRF attacks"""
     from urllib.parse import urlparse
@@ -837,7 +870,9 @@ def get_detector():
         print("Loading YOLO detector...")
         print("=" * 60)
         from yolo_detector import YOLOWatermarkDetector
-        detector = YOLOWatermarkDetector()
+        # Force TensorRT-only mode (no fallback to .pt)
+        # Will fail if engine not found - ensures maximum speed!
+        detector = YOLOWatermarkDetector(require_tensorrt=True)
         print("=" * 60)
         print("✅ YOLO detector ready!")
         print("=" * 60)
@@ -1072,49 +1107,65 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             print(f"🎯 Running YOLO detection on {total_frames} frames...")
             self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
 
-            zero_mask = np.zeros((height, width), dtype=np.uint8)
-            last_valid_bbox = None
-            frames_processed = 0
-            frames_with_watermark = 0
-            detect_interval = 3
-            warmup_frames = 60
-            hit_found = False
-            det_conf = 0.15
-            bboxes_per_frame = []
-
+            # 🔥 EXTREME SPEED: Load all frames to memory for batch processing
+            print("📥 Loading all frames to memory for batch detection...")
+            all_frames = []
+            frames_loaded = 0
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
-
-                progress = 10 + int((frames_processed / max(total_frames, 1)) * 30)
-                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Detection {frames_processed}/{total_frames}'})
-
-                if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
-                    detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
-                    if detections:
-                        frames_with_watermark += 1
-                        last_valid_bbox = detections[0]['bbox']
-                        hit_found = True
-                        bboxes_per_frame.append(last_valid_bbox)
-                    elif last_valid_bbox:
-                        bboxes_per_frame.append(last_valid_bbox)
-                    else:
-                        bboxes_per_frame.append(None)
-
-                    mask = detector.create_mask(frame, detections) if detections else zero_mask
-                else:
-                    bboxes_per_frame.append(last_valid_bbox)
-                    mask = detector.create_mask(frame, [{'bbox': last_valid_bbox}]) if last_valid_bbox else zero_mask
-
-                mask_path = os.path.join(shared_mask_dir, f"{frames_processed:04d}.png")
-                cv2.imwrite(mask_path, mask)
-                # Save frame to shared storage (workers will copy/download these)
-                frame_path = os.path.join(shared_frames_dir, f"{frames_processed:04d}.png")
-                cv2.imwrite(frame_path, frame)
-                frames_processed += 1
+                all_frames.append(frame)
+                frames_loaded += 1
+                if frames_loaded % 100 == 0:
+                    print(f"   Loaded {frames_loaded}/{total_frames} frames...")
 
             cap.release()
+            frames_processed = len(all_frames)
+            print(f"✅ Loaded {frames_processed} frames to memory")
+
+            # 🚀 BATCH DETECTION (EXTREME SPEED - 1-2ms per frame!)
+            print(f"🚀 Running BATCH detection on {frames_processed} frames (EXTREME SPEED!)...")
+            self.update_state(state='PROCESSING', meta={'progress': 15, 'status': f'Batch detection (1-2ms/frame)'})
+
+            import time
+            batch_start = time.time()
+            # Batch detect ALL frames at once! (batch_size=64)
+            all_detections = detector.detect_batch(all_frames, confidence_threshold=0.15, padding=0, batch_size=64)
+            batch_duration = time.time() - batch_start
+            ms_per_frame = (batch_duration / max(frames_processed, 1)) * 1000
+            print(f"✅ Batch detection complete: {batch_duration:.3f}s ({ms_per_frame:.2f}ms per frame)")
+
+            # Process detections and write masks/frames
+            print(f"💾 Writing {frames_processed} masks and frames to disk...")
+            zero_mask = np.zeros((height, width), dtype=np.uint8)
+            bboxes_per_frame = []
+            frames_with_watermark = 0
+            last_valid_bbox = None
+
+            for i, (frame, detections) in enumerate(zip(all_frames, all_detections)):
+                progress = 15 + int((i / max(frames_processed, 1)) * 25)
+                if i % 50 == 0:
+                    self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Writing masks {i}/{frames_processed}'})
+
+                # Track bbox for segmentation
+                if detections:
+                    frames_with_watermark += 1
+                    last_valid_bbox = detections[0]['bbox']
+                    bboxes_per_frame.append(last_valid_bbox)
+                elif last_valid_bbox:
+                    bboxes_per_frame.append(last_valid_bbox)
+                else:
+                    bboxes_per_frame.append(None)
+
+                # Create and write mask
+                mask = detector.create_mask(frame, detections) if detections else zero_mask
+                mask_path = os.path.join(shared_mask_dir, f"{i:04d}.png")
+                cv2.imwrite(mask_path, mask)
+
+                # Write frame to shared storage
+                frame_path = os.path.join(shared_frames_dir, f"{i:04d}.png")
+                cv2.imwrite(frame_path, frame)
 
             if frames_processed == 0:
                 raise RuntimeError("No frames processed - video may be corrupted")
@@ -1940,7 +1991,7 @@ def finalize_video_task(self, segment_results, prepare_result):
 
         # Upload final result
         uploaded_path = None
-        tunnel = os.getenv('TUNNEL_URL')
+        tunnel = get_tunnel_url()
         if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
             try:
                 upload_url = f"{tunnel.rstrip('/')}/api/upload-result"

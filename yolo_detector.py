@@ -21,22 +21,18 @@ except Exception:
 class YOLOWatermarkDetector:
     def __init__(self, model_path=None, require_tensorrt=None):
         """
-        Initialize YOLOv8 watermark detector
+        Initialize YOLOv8 watermark detector - BATCH TENSORRT ONLY!
 
         Args:
-            model_path: Path to custom YOLOv8 model, or None to use trained Sora model
-            require_tensorrt: If True, require TensorRT engine and fail otherwise. If None, reads
-                YOLO_REQUIRE_TENSORRT/YOLO_ENGINE_ONLY from environment.
+            model_path: Path to custom YOLOv8 model, or None to use batch TensorRT engine
+            require_tensorrt: Ignored - always uses batch TensorRT engine (no fallbacks)
         """
         try:
             print("Loading YOLOv8 watermark detection model...")
             from ultralytics import YOLO
-            # Determine if we must force TensorRT-only mode
-            if require_tensorrt is None:
-                env_val = os.getenv('YOLO_REQUIRE_TENSORRT', os.getenv('YOLO_ENGINE_ONLY', '0'))
-                require_tensorrt = str(env_val).lower() in ('1', 'true', 'yes', 'on')
 
-            self._require_tensorrt = bool(require_tensorrt)
+            # ALWAYS require batch TensorRT - no fallbacks!
+            self._require_tensorrt = True
             self._using_tensorrt = False
 
             if model_path:
@@ -44,138 +40,50 @@ class YOLOWatermarkDetector:
                 self.model = YOLO(model_path)
                 print(f"✅ Loaded custom model: {model_path}")
             else:
-                # Try to use TensorRT engine first (FAST!)
-                env_engine = os.getenv('YOLO_TENSORRT_ENGINE') or os.getenv('YOLO_ENGINE_PATH')
-                tensorrt_paths = [
-                    p for p in [
-                        env_engine,
-                        'runs/detect/new_sora_watermark/weights/best.engine',  # NEW trained model
-                        '../runs/detect/new_sora_watermark/weights/best.engine',
-                        'D:/github/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.engine',
-                        'runs/detect/sora_watermark/weights/best.engine',      # Old model
-                        'yolov8n.engine',
-                        # Common alternate names
-                        'runs/detect/new_sora_watermark/weights/best_fp16.engine',
-                        'runs/detect/new_sora_watermark/weights/best.int8.engine',
-                    ] if p
-                ]
+                # 🔥 BATCH-ENABLED ENGINE ONLY - NO FALLBACKS!
+                batch_engine = 'runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine'
 
-                tensorrt_model = None
-                for path in tensorrt_paths:
-                    if os.path.exists(path):
-                        tensorrt_model = path
-                        break
+                if not os.path.exists(batch_engine):
+                    raise RuntimeError(
+                        f"❌ BATCH ENGINE NOT FOUND: {batch_engine}\n"
+                        f"   Run BUILD_FP16_BATCH.bat to create it!\n"
+                        f"   NO FALLBACKS ALLOWED - EXTREME SPEED MODE ONLY!"
+                    )
 
-                tensorrt_loaded = False
-                if tensorrt_model:
-                    if (torch is None) or (not torch.cuda.is_available()):
-                        msg = "⚠️  CUDA torch not available in this process; skipping YOLO TensorRT engine"
-                        if self._require_tensorrt:
-                            raise RuntimeError(
-                                msg + " (YOLO_REQUIRE_TENSORRT=1 set; refusing to fall back)"
-                            )
-                        print(msg)
-                    else:
-                        try:
-                            print(f"🚀 Attempting to load TensorRT engine: {tensorrt_model}")
-                            # Try to load TensorRT
-                            self.model = YOLO(tensorrt_model, task='detect')
-                            print(f"✅ TensorRT engine loaded! (optimized for RTX 5070)")
-                            tensorrt_loaded = True
-                            self._using_tensorrt = True
-                        except FileNotFoundError as e:
-                            if 'nvinfer' in str(e):
-                                if self._require_tensorrt:
-                                    raise RuntimeError(
-                                        "TensorRT DLLs not found (e.g., nvinfer_10.dll missing) and YOLO_REQUIRE_TENSORRT=1"
-                                    ) from e
-                                print(f"⚠️  TensorRT DLLs not found (nvinfer_10.dll missing)")
-                                print(f"   Falling back to PyTorch .pt model (slower but works)")
-                            else:
-                                if self._require_tensorrt:
-                                    raise RuntimeError(f"TensorRT load error and YOLO_REQUIRE_TENSORRT=1: {e}") from e
-                                print(f"⚠️  TensorRT load error: {e}")
-                            tensorrt_loaded = False
-                        except Exception as e:
-                            if self._require_tensorrt:
-                                raise RuntimeError(f"TensorRT failed and YOLO_REQUIRE_TENSORRT=1: {e}") from e
-                            print(f"⚠️  TensorRT failed: {e}")
-                            print(f"   Falling back to PyTorch model...")
-                            tensorrt_loaded = False
-                else:
-                    if self._require_tensorrt:
-                        searched = "\n".join([f"  - {p}" for p in tensorrt_paths])
-                        raise RuntimeError(
-                            "TensorRT engine not found at expected paths and YOLO_REQUIRE_TENSORRT=1.\n"
-                            "Searched paths:\n" + searched
-                        )
+                # Check CUDA available
+                if (torch is None) or (not torch.cuda.is_available()):
+                    raise RuntimeError(
+                        "❌ CUDA GPU not available!\n"
+                        f"   Batch TensorRT requires GPU\n"
+                        f"   Check that PyTorch CUDA is installed and GPU is accessible"
+                    )
 
-                if not tensorrt_loaded:
-                    # Fallback to .pt model
-                    if self._require_tensorrt:
-                        raise RuntimeError("TensorRT required but not loaded; refusing to use .pt fallback")
-                    print("⚠️  Using .pt model (10-15 fps, slower than TensorRT)")
-
-                    # Try to use trained Sora watermark model first
-                    # Check multiple possible paths (prioritize new_sora_watermark)
-                    possible_paths = [
-                        'runs/detect/new_sora_watermark/weights/best.pt',  # NEW trained model
-                        '/app/runs/detect/new_sora_watermark/weights/best.pt',  # Cloud GPU absolute path
-                        '../runs/detect/new_sora_watermark/weights/best.pt',
-                        '/app/waterz/WATERZ/runs/detect/new_sora_watermark/weights/best.pt',  # Docker/production path
-                        'D:/github/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.pt',
-                        '/workspaces/RoomFinderAI/watermarkz/runs/detect/new_sora_watermark/weights/best.pt',
-                        'runs/detect/sora_watermark/weights/best.pt',  # Old model fallback
-                        '../runs/detect/sora_watermark/weights/best.pt',
-                        '/app/waterz/WATERZ/runs/detect/sora_watermark/weights/best.pt',  # Docker/production path (old)
-                        'D:/github/RoomFinderAI/runs/detect/sora_watermark/weights/best.pt',
-                        '/workspaces/RoomFinderAI/runs/detect/sora_watermark/weights/best.pt',
-                    ]
-
-                    sora_model = None
-                    for path in possible_paths:
-                        if os.path.exists(path):
-                            sora_model = path
-                            break
-
-                    if sora_model:
-                        print("Loading trained Sora watermark model...")
-                        self.model = YOLO(sora_model)
-                        print(f"✅ Loaded trained Sora model: {sora_model}")
-                    else:
-                        print("⚠️  Trained Sora model not found!")
-                        print("Checked paths:")
-                        for p in possible_paths:
-                            print(f"  - {p}")
-                        print("\nRun TRAIN_YOLO.bat to train the model first")
-                        print("\nFalling back to generic watermark detector...")
-
-                        # Try to download from Hugging Face
-                        try:
-                            from huggingface_hub import hf_hub_download
-
-                            model_file = hf_hub_download(
-                                repo_id="qfisch/yolov8n-watermark-detection",
-                                filename="best.pt"
-                            )
-                            self.model = YOLO(model_file)
-                            print("✅ Loaded qfisch/yolov8n-watermark-detection model")
-
-                        except Exception as e:
-                            print(f"Could not download from HuggingFace: {e}")
-                            print("Falling back to YOLOv8n base model")
-                            self.model = YOLO('yolov8n.pt')
+                # Load batch-enabled TensorRT engine
+                print(f"🔥 Loading BATCH-ENABLED TensorRT engine: {batch_engine}")
+                try:
+                    self.model = YOLO(batch_engine, task='detect')
+                    print(f"✅ Batch TensorRT engine loaded! (10.7 MB, batch 1-128)")
+                    print(f"   Expected performance: 1-2ms per frame (600-1000 fps)")
+                    self._using_tensorrt = True
+                except Exception as e:
+                    raise RuntimeError(
+                        f"❌ Failed to load batch TensorRT engine: {e}\n"
+                        f"   Engine: {batch_engine}\n"
+                        f"   NO FALLBACKS - Fix the engine or rebuild it!"
+                    ) from e
 
             self.use_yolo = True
             print("✅ YOLOv8 ready for watermark detection!")
 
         except Exception as e:
-            print(f"❌ Could not load YOLOv8: {e}")
-            # If TensorRT-only mode is requested, fail fast instead of silently disabling YOLO
-            if getattr(self, '_require_tensorrt', False):
-                raise
-            print("Will use fallback detection")
-            self.use_yolo = False
+            print(f"❌ Could not load YOLOv8 batch TensorRT engine: {e}")
+            # NO FALLBACKS - fail fast!
+            raise RuntimeError(
+                f"❌ BATCH TENSORRT ENGINE REQUIRED!\n"
+                f"   Error: {e}\n"
+                f"   Run BUILD_FP16_BATCH.bat to create the engine\n"
+                f"   NO FALLBACKS ALLOWED - EXTREME SPEED MODE ONLY!"
+            ) from e
 
     def detect(self, image, confidence_threshold=0.25, padding=30):
         """
@@ -195,7 +103,19 @@ class YOLOWatermarkDetector:
         h, w = image.shape[:2]
 
         # Run YOLOv8 detection
-        device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
+        # Force GPU when TensorRT mode is required (no CPU fallback!)
+        if self._require_tensorrt:
+            # TensorRT mode - MUST use GPU, fail if unavailable
+            if torch is None or not torch.cuda.is_available():
+                raise RuntimeError(
+                    "TensorRT mode requires CUDA GPU but torch.cuda.is_available() is False. "
+                    "Check that PyTorch CUDA is installed and GPU is accessible."
+                )
+            device_arg = 0  # GPU only
+        else:
+            # Regular mode - allow CPU fallback
+            device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
+
         results = self.model(image, conf=confidence_threshold, device=device_arg, verbose=False)
 
         bboxes = []
@@ -224,6 +144,120 @@ class YOLOWatermarkDetector:
                 pass
 
         return bboxes
+
+    def detect_batch(self, images, confidence_threshold=0.25, padding=30, batch_size=64):
+        """
+        Batch detect watermarks in multiple images (EXTREME SPEED!)
+
+        Args:
+            images: List of numpy arrays [(H, W, 3) BGR, ...]
+            confidence_threshold: Minimum confidence for detections (0-1)
+            padding: Pixels to add around detected region
+            batch_size: Batch size for TensorRT inference (32, 64, or 128)
+
+        Returns:
+            List of detection lists [
+                [{'bbox': (x1, y1, x2, y2), 'confidence': conf}, ...],  # Frame 0
+                [{'bbox': (x1, y1, x2, y2), 'confidence': conf}, ...],  # Frame 1
+                ...
+            ]
+        """
+        if not self.use_yolo:
+            return [[] for _ in images]
+
+        if not images:
+            return []
+
+        # Determine device
+        if self._require_tensorrt:
+            if torch is None or not torch.cuda.is_available():
+                raise RuntimeError(
+                    "TensorRT mode requires CUDA GPU but torch.cuda.is_available() is False."
+                )
+            device_arg = 0  # GPU only
+        else:
+            device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
+
+        all_detections = []
+
+        # 🔥 CRITICAL: Pad all images to 640x640 for TensorRT batch engine
+        # TensorRT engine expects square 640x640 inputs
+        padded_images = []
+        pad_info = []  # Store (scale, pad_left, pad_top, orig_w, orig_h) for each image
+
+        for img in images:
+            h, w = img.shape[:2]
+
+            # Calculate scale to fit in 640x640
+            scale = min(640.0 / w, 640.0 / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+
+            # Resize maintaining aspect ratio
+            resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+            # Calculate padding to make it 640x640
+            pad_w = 640 - new_w
+            pad_h = 640 - new_h
+            top = pad_h // 2
+            bottom = pad_h - top
+            left = pad_w // 2
+            right = pad_w - left
+
+            # Pad with gray (114, 114, 114) - YOLO standard
+            padded = cv2.copyMakeBorder(resized, top, bottom, left, right,
+                                       cv2.BORDER_CONSTANT, value=(114, 114, 114))
+
+            padded_images.append(padded)
+            pad_info.append((scale, left, top, w, h))
+
+        # Process in batches
+        for i in range(0, len(padded_images), batch_size):
+            batch = padded_images[i:i + batch_size]
+            batch_info = pad_info[i:i + batch_size]
+            orig_images = images[i:i + batch_size]
+
+            # Run batch inference on 640x640 padded images (EXTREME SPEED!)
+            results = self.model(batch, conf=confidence_threshold, device=device_arg,
+                               verbose=False, imgsz=640)
+
+            # Process each result in the batch
+            for orig_img, result, (scale, pad_left, pad_top, orig_w, orig_h) in zip(orig_images, results, batch_info):
+                bboxes = []
+
+                boxes = result.boxes
+                for box in boxes:
+                    # Get bounding box coordinates (in padded 640x640 space)
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+
+                    # Remove padding offset
+                    x1 = x1 - pad_left
+                    y1 = y1 - pad_top
+                    x2 = x2 - pad_left
+                    y2 = y2 - pad_top
+
+                    # Scale back to original image coordinates
+                    x1 = x1 / scale
+                    y1 = y1 / scale
+                    x2 = x2 / scale
+                    y2 = y2 / scale
+
+                    # Add padding and clamp to image bounds
+                    x1 = max(0, int(x1) - padding)
+                    y1 = max(0, int(y1) - padding)
+                    x2 = min(orig_w, int(x2) + padding)
+                    y2 = min(orig_h, int(y2) + padding)
+
+                    conf = float(box.conf[0])
+
+                    bboxes.append({
+                        'bbox': (x1, y1, x2, y2),
+                        'confidence': conf
+                    })
+
+                all_detections.append(bboxes)
+
+        return all_detections
 
     def create_mask(
         self,
