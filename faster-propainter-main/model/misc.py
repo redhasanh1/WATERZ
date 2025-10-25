@@ -53,8 +53,8 @@ def get_root_logger(logger_name='basicsr', log_level=logging.INFO, log_file=None
     return logger
 
 
-IS_HIGH_VERSION = [int(m) for m in list(re.findall(r"^([0-9]+)\.([0-9]+)\.([0-9]+)([^0-9][a-zA-Z0-9]*)?(\+git.*)?$",\
-    torch.__version__)[0][:3])] >= [1, 12, 0]
+# RTX 5070 parse fix: Handle nightly builds like 2.10.0.dev20251024+cu128
+IS_HIGH_VERSION = [int(m) for m in re.findall(r"(\d+)\.(\d+)\.(\d+)", torch.__version__)[0]] >= [1, 12, 0]
 
 def gpu_is_available():
     if IS_HIGH_VERSION:

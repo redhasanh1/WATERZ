@@ -10,15 +10,11 @@ Production Server for Watermark Removal SaaS
 import sys
 import os
 import importlib
-import importlib.util
 import shutil
 from pathlib import Path
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Ensure project root is importable (so `yolo_detector.py` resolves in workers)
-if SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, SCRIPT_DIR)
 TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
 CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
 UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
@@ -107,23 +103,6 @@ def _ensure_cuda_torch():
 
 
 _ensure_cuda_torch()
-
-
-def _import_local_module(module_name: str):
-    """Import a module, falling back to a file in SCRIPT_DIR if needed."""
-    try:
-        return importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:
-        module_file = Path(SCRIPT_DIR) / f"{module_name}.py"
-        if not module_file.exists():
-            raise
-        spec = importlib.util.spec_from_file_location(module_name, module_file)
-        if spec is None or spec.loader is None:
-            raise
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        sys.modules[module_name] = module
-        return module
 
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
@@ -486,26 +465,57 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
         if not os.path.exists(seg_propainter_frames):
             raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
 
-        print(f"   🔗 Merging cleaned region back to full frames (in-memory)...")
-        # Load all frames into memory first (faster than disk I/O in loop)
-        original_frames = []
-        cleaned_frames = []
-        for frame_idx in range(seg_duration):
-            frame_file = f"{frame_idx:04d}.png"
-            orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
-            clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
-            original_frames.append(orig)
-            cleaned_frames.append(clean)
+        print(f"   🔗 Merging cleaned region back to full frames (GPU-accelerated)...")
 
-        # Merge in memory and write in one pass
-        for frame_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
-            frame_file = f"{frame_idx:04d}.png"
-            if cleaned_crop is not None and original is not None:
-                result_frame = original.copy()
-                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
-                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
-            elif original is not None:
-                cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+        # Try GPU-accelerated merge first, fallback to CPU if needed
+        try:
+            import torch
+            if torch.cuda.is_available():
+                # GPU-accelerated batch processing
+                print(f"   🚀 Using GPU for frame merging...")
+                for frame_idx in range(seg_duration):
+                    frame_file = f"{frame_idx:04d}.png"
+                    orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                    clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+
+                    if clean is not None and orig is not None:
+                        # Convert to GPU tensors (BGR to RGB not needed for merging)
+                        orig_gpu = torch.from_numpy(orig).cuda()
+                        clean_gpu = torch.from_numpy(clean).cuda()
+
+                        # Merge on GPU
+                        orig_gpu[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = clean_gpu
+
+                        # Copy back to CPU and save
+                        result_frame = orig_gpu.cpu().numpy()
+                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+                    elif orig is not None:
+                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), orig)
+
+                print(f"   ✅ GPU merge completed")
+            else:
+                raise RuntimeError("CUDA not available")
+        except Exception as e:
+            # Fallback to CPU merge
+            print(f"   ⚠️  GPU merge failed ({e}), falling back to CPU...")
+            original_frames = []
+            cleaned_frames = []
+            for frame_idx in range(seg_duration):
+                frame_file = f"{frame_idx:04d}.png"
+                orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+                original_frames.append(orig)
+                cleaned_frames.append(clean)
+
+            # Merge in memory and write in one pass
+            for frame_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
+                frame_file = f"{frame_idx:04d}.png"
+                if cleaned_crop is not None and original is not None:
+                    result_frame = original.copy()
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+                elif original is not None:
+                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
 
         # Return cleaned frames directory for later encoding
         temp_dirs = [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir]
@@ -520,7 +530,7 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
 
 def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs_to_cleanup):
     """
-    Encode a segment's cleaned frames to video (CPU-bound, runs in parallel).
+    Encode a segment's cleaned frames to video (GPU-accelerated with NVENC).
 
     Returns a tuple (seg_idx, seg_video_path).
     """
@@ -534,18 +544,29 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
     seg_video_path = os.path.join(TEMP_DIR, f"{seg_prefix}.mp4")
 
     seg_label = f"{seg_idx + 1}/{total_segments}"
-    print(f"   🎞️  Encoding segment {seg_label} to video...")
+    print(f"   🎞️  Encoding segment {seg_label} to video (GPU NVENC)...")
 
     try:
+        # Try faster preset p1 for maximum speed, fallback to p4 if fails
         encode_cmd = [
-            'ffmpeg', '-y', '-framerate', str(fps),
+            'ffmpeg', '-y',
+            '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '5M',
+            '-c:v', 'h264_nvenc',
+            '-preset', 'p1',  # Fastest NVENC preset (was p4)
+            '-b:v', '8M',  # Increased bitrate for better quality at higher speed
+            '-bufsize', '16M',
             '-pix_fmt', 'yuv420p',
             '-profile:v', 'main',
             seg_video_path
         ]
-        subprocess.run(encode_cmd, capture_output=True, check=True)
+        result = subprocess.run(encode_cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            # Fallback to p4 if p1 fails
+            print(f"   ⚠️  p1 preset failed, trying p4...")
+            encode_cmd[encode_cmd.index('-preset') + 1] = 'p4'
+            subprocess.run(encode_cmd, capture_output=True, check=True)
 
         print(f"   ✅ Segment {seg_label} encoded successfully")
         return seg_idx, seg_video_path
@@ -622,6 +643,101 @@ celery.conf.update(
     task_acks_late=True,
     worker_disable_rate_limits=True,  # Disable rate limiting to prevent task pickup delays
 )
+
+# ============================================================================
+# REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
+# ============================================================================
+
+def start_redis_download_poller():
+    """
+    Background thread that polls Redis for video download signals.
+    When prepare_video sets 'video_download:{video_id}' key, this thread
+    detects it and downloads the video to cache immediately.
+
+    This enables ALL workers to download in parallel instead of sitting idle.
+    """
+    import threading
+    import time
+    import requests
+
+    def poll_redis():
+        print("🔍 Starting Redis video download poller...")
+        redis_client = celery.backend.client
+        checked_videos = set()  # Track videos we've already processed
+
+        while True:
+            try:
+                # Scan for all video_download:* keys
+                keys = redis_client.keys('video_download:*')
+
+                for key in keys:
+                    key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                    video_id = key_str.replace('video_download:', '')
+
+                    # Skip if we've already downloaded this video
+                    if video_id in checked_videos:
+                        continue
+
+                    # Get download URL from Redis
+                    download_url = redis_client.get(key)
+                    if not download_url:
+                        continue
+
+                    download_url = download_url.decode('utf-8') if isinstance(download_url, bytes) else download_url
+
+                    # Check if we already have this video cached
+                    cache_dir = os.path.join(TEMP_DIR, 'video_cache')
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cached_video = os.path.join(cache_dir, f"{video_id}.mp4")
+
+                    if os.path.exists(cached_video):
+                        print(f"✅ Worker {os.getpid()}: Video {video_id} already cached (skip)")
+                        checked_videos.add(video_id)
+                        continue
+
+                    # Download video to cache
+                    print(f"📥 Worker {os.getpid()}: Detected download signal for {video_id}")
+                    print(f"   ⬇️  Downloading: {download_url}")
+
+                    try:
+                        r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=120)
+                        r.raise_for_status()
+
+                        with open(cached_video, 'wb') as f:
+                            f.write(r.content)
+
+                        file_size = os.path.getsize(cached_video) / (1024 * 1024)
+                        print(f"   ✅ Worker {os.getpid()}: Downloaded and cached {video_id} ({file_size:.1f}MB)")
+                        checked_videos.add(video_id)
+
+                    except Exception as download_error:
+                        print(f"   ❌ Worker {os.getpid()}: Download failed for {video_id}: {download_error}")
+                        # Don't add to checked_videos so we can retry
+
+                # Clean up checked_videos if it gets too large (memory leak prevention)
+                if len(checked_videos) > 100:
+                    checked_videos.clear()
+
+            except Exception as e:
+                print(f"⚠️  Redis poller error: {e}")
+
+            # Poll every 1 second
+            time.sleep(1)
+
+    # Start polling thread
+    poller_thread = threading.Thread(target=poll_redis, daemon=True)
+    poller_thread.start()
+    print("✅ Redis video download poller started")
+
+
+# Start poller when Celery worker is ready
+from celery.signals import worker_ready
+
+@worker_ready.connect
+def on_worker_ready(sender=None, **kwargs):
+    """Called when Celery worker finishes initialization"""
+    start_redis_download_poller()
+
 
 # Global model instances (lazy loaded)
 detector = None
@@ -705,8 +821,7 @@ def get_detector():
         print("=" * 60)
         print("Loading YOLO detector...")
         print("=" * 60)
-        yolo_module = _import_local_module('yolo_detector')
-        YOLOWatermarkDetector = getattr(yolo_module, 'YOLOWatermarkDetector')
+        from yolo_detector import YOLOWatermarkDetector
         detector = YOLOWatermarkDetector()
         print("=" * 60)
         print("✅ YOLO detector ready!")
@@ -727,8 +842,47 @@ def get_detector():
 # on processing one video together by distributing segments across all GPUs
 # ============================================================================
 
+@celery.task(bind=True, name='watermark.broadcast_download')
+def broadcast_video_download(self, video_id, video_url, upload_filename):
+    """
+    Broadcast task: All workers download video simultaneously
+    This runs on ALL workers in parallel to pre-cache the video
+    """
+    try:
+        print(f"\n📡 Broadcast download for video {video_id}")
+
+        # Create cache directory
+        cache_dir = os.path.join(TEMP_DIR, 'video_cache')
+        os.makedirs(cache_dir, exist_ok=True)
+        cached_video = os.path.join(cache_dir, f"{video_id}.mp4")
+
+        # Skip if already cached
+        if os.path.exists(cached_video):
+            print(f"   ✅ Video already cached")
+            return {'status': 'cached', 'path': cached_video}
+
+        # Download video
+        print(f"   ⬇️  Downloading: {video_url}")
+        import requests
+        r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=120)
+        r.raise_for_status()
+
+        # Save to cache
+        with open(cached_video, 'wb') as f:
+            f.write(r.content)
+
+        file_size = os.path.getsize(cached_video) / (1024 * 1024)
+        print(f"   ✅ Video downloaded and cached ({file_size:.2f} MB)")
+
+        return {'status': 'downloaded', 'path': cached_video, 'size_mb': file_size}
+
+    except Exception as e:
+        print(f"   ❌ Broadcast download failed: {e}")
+        return {'status': 'failed', 'error': str(e)}
+
+
 @celery.task(bind=True, name='watermark.prepare_video')
-def prepare_video_task(self, video_path, api_base=None, temp_base=None):
+def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id=None):
     """
     Phase 1: Prepare video for distributed processing
     - Download video if needed
@@ -786,7 +940,24 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
 
         base_name = Path(video_path).stem
-        video_id = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
+        # Use provided video_id (from upload task_id) for cache consistency, fallback to Celery task ID
+        video_id = video_id or (self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8])
+
+        # 🚀 REDIS SIGNAL: Tell ALL workers to download this video in parallel!
+        # This allows idle workers to start downloading immediately instead of waiting
+        try:
+            redis_client = celery.backend.client
+            # Construct download URL for workers to use
+            tunnel = api_base or temp_base or os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
+            if tunnel:
+                from urllib.parse import urljoin
+                video_filename = os.path.basename(video_path)
+                download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{video_filename}')
+                # Set Redis key with 5 minute expiry (workers will poll for this)
+                redis_client.setex(f'video_download:{video_id}', 300, download_url)
+                print(f"📡 Redis signal sent: video_download:{video_id} = {download_url}")
+        except Exception as e:
+            print(f"⚠️  Failed to send Redis download signal: {e}")
 
         # Create shared directories for distributed access
         shared_mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{video_id}")
@@ -937,6 +1108,27 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None):
 
         print(f"✅ Video prepared for distributed processing: {len(segments)} segments ready")
 
+        # 🔒 REDIS LOCK: Only ONE worker should dispatch segments (others exit here)
+        # When multiple workers do YOLO in parallel, they all find the same segments
+        # Use Redis lock to ensure only the first one dispatches
+        redis_client = celery.backend.client
+        dispatch_lock_key = f"dispatch_lock:{video_id}"
+
+        # Try to acquire lock (set if not exists, 60 second expiry)
+        lock_acquired = redis_client.set(dispatch_lock_key, self.request.id, nx=True, ex=60)
+
+        if not lock_acquired:
+            # Another worker already dispatching segments - this worker's job is done!
+            print(f"🔓 Another worker already dispatching segments - exiting early (YOLO parallelization worked!)")
+            return {
+                'chord_id': f'distributed_{video_id}',
+                'status': 'processing',
+                'message': f'Parallel YOLO worker (segments being dispatched by another worker)'
+            }
+
+        # We got the lock! This worker will dispatch segments
+        print(f"🔒 Lock acquired - this worker will dispatch segments")
+
         # Manually dispatch each segment task to guarantee they all get queued
         # This is more reliable than chord with solo pool
         print(f"🔥 Dispatching {len(segments)} segment tasks manually across all workers...")
@@ -1037,52 +1229,44 @@ def process_segment_task(self, segment_data):
         shared_mask_dir = segment_data.get('shared_mask_dir')
         shared_frames_dir = segment_data.get('shared_frames_dir')
 
-        print(f"   ⬇️  Downloading frames {start_frame}-{end_frame}...")
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading frames'})
+        # Multi-PC optimization: Skip frame sharing, download video directly in parallel
+        is_multi_pc = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
 
         import requests
         frames_copied = 0
-        for frame_idx in range(start_frame, end_frame + 1):
-            frame_file = f"{frame_idx:04d}.png"
 
-            # Try local first (if on same machine as prepare task)
-            local_frame = os.path.join(shared_frames_dir, frame_file) if shared_frames_dir else None
-            if local_frame and os.path.exists(local_frame):
-                dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
-                shutil.copy2(local_frame, dst)
-                frames_copied += 1
-            elif origin_base:
-                # Download individual frame from origin host (serving /temp/)
-                try:
-                    frame_url = f"{origin_base.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
-                    r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
-                    if r.ok:
-                        dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
-                        with open(dst, 'wb') as f:
-                            f.write(r.content)
-                        frames_copied += 1
-                except Exception as e:
-                    print(f"⚠️  Failed to download frame {frame_idx}: {e}")
+        if is_multi_pc:
+            # Multi-PC mode: Each worker downloads video directly (faster, no tunnel congestion)
+            print(f"   📦 Multi-PC mode: downloading video directly for frames {start_frame}-{end_frame}...")
+            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading video'})
 
-        if frames_copied == 0:
-            # Fallback: fetch original video from API uploads and extract only needed frames
-            print(f"   ⚠️  No frames found in shared storage, falling back to video download...")
             api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
             upload_filename = segment_data.get('upload_filename')
             video_url = segment_data.get('video_url')
             if (api_base or video_url) and upload_filename:
                 try:
-                    import requests
-                    video_url = video_url or f"{api_base.rstrip('/')}/uploads/{upload_filename}"
-                    print(f"   ⬇️  Fallback: downloading original video for local extraction: {video_url}")
-                    r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
-                    r.raise_for_status()
-                    local_video = os.path.join(TEMP_DIR, f"seg_{seg_idx}_{upload_filename}")
-                    with open(local_video, 'wb') as f:
-                        f.write(r.content)
+                    # Check cache first to avoid re-downloading for multiple segments
+                    cache_dir = os.path.join(TEMP_DIR, 'video_cache')
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cached_video = os.path.join(cache_dir, f"{video_id}.mp4")
+
+                    if os.path.exists(cached_video):
+                        print(f"   ✅ Using cached video (skip download)")
+                        local_video = cached_video
+                    else:
+                        video_url = video_url or f"{api_base.rstrip('/')}/uploads/{upload_filename}"
+                        print(f"   ⬇️  Downloading: {video_url}")
+                        r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                        r.raise_for_status()
+                        # Save to cache for future segments
+                        with open(cached_video, 'wb') as f:
+                            f.write(r.content)
+                        print(f"   💾 Video cached for future segments")
+                        local_video = cached_video
+
                     cap2 = cv2.VideoCapture(local_video)
                     if not cap2.isOpened():
-                        raise RuntimeError("Fallback video open failed")
+                        raise RuntimeError("Video open failed")
                     current_frame = 0
                     while True:
                         ret, frame = cap2.read()
@@ -1096,11 +1280,75 @@ def process_segment_task(self, segment_data):
                             frames_copied += 1
                         current_frame += 1
                     cap2.release()
-                    os.remove(local_video)
+                    # Don't delete - keep cached for other segments!
                 except Exception as e:
-                    raise RuntimeError(f"Fallback frame extraction failed: {e}")
+                    raise RuntimeError(f"Video download failed: {e}")
             else:
-                raise RuntimeError(f"No frames available for segment {seg_idx}")
+                raise RuntimeError(f"No video URL available for segment {seg_idx}")
+        else:
+            # Single-PC mode: Try frame sharing first
+            print(f"   ⬇️  Downloading frames {start_frame}-{end_frame}...")
+            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading frames'})
+
+            for frame_idx in range(start_frame, end_frame + 1):
+                frame_file = f"{frame_idx:04d}.png"
+
+                # Try local first (if on same machine as prepare task)
+                local_frame = os.path.join(shared_frames_dir, frame_file) if shared_frames_dir else None
+                if local_frame and os.path.exists(local_frame):
+                    dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                    shutil.copy2(local_frame, dst)
+                    frames_copied += 1
+                elif origin_base:
+                    # Download individual frame from origin host (serving /temp/)
+                    try:
+                        frame_url = f"{origin_base.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
+                        r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
+                        if r.ok:
+                            dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                            with open(dst, 'wb') as f:
+                                f.write(r.content)
+                            frames_copied += 1
+                    except Exception as e:
+                        print(f"⚠️  Failed to download frame {frame_idx}: {e}")
+
+            if frames_copied == 0:
+                # Fallback: fetch original video from API uploads and extract only needed frames
+                print(f"   ⚠️  No frames found in shared storage, falling back to video download...")
+                api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
+                upload_filename = segment_data.get('upload_filename')
+                video_url = segment_data.get('video_url')
+                if (api_base or video_url) and upload_filename:
+                    try:
+                        import requests
+                        video_url = video_url or f"{api_base.rstrip('/')}/uploads/{upload_filename}"
+                        print(f"   ⬇️  Fallback: downloading original video for local extraction: {video_url}")
+                        r = requests.get(video_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                        r.raise_for_status()
+                        local_video = os.path.join(TEMP_DIR, f"seg_{seg_idx}_{upload_filename}")
+                        with open(local_video, 'wb') as f:
+                            f.write(r.content)
+                        cap2 = cv2.VideoCapture(local_video)
+                        if not cap2.isOpened():
+                            raise RuntimeError("Fallback video open failed")
+                        current_frame = 0
+                        while True:
+                            ret, frame = cap2.read()
+                            if not ret:
+                                break
+                            if current_frame > end_frame:
+                                break
+                            if current_frame >= start_frame:
+                                dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                                cv2.imwrite(dst, frame)
+                                frames_copied += 1
+                            current_frame += 1
+                        cap2.release()
+                        os.remove(local_video)
+                    except Exception as e:
+                        raise RuntimeError(f"Fallback frame extraction failed: {e}")
+                else:
+                    raise RuntimeError(f"No frames available for segment {seg_idx}")
 
         if frames_copied == 0:
             raise RuntimeError(f"No frames extracted for segment {seg_idx}")
@@ -1349,10 +1597,11 @@ def process_segment_task(self, segment_data):
         ]
         subprocess.run(encode_cmd, capture_output=True, check=True)
 
-        # Skip upload if on same machine (all workers on 1 GPU = same machine!)
+        # Upload segment for multi-PC worker access
         api_base = segment_data.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
-        # If no external API base or it's ngrok (same machine), skip upload
-        is_local = api_base is None or 'localhost' in (api_base or '').lower() or '127.0.0.1' in (api_base or '') or 'ngrok' in (api_base or '').lower()
+        # Only skip upload if truly local (localhost/127.0.0.1)
+        # ngrok URLs are for distributed multi-PC setups, so UPLOAD!
+        is_local = api_base is None or 'localhost' in (api_base or '').lower() or '127.0.0.1' in (api_base or '')
 
         if not is_local and api_base:
             try:
@@ -3361,8 +3610,26 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
+
+                # OPTIMIZATION: Broadcast video download to ALL workers in parallel
+                # This pre-caches the video on all workers before processing starts
+                video_id = task_id  # Use task_id as video_id
+                video_filename = os.path.basename(video_path)
+                video_url = f"{base.rstrip('/')}/uploads/{video_filename}"
+
+                print(f"📡 Broadcasting download to all workers...")
+                # Use Celery group to send to all workers simultaneously
+                from celery import group
+                try:
+                    broadcast_group = group(broadcast_video_download.s(video_id, video_url, video_filename))
+                    broadcast_result = broadcast_group.apply_async()
+                    print(f"   ✅ Broadcast initiated to all workers")
+                except Exception as e:
+                    print(f"   ⚠️  Broadcast failed (continuing anyway): {e}")
+
                 # Call prepare_video_task which creates the chord internally
                 # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize
+                # prepare_video will use cached video if broadcast succeeded
                 result = prepare_video_task.apply_async(
                     args=[video_path],
                     kwargs={'api_base': base, 'temp_base': base}

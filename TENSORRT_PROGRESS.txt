@@ -12,12 +12,11 @@ TensorRT Progress (detailed)
     loads the TensorRT engine when available, else falls back to PyTorch RAFT.
     - No PyCUDA required: uses TensorRT Python + torch device pointers
     - Windows: ensure TensorRT lib path on PATH (TensorRT-10.7.0.23/lib)
-  • Benchmarks (GTX 1660 Ti):
-    - Torch FastFlowNet 256: ~39.2 ms/pair (~25.5 FPS)
-    - TensorRT FP16   256: ~6.16 ms/pair (~162.5 FPS)
-    - Torch FastFlowNet 640: ~47.8 ms/pair (~20.9 FPS)
-    - TensorRT FP16   640: ~6.68 ms/pair (~149.8 FPS)
-    - RAFT portion ~6–7× faster; end‑to‑end gains ~10–20% until RFCNet/ProPainter are converted
+  • Benchmarks (RTX 5070):
+    - Engines from GTX 1660 Ti removed (architecture incompatible)
+    - Using PyTorch .pt models until RTX 5070 engines are rebuilt
+    - Expected performance after rebuild: 2-3x faster than 1660 Ti benchmarks
+    - RAFT/RFCNet/ProPainter engines will need rebuild for RTX 5070
 
 - Step 3 — RFCNet (flow completion) engine: In Progress
   • Exporter added: faster-propainter-main/tools/export_rfcnet_onnx.py

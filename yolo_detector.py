@@ -80,7 +80,7 @@ class YOLOWatermarkDetector:
                             print(f"🚀 Attempting to load TensorRT engine: {tensorrt_model}")
                             # Try to load TensorRT
                             self.model = YOLO(tensorrt_model, task='detect')
-                            print(f"✅ TensorRT engine loaded! (20-35 fps on GTX 1660 Ti)")
+                            print(f"✅ TensorRT engine loaded! (optimized for RTX 5070)")
                             tensorrt_loaded = True
                             self._using_tensorrt = True
                         except FileNotFoundError as e:
