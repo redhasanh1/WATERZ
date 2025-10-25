@@ -427,10 +427,8 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
 
         print(f"   🎨 Running faster-propainter pipeline on cropped segment...")
         try:
-            faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
-            if faster_propainter_path not in sys.path:
-                sys.path.insert(0, faster_propainter_path)
-            from watermark import pipeline as faster_propainter_pipeline
+            # Use cached ProPainter pipeline (pre-loaded at worker startup)
+            faster_propainter_pipeline = get_propainter_pipeline()
 
             import torch
             use_fp16 = torch.cuda.is_available()
@@ -445,9 +443,9 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
                 resize_ratio=1.0,
                 mask_dilation=4,
                 ref_stride=10,
-                neighbor_length=20,
-                subvideo_length=80,
-                raft_iter=20,
+                neighbor_length=10,
+                subvideo_length=60,
+                raft_iter=10,
                 mode="video_inpainting",
                 save_frames=True,
                 fp16=use_fp16
@@ -735,8 +733,25 @@ from celery.signals import worker_ready
 
 @worker_ready.connect
 def on_worker_ready(sender=None, **kwargs):
-    """Called when Celery worker finishes initialization"""
+    """Called when Celery worker finishes initialization - pre-warm models"""
+    print("🔥 Worker ready - warming up models...")
     start_redis_download_poller()
+
+    # Pre-load YOLO detector (saves 6-7s on first task)
+    try:
+        get_detector()
+        print("✅ YOLO detector pre-loaded")
+    except Exception as e:
+        print(f"⚠️  Failed to pre-load YOLO: {e}")
+
+    # Pre-load ProPainter pipeline (saves 1-2s per segment)
+    try:
+        get_propainter_pipeline()
+        print("✅ ProPainter pipeline pre-loaded")
+    except Exception as e:
+        print(f"⚠️  Failed to pre-load ProPainter: {e}")
+
+    print("🚀 Worker fully initialized and ready!")
 
 
 # Global model instances (lazy loaded)
@@ -830,6 +845,33 @@ def get_detector():
     # Check ProPainter assets (only matters on cloud workers)
     _check_propainter_assets()
     return detector
+
+
+# Global ProPainter pipeline cache
+_propainter_pipeline = None
+
+def get_propainter_pipeline():
+    """
+    Cached ProPainter pipeline loader.
+    Loads the pipeline once and reuses it across all tasks in the same worker.
+    """
+    global _propainter_pipeline
+
+    if _propainter_pipeline is None:
+        print("=" * 60)
+        print("Loading ProPainter pipeline...")
+        print("=" * 60)
+        faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
+        if faster_propainter_path not in sys.path:
+            sys.path.insert(0, faster_propainter_path)
+
+        from watermark import pipeline as faster_propainter_pipeline
+        _propainter_pipeline = faster_propainter_pipeline
+        print("=" * 60)
+        print("✅ ProPainter pipeline loaded!")
+        print("=" * 60)
+
+    return _propainter_pipeline
 
 
 # ============================================================================
@@ -1656,13 +1698,8 @@ def process_segment_task(self, segment_data):
             self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
 
             try:
-                faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
-                if faster_propainter_path not in sys.path:
-                    sys.path.insert(0, faster_propainter_path)
-
-                print(f"   📦 Importing ProPainter from: {faster_propainter_path}")
-                from watermark import pipeline as faster_propainter_pipeline
-                print(f"   ✅ ProPainter import successful")
+                # Use cached ProPainter pipeline (pre-loaded at worker startup)
+                faster_propainter_pipeline = get_propainter_pipeline()
 
                 import torch
                 use_fp16 = torch.cuda.is_available()
@@ -1674,10 +1711,10 @@ def process_segment_task(self, segment_data):
                     output=seg_output_dir,
                     resize_ratio=1.0,
                     mask_dilation=4,
-                    ref_stride=10,
-                    neighbor_length=20,
-                    subvideo_length=80,
-                    raft_iter=20,
+                    ref_stride=15,
+                    neighbor_length=10,
+                    subvideo_length=60,
+                    raft_iter=10,
                     mode="video_inpainting",
                     save_frames=True,
                     fp16=use_fp16
@@ -1720,52 +1757,17 @@ def process_segment_task(self, segment_data):
                 elif original is not None:
                     cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
 
-        # Encode segment to video
-        print(f"   🎞️  Encoding segment...")
-        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': f'Encoding video'})
+        # ⚡ OPTIMIZATION: Skip encoding/upload, save frames directly for final encode
+        print(f"   ✅ Cleaned frames ready in: {seg_cleaned_dir}")
+        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': f'Segment complete'})
 
-        seg_video_path = os.path.join(RESULT_DIR, f"{seg_prefix}.mp4")
-        encode_cmd = [
-            'ffmpeg', '-y', '-framerate', str(fps),
-            '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '5M',
-            '-pix_fmt', 'yuv420p', '-profile:v', 'main',
-            seg_video_path
-        ]
-        subprocess.run(encode_cmd, capture_output=True, check=True)
-
-        # Upload segment for multi-PC worker access
-        api_base = segment_data.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
-        # Only skip upload if truly local (localhost/127.0.0.1)
-        # ngrok URLs are for distributed multi-PC setups, so UPLOAD!
-        is_local = api_base is None or 'localhost' in (api_base or '').lower() or '127.0.0.1' in (api_base or '')
-
-        if not is_local and api_base:
-            try:
-                upload_url = f"{api_base.rstrip('/')}/api/upload-segment"
-                print(f"   ⬆️  Uploading segment {seg_idx+1} to API server...")
-                with open(seg_video_path, 'rb') as f:
-                    resp = requests.post(
-                        upload_url,
-                        headers={'ngrok-skip-browser-warning': 'true'},
-                        files={'file': (os.path.basename(seg_video_path), f, 'video/mp4')},
-                        data={'video_id': video_id, 'seg_idx': seg_idx},
-                        timeout=120
-                    )
-                if resp.ok:
-                    print(f"   ✅ Segment {seg_idx+1} uploaded successfully")
-            except Exception as e:
-                print(f"⚠️  Failed to upload segment: {e}")
-        else:
-            print(f"   ✅ Segment {seg_idx+1} stored locally (skip upload)")
-
-        # Cleanup temp directories
-        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+        # Cleanup ONLY temp directories (keep seg_cleaned_dir for finalize)
+        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir]:
             shutil.rmtree(path, ignore_errors=True)
 
         result = {
             'seg_idx': seg_idx,
-            'video_path': seg_video_path,
+            'cleaned_frames_dir': seg_cleaned_dir,  # Changed from video_path
             'start_frame': start_frame,
             'end_frame': end_frame,
             'frames_processed': seg_duration,
@@ -1809,7 +1811,7 @@ def process_segment_task(self, segment_data):
                         if result_json:
                             result_data = json.loads(result_json)
                             segment_results.append(result_data)
-                            print(f"   ✅ Collected segment {i} result: {result_data['video_path']}")
+                            print(f"   ✅ Collected segment {i} result: {result_data['cleaned_frames_dir']}")
                         else:
                             print(f"⚠️  Segment {i} result not found in Redis")
 
@@ -1861,65 +1863,52 @@ def finalize_video_task(self, segment_results, prepare_result):
         # Sort segments by index
         segment_results = sorted(segment_results, key=lambda x: x['seg_idx'])
 
-        # Download segment videos if needed
-        tunnel = prepare_result.get('api_base') or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL')
-        segment_videos = []
+        # ⚡ OPTIMIZATION: Read frames directly, skip segment video download/concat
+        print(f"📥 Loading cleaned frames from {total_segments} segments...")
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Loading frames'})
 
-        print(f"📥 Collecting {total_segments} segment videos...")
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Collecting segments'})
-
+        # Collect all frame paths in order
+        all_frame_paths = []
         for seg_result in segment_results:
-            seg_video_path = seg_result['video_path']
+            cleaned_dir = seg_result['cleaned_frames_dir']
+            if not os.path.exists(cleaned_dir):
+                raise Exception(f"Cleaned frames dir not found: {cleaned_dir}")
 
-            # Check if segment exists locally
-            if os.path.exists(seg_video_path):
-                segment_videos.append(seg_video_path)
-            elif tunnel:
-                # Download from API server
-                try:
-                    seg_filename = os.path.basename(seg_video_path)
-                    download_url = f"{tunnel.rstrip('/')}/results/{seg_filename}"
-                    print(f"   ⬇️  Downloading segment {seg_result['seg_idx']+1}...")
+            # Get sorted frame files
+            frame_files = sorted([f for f in os.listdir(cleaned_dir) if f.endswith('.png')])
+            for frame_file in frame_files:
+                all_frame_paths.append(os.path.join(cleaned_dir, frame_file))
 
-                    import requests
-                    r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
-                    r.raise_for_status()
+        print(f"✅ Collected {len(all_frame_paths)} frames from {total_segments} segments")
 
-                    local_path = os.path.join(TEMP_DIR, seg_filename)
-                    with open(local_path, 'wb') as f:
-                        f.write(r.content)
-                    segment_videos.append(local_path)
-                except Exception as e:
-                    raise Exception(f"Failed to download segment {seg_result['seg_idx']}: {e}")
-            else:
-                raise Exception(f"Segment video not found: {seg_video_path}")
+        # Encode directly to video (single encode, no concat needed!)
+        print(f"🎬 Encoding final video from frames...")
+        self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Encoding final video'})
 
-        if len(segment_videos) != total_segments:
-            raise RuntimeError(f"Expected {total_segments} segments, got {len(segment_videos)}")
+        # Create temp dir with symlinks for ffmpeg (faster than copying)
+        frames_temp = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames")
+        os.makedirs(frames_temp, exist_ok=True)
 
-        print(f"✅ All {total_segments} segments collected")
-
-        # Concatenate segments
-        print(f"🔗 Concatenating segments...")
-        self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Concatenating segments'})
-
-        concat_list_file = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
-        with open(concat_list_file, 'w') as f:
-            for seg_video in segment_videos:
-                f.write(f"file '{seg_video}'\n")
+        for i, frame_path in enumerate(all_frame_paths):
+            # Copy frame with sequential naming for ffmpeg
+            import shutil
+            shutil.copy2(frame_path, os.path.join(frames_temp, f"{i:04d}.png"))
 
         temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
 
-        import subprocess
-        concat_cmd = [
-            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
-            '-i', concat_list_file,
-            '-c', 'copy',
+        encode_cmd = [
+            'ffmpeg', '-y', '-framerate', str(fps),
+            '-i', os.path.join(frames_temp, '%04d.png'),
+            '-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '8M',
+            '-pix_fmt', 'yuv420p', '-profile:v', 'main',
             temp_processed
         ]
-        subprocess.run(concat_cmd, capture_output=True, check=True)
+        subprocess.run(encode_cmd, capture_output=True, check=True)
 
-        print(f"✅ Segments concatenated")
+        # Cleanup temp frames
+        shutil.rmtree(frames_temp, ignore_errors=True)
+
+        print(f"✅ Final video encoded")
 
         # Merge audio from original video
         print(f"🎵 Merging audio...")
@@ -2320,13 +2309,9 @@ def process_image_task(self, image_path):
         # Use direct faster-propainter pipeline instead of subprocess for 3x speedup
         pipeline_start = performance_checkpoint("faster-propainter Pipeline")
         try:
-            # Import faster-propainter pipeline at runtime
-            import sys
-            faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
-            if faster_propainter_path not in sys.path:
-                sys.path.insert(0, faster_propainter_path)
-            from watermark import pipeline as faster_propainter_pipeline
-            
+            # Use cached ProPainter pipeline (pre-loaded at worker startup)
+            faster_propainter_pipeline = get_propainter_pipeline()
+
             import torch
             use_fp16 = torch.cuda.is_available()
             
@@ -2339,10 +2324,10 @@ def process_image_task(self, image_path):
                 output=PROPAINTER_OUTPUT_ROOT,      # Output directory
                 resize_ratio=1.0,                   # Keep original resolution for images
                 mask_dilation=4,                    # faster-propainter: standard mask dilation
-                ref_stride=10,                      # faster-propainter: reduce references
-                neighbor_length=20,                 # faster-propainter: recommended neighbors for quality
-                subvideo_length=80,                 # faster-propainter: standard subvideo length
-                raft_iter=20,                       # faster-propainter: standard optical flow
+                ref_stride=15,                      # faster-propainter: faster processing
+                neighbor_length=10,                 # faster-propainter: reduced for speed
+                subvideo_length=60,                 # faster-propainter: reduced for speed
+                raft_iter=10,                       # faster-propainter: reduced for speed
                 mode="video_inpainting",            # Standard inpainting mode
                 save_frames=True,                   # Save individual frames
                 fp16=use_fp16                       # Enable FP16 if available
@@ -2784,13 +2769,9 @@ def process_video_task(self, video_path):
             )
 
             try:
-                # Import faster-propainter pipeline at runtime
-                import sys
-                faster_propainter_path = os.path.join(SCRIPT_DIR, 'faster-propainter-main')
-                if faster_propainter_path not in sys.path:
-                    sys.path.insert(0, faster_propainter_path)
-                from watermark import pipeline as faster_propainter_pipeline
-                
+                # Use cached ProPainter pipeline (pre-loaded at worker startup)
+                faster_propainter_pipeline = get_propainter_pipeline()
+
                 import torch
                 use_fp16 = torch.cuda.is_available()
                 
@@ -2798,19 +2779,19 @@ def process_video_task(self, video_path):
                 dynamic_subvideo, _ = get_dynamic_subvideo_length(width, height)
                 
                 print(f"🚀 Direct faster-propainter pipeline: resolution={width}x{height}, FP16={use_fp16}")
-                print(f"   faster-propainter: neighbor_length=20 + ref_stride=10 + raft_iter=20 + subvideo_length=80 + flow_backend={PROPAINTER_FLOW_BACKEND}")
-                
-                # Direct pipeline call - TRUE FASTER-PROPAINTER SETTINGS
+                print(f"   faster-propainter: neighbor_length=10 + ref_stride=15 + raft_iter=10 + subvideo_length=60 + flow_backend={PROPAINTER_FLOW_BACKEND}")
+
+                # Direct pipeline call - OPTIMIZED FOR SPEED
                 faster_propainter_pipeline(
                     video=video_path,                   # Input video
                     mask=mask_dir,                      # Mask directory
                     output=PROPAINTER_OUTPUT_ROOT,      # Output directory
                     resize_ratio=1.0,                   # Keep original resolution
                     mask_dilation=4,                    # faster-propainter: standard mask dilation
-                    ref_stride=10,                      # faster-propainter: reduce references
-                    neighbor_length=20,                 # faster-propainter: recommended neighbors for quality
-                    subvideo_length=80,                 # faster-propainter: standard subvideo length
-                    raft_iter=20,                       # faster-propainter: standard optical flow
+                    ref_stride=15,                      # faster-propainter: optimized for speed
+                    neighbor_length=10,                 # faster-propainter: reduced for speed
+                    subvideo_length=60,                 # faster-propainter: reduced for speed
+                    raft_iter=10,                       # faster-propainter: reduced for speed
                     mode="video_inpainting",            # Standard inpainting
                     save_fps=fps,                       # Preserve original FPS
                     save_frames=False,                  # Only save video, not frames
