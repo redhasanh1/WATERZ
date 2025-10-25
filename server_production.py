@@ -902,25 +902,32 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         if not _check_propainter_assets():
             raise RuntimeError("ProPainter assets missing")
 
-        # Download video if on remote worker
-        if not os.path.exists(video_path):
-            # Prefer dynamic base provided by API, else env
+        # Download video if on remote worker OR if not found locally
+        # First extract the local filename (whether video_path is URL or local path)
+        from pathlib import PureWindowsPath
+        base_name = PureWindowsPath(video_path).name if '\\' in video_path else os.path.basename(video_path)
+        local_video_path = os.path.join(UPLOAD_DIR, base_name)
+
+        # Smart check: If file exists locally (same PC workers share uploads/), skip download!
+        if os.path.exists(local_video_path):
+            print(f"✅ Video already exists locally: {local_video_path} (skip download)")
+            video_path = local_video_path
+        elif not os.path.exists(video_path):
+            # File not found locally - download from remote
             tunnel = api_base or os.getenv('TUNNEL_URL')
             if tunnel:
                 try:
                     from urllib.parse import urljoin
                     import requests
-                    from pathlib import PureWindowsPath
-                    base_name = PureWindowsPath(video_path).name if '\\' in video_path else os.path.basename(video_path)
                     download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
                     print(f"🌐 Downloading video: {download_url}")
                     r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
                     r.raise_for_status()
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
-                    video_path = os.path.join(UPLOAD_DIR, base_name)
-                    with open(video_path, 'wb') as f:
+                    with open(local_video_path, 'wb') as f:
                         f.write(r.content)
-                    print(f"✅ Video downloaded: {video_path}")
+                    print(f"✅ Video downloaded: {local_video_path}")
+                    video_path = local_video_path
                 except Exception as e:
                     raise Exception(f"Failed to download video: {e}")
             else:
@@ -942,6 +949,27 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         base_name = Path(video_path).stem
         # Use provided video_id (from upload task_id) for cache consistency, fallback to Celery task ID
         video_id = video_id or (self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8])
+
+        # 🔒 DEDUPLICATION: Check if this video is already being prepared by another worker
+        try:
+            redis_client = celery.backend.client
+            lock_key = f'prepare_lock:{base_name}'
+
+            # Check if another worker is already processing this video
+            if redis_client.exists(lock_key):
+                print(f"⏭️  Video '{base_name}' already being prepared by another worker - skipping duplicate task")
+                cap.release()  # Clean up video capture
+                return {
+                    'status': 'skipped',
+                    'message': f'Video already being processed',
+                    'video_id': base_name
+                }
+
+            # Acquire lock for 5 minutes (YOLO detection + frame extraction time)
+            redis_client.setex(lock_key, 300, self.request.id if hasattr(self.request, 'id') else 'unknown')
+            print(f"🔒 Acquired processing lock for video '{base_name}'")
+        except Exception as e:
+            print(f"⚠️  Deduplication check failed: {e} - proceeding anyway")
 
         # 🚀 REDIS SIGNAL: Tell ALL workers to download this video in parallel!
         # This allows idle workers to start downloading immediately instead of waiting
@@ -965,71 +993,126 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         os.makedirs(shared_mask_dir, exist_ok=True)
         os.makedirs(shared_frames_dir, exist_ok=True)
 
-        print(f"🎯 Running YOLO detection on {total_frames} frames...")
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
+        # 🚀 CACHE CHECK: Skip YOLO if segments already cached from previous request
+        segments = None
+        frames_processed = total_frames
+        cache_key = f'segments_cache:{base_name}'
 
-        zero_mask = np.zeros((height, width), dtype=np.uint8)
-        last_valid_bbox = None
-        frames_processed = 0
-        frames_with_watermark = 0
-        detect_interval = 3
-        warmup_frames = 60
-        hit_found = False
-        det_conf = 0.15
-        bboxes_per_frame = []
+        try:
+            # Check if segments were already detected for this video
+            cached_data = redis_client.get(cache_key)
+            if cached_data:
+                import json
+                import time
+                cached = json.loads(cached_data)
 
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+                # Verify frames/masks still exist (not cleaned up)
+                frame_count = len([f for f in os.listdir(shared_frames_dir) if f.endswith('.png')]) if os.path.exists(shared_frames_dir) else 0
 
-            progress = 10 + int((frames_processed / max(total_frames, 1)) * 30)
-            self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Detection {frames_processed}/{total_frames}'})
-
-            if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
-                detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
-                if detections:
-                    frames_with_watermark += 1
-                    last_valid_bbox = detections[0]['bbox']
-                    hit_found = True
-                    bboxes_per_frame.append(last_valid_bbox)
-                elif last_valid_bbox:
-                    bboxes_per_frame.append(last_valid_bbox)
+                if frame_count > 0:
+                    segments = cached['segments']
+                    frames_processed = cached.get('total_frames', total_frames)
+                    frames_with_watermark = cached.get('frames_with_watermark', 0)  # Load from cache
+                    cache_age = time.time() - cached.get('cached_at', 0)
+                    print(f"✅ Using cached YOLO results for '{base_name}' (age: {cache_age:.1f}s, {frame_count} frames)")
+                    print(f"   ⏭️  Skipping YOLO detection - reusing {len(segments)} cached segments")
+                    # Convert cached segments back to tuples (JSON converts tuples to lists)
+                    segments = [tuple(seg) for seg in segments]
                 else:
-                    bboxes_per_frame.append(None)
+                    print(f"⚠️  Cache found but frames missing - will re-run YOLO")
+                    segments = None
+        except Exception as e:
+            print(f"⚠️  Cache check failed: {e} - will run YOLO")
+            segments = None
 
-                mask = detector.create_mask(frame, detections) if detections else zero_mask
+        # Run YOLO only if not cached
+        if segments is None:
+            print(f"🎯 Running YOLO detection on {total_frames} frames...")
+            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
+
+            zero_mask = np.zeros((height, width), dtype=np.uint8)
+            last_valid_bbox = None
+            frames_processed = 0
+            frames_with_watermark = 0
+            detect_interval = 3
+            warmup_frames = 60
+            hit_found = False
+            det_conf = 0.15
+            bboxes_per_frame = []
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                progress = 10 + int((frames_processed / max(total_frames, 1)) * 30)
+                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Detection {frames_processed}/{total_frames}'})
+
+                if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
+                    detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
+                    if detections:
+                        frames_with_watermark += 1
+                        last_valid_bbox = detections[0]['bbox']
+                        hit_found = True
+                        bboxes_per_frame.append(last_valid_bbox)
+                    elif last_valid_bbox:
+                        bboxes_per_frame.append(last_valid_bbox)
+                    else:
+                        bboxes_per_frame.append(None)
+
+                    mask = detector.create_mask(frame, detections) if detections else zero_mask
+                else:
+                    bboxes_per_frame.append(last_valid_bbox)
+                    mask = detector.create_mask(frame, [{'bbox': last_valid_bbox}]) if last_valid_bbox else zero_mask
+
+                mask_path = os.path.join(shared_mask_dir, f"{frames_processed:04d}.png")
+                cv2.imwrite(mask_path, mask)
+                # Save frame to shared storage (workers will copy/download these)
+                frame_path = os.path.join(shared_frames_dir, f"{frames_processed:04d}.png")
+                cv2.imwrite(frame_path, frame)
+                frames_processed += 1
+
+            cap.release()
+
+            if frames_processed == 0:
+                raise RuntimeError("No frames processed - video may be corrupted")
+
+            print(f"✅ Detection complete: {frames_processed} frames, {frames_with_watermark} with watermarks")
+            print(f"✅ Frames saved to shared storage: {shared_frames_dir}")
+
+            # Detect segments (by watermark position changes)
+            from segment_detector import detect_segments, merge_adjacent_segments
+            segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
+            if segments:
+                segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
+                print(f"📊 Detected {len(segments)} segments for distributed processing")
+                for i, (start, end, bbox) in enumerate(segments):
+                    print(f"   Segment {i+1}: frames {start}-{end} ({end-start+1} frames), bbox={bbox}")
             else:
-                bboxes_per_frame.append(last_valid_bbox)
-                mask = detector.create_mask(frame, [{'bbox': last_valid_bbox}]) if last_valid_bbox else zero_mask
+                # No segments detected - treat entire video as one segment
+                segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
+                print("📊 No segments detected - processing entire video as one segment")
 
-            mask_path = os.path.join(shared_mask_dir, f"{frames_processed:04d}.png")
-            cv2.imwrite(mask_path, mask)
-            # Save frame to shared storage (workers will copy/download these)
-            frame_path = os.path.join(shared_frames_dir, f"{frames_processed:04d}.png")
-            cv2.imwrite(frame_path, frame)
-            frames_processed += 1
-
-        cap.release()
-
-        if frames_processed == 0:
-            raise RuntimeError("No frames processed - video may be corrupted")
-
-        print(f"✅ Detection complete: {frames_processed} frames, {frames_with_watermark} with watermarks")
-        print(f"✅ Frames saved to shared storage: {shared_frames_dir}")
-
-        # Detect segments (by watermark position changes)
-        from segment_detector import detect_segments, merge_adjacent_segments
-        segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
-        if segments:
-            segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
-            print(f"📊 Detected {len(segments)} segments for distributed processing")
-            for i, (start, end, bbox) in enumerate(segments):
-                print(f"   Segment {i+1}: frames {start}-{end} ({end-start+1} frames), bbox={bbox}")
+            # 💾 Cache segment results for future duplicate requests (1 hour TTL)
+            try:
+                import json
+                import time
+                cache_data = {
+                    'segments': segments,  # Will be converted to list by JSON
+                    'total_frames': frames_processed,
+                    'frames_with_watermark': frames_with_watermark,  # Include for accurate stats
+                    'cached_at': time.time()
+                }
+                redis_client.setex(cache_key, 3600, json.dumps(cache_data))
+                print(f"💾 Cached YOLO results for '{base_name}' (1 hour TTL)")
+            except Exception as e:
+                print(f"⚠️  Failed to cache results: {e}")
         else:
-            # No segments detected - treat entire video as one segment
-            segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
-            print("📊 No segments detected - processing entire video as one segment")
+            # Using cached segments - release video capture
+            cap.release()
+            # frames_with_watermark should be loaded from cache, but add fallback
+            if 'frames_with_watermark' not in locals():
+                frames_with_watermark = 0  # Fallback if not in cache
 
         # Optional: force time-based splitting to ensure multi-GPU distribution
         try:
@@ -1165,6 +1248,15 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # Create a fake task ID for frontend tracking (we'll track the segments)
         tracking_task_id = f"distributed_{video_id}"
 
+        # 🔓 Release processing lock - we're done with preparation
+        try:
+            redis_client = celery.backend.client
+            lock_key = f'prepare_lock:{base_name}'
+            redis_client.delete(lock_key)
+            print(f"🔓 Released processing lock for video '{base_name}'")
+        except Exception as e:
+            print(f"⚠️  Failed to release lock: {e}")
+
         # Return tracking ID for frontend
         return {
             'chord_id': tracking_task_id,
@@ -1173,6 +1265,15 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         }
 
     except Exception as e:
+        # 🔓 Release processing lock on error
+        try:
+            redis_client = celery.backend.client
+            lock_key = f'prepare_lock:{base_name}'
+            redis_client.delete(lock_key)
+            print(f"🔓 Released processing lock for video '{base_name}' (error cleanup)")
+        except:
+            pass  # Ignore cleanup errors
+
         print(f"❌ Error preparing video: {e}")
         import traceback
         traceback.print_exc()
@@ -1230,7 +1331,9 @@ def process_segment_task(self, segment_data):
         shared_frames_dir = segment_data.get('shared_frames_dir')
 
         # Multi-PC optimization: Skip frame sharing, download video directly in parallel
-        is_multi_pc = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
+        # Smart detection: Check if shared dirs are locally accessible (same PC = fast file copy)
+        is_local_worker = shared_frames_dir and os.path.exists(shared_frames_dir)
+        is_multi_pc = not is_local_worker
 
         import requests
         frames_copied = 0
@@ -1355,10 +1458,43 @@ def process_segment_task(self, segment_data):
 
         print(f"   ✅ Downloaded {frames_copied} frames ({start_frame}-{end_frame})")
 
-        # Try to download masks from shared location (same PC) or regenerate them (different PC)
+        # Try to get masks from shared location (same PC) or download/regenerate them (different PC)
         masks_downloaded = False
-        if origin_base and shared_mask_dir:
-            print(f"   📥 Attempting to download masks from shared location...")
+
+        # Try local filesystem first (same PC - FAST, direct file copy)
+        if shared_mask_dir and os.path.exists(shared_mask_dir):
+            print(f"   📁 Copying masks from local shared directory...")
+            self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Copying masks'})
+
+            try:
+                masks_needed = list(range(start_frame, end_frame + 1))
+                masks_succeeded = 0
+
+                for abs_frame_idx in masks_needed:
+                    mask_filename = f"{abs_frame_idx:04d}.png"
+                    shared_mask_path = os.path.join(shared_mask_dir, mask_filename)
+
+                    if os.path.exists(shared_mask_path):
+                        # Save to local segment mask dir with LOCAL index (0000, 0001, etc.)
+                        local_idx = abs_frame_idx - start_frame
+                        local_mask_path = os.path.join(seg_mask_dir, f"{local_idx:04d}.png")
+                        shutil.copy2(shared_mask_path, local_mask_path)
+                        masks_succeeded += 1
+                    else:
+                        # Missing mask - break and regenerate all
+                        break
+
+                if masks_succeeded == len(masks_needed):
+                    print(f"   ✅ Copied {masks_succeeded} masks from local storage (fast!)")
+                    masks_downloaded = True
+                else:
+                    print(f"   ⚠️  Only {masks_succeeded}/{len(masks_needed)} masks found locally - will regenerate")
+            except Exception as copy_err:
+                print(f"   ⚠️  Local mask copy failed: {copy_err} - will regenerate")
+
+        # Fallback: HTTP download (different PC - SLOW but necessary for distributed workers)
+        elif origin_base and shared_mask_dir:
+            print(f"   📥 Downloading masks from remote location...")
             self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
 
             try:
@@ -1385,7 +1521,7 @@ def process_segment_task(self, segment_data):
                         break
 
                 if masks_succeeded == len(masks_needed):
-                    print(f"   ✅ Downloaded {masks_succeeded} masks from shared location")
+                    print(f"   ✅ Downloaded {masks_succeeded} masks from remote location")
                     masks_downloaded = True
                 else:
                     print(f"   ⚠️  Only {masks_succeeded}/{len(masks_needed)} masks downloaded - will regenerate")
@@ -1427,6 +1563,7 @@ def process_segment_task(self, segment_data):
             # Masks were downloaded - need to extract bbox from them
             print(f"   📊 Using downloaded masks - extracting bbox info...")
             last_valid_bbox = bbox  # Use bbox from segment_data (from centralized detection)
+            frames_with_watermark = frames_copied  # Assume all frames have watermarks (already filtered)
 
         # Update crop region based on detected bbox (calculate_crop_region handles min sizing)
         if last_valid_bbox:
