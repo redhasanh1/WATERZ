@@ -7,7 +7,8 @@ echo.
 cd /d "%~dp0"
 
 REM Add python_packages, PyTorch CUDA libs, and TensorRT libs to PATH so TensorRT can find DLLs
-set PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%~dp0TensorRT-10.7.0.23\lib;%PATH%
+call "%~dp0SETUP_TRT_ENV.bat" >nul 2>&1
+set PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%PATH%
 
 REM Force D drive
 set PIP_CACHE_DIR=%~dp0pip_cache

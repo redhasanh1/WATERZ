@@ -3,7 +3,7 @@ REM Add TensorRT and (optionally) CUDA to PATH for current session
 setlocal
 
 REM Adjust this root if you relocate TensorRT
-set "TRT_ROOT=%~dp0TensorRT-10.7.0.23"
+set "TRT_ROOT=%~dp0TensorRT-10.13.3.9"
 
 if exist "%TRT_ROOT%\lib\nvinfer_10.dll" (
   set "PATH=%TRT_ROOT%\lib;%TRT_ROOT%\bin;%PATH%"

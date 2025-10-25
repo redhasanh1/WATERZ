@@ -1,14 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(where:*)",
-      "Bash(winget install:*)",
-      "Bash(setx PATH \"%PATH%;C:\\Program Files\\Python311;C:\\Program Files\\Python311\\Scripts\")",
-      "Bash(cmd /c \"START_CELERY.bat\")",
-      "Read(//c/Program Files/**)",
-      "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" -m pip install celery redis flask flask-cors opencv-python numpy torch torchvision --extra-index-url https://download.pytorch.org/whl/cu121)",
-      "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\":*)",
-      "Bash(cat:*)"
+      "Bash(powershell -Command:*)"
     ],
     "deny": [],
     "ask": []

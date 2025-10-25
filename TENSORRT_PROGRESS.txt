@@ -194,6 +194,45 @@ RFCNet (Step 3) - BLOCKED:
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Last Updated: 2025-10-25
 RTX 5070 (Blackwell SM 120) | TensorRT 10.13.3.9 | PyTorch 2.10.0+cu128
+
+UPDATE: STEP 3 DCNv2 PLUGIN BUILD - COMPLETE
+Date: 2025-10-25
+
+DCNv2 Plugin Status: SUCCESSFULLY BUILT
+Plugin DLL: E:\watermarkz\mmdeploy\build-trt\bin\Release\mmdeploy_tensorrt_ops.dll
+
+TensorRT 10.x Compatibility Fixes Applied:
+- gather_topk.cpp (lines 81-93): Added int64_t to int32_t conversion loops
+- trt_grid_sampler.cpp (lines 110-122): Added dimension conversion for grid_sample
+- Issue: TensorRT 10.x changed Dims struct from int32_t to int64_t
+- Solution: Convert int64_t dimension arrays to int32_t before passing to kernels
+
+Build Environment:
+- Visual Studio 2022 Build Tools (MSVC 19.44.35219.0)
+- CMake 4.2.0-rc1
+- CUDA 12.8 (nvcc 12.8.61)
+- TensorRT 10.13.3.9 (versioned libraries: nvinfer_10.lib, nvinfer_plugin_10.lib)
+- cuDNN 9.14 (CUDA 12.9 compatibility paths)
+
+Build Output:
+- Compilation: SUCCESS (warnings only, no errors)
+- Warnings: C4244 type conversions (harmless, expected in mmdeploy codebase)
+- Plugin contains: DCNv2, GridSampler, ROIAlign, NMS, and other TensorRT ops
+
+NEXT STEPS - RFCNet & ProPainter TensorRT:
+1. Export RFCNet ONNX with DCNv2 custom op registration
+2. Export ProPainter ONNX with DCNv2 custom op registration
+3. Build TensorRT FP16 engines with --plugins flag pointing to mmdeploy_tensorrt_ops.dll
+4. Wire TRT runtime into faster-propainter-main/watermark.py
+5. Benchmark: Expected 5-7x speedup vs PyTorch for both models
+
+BLACKWELL OPTIMIZATION PATH:
+With DCNv2 plugin complete, full Blackwell-optimized pipeline is now possible:
+- NVOF Hardware Optical Flow: 15-20x vs RAFT PyTorch
+- RFCNet TRT FP16 + DCNv2: 5-7x vs PyTorch
+- ProPainter TRT FP16 + DCNv2: 5-7x vs PyTorch
+- CUDA Streams Pipeline: 2-3x throughput gain
+Target: 50-100x end-to-end speedup (100ms → 1-2ms per frame)
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 

@@ -1,0 +1,144 @@
+==========================================
+  Docker Image Usage Instructions
+==========================================
+
+IMAGE: humblewoslayer/watermarkz:latest
+Optimized for NVIDIA RTX 5090 (also works on RTX 4090, 4080, 3090, 5070, etc.)
+
+
+==========================================
+  1. BUILD THE IMAGE
+==========================================
+
+Run the build script:
+  build-docker.bat
+
+Or manually:
+  docker build -t humblewoslayer/watermarkz:latest .
+
+
+==========================================
+  2. PUSH TO DOCKER HUB
+==========================================
+
+Login first:
+  docker login
+
+Push the image:
+  docker push humblewoslayer/watermarkz:latest
+
+
+==========================================
+  3. RUN ON SALAD GPU (RTX 5090)
+==========================================
+
+Basic command:
+  docker run --gpus all \
+    -e REDIS_URL="redis://:password@host:port/0" \
+    humblewoslayer/watermarkz:latest
+
+With manual concurrency override:
+  docker run --gpus all \
+    -e REDIS_URL="redis://:password@host:port/0" \
+    -e CELERY_CONCURRENCY=6 \
+    humblewoslayer/watermarkz:latest
+
+With custom worker name:
+  docker run --gpus all \
+    -e REDIS_URL="redis://:password@host:port/0" \
+    -e WORKER_NAME="worker_5090_1@salad" \
+    humblewoslayer/watermarkz:latest
+
+
+==========================================
+  4. AUTO-DETECTED SETTINGS
+==========================================
+
+The container automatically detects GPU VRAM and sets optimal concurrency:
+
+  32GB+ (RTX 5090, 4090)     → concurrency=6
+  24GB  (RTX 4080, 3090)     → concurrency=4
+  12GB  (RTX 5070, 4070)     → concurrency=2
+  <12GB (Lower-end GPUs)     → concurrency=1
+
+
+==========================================
+  5. EXPECTED PERFORMANCE (300 frames)
+==========================================
+
+RTX 5090 (concurrency=6, batch_size=128):
+  - Estimated: ~7 seconds total
+  - 3x faster than RTX 5070
+
+RTX 5070 (concurrency=2, batch_size=64):
+  - Current: ~21 seconds total
+  - Baseline performance
+
+
+==========================================
+  6. ENVIRONMENT VARIABLES
+==========================================
+
+Required:
+  REDIS_URL             Redis connection string
+
+Optional:
+  CELERY_CONCURRENCY    Override auto-detected concurrency
+  WORKER_NAME           Custom worker name (default: worker@hostname)
+
+
+==========================================
+  7. TROUBLESHOOTING
+==========================================
+
+Check GPU is accessible:
+  docker run --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
+
+Check logs:
+  docker logs <container_id>
+
+Interactive shell (debug):
+  docker run --gpus all -it --entrypoint /bin/bash humblewoslayer/watermarkz:latest
+
+
+==========================================
+  8. MULTI-WORKER SCALING
+==========================================
+
+Run multiple workers on same GPU (if VRAM allows):
+  docker run --gpus all -e REDIS_URL="..." -e WORKER_NAME="worker1@host" humblewoslayer/watermarkz:latest
+  docker run --gpus all -e REDIS_URL="..." -e WORKER_NAME="worker2@host" humblewoslayer/watermarkz:latest
+
+Run across multiple GPUs:
+  docker run --gpus '"device=0"' -e REDIS_URL="..." humblewoslayer/watermarkz:latest
+  docker run --gpus '"device=1"' -e REDIS_URL="..." humblewoslayer/watermarkz:latest
+
+
+==========================================
+  9. IMAGE SIZE
+==========================================
+
+Estimated size: 6-8GB
+Includes:
+  - CUDA 12.1 runtime
+  - PyTorch + TensorRT
+  - ProPainter models
+  - YOLO TensorRT engine (FP16 batch)
+  - All dependencies
+
+
+==========================================
+  10. NEXT STEPS FOR RTX 5090 TESTING
+==========================================
+
+1. Build and push image to Docker Hub
+2. Deploy on Salad GPU RTX 5090 instance
+3. Update server_production.py:
+   - Set batch_size=128 (line 1140 and 1757)
+4. Test with 300-frame video
+5. Compare performance vs RTX 5070
+
+Expected results:
+  - YOLO: 1.3s → 0.5-0.7s (batch_size=128, less overhead)
+  - ProPainter: 20s → 7s (6 concurrent segments vs 2)
+  - Total: 21s → 7-8s (3x speedup!)

@@ -4,7 +4,7 @@ setlocal
 
 call "%~dp0SETUP_TRT_ENV.bat"
 
-set "TRTEXEC=%~dp0TensorRT-10.7.0.23\bin\trtexec.exe"
+set "TRTEXEC=%~dp0TensorRT-10.13.3.9\bin\trtexec.exe"
 set "ONNX=faster-propainter-main\engines\raft\fastflownet.onnx"
 set "ENGINE=faster-propainter-main\engines\raft\raft_fp16.engine"
 set "TIMING=faster-propainter-main\engines\raft\trt_timing_cache"

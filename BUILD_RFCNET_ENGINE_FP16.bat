@@ -3,15 +3,17 @@ REM Build RFCNet FP16 TensorRT engine (requires DCNv2 TRT plugin)
 setlocal
 
 call "%~dp0SETUP_TRT_ENV.bat"
+call "%~dp0SET_DCNV2_PATH.bat"
+if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
-set "TRTEXEC=%~dp0TensorRT-10.7.0.23\bin\trtexec.exe"
+set "TRTEXEC=trtexec"
 set ONNX=faster-propainter-main\engines\rfcnet\rfcnet.onnx
 set ENGINE=faster-propainter-main\engines\rfcnet\rfcnet_fp16.engine
 set TIMING_CACHE=faster-propainter-main\engines\rfcnet\trt_timing_cache
 
-REM Path to DCNv2 TensorRT plugin DLL (set before running or edit below)
-if "%DCNV2_PLUGIN_DLL%"=="" (
-  echo DCNV2_PLUGIN_DLL not set. Set it to your dcnv2_trt_plugin.dll path.
+if not exist "%ONNX%" (
+  echo ERROR: ONNX model not found: %ONNX%
+  echo Run BUILD_RFCNET_ONNX.bat first to export the model.
   exit /b 1
 )
 

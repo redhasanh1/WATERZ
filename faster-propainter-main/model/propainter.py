@@ -17,6 +17,14 @@ from triton_ops import fused_flow_warp_mask, triton_is_available
 
 from .misc import constant_init
 
+# Use mmcv ops for TensorRT compatibility
+try:
+    from mmcv.ops import modulated_deform_conv2d
+    MMCV_AVAILABLE = True
+except ImportError:
+    MMCV_AVAILABLE = False
+    print("Warning: mmcv not found, falling back to torchvision.ops")
+
 def length_sq(x):
     return torch.sum(torch.square(x), dim=1, keepdim=True)
 
@@ -65,9 +73,15 @@ class DeformableAlignment(ModulatedDeformConv2d):
         # mask
         mask = torch.sigmoid(mask)
 
-        return torchvision.ops.deform_conv2d(x, offset, self.weight, self.bias, 
-                                             self.stride, self.padding,
-                                             self.dilation, mask)
+        # Use mmcv ops for TensorRT compatibility, fallback to torchvision
+        if MMCV_AVAILABLE:
+            return modulated_deform_conv2d(x, offset, mask, self.weight, self.bias,
+                                          self.stride, self.padding,
+                                          self.dilation, self.deform_groups)
+        else:
+            return torchvision.ops.deform_conv2d(x, offset, self.weight, self.bias,
+                                                self.stride, self.padding,
+                                                self.dilation, mask)
 
 
 class BidirectionalPropagation(nn.Module):

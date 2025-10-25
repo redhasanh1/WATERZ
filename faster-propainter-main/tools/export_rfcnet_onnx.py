@@ -120,6 +120,7 @@ def export_rfcnet_onnx(args: argparse.Namespace) -> None:
         input_names=["masked_flows", "masks"],
         output_names=output_names,
         dynamic_axes=dynamic_axes,
+        dynamo=False,  # Use legacy ONNX exporter (PyTorch 2.x dynamo has constraint issues)
     )
 
     print(f"✅ RFCNet ONNX exported to {output_path}")

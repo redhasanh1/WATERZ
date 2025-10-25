@@ -6,7 +6,11 @@ set PYTHONPATH=%CD%\faster-propainter-main;%PYTHONPATH%
 
 if not exist faster-propainter-main\engines\rfcnet mkdir faster-propainter-main\engines\rfcnet
 
-python faster-propainter-main\tools\export_rfcnet_onnx.py ^
+REM Use explicit Python path to avoid Windows Store stub
+set PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python311\python.exe
+if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
+
+"%PYTHON_PATH%" faster-propainter-main\tools\export_rfcnet_onnx.py ^
   --weights weights\recurrent_flow_completion.pth ^
   --out faster-propainter-main\engines\rfcnet\rfcnet.onnx ^
   --opset 12
