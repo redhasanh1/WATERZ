@@ -22,5 +22,6 @@ set PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python311\python.exe
 if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
 
 REM Use module form so we don't rely on a celery.exe script
-REM Use solo pool for Windows stability (avoids prefork errors)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=solo 
+REM Use threads pool for Windows (allows concurrent tasks, unlike solo)
+REM concurrency=4 ensures a thread is available for finalize while segments run
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4 

@@ -106,7 +106,7 @@ _ensure_cuda_torch()
 
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
-from celery import Celery
+from celery import Celery, chord
 import cv2
 import numpy as np
 import io
@@ -1254,41 +1254,30 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # We got the lock! This worker will dispatch segments
         print(f"🔒 Lock acquired - this worker will dispatch segments")
 
-        # Manually dispatch each segment task to guarantee they all get queued
-        # This is more reliable than chord with solo pool
-        print(f"🔥 Dispatching {len(segments)} segment tasks manually across all workers...")
+        # ⚡ OPTIMIZATION: Use Celery chord to dispatch segments in parallel
+        # Chord automatically waits for ALL segments to complete, then triggers finalize
+        print(f"🔥 Creating chord: {len(segments)} segment tasks → finalize callback")
         self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
 
         # Add total_segments to each segment data
         for seg in segment_tasks_data:
             seg['total_segments'] = len(segments)
 
-        # Create a tracking key in Redis for this video
+        # Create task signatures (delayed execution) for each segment
+        segment_sigs = [process_segment_task.s(seg_data) for seg_data in segment_tasks_data]
+
+        # Create chord: segments run in parallel, finalize runs when ALL complete
+        # The chord returns a finalize task ID that we can track
+        workflow = chord(segment_sigs)(finalize_video_task.s(prepare_result=result))
+
+        # Store tracking for status endpoint (distributed_ pattern compatibility)
         tracking_key = f"segments:{video_id}"
-        celery.backend.set(tracking_key, 0)  # Initialize counter to 0
-        celery.backend.set(f"{tracking_key}:total", len(segments))  # Store total
-        celery.backend.set(f"{tracking_key}:prepare_result", json.dumps(result))  # Store prepare result
+        celery.backend.set(f"{tracking_key}:total", len(segments))
+        celery.backend.set(f"{tracking_key}:prepare_result", json.dumps(result))
 
-        # Dispatch each segment task individually - guarantees queue delivery
-        segment_tasks = []
-        for seg_data in segment_tasks_data:
-            # Add tracking info to segment data
-            seg_data['tracking_key'] = tracking_key
-
-            task = process_segment_task.apply_async(args=[seg_data])
-            segment_tasks.append(task.id)
-
-            # Store task ID in Redis for result collection later (1 hour TTL)
-            celery.backend.client.setex(f"{tracking_key}:task_{seg_data['seg_idx']}", 3600, task.id)
-
-            print(f"   ✅ Segment {seg_data['seg_idx']+1} task queued: {task.id}")
-
-        print(f"✅ All {len(segments)} segment tasks dispatched to queue!")
-        print(f"   Workers will grab and process them in parallel")
-        print(f"   Tracking progress with key: {tracking_key}")
-
-        # Create a fake task ID for frontend tracking (we'll track the segments)
-        tracking_task_id = f"distributed_{video_id}"
+        print(f"✅ Chord dispatched! Segments will run in parallel across workers")
+        print(f"   Finalize callback ID: {workflow.id}")
+        print(f"   Finalize will auto-trigger when all {len(segments)} segments complete")
 
         # 🔓 Release processing lock - we're done with preparation
         try:
@@ -1299,11 +1288,11 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         except Exception as e:
             print(f"⚠️  Failed to release lock: {e}")
 
-        # Return tracking ID for frontend
+        # Return distributed task ID for frontend tracking (status endpoint recognizes this pattern)
         return {
-            'chord_id': tracking_task_id,
+            'chord_id': f'distributed_{video_id}',
             'status': 'processing',
-            'message': f'Distributed processing started: {len(segments)} segments across all workers'
+            'message': f'Chord workflow: {len(segments)} segments → finalize callback'
         }
 
     except Exception as e:
@@ -1777,56 +1766,7 @@ def process_segment_task(self, segment_data):
 
         # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
         # Celery automatically sets state to SUCCESS when the task returns normally
-
-        # Track completion in Redis for manual coordination
-        tracking_key = segment_data.get('tracking_key')
-        if tracking_key:
-            import json
-
-            # FIRST: Store this segment's result in Redis (before incrementing counter)
-            # This prevents race condition where counter = total but results aren't ready yet
-            celery.backend.client.setex(f"{tracking_key}:result_{seg_idx}", 3600, json.dumps(result))
-
-            # THEN: Increment counter atomically
-            completed = celery.backend.client.incr(tracking_key)
-            total = int(celery.backend.get(f"{tracking_key}:total") or 0)
-
-            print(f"📊 Tracking: {completed}/{total} segments complete")
-
-            # Check if this is the last segment
-            if completed >= total:
-                # Use atomic lock to ensure only ONE worker triggers finalize
-                lock_key = f"{tracking_key}:finalize_lock"
-                if celery.backend.client.setnx(lock_key, 1):
-                    # This worker won the race - trigger finalize
-                    celery.backend.client.expire(lock_key, 60)  # Lock expires in 60s
-
-                    print(f"🎉 All segments complete! This worker triggering finalize...")
-
-                    # Collect all segment results from Redis (stored before counter increment)
-                    # This avoids race conditions with AsyncResult
-                    segment_results = []
-                    for i in range(total):
-                        result_json = celery.backend.get(f"{tracking_key}:result_{i}")
-                        if result_json:
-                            result_data = json.loads(result_json)
-                            segment_results.append(result_data)
-                            print(f"   ✅ Collected segment {i} result: {result_data['cleaned_frames_dir']}")
-                        else:
-                            print(f"⚠️  Segment {i} result not found in Redis")
-
-                    # Get prepare result
-                    prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
-                    if prepare_result_json:
-                        prepare_result = json.loads(prepare_result_json)
-
-                        if len(segment_results) == total:
-                            finalize_video_task.apply_async(args=[segment_results, prepare_result])
-                            print(f"✅ Finalize task triggered with {len(segment_results)} segment results!")
-                        else:
-                            print(f"❌ Cannot finalize: expected {total} segments, got {len(segment_results)}")
-                else:
-                    print(f"⏭️  Another worker already triggered finalize")
+        # Chord will automatically trigger finalize when all segments complete
 
         return result
 
@@ -1881,19 +1821,35 @@ def finalize_video_task(self, segment_results, prepare_result):
 
         print(f"✅ Collected {len(all_frame_paths)} frames from {total_segments} segments")
 
+        # Validate frames collected
+        if len(all_frame_paths) == 0:
+            raise Exception(f"No frames collected from segments! Check segment results.")
+
         # Encode directly to video (single encode, no concat needed!)
         print(f"🎬 Encoding final video from frames...")
         self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Encoding final video'})
 
-        # Create temp dir with symlinks for ffmpeg (faster than copying)
+        # Create temp dir for ffmpeg input frames
         frames_temp = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames")
         os.makedirs(frames_temp, exist_ok=True)
 
+        print(f"📁 Copying {len(all_frame_paths)} frames to temp directory...")
         for i, frame_path in enumerate(all_frame_paths):
+            if not os.path.exists(frame_path):
+                raise Exception(f"Frame missing: {frame_path}")
             # Copy frame with sequential naming for ffmpeg
             import shutil
             shutil.copy2(frame_path, os.path.join(frames_temp, f"{i:04d}.png"))
 
+        # Verify frames copied
+        copied_frames = len([f for f in os.listdir(frames_temp) if f.endswith('.png')])
+        print(f"✅ Copied {copied_frames} frames to {frames_temp}")
+
+        if copied_frames == 0:
+            raise Exception(f"No frames in temp directory after copy!")
+
+        # Ensure output directory exists
+        os.makedirs(RESULT_DIR, exist_ok=True)
         temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
 
         encode_cmd = [
@@ -1903,7 +1859,18 @@ def finalize_video_task(self, segment_results, prepare_result):
             '-pix_fmt', 'yuv420p', '-profile:v', 'main',
             temp_processed
         ]
-        subprocess.run(encode_cmd, capture_output=True, check=True)
+
+        try:
+            result = subprocess.run(encode_cmd, capture_output=True, check=True, text=True)
+        except subprocess.CalledProcessError as e:
+            print(f"❌ FFmpeg encoding failed!")
+            print(f"   Command: {' '.join(encode_cmd)}")
+            print(f"   stderr: {e.stderr}")
+            raise
+        except FileNotFoundError as e:
+            print(f"❌ FFmpeg not found! Ensure ffmpeg is in PATH")
+            print(f"   Tried to run: {encode_cmd[0]}")
+            raise
 
         # Cleanup temp frames
         shutil.rmtree(frames_temp, ignore_errors=True)
@@ -1957,10 +1924,11 @@ def finalize_video_task(self, segment_results, prepare_result):
         print(f"🧹 Cleaning up...")
         self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Cleaning up'})
 
-        for seg_video in segment_videos:
-            if os.path.exists(seg_video):
-                os.remove(seg_video)
-        os.remove(concat_list_file)
+        # Cleanup segment cleaned frame directories
+        for seg_result in segment_results:
+            cleaned_dir = seg_result.get('cleaned_frames_dir')
+            if cleaned_dir and os.path.exists(cleaned_dir):
+                shutil.rmtree(cleaned_dir, ignore_errors=True)
 
         # Cleanup shared directories
         shared_mask_dir = prepare_result.get('shared_mask_dir')
@@ -1972,6 +1940,7 @@ def finalize_video_task(self, segment_results, prepare_result):
 
         # Upload final result
         uploaded_path = None
+        tunnel = os.getenv('TUNNEL_URL')
         if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
             try:
                 upload_url = f"{tunnel.rstrip('/')}/api/upload-result"
@@ -2003,6 +1972,10 @@ def finalize_video_task(self, segment_results, prepare_result):
                 'height': prepare_result['height'],
             }
         }
+
+        # Mark distributed task as complete in Redis (for status endpoint)
+        tracking_key = f"segments:{video_id}"
+        celery.backend.set(tracking_key, total_segments)  # Set completed = total
 
         print(f"✅ Video finalized: {final_output}")
         self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
