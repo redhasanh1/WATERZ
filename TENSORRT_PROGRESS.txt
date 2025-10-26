@@ -236,3 +236,367 @@ Target: 50-100x end-to-end speedup (100ms → 1-2ms per frame)
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 
+================================================================================
+ STEP 4: RFCNet Flow Completion - COMPLETE WITH TensorRT + DCNv2
+================================================================================
+
+Status: SUCCESSFULLY BUILT & BENCHMARKED
+Date: 2025-10-25
+
+Engine Location: faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
+ONNX Model: faster-propainter-main/engines/rfcnet/rfcnet.onnx (20 MB)
+Export Script: faster-propainter-main/tools/export_rfcnet_onnx.py
+Build Scripts: BUILD_RFCNET_ONNX.bat, BUILD_RFCNET_ENGINE_FP16.bat
+
+--------------------------------------------------------------------------------
+ MODEL SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+Model: RecurrentFlowCompleteNet (RFCNet)
+Architecture: BidirectionalPropagation with 14 DCNv2 layers
+Source: faster-propainter-main/model/recurrent_flow_completion.py
+
+Network Details:
+- Feature Propagation: Bidirectional temporal propagation
+- Deformable Alignment: SecondOrderDeformableAlignment modules
+- DCNv2 Configuration (all 14 layers):
+  * kernel_size: 3x3
+  * stride: 1
+  * padding: 1
+  * dilation: 1
+  * deform_groups: 16
+  * groups: 1
+  * out_channels: 128 (fixed for all DCNv2 layers)
+
+Input Shapes:
+- masked_flows: [B, T, 2, H, W] - Flow field with masked regions
+- masks: [B, T, 1, H, W] - Binary mask indicating invalid regions
+
+Output Shape:
+- flow: [B, T, 2, H, W] - Completed flow field
+
+Typical Runtime Shape (from export):
+- Input: [1, 8, 2, 480, 480] (1 batch, 8 frames, 2D flow, 480x480 resolution)
+- Output: [1, 8, 2, 480, 480]
+
+ONNX Opset: 12 (required for mmdeploy DCNv2 op compatibility)
+Dynamic Axes: DISABLED (fixed shape for debugging TensorRT shape inference)
+
+--------------------------------------------------------------------------------
+ CRITICAL DEPENDENCIES & VERSIONS
+--------------------------------------------------------------------------------
+
+Core Requirements:
+[X] CUDA 12.8 (nvcc 12.8.61)
+[X] cuDNN 9.14 (CUDA 12.x compatible)
+[X] TensorRT 10.13.3.9
+[X] PyTorch 2.10.0.dev20251024+cu128
+[X] torchvision 0.20.0.dev20251024+cu128
+[X] Visual Studio 2022 Build Tools (MSVC 19.44.35219.0)
+[X] CMake 4.2.0-rc1
+
+Python Packages:
+[X] onnx 1.17.0 (for model manipulation)
+[X] mmdeploy 1.3.1 (DCNv2 TensorRT plugin source)
+
+GPU Architecture Requirements:
+[X] Compute Capability 90 (SM 90) kernel support for Blackwell
+[X] FP16 Tensor Core support
+[X] CUBLAS (cuDNN NOT supported as TensorRT tactic source on Blackwell)
+
+File Dependencies:
+[X] mmdeploy_tensorrt_ops.dll (DCNv2 plugin, 21 MB)
+    Location: TensorRT-10.13.3.9/lib/mmdeploy_tensorrt_ops.dll
+    Built with: CMAKE_CUDA_ARCHITECTURES="80;86;89;90"
+[X] TensorRT runtime DLLs (nvinfer_10.dll, nvinfer_plugin_10.dll, etc.)
+[X] CUDA runtime DLLs (cudart64_12.dll, cublas*.dll)
+[X] cuDNN DLLs (cudnn64_9.dll + 7 additional cuDNN modules)
+
+Environment Variables:
+- PATH must include: TensorRT-10.13.3.9\lib (for all DLLs)
+- TENSORRT_DIR: E:\watermarkz\TensorRT-10.13.3.9
+- CUDA_PATH: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8
+
+--------------------------------------------------------------------------------
+ CRITICAL FIXES REQUIRED FOR SUCCESS
+--------------------------------------------------------------------------------
+
+FIX #1: PyTorch ONNX Argument Order (MOST CRITICAL)
+-----------------------------------------------------
+Problem: torchvision::deform_conv2d has no ONNX symbolic function
+
+Discovery: PyTorch passes deform_conv2d arguments in NON-STANDARD order during
+           ONNX tracing, different from torchvision.ops.deform_conv2d signature
+
+Documented Signature:
+  deform_conv2d(input, offset, weight, bias, stride, padding, dilation, mask)
+
+ACTUAL PyTorch ONNX Tracing Order:
+  args[0] = input (Concat node)
+  args[1] = weight (prim::Param - convolution weight tensor!)
+  args[2] = offset (Concat node)
+  args[3] = mask (Sigmoid node)
+  args[4] = bias (prim::Param)
+  args[5-13] = stride/padding/dilation constants
+
+Solution in export_rfcnet_onnx.py (lines 64-68):
+  input_arg = args[0]
+  weight = args[1]     # CRITICAL: weight at position 1, not 2!
+  offset = args[2]     # offset at position 2, not 1!
+  mask = args[3]
+  bias = args[4]
+
+Why This Matters:
+- mmdeploy plugin reads weight.shape[0] to determine output channels
+- Wrong tensor passed as weight -> plugin outputs [1,1,3,3] instead of [1,128,H,W]
+- Caused TensorRT shape inference to fail downstream
+
+Debug Method Used:
+- Added extensive logging to print all args with kind/name/shape
+- Used torch.onnx.symbolic_helper._get_tensor_sizes to inspect shapes
+- Identified prim::Param nodes (model parameters) vs computed tensors
+- Cross-referenced shapes with model architecture
+
+File: faster-propainter-main/tools/export_rfcnet_onnx.py
+Lines: 31-70 (debug logging), 64-68 (corrected extraction)
+
+
+FIX #2: DCNv2 Plugin Compute Capability 90 for Blackwell
+----------------------------------------------------------
+Problem: TensorRT engine builds successfully but fails at runtime:
+  "Cuda failure: 'no kernel image is available for execution on the device'"
+
+Root Cause: mmdeploy_tensorrt_ops.dll compiled for CC 80/86/89 only
+            RTX 5070 (Blackwell, CC 12.0) requires CC 90 kernel support
+
+Solution in build_dcnv2_plugin.bat (line 18):
+  cmake -D CMAKE_CUDA_ARCHITECTURES="80;86;89;90" ...
+
+Build Output Verification:
+  --generate-code=arch=compute_90,code=[compute_90,sm_90]
+
+Why This Matters:
+- Blackwell architecture (RTX 50-series) requires SM 90 kernels
+- Without CC 90: runtime error at first DCNv2 layer execution
+- Plugin must be rebuilt whenever CUDA arch support changes
+
+File: build_dcnv2_plugin.bat
+Line: 18
+
+
+FIX #3: Remove cuDNN Tactic Source for Blackwell
+--------------------------------------------------
+Problem: TensorRT engine build fails with:
+  "Error Code 10: TensorRT does not support cuDNN as a tactic source in
+   Blackwell and later architectures. Please unset TacticSource::kCUDNN."
+
+Root Cause: TensorRT 10.x architectural restriction on Blackwell
+            cuDNN tactics not supported for standard layer optimization
+
+Solution in BUILD_RFCNET_ENGINE_FP16.bat (lines 28-33):
+  trtexec --tacticSources=+CUBLAS  # removed +CUDNN
+
+Important Notes:
+- This only affects TensorRT's graph optimizer tactic selection
+- DCNv2 plugin can still use cuDNN internally (separate from tactic sources)
+- Only CUBLAS available for standard convolution/pooling layers on Blackwell
+
+File: BUILD_RFCNET_ENGINE_FP16.bat
+Lines: 27-33
+
+
+FIX #4: Unicode Encoding in Python Export Script
+--------------------------------------------------
+Problem: Windows CMD console can't display UTF-8 symbols
+  "UnicodeEncodeError: 'charmap' codec can't encode character '\u2713'"
+
+Solution in export_rfcnet_onnx.py (lines 140, 255-258):
+  Replace all UTF-8 symbols with ASCII text:
+  "[OK]", "[SUCCESS]", "[WARNING]"
+
+File: faster-propainter-main/tools/export_rfcnet_onnx.py
+Lines: 140, 255-258
+
+--------------------------------------------------------------------------------
+ BUILD PROCESS SUMMARY
+--------------------------------------------------------------------------------
+
+Step 1: Export RFCNet to ONNX with DCNv2 Custom Op
+---------------------------------------------------
+Command: BUILD_RFCNET_ONNX.bat
+Internally runs:
+  python faster-propainter-main/tools/export_rfcnet_onnx.py
+    --weights weights/recurrent_flow_completion.pth
+    --out faster-propainter-main/engines/rfcnet/rfcnet.onnx
+    --opset 12
+
+Key Operations:
+1. Registers custom ONNX symbolic function
+2. Loads RFCNet PyTorch model from weights
+3. Creates dummy inputs: masked_flows [1,8,2,480,480], masks [1,8,1,480,480]
+4. Exports ONNX with fixed shapes (dynamic_axes disabled)
+5. Infers deform_groups=16 from offset tensor shape
+6. Hardcodes stride=[1,1], padding=[1,1], dilation=[1,1]
+
+Output: rfcnet.onnx (20 MB) with 14 DCNv2 custom operations
+
+Step 2: Build TensorRT FP16 Engine with DCNv2 Plugin
+------------------------------------------------------
+Command: BUILD_RFCNET_ENGINE_FP16.bat
+
+Build Command:
+  trtexec --onnx=faster-propainter-main/engines/rfcnet/rfcnet.onnx
+    --saveEngine=faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
+    --fp16
+    --memPoolSize=workspace:4096M
+    --useSpinWait
+    --tacticSources=+CUBLAS
+    --timingCacheFile=faster-propainter-main/engines/rfcnet/trt_timing_cache
+    --plugins="TensorRT-10.13.3.9/lib/mmdeploy_tensorrt_ops.dll"
+
+Success Indicators:
+- "GPU Compute Time: mean = 4.34403 ms"
+- "Throughput: 210.183 qps"
+
+--------------------------------------------------------------------------------
+ PERFORMANCE RESULTS
+--------------------------------------------------------------------------------
+
+TensorRT Engine Performance (from trtexec):
+- Mean GPU Compute Time: 4.34 ms
+- Throughput: 210 qps (queries per second)
+- Precision: FP16
+- Input Shape: 1x8x2x480x480 (masked_flows), 1x8x1x480x480 (masks)
+
+Expected vs PyTorch:
+- PyTorch Baseline: ~20-25 ms per inference (estimated)
+- TensorRT FP16: 4.34 ms per inference
+- Speedup: ~5-6x faster
+
+GPU Utilization:
+- RTX 5070 (Blackwell SM 120)
+- FP16 Tensor Cores utilized
+- 14 DCNv2 custom ops executed successfully
+
+--------------------------------------------------------------------------------
+ DEBUGGING CHECKLIST FOR FUTURE CUDA/TENSORRT UPDATES
+--------------------------------------------------------------------------------
+
+When Updating CUDA Version:
+[ ] Check if new CUDA version changes compute capability requirements
+[ ] Verify mmdeploy compatibility with new CUDA version
+[ ] Rebuild DCNv2 plugin with new CUDA toolkit
+[ ] Update CMAKE_CUDA_ARCHITECTURES if new GPU arch added
+[ ] Test DCNv2 plugin loads without "no kernel image" error
+[ ] Check if cuDNN version needs update for new CUDA
+
+When Updating TensorRT Version:
+[ ] Check TensorRT release notes for Blackwell tactic source changes
+[ ] Verify cuDNN tactic support status (may change in future releases)
+[ ] Check if plugin API changed (IPluginV2DynamicExt, etc.)
+[ ] Verify mmdeploy plugin compiles with new TensorRT headers
+[ ] Test trtexec --plugins flag still works
+[ ] Check if new optimization passes affect DCNv2 shape inference
+
+When Updating PyTorch/torchvision:
+[ ] Verify torchvision::deform_conv2d argument order hasn't changed
+[ ] Test ONNX export with both legacy and new exporter
+[ ] Check if torch.onnx.symbolic_helper APIs changed
+[ ] Verify custom symbolic registration still works
+[ ] Test with debug logging to confirm tensor extraction order
+
+When Updating mmdeploy:
+[ ] Check if DCNv2 plugin source code changed
+[ ] Verify TensorRT 10.x compatibility fixes still present
+[ ] Test CMake build with new mmdeploy version
+[ ] Check if plugin output shape inference changed
+[ ] Verify ONNX op signature (mmdeploy::MMCVModulatedDeformConv2d)
+
+When Encountering Shape Mismatch Errors:
+[ ] Add debug logging to export_rfcnet_onnx.py (lines 31-54)
+[ ] Print all args with kind, name, shape for symbolic function
+[ ] Use _get_tensor_sizes to verify weight/offset/mask shapes
+[ ] Check if weight tensor is at correct position (args[1])
+[ ] Verify deform_groups calculation from offset shape
+[ ] Check TensorRT verbose logs for plugin shape inference
+
+When Encountering Runtime Errors:
+[ ] Check "no kernel image available" -> rebuild plugin with correct CC
+[ ] Check "cuDNN tactic source" -> remove +CUDNN from --tacticSources
+[ ] Check DLL not found -> verify PATH includes TensorRT-10.13.3.9/lib
+[ ] Check plugin not found -> verify --plugins path is absolute
+[ ] Enable TensorRT debug logging: set TENSORRT_LOG_LEVEL=5
+
+--------------------------------------------------------------------------------
+ LESSONS LEARNED
+--------------------------------------------------------------------------------
+
+1. PyTorch ONNX Tracing Argument Order is Non-Deterministic
+   - NEVER assume PyTorch passes args in documented signature order
+   - ALWAYS use debug logging to inspect actual arg order during tracing
+   - Use symbolic_helper functions to inspect tensor types/shapes
+   - Cross-reference with model architecture to validate extracted tensors
+
+2. Blackwell Architecture Has Specific Restrictions
+   - TensorRT 10.x does not support cuDNN tactic source on Blackwell
+   - Always use --tacticSources=+CUBLAS only for RTX 50-series
+   - Future TensorRT versions may lift this restriction
+   - DCNv2 plugin can still use cuDNN internally (separate concern)
+
+3. Custom TensorRT Plugins Require Explicit Compute Capability
+   - Plugin must be compiled for target GPU's SM version
+   - CMAKE_CUDA_ARCHITECTURES must include CC 90 for Blackwell
+   - "no kernel image available" = missing SM version in plugin build
+   - Verify --generate-code output during plugin compilation
+
+4. UTF-8 Encoding Issues on Windows CMD
+   - Avoid UTF-8 symbols in Python scripts run from batch files
+   - Use ASCII alternatives: [OK], [SUCCESS], [WARNING]
+   - Affects print statements, not file I/O or ONNX export
+
+5. ONNX Shape Inference Metadata is Ignored by Custom Plugins
+   - Attempted fixes using onnx.shape_inference or setType() don't help
+   - Custom plugins implement their own getOutputDimensions()
+   - Shape issues must be fixed in plugin source or ONNX symbolic function
+   - TensorRT doesn't validate ONNX shape metadata for custom ops
+
+6. mmdeploy DCNv2 Plugin Reads Weight Shape Directly
+   - Plugin uses inputs[3] (weight tensor) to determine output channels
+   - weight.shape[0] = output channels for deformable conv
+   - Wrong tensor at inputs[3] -> wrong output shape
+   - No error/warning from plugin, just incorrect dimensions
+
+--------------------------------------------------------------------------------
+ FILES MODIFIED/CREATED
+--------------------------------------------------------------------------------
+
+Modified Files:
+1. faster-propainter-main/tools/export_rfcnet_onnx.py
+   - Added custom ONNX symbolic function for torchvision::deform_conv2d
+   - Fixed tensor extraction order (args[1]=weight, args[2]=offset)
+   - Added extensive debug logging (lines 31-54)
+   - Replaced UTF-8 symbols with ASCII
+   - Hardcoded RFCNet architecture values
+
+2. build_dcnv2_plugin.bat
+   - Added CMAKE_CUDA_ARCHITECTURES="80;86;89;90" for Blackwell support
+
+3. BUILD_RFCNET_ENGINE_FP16.bat
+   - Removed +CUDNN from --tacticSources (Blackwell compatibility)
+
+Created Files:
+4. faster-propainter-main/engines/rfcnet/rfcnet.onnx (20 MB)
+5. faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
+6. faster-propainter-main/engines/rfcnet/trt_timing_cache
+
+Debugging Tools (not used in final solution):
+7. fix_onnx_shapes.py - Attempted ONNX shape metadata fixes
+8. add_reshape_after_dcnv2.py - Attempted Reshape node insertion
+
+Backed Up Files:
+9. TensorRT-10.13.3.9/lib/mmdeploy_tensorrt_ops.dll.backup.v1
+10. TensorRT-10.13.3.9/lib/mmdeploy_tensorrt_ops.dll (21 MB, CC 90)
+
+================================================================================
+Last Updated: 2025-10-25 (Step 4 RFCNet Complete)
+RTX 5070 (Blackwell SM 120) | TensorRT 10.13.3.9 | PyTorch 2.10.0+cu128
