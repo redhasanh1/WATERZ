@@ -15,6 +15,7 @@ REM Set cuDNN path
 set "CUDNN_DIR=C:\Program Files\NVIDIA\CUDNN\v9.14"
 cmake -G "Visual Studio 17 2022" -A x64 ^
   -D CMAKE_BUILD_TYPE=Release ^
+  -D CMAKE_CUDA_ARCHITECTURES="80;86;89;90" ^
   -D TensorRT_DIR=%TENSORRT_DIR% ^
   -D MMDEPLOY_TARGET_BACKENDS=trt ^
   -D MMDEPLOY_BUILD_SDK=OFF ^

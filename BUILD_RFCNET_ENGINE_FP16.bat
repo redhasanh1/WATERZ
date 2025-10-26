@@ -17,15 +17,20 @@ if not exist "%ONNX%" (
   exit /b 1
 )
 
+set "PLUGIN_PATH=%~dp0TensorRT-10.13.3.9\lib\mmdeploy_tensorrt_ops.dll"
+if not exist "%PLUGIN_PATH%" (
+  echo ERROR: DCNv2 plugin not found at: %PLUGIN_PATH%
+  echo Run: copy mmdeploy\build-trt\bin\Release\mmdeploy_tensorrt_ops.dll TensorRT-10.13.3.9\lib\
+  exit /b 1
+)
+
+REM NOTE: cuDNN not supported on Blackwell (RTX 50-series), use CUBLAS only
 "%TRTEXEC%" --onnx=%ONNX% ^
   --saveEngine=%ENGINE% ^
   --fp16 --memPoolSize=workspace:4096M --useSpinWait ^
-  --tacticSources=+CUBLAS,+CUDNN ^
-  --minShapes=masked_flows:1x4x2x256x256,masks:1x4x1x256x256 ^
-  --optShapes=masked_flows:1x8x2x480x480,masks:1x8x1x480x480 ^
-  --maxShapes=masked_flows:1x12x2x640x640,masks:1x12x1x640x640 ^
+  --tacticSources=+CUBLAS ^
   --timingCacheFile=%TIMING_CACHE% ^
-  --plugins=%DCNV2_PLUGIN_DLL%
+  --plugins="%PLUGIN_PATH%"
 
 if %ERRORLEVEL% NEQ 0 (
   echo Engine build failed.
