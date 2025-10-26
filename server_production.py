@@ -1725,6 +1725,10 @@ def process_segment_task(self, segment_data):
             except Exception as download_err:
                 print(f"   ⚠️  Mask download failed: {download_err} - will regenerate")
 
+        # Define memory pipeline flag (check if we have all frames/masks in memory)
+        using_memory_pipeline = (len(segment_frames_memory) == frames_copied and
+                                 len(segment_masks_memory) == frames_copied)
+
         # Fallback: Regenerate masks if not downloaded
         detector = None
         if not masks_downloaded:
@@ -1778,9 +1782,6 @@ def process_segment_task(self, segment_data):
 
         # Crop frames to detected watermark region AND create masks on cropped frames
         # 🔥 OPTIMIZATION: Skip disk-based cropping if we have in-memory frames/masks
-        using_memory_pipeline = (len(segment_frames_memory) == frames_copied and
-                                 len(segment_masks_memory) == frames_copied)
-
         if last_valid_bbox and not using_memory_pipeline:
             # Disk-based pipeline (fallback for remote workers or when memory cache unavailable)
             print(f"   ✂️  Cropping frames to watermark region (disk-based)...")

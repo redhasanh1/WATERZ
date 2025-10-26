@@ -8,7 +8,9 @@
       "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" fix_onnx_shapes.py faster-propainter-main/engines/rfcnet/rfcnet.onnx)",
       "Bash(./BUILD_RFCNET_ENGINE_FP16.bat)",
       "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" add_reshape_after_dcnv2.py faster-propainter-main/engines/rfcnet/rfcnet.onnx)",
-      "Bash(py -c:*)"
+      "Bash(py -c:*)",
+      "WebSearch",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

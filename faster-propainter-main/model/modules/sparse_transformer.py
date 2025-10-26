@@ -1,4 +1,5 @@
 import math
+import os
 from functools import reduce
 import torch
 import torch.nn as nn
@@ -125,7 +126,15 @@ class SparseWindowAttention(nn.Module):
         self.value = nn.Linear(dim, dim, qkv_bias)
         # regularization
         self.attn_drop = nn.Dropout(attn_drop)
+        self.attn_drop_p = attn_drop  # Store dropout probability for SDPA
         self.proj_drop = nn.Dropout(proj_drop)
+
+        # Flash Attention control (disabled for NeuFlow testing)
+        self.use_flash_attn = os.getenv("ENABLE_FLASH_ATTENTION", "0") == "1"
+        if self.use_flash_attn:
+            print("[OK] SparseWindowAttention: Flash Attention enabled (Blackwell-optimized)")
+        else:
+            print("[INFO] SparseWindowAttention: Using manual attention (Flash Attention disabled)")
         # output projection
         self.proj = nn.Linear(dim, dim)
         self.n_head = n_head
@@ -247,10 +256,18 @@ class SparseWindowAttention(nn.Module):
                     win_k_t = win_k_t.view(n_wh*n_ww, self.n_head, t*w_h*w_w, c_head)
                     win_v_t = win_v_t.view(n_wh*n_ww, self.n_head, t*w_h*w_w, c_head)
 
-                att_t = (win_q_t @ win_k_t.transpose(-2, -1)) * (1.0 / math.sqrt(win_q_t.size(-1)))
-                att_t = F.softmax(att_t, dim=-1)
-                att_t = self.attn_drop(att_t)
-                y_t = att_t @ win_v_t 
+                # Use Flash Attention if enabled (Blackwell-optimized)
+                if self.use_flash_attn:
+                    y_t = F.scaled_dot_product_attention(
+                        win_q_t, win_k_t, win_v_t,
+                        dropout_p=self.attn_drop_p if self.training else 0.0
+                    )
+                else:
+                    # Fallback: manual attention computation
+                    att_t = (win_q_t @ win_k_t.transpose(-2, -1)) * (1.0 / math.sqrt(win_q_t.size(-1)))
+                    att_t = F.softmax(att_t, dim=-1)
+                    att_t = self.attn_drop(att_t)
+                    y_t = att_t @ win_v_t 
                 
                 out[i, mask_ind_i] = y_t.view(-1, self.n_head, t, w_h*w_w, c_head)
 
@@ -262,10 +279,18 @@ class SparseWindowAttention(nn.Module):
             win_k_s = win_k[i, unmask_ind_i, :, :, :w_h*w_w]
             win_v_s = win_v[i, unmask_ind_i, :, :, :w_h*w_w]
 
-            att_s = (win_q_s @ win_k_s.transpose(-2, -1)) * (1.0 / math.sqrt(win_q_s.size(-1)))
-            att_s = F.softmax(att_s, dim=-1)
-            att_s = self.attn_drop(att_s)
-            y_s = att_s @ win_v_s
+            # Use Flash Attention if enabled (Blackwell-optimized)
+            if self.use_flash_attn:
+                y_s = F.scaled_dot_product_attention(
+                    win_q_s, win_k_s, win_v_s,
+                    dropout_p=self.attn_drop_p if self.training else 0.0
+                )
+            else:
+                # Fallback: manual attention computation
+                att_s = (win_q_s @ win_k_s.transpose(-2, -1)) * (1.0 / math.sqrt(win_q_s.size(-1)))
+                att_s = F.softmax(att_s, dim=-1)
+                att_s = self.attn_drop(att_s)
+                y_s = att_s @ win_v_s
             out[i, unmask_ind_i] = y_s
 
         # re-assemble all head outputs side by side

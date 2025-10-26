@@ -2,7 +2,13 @@
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 REM Minimal environment: only TensorRT-related config
-echo Starting Celery worker (TensorRT-optimized)... 
+echo Starting Celery worker (TensorRT-optimized)...
+
+REM Activate Visual Studio 2022 C++ environment (required for torch.compile)
+if exist "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
+    call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+    echo ✅ Visual Studio C++ environment activated
+)
 
 REM Ensure TensorRT DLLs and tools are on PATH
 call "%~dp0SETUP_TRT_ENV.bat"
@@ -19,6 +25,12 @@ set FORCE_TRT_RAFT=1
 
 REM Enable Torch-TensorRT for RFCNet (Blackwell-compatible hybrid compilation)
 set RFCNET_TORCHTRT=1
+
+REM Disable Flash Attention for testing
+set ENABLE_FLASH_ATTENTION=0
+
+REM Use NeuFlow v2 exclusively (no RAFT fallback)
+set USE_NEUFLOW=1
 
 REM Use module form; threads pool works best on Windows
 REM concurrency=2 is a safe default for RTX 5070

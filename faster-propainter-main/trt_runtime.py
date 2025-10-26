@@ -19,7 +19,7 @@ def maybe_compile_rfcnet(
     max_t: int = 12,
 ) -> bool:
     """
-    Try to accelerate RFCNet.forward using Torch-TensorRT Dynamo.
+    Try to accelerate RFCNet.forward using torch.compile() with inductor backend.
 
     This compiles only the forward(masked_flows, masks) path. Methods that
     call self.forward (e.g., forward_bidirect_flow) will benefit.
@@ -31,47 +31,22 @@ def maybe_compile_rfcnet(
         return False
 
     if not (device.type == "cuda" and torch.cuda.is_available()):
-        print("⚠️ RFCNet Torch-TensorRT skipped (CUDA not available)")
+        print("⚠️ RFCNet torch.compile skipped (CUDA not available)")
         return False
 
     try:
-        import torch_tensorrt
-    except Exception as exc:
-        print(f"⚠️ RFCNet Torch-TensorRT not available: {exc}")
-        return False
-
-    # Prepare input specs with dynamic shapes
-    dtype = torch.half if use_fp16 else torch.float
-    min_shape_1 = (1, 1, 2, min_hw[1], min_hw[0])
-    opt_shape_1 = (1, min(max_t, 8), 2, opt_hw[1], opt_hw[0])
-    max_shape_1 = (1, max_t, 2, max_hw[1], max_hw[0])
-    in1 = torch_tensorrt.Input(
-        min_shape=min_shape_1, opt_shape=opt_shape_1, max_shape=max_shape_1, dtype=dtype
-    )
-
-    min_shape_2 = (1, 1, 1, min_hw[1], min_hw[0])
-    opt_shape_2 = (1, min(max_t, 8), 1, opt_hw[1], opt_hw[0])
-    max_shape_2 = (1, max_t, 1, max_hw[1], max_hw[0])
-    in2 = torch_tensorrt.Input(
-        min_shape=min_shape_2, opt_shape=opt_shape_2, max_shape=max_shape_2, dtype=dtype
-    )
-
-    try:
-        compiled = torch_tensorrt.dynamo.compile(
-            model,
-            inputs=[in1, in2],
-            enabled_precisions={torch.half} if use_fp16 else {torch.float},
+        # Use torch.compile() with inductor backend (PyTorch's built-in optimizer)
+        compiled_forward = torch.compile(
+            model.forward,
+            backend="inductor",
+            mode="max-autotune",
+            dynamic=True,
         )
+        # Install compiled forward into the existing instance
+        model.forward = compiled_forward  # type: ignore[assignment]
     except Exception as exc:
-        print(f"⚠️ RFCNet Torch-TensorRT compile failed: {exc}")
+        print(f"⚠️ RFCNet torch.compile(inductor) failed: {exc}")
         return False
-
-    # Install compiled forward into the existing instance so that
-    # forward_bidirect_flow → self.forward uses the accelerated path.
-    def _compiled_forward(masked_flows: torch.Tensor, masks: torch.Tensor):
-        return compiled(masked_flows, masks)
-
-    model.forward = _compiled_forward  # type: ignore[assignment]
-    print("✅ RFCNet forward accelerated via Torch-TensorRT (Dynamo)")
+    print("✅ RFCNet forward accelerated via torch.compile(backend='inductor')")
     return True
 
