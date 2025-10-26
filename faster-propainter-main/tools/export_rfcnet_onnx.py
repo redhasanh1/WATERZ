@@ -4,13 +4,140 @@ import sys
 from pathlib import Path
 
 import torch
-
+from torch.onnx import register_custom_op_symbolic
+from torch.onnx.symbolic_helper import _get_tensor_sizes, _get_tensor_dim_size
 
 # Ensure imports work when running from repo root or this script's folder
 SCRIPT_DIR = Path(__file__).resolve().parent
 FP_ROOT = SCRIPT_DIR.parent  # faster-propainter-main/
 if str(FP_ROOT) not in sys.path:
     sys.path.insert(0, str(FP_ROOT))
+
+
+# Register ONNX symbolic for torchvision::deform_conv2d -> mmdeploy::MMCVModulatedDeformConv2d
+# This is needed because mmcv doesn't have CUDA ops available, so model falls back to torchvision
+def torchvision_deform_conv2d_symbolic(g, *args, **kwargs):
+    """
+    Custom ONNX symbolic function for torchvision.ops.deform_conv2d.
+    Converts to mmdeploy::MMCVModulatedDeformConv2d for TensorRT DCNv2 plugin support.
+
+    PyTorch passes args as: input, offset, weight, bias, stride, padding, dilation, mask
+    But tuples may be expanded, so we accept variable args.
+    """
+    # torchvision.ops.deform_conv2d signature:
+    # (input, offset, weight, bias, stride, padding, dilation, mask)
+    # When traced, tuples expand, so we get more args than expected
+
+    # Debug: print detailed info for all args
+    print(f"\nDEBUG: Received {len(args)} args for deform_conv2d")
+    for i, arg in enumerate(args):
+        if hasattr(arg, 'node'):
+            node = arg.node()
+            kind = node.kind()
+
+            # Get tensor name
+            name = arg.debugName() if hasattr(arg, 'debugName') else "unknown"
+
+            # Try to get shape
+            shape_str = "unknown"
+            try:
+                if hasattr(arg, 'type') and hasattr(arg.type(), 'sizes'):
+                    shape_str = str(list(arg.type().sizes()))
+            except:
+                pass
+
+            # Check if it's an initializer (model parameter)
+            is_param = "parameter" if kind == "prim::Param" else "computed"
+
+            print(f"  arg[{i}]: kind={kind:30s} name={name:40s} shape={shape_str:20s} [{is_param}]")
+        else:
+            print(f"  arg[{i}]: no node attribute")
+
+    # CORRECTED: Based on debug output, PyTorch actually passes in this order:
+    # args[0] = input (Concat)
+    # args[1] = weight (prim::Param - the actual convolution weight!)
+    # args[2] = offset (Concat)
+    # args[3] = mask (Sigmoid)
+    # args[4] = bias (prim::Param)
+    # args[5-13] = stride/padding/dilation constants
+
+    input_arg = args[0]
+    weight = args[1]     # CORRECTED: weight is at position 1, not 2!
+    offset = args[2]     # CORRECTED: offset is at position 2, not 1!
+    mask = args[3]       # CORRECTED: mask is at position 3
+    bias = args[4] if len(args) > 4 else None  # CORRECTED: bias is at position 4
+
+    print(f"DEBUG: Extracted - input: 0, weight: 1 (CORRECTED), offset: 2, mask: 3, bias: {'4' if bias is not None else 'None'}")
+
+    # RFCNet architecture uses fixed values for all deformable convolution layers
+    # (from faster-propainter-main/model/recurrent_flow_completion.py:64,70)
+    # SecondOrderDeformableAlignment(in_channels, out_channels, kernel_size=3, padding=1, deform_groups=16)
+    stride = [1, 1]      # stride=1 for all deform convs
+    padding = [1, 1]     # padding=1 for kernel_size=3
+    dilation = [1, 1]    # dilation=1 (default)
+
+    # Note: Tried parsing from args but PyTorch doesn't pass them in expected format
+    # Since RFCNet architecture is fixed, hardcoding is more reliable than arg parsing
+
+    # Infer deform_groups from offset shape using ONNX symbolic helper
+    try:
+        weight_sizes = _get_tensor_sizes(weight, allow_nonstatic=False)
+        offset_sizes = _get_tensor_sizes(offset, allow_nonstatic=False)
+
+        if weight_sizes is not None and offset_sizes is not None:
+            kh = weight_sizes[2]  # kernel height
+            kw = weight_sizes[3]  # kernel width
+            offset_channels = offset_sizes[1]
+            deform_groups = offset_channels // (2 * kh * kw)
+        else:
+            # Fallback: RFCNet/ProPainter always use deform_groups=16
+            print("WARNING: Could not infer tensor sizes, using deform_groups=16 (RFCNet/ProPainter default)")
+            deform_groups = 16
+    except Exception as e:
+        # Fallback to hardcoded value based on model architecture
+        print(f"WARNING: Error getting tensor sizes ({e}), using deform_groups=16 (RFCNet/ProPainter default)")
+        deform_groups = 16
+
+    groups = 1
+
+    # mmdeploy ONNX op expects: input, offset, mask, weight, bias (optional)
+    input_tensors = [input_arg, offset, mask, weight]
+    if bias is not None and hasattr(bias, 'node') and not bias.node().mustBeNone():
+        input_tensors.append(bias)
+
+    # Export as mmdeploy custom op
+    output = g.op(
+        'mmdeploy::MMCVModulatedDeformConv2d',
+        *input_tensors,
+        stride_i=stride,
+        padding_i=padding,
+        dilation_i=dilation,
+        groups_i=groups,
+        deform_groups_i=deform_groups
+    )
+
+    # Add shape type inference: output shape should match input shape (deformable conv preserves spatial dims)
+    # Output shape: [N, C_out, H_out, W_out] where C_out comes from weight shape
+    try:
+        input_sizes = _get_tensor_sizes(input_arg, allow_nonstatic=False)
+        weight_sizes = _get_tensor_sizes(weight, allow_nonstatic=False)
+        if input_sizes is not None and weight_sizes is not None:
+            # For deformable conv with padding=1, stride=1: output spatial dims = input spatial dims
+            batch_size = input_sizes[0]
+            out_channels = weight_sizes[0]
+            height = input_sizes[2]
+            width = input_sizes[3]
+            # Set output type
+            output.setType(input_arg.type().with_sizes([batch_size, out_channels, height, width]))
+    except Exception as e:
+        print(f"WARNING: Could not set shape type for DCNv2 output: {e}")
+
+    return output
+
+
+# Register the symbolic function for torchvision::deform_conv2d (opset 11)
+register_custom_op_symbolic('torchvision::deform_conv2d', torchvision_deform_conv2d_symbolic, 11)
+print("[OK] Registered ONNX symbolic for torchvision::deform_conv2d -> mmdeploy::MMCVModulatedDeformConv2d")
 
 
 def build_model(weights_path: str):
@@ -63,10 +190,10 @@ def export_rfcnet_onnx(args: argparse.Namespace) -> None:
         import torchvision  # noqa: F401
         if not hasattr(torchvision.ops, "deform_conv2d"):
             print(
-                "⚠️ torchvision.ops.deform_conv2d not found. Install a matching torchvision build."
+                "[WARNING] torchvision.ops.deform_conv2d not found. Install a matching torchvision build."
             )
     except Exception as exc:
-        print(f"⚠️ torchvision import check failed: {exc}")
+        print(f"[WARNING] torchvision import check failed: {exc}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     inner = build_model(args.weights)
@@ -100,6 +227,8 @@ def export_rfcnet_onnx(args: argparse.Namespace) -> None:
     dummy_masked_flows = torch.zeros((b, t, 2, h, w), dtype=torch.float32, device=device)
     dummy_masks = torch.zeros((b, t, 1, h, w), dtype=torch.float32, device=device)
 
+    # TEMPORARY: Export with fixed shapes to debug TensorRT shape inference issues
+    # Enable dynamic_axes for TensorRT dynamic shape support
     dynamic_axes = {
         "masked_flows": {0: "batch", 1: "time", 3: "height", 4: "width"},
         "masks": {0: "batch", 1: "time", 3: "height", 4: "width"},
@@ -119,11 +248,11 @@ def export_rfcnet_onnx(args: argparse.Namespace) -> None:
         do_constant_folding=True,
         input_names=["masked_flows", "masks"],
         output_names=output_names,
-        dynamic_axes=dynamic_axes,
+        dynamic_axes=dynamic_axes,  # ENABLED for dynamic shape support
         dynamo=False,  # Use legacy ONNX exporter (PyTorch 2.x dynamo has constraint issues)
     )
 
-    print(f"✅ RFCNet ONNX exported to {output_path}")
+    print(f"[SUCCESS] RFCNet ONNX exported to {output_path}")
     print(
         "   Note: This model uses torchvision.ops.deform_conv2d (DCNv2). "
         "For TensorRT, you may need a DCNv2 plugin or keep that op in a Torch fallback."
