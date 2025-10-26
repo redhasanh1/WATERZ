@@ -17,6 +17,9 @@ set YOLO_REQUIRE_TENSORRT=1
 REM Force TensorRT-only RAFT (no PyTorch fallback)
 set FORCE_TRT_RAFT=1
 
+REM Enable Torch-TensorRT for RFCNet (Blackwell-compatible hybrid compilation)
+set RFCNET_TORCHTRT=1
+
 REM Use module form; threads pool works best on Windows
 REM concurrency=2 is a safe default for RTX 5070
 "%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2 

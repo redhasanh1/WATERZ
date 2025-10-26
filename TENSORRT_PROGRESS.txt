@@ -417,6 +417,37 @@ Solution in export_rfcnet_onnx.py (lines 140, 255-258):
 File: faster-propainter-main/tools/export_rfcnet_onnx.py
 Lines: 140, 255-258
 
+
+FIX #5: TensorRT Python CUDA Version Mismatch
+----------------------------------------------
+Problem: Engine deserialization fails with:
+  "Error Code 6: Unable to load library: cublas64_13.dll"
+
+Root Cause: pip-installed tensorrt package defaults to CUDA 13 version
+            System has CUDA 12.8, causing DLL mismatch at runtime
+
+Discovery: pip show tensorrt shows "Requires: tensorrt_cu13"
+           Engine built with CUDA 12.8 but Python TensorRT expects CUDA 13
+
+Solution:
+  1. Uninstall CUDA 13 version:
+     pip uninstall -y tensorrt tensorrt-cu13 tensorrt-cu13-bindings tensorrt-cu13-libs
+
+  2. Install CUDA 12 version:
+     pip install tensorrt-cu12 tensorrt-cu12-bindings tensorrt-cu12-libs
+
+Why This Matters:
+- TensorRT Python package must match system CUDA version
+- Engine DLL references are embedded at build time (CUDA 12.8)
+- Python runtime must use matching tensorrt-cu12 package
+- pip defaults to latest CUDA version (cu13) if not specified
+
+Verification:
+  pip show tensorrt | grep Requires
+  # Should show: Requires: tensorrt_cu12 (not cu13)
+
+File: benchmark_rfcnet.py (and any Python TensorRT code)
+
 --------------------------------------------------------------------------------
  BUILD PROCESS SUMMARY
 --------------------------------------------------------------------------------
@@ -462,16 +493,28 @@ Success Indicators:
  PERFORMANCE RESULTS
 --------------------------------------------------------------------------------
 
-TensorRT Engine Performance (from trtexec):
-- Mean GPU Compute Time: 4.34 ms
-- Throughput: 210 qps (queries per second)
-- Precision: FP16
-- Input Shape: 1x8x2x480x480 (masked_flows), 1x8x1x480x480 (masks)
+Benchmark Results (benchmark_rfcnet.py - 1000 iterations):
 
-Expected vs PyTorch:
-- PyTorch Baseline: ~20-25 ms per inference (estimated)
-- TensorRT FP16: 4.34 ms per inference
-- Speedup: ~5-6x faster
+PyTorch Performance:
+- Mean Latency: 30.78 ms
+- Std Dev: 0.25 ms
+- P50 (Median): 30.68 ms
+- P95: 31.41 ms
+- P99: 31.59 ms
+- Throughput: 32.48 fps
+
+TensorRT FP16 Performance:
+- Mean Latency: 3.64 ms
+- Std Dev: 0.26 ms
+- P50 (Median): 3.61 ms
+- P95: 4.03 ms
+- P99: 4.92 ms
+- Throughput: 274.40 fps
+
+Speedup Analysis:
+- TensorRT is 8.45x faster than PyTorch
+- Absolute speedup: 27.14 ms saved per inference
+- Input shape: 1x8x2x480x480 (masked_flows), 1x8x1x480x480 (masks)
 
 GPU Utilization:
 - RTX 5070 (Blackwell SM 120)
