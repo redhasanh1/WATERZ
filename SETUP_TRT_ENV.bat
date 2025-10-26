@@ -1,6 +1,6 @@
 @echo off
 REM Add TensorRT and (optionally) CUDA to PATH for current session
-setlocal
+REM NOTE: Don't use setlocal - we need PATH changes to persist for the calling script
 
 REM Adjust this root if you relocate TensorRT
 set "TRT_ROOT=%~dp0TensorRT-10.13.3.9"
@@ -11,6 +11,7 @@ if exist "%TRT_ROOT%\lib\nvinfer_10.dll" (
 ) else (
   echo TensorRT not found at %TRT_ROOT%
   echo Edit SETUP_TRT_ENV.bat and set TRT_ROOT accordingly.
+  exit /b 1
 )
 
 REM If CUDA is installed, add it to PATH (required for cublas/cudnn DLLs)
@@ -26,6 +27,5 @@ REM Quick checks
 where trtexec >nul 2>&1 && echo trtexec found || echo trtexec NOT found (ensure TRT bin on PATH)
 where nvinfer_plugin_10.dll >nul 2>&1 && echo nvinfer_plugin_10.dll found || echo nvinfer_plugin_10.dll NOT found
 
-endlocal & set "PATH=%PATH%"
 echo Environment configured for TensorRT in this terminal.
 
