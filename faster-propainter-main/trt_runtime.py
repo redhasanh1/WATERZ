@@ -31,7 +31,7 @@ def maybe_compile_rfcnet(
         return False
 
     if not (device.type == "cuda" and torch.cuda.is_available()):
-        print("⚠️ RFCNet torch.compile skipped (CUDA not available)")
+        print("[WARNING] RFCNet torch.compile skipped (CUDA not available)")
         return False
 
     try:
@@ -45,8 +45,8 @@ def maybe_compile_rfcnet(
         # Install compiled forward into the existing instance
         model.forward = compiled_forward  # type: ignore[assignment]
     except Exception as exc:
-        print(f"⚠️ RFCNet torch.compile(inductor) failed: {exc}")
+        print(f"[WARNING] RFCNet torch.compile(inductor) failed: {exc}")
         return False
-    print("✅ RFCNet forward accelerated via torch.compile(backend='inductor')")
+    print("[OK] RFCNet forward accelerated via torch.compile(backend='inductor')")
     return True
 

@@ -14,6 +14,15 @@ if exist "%TRT_ROOT%\lib\nvinfer_10.dll" (
   exit /b 1
 )
 
+REM Add PyTorch cuDNN DLLs for ONNX Runtime (fixes Conv fallback to CPU)
+set "PYTORCH_LIB=%LOCALAPPDATA%\Programs\Python\Python311\Lib\site-packages\torch\lib"
+if exist "%PYTORCH_LIB%\cudnn64_9.dll" (
+  set "PATH=%PYTORCH_LIB%;%PATH%"
+  echo Added PyTorch cuDNN to PATH for ONNX Runtime
+) else (
+  echo Warning: PyTorch cuDNN DLLs not found at %PYTORCH_LIB%
+)
+
 REM If CUDA is installed, add it to PATH (required for cublas/cudnn DLLs)
 if defined CUDA_PATH (
   if exist "%CUDA_PATH%\bin" set "PATH=%CUDA_PATH%\bin;%PATH%"

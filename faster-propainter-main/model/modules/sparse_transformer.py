@@ -116,7 +116,10 @@ def window_partition(x, window_size, n_head):
     return windows
 
 class SparseWindowAttention(nn.Module):
-    def __init__(self, dim, n_head, window_size, pool_size=(4,4), qkv_bias=True, attn_drop=0., proj_drop=0., 
+    # Class variable to track if we've already printed Flash Attention status
+    _flash_attn_printed = False
+
+    def __init__(self, dim, n_head, window_size, pool_size=(4,4), qkv_bias=True, attn_drop=0., proj_drop=0.,
                 pooling_token=True):
         super().__init__()
         assert dim % n_head == 0
@@ -129,12 +132,14 @@ class SparseWindowAttention(nn.Module):
         self.attn_drop_p = attn_drop  # Store dropout probability for SDPA
         self.proj_drop = nn.Dropout(proj_drop)
 
-        # Flash Attention control (disabled for NeuFlow testing)
+        # Flash Attention control (only print once globally)
         self.use_flash_attn = os.getenv("ENABLE_FLASH_ATTENTION", "0") == "1"
-        if self.use_flash_attn:
-            print("[OK] SparseWindowAttention: Flash Attention enabled (Blackwell-optimized)")
-        else:
-            print("[INFO] SparseWindowAttention: Using manual attention (Flash Attention disabled)")
+        if not SparseWindowAttention._flash_attn_printed:
+            if self.use_flash_attn:
+                print("[OK] SparseWindowAttention: Flash Attention enabled (Blackwell-optimized)")
+            else:
+                print("[INFO] SparseWindowAttention: Using manual attention (Flash Attention disabled)")
+            SparseWindowAttention._flash_attn_printed = True
         # output projection
         self.proj = nn.Linear(dim, dim)
         self.n_head = n_head

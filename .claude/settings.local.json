@@ -10,7 +10,11 @@
       "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" add_reshape_after_dcnv2.py faster-propainter-main/engines/rfcnet/rfcnet.onnx)",
       "Bash(py -c:*)",
       "WebSearch",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2)",
+      "WebFetch(domain:github.com)",
+      "Bash(py -m celery:*)",
+      "Read(//c/Users/Hasan/AppData/Local/Programs/Python/Python311/Lib/site-packages/torch/lib/**)"
     ],
     "deny": [],
     "ask": []

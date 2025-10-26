@@ -28,7 +28,7 @@ if os.getenv("USE_NEUFLOW", "0") == "1":
     print("[OK] Using NeuFlow v2 for optical flow (10-70x faster than RAFT)")
 else:
     from model.modules.flow_comp_raft import RAFT_bi
-    print("[OK] Using RAFT for optical flow (TensorRT-optimized)")
+    # RAFT can use PyTorch or TensorRT depending on FORCE_TRT_RAFT env var
 from model.recurrent_flow_completion import RecurrentFlowCompleteNet
 from model.propainter import InpaintGenerator
 from utils.download_util import load_file_from_url
@@ -388,7 +388,8 @@ def pipeline(
             # PRIORITY 1: Check USE_NEUFLOW FIRST (takes precedence over TensorRT)
             if os.getenv("USE_NEUFLOW", "0") == "1":
                 # NeuFlow v2 uses ONNX model - MANDATORY when USE_NEUFLOW=1
-                model_path = "models/neuflow_things.onnx"
+                # Use absolute path based on this script's location
+                model_path = os.path.join(os.path.dirname(__file__), "models", "neuflow_things.onnx")
                 if not os.path.exists(model_path):
                     raise FileNotFoundError(
                         f"USE_NEUFLOW=1 but NeuFlow model not found: {model_path}\n"
@@ -399,22 +400,25 @@ def pipeline(
                 print("[OK] Expected speedup: 10-70x faster than RAFT baseline")
                 self._trt_ready = False  # Disable TensorRT path in __call__
             else:
-                # PRIORITY 2: Try TensorRT RAFT (only when USE_NEUFLOW=0)
-                # Candidate engine paths (absolute + relative)
-                engine_candidates = [
-                    os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'raft', 'raft_fp16.engine'),
-                    os.path.join(os.path.dirname(__file__), 'engines', 'raft', 'raft_fp16.engine'),
-                ]
-                engine_path = None
-                for p in engine_candidates:
-                    if os.path.exists(p):
-                        engine_path = p
-                        break
+                # PRIORITY 2: Try TensorRT RAFT (only when USE_NEUFLOW=0 AND FORCE_TRT_RAFT=1)
+                # When FORCE_TRT_RAFT=0, skip TensorRT entirely and use PyTorch RAFT
+                self._trt_ready = False  # Default to PyTorch
+                if self._force_trt:
+                    # Candidate engine paths (absolute + relative)
+                    engine_candidates = [
+                        os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'raft', 'raft_fp16.engine'),
+                        os.path.join(os.path.dirname(__file__), 'engines', 'raft', 'raft_fp16.engine'),
+                    ]
+                    engine_path = None
+                    for p in engine_candidates:
+                        if os.path.exists(p):
+                            engine_path = p
+                            break
 
-                if not engine_path and self._force_trt:
-                    raise RuntimeError("FORCE_TRT_RAFT=1 set but RAFT engine not found at expected locations")
+                    if not engine_path:
+                        raise RuntimeError("FORCE_TRT_RAFT=1 set but RAFT engine not found at expected locations")
 
-                if engine_path and device.type == 'cuda':
+                if self._force_trt and engine_path and device.type == 'cuda':
                     try:
                         # Ensure TensorRT DLLs are available on Windows
                         trt_root = os.environ.get('TENSORRT_ROOT') or os.path.join(os.getcwd(), 'TensorRT-10.7.0.23')
@@ -455,7 +459,7 @@ def pipeline(
                                 mode = self._engine.get_tensor_mode(name)
                                 if mode == trt.TensorIOMode.INPUT and self._in_name is None:
                                     self._in_name = name
-                                    self._binding_dtype_in = self._engine.get_binding_dtype(name)
+                                    self._binding_dtype_in = self._engine.get_tensor_dtype(name)
                                 elif mode == trt.TensorIOMode.OUTPUT and self._out_name is None:
                                     self._out_name = name
                                     self._binding_dtype_out = self._engine.get_tensor_dtype(name)

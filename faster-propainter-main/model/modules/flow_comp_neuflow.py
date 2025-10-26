@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
 
@@ -19,15 +20,16 @@ class NeuFlow_bi(nn.Module):
         try:
             import onnxruntime as ort
 
-            # Configure CUDA execution provider
+            # Configure CUDA execution provider (NO CPU FALLBACK!)
             providers = [
                 ('CUDAExecutionProvider', {
                     'device_id': 0,
                     'gpu_mem_limit': 8 * 1024 * 1024 * 1024,  # 8GB
                     'arena_extend_strategy': 'kSameAsRequested',
-                    'cudnn_conv_algo_search': 'DEFAULT',
+                    'cudnn_conv_algo_search': 'EXHAUSTIVE',  # Best Conv algorithm (4x faster than DEFAULT)
+                    'cudnn_conv_use_max_workspace': '1',     # Use full GPU memory for Conv optimization
                 }),
-                'CPUExecutionProvider'  # Fallback
+                # NO CPU FALLBACK - Fail fast if CUDA isn't available!
             ]
 
             # Create session
@@ -49,11 +51,15 @@ class NeuFlow_bi(nn.Module):
             print(f"[OK] NeuFlow v2 loaded: {model_path}")
             print(f"[OK] ONNX Runtime providers: {available_providers}")
 
-            # Check if CUDA is available
-            if 'CUDAExecutionProvider' in available_providers:
-                print("[OK] CUDA acceleration enabled for NeuFlow v2")
-            else:
-                print("[WARNING] CUDA not available, using CPU for NeuFlow v2")
+            # ENFORCE CUDA - Crash hard if CPU fallback occurred!
+            if 'CUDAExecutionProvider' not in available_providers:
+                raise RuntimeError(
+                    f"[ERROR] NeuFlow v2 REQUIRES CUDAExecutionProvider but it's not available!\n"
+                    f"Available providers: {available_providers}\n"
+                    f"This means ONNX Runtime fell back to CPU mode.\n"
+                    f"Install onnxruntime-gpu with CUDA support or check your GPU setup."
+                )
+            print("[OK] CUDA acceleration VERIFIED for NeuFlow v2 - NO CPU FALLBACK!")
 
         except ImportError:
             raise ImportError("onnxruntime-gpu is required. Install: pip install onnxruntime-gpu")
@@ -93,35 +99,79 @@ class NeuFlow_bi(nn.Module):
 
     def _compute_flow(self, image1, image2, iters):
         """
-        Run NeuFlow v2 inference on a pair of images.
+        Run NeuFlow v2 inference on batch of image pairs.
+
+        NeuFlow ONNX model has fixed input shape [1, 3, 432, 768].
+        This method handles batching and resizing to work with ProPainter's
+        variable batch sizes and cropped frame resolutions.
 
         Args:
-            image1: First image [B, C, H, W] in range [0, 1]
-            image2: Second image [B, C, H, W] in range [0, 1]
-            iters: Number of refinement iterations
+            image1: First images [B, C, H, W] in range [0, 1]
+            image2: Second images [B, C, H, W] in range [0, 1]
+            iters: Number of refinement iterations (unused for NeuFlow)
 
         Returns:
             flow: Optical flow [B, 2, H, W]
         """
-        # Convert to numpy and normalize if needed
-        img1_np = image1.cpu().numpy().astype(np.float32)
-        img2_np = image2.cpu().numpy().astype(np.float32)
+        B, C, H_orig, W_orig = image1.shape
 
-        # Prepare inputs for ONNX model
-        # Note: May need to adjust input format based on actual model requirements
-        inputs = {
-            self.input_names[0]: img1_np,
-            self.input_names[1]: img2_np,
-        }
+        # NeuFlow v2 ONNX expects fixed 432x768 resolution
+        TARGET_H, TARGET_W = 432, 768
 
-        # Run inference
-        outputs = self.session.run(self.output_names, inputs)
-        flow_np = outputs[0]  # Assuming first output is the flow
+        flows = []
 
-        # Convert back to PyTorch tensor
-        flow_tensor = torch.from_numpy(flow_np).to(self.device)
+        # Process each frame pair individually (ONNX batch size = 1)
+        for i in range(B):
+            # Extract single pair
+            img1 = image1[i:i+1]  # [1, C, H, W]
+            img2 = image2[i:i+1]  # [1, C, H, W]
 
-        return flow_tensor
+            # Resize to target resolution for ONNX model
+            img1_resized = F.interpolate(
+                img1,
+                size=(TARGET_H, TARGET_W),
+                mode='bilinear',
+                align_corners=False
+            )
+            img2_resized = F.interpolate(
+                img2,
+                size=(TARGET_H, TARGET_W),
+                mode='bilinear',
+                align_corners=False
+            )
+
+            # Convert to numpy for ONNX Runtime
+            img1_np = img1_resized.cpu().numpy().astype(np.float32)
+            img2_np = img2_resized.cpu().numpy().astype(np.float32)
+
+            # Run ONNX inference
+            inputs = {
+                self.input_names[0]: img1_np,
+                self.input_names[1]: img2_np,
+            }
+            outputs = self.session.run(self.output_names, inputs)
+            flow_np = outputs[0]  # [1, 2, 432, 768]
+
+            # Convert back to PyTorch
+            flow_torch = torch.from_numpy(flow_np).to(self.device)
+
+            # Resize flow back to original resolution
+            flow_resized = F.interpolate(
+                flow_torch,
+                size=(H_orig, W_orig),
+                mode='bilinear',
+                align_corners=False
+            )
+
+            # CRITICAL: Scale flow values by resize ratio
+            # Optical flow represents pixel displacement, so it must be scaled
+            flow_resized[:, 0, :, :] *= (W_orig / TARGET_W)  # Scale u (horizontal) component
+            flow_resized[:, 1, :, :] *= (H_orig / TARGET_H)  # Scale v (vertical) component
+
+            flows.append(flow_resized)
+
+        # Concatenate batch dimension
+        return torch.cat(flows, dim=0)  # [B, 2, H, W]
 
 
 def initialize_NeuFlow(model_path='models/neuflow_things.onnx', device='cuda'):
