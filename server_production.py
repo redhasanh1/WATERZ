@@ -501,7 +501,7 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
             import torch
             use_fp16 = torch.cuda.is_available()
 
-            print(f"   [RUNNING] Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=20, ref_stride=10, subvideo_length=80, FP16={use_fp16}")
+            print(f"   [RUNNING] Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=10, ref_stride=10, subvideo_length=120, raft_iter=10, FP16={use_fp16}")
 
             # Each process gets its own CUDA context for true parallel processing
             faster_propainter_pipeline(

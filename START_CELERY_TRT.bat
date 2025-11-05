@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
-echo Starting Celery worker (TensorRT RAFT - testing acceleration)...
+echo Starting Celery worker (TensorRT FastFlowNet - optimized optical flow)...
 echo.
 echo ============================================================
-echo TENSORRT MODE: TensorRT RAFT engine (3-5x faster than baseline)
+echo TENSORRT MODE: FastFlowNet TensorRT FP16 (thread-safe, optimized graph)
 echo ============================================================
 echo.
 
@@ -38,10 +38,11 @@ echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
-echo   - RAFT: PyTorch FP16 + TF32 (stable - TRT crashes in production)
+echo   - Optical Flow: FastFlowNet TensorRT FP16 (thread-safe, ~5ms/pair)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: Disabled
 echo   - Concurrency: 4 workers (optimal VRAM balance)
+echo   - neighbor_length: 10, raft_iter: 10 (optimized for speed)
 echo ============================================================
 echo.
 

@@ -386,18 +386,23 @@ class NVOFOpticalFlow:
             tensor: PyTorch tensor on GPU (uint8, shape H x W)
             buffer: NVOF GPU buffer handle
         """
+        # Ensure tensor is contiguous for fast memcpy
+        if not tensor.is_contiguous():
+            tensor = tensor.contiguous()
+
         # Get CUDA device pointer from NVOF buffer
         cu_ptr = self.api.nvOFGPUBufferGetCUdeviceptr(buffer)
 
-        # Use CUDA memcpy to transfer data
-        cuMemcpyDtoD = self.cuda_lib.cuMemcpyDtoD_v2
-        cuMemcpyDtoD.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
-        cuMemcpyDtoD.restype = ctypes.c_int
+        # Use cached CUDA memcpy function (avoid repeated function setup)
+        if not hasattr(self, '_cuMemcpyDtoD'):
+            self._cuMemcpyDtoD = self.cuda_lib.cuMemcpyDtoD_v2
+            self._cuMemcpyDtoD.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+            self._cuMemcpyDtoD.restype = ctypes.c_int
 
         tensor_ptr = tensor.data_ptr()
         size_bytes = tensor.numel() * tensor.element_size()
 
-        status = cuMemcpyDtoD(cu_ptr, tensor_ptr, size_bytes)
+        status = self._cuMemcpyDtoD(cu_ptr, tensor_ptr, size_bytes)
         assert status == 0, f"Failed to upload tensor to NVOF buffer: {status}"
 
     def _download_from_nvof_buffer(self, buffer: NvOFGPUBufferHandle, shape: Tuple[int, ...], dtype=torch.int16) -> torch.Tensor:
@@ -412,21 +417,22 @@ class NVOFOpticalFlow:
         Returns:
             PyTorch tensor on GPU
         """
-        # Allocate output tensor
+        # Allocate output tensor (contiguous by default)
         output = torch.empty(shape, dtype=dtype, device='cuda')
 
         # Get CUDA device pointer from NVOF buffer
         cu_ptr = self.api.nvOFGPUBufferGetCUdeviceptr(buffer)
 
-        # Use CUDA memcpy to transfer data
-        cuMemcpyDtoD = self.cuda_lib.cuMemcpyDtoD_v2
-        cuMemcpyDtoD.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
-        cuMemcpyDtoD.restype = ctypes.c_int
+        # Use cached CUDA memcpy function (avoid repeated function setup)
+        if not hasattr(self, '_cuMemcpyDtoD'):
+            self._cuMemcpyDtoD = self.cuda_lib.cuMemcpyDtoD_v2
+            self._cuMemcpyDtoD.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+            self._cuMemcpyDtoD.restype = ctypes.c_int
 
         output_ptr = output.data_ptr()
         size_bytes = output.numel() * output.element_size()
 
-        status = cuMemcpyDtoD(output_ptr, cu_ptr, size_bytes)
+        status = self._cuMemcpyDtoD(output_ptr, cu_ptr, size_bytes)
         assert status == 0, f"Failed to download from NVOF buffer: {status}"
 
         return output
@@ -478,6 +484,12 @@ class NVOFOpticalFlow:
         flows_fwd = torch.zeros(B, num_pairs, 2, H, W, dtype=torch.float32, device=device)
         flows_bwd = torch.zeros(B, num_pairs, 2, H, W, dtype=torch.float32, device=device) if self.bidirectional else None
 
+        # OPTIMIZATION: Batch convert ALL frames to grayscale + uint8 at once
+        # This reduces overhead from T individual conversions to just 1
+        frames_gray = self._rgb_to_grayscale(frames.view(B * T, C, H, W))  # (B*T, 1, H, W)
+        frames_gray_u8 = (frames_gray * 255.0).clamp(0, 255).byte().squeeze(1)  # (B*T, H, W)
+        frames_gray_u8 = frames_gray_u8.view(B, T, H, W)  # (B, T, H, W)
+
         # Setup execute parameters
         exec_in = NV_OF_EXECUTE_INPUT_PARAMS()
         exec_in.inputFrame = self.input_buffer1
@@ -502,19 +514,11 @@ class NVOFOpticalFlow:
         for b in range(B):
             # Process each frame pair
             for t in range(num_pairs):
-                # Get current and next frame
-                frame1 = frames[b, t]      # (C, H, W)
-                frame2 = frames[b, t + 1]  # (C, H, W)
+                # Get pre-converted grayscale uint8 frames (no conversion overhead!)
+                gray1_u8 = frames_gray_u8[b, t]      # (H, W)
+                gray2_u8 = frames_gray_u8[b, t + 1]  # (H, W)
 
-                # Convert RGB to grayscale
-                gray1 = self._rgb_to_grayscale(frame1.unsqueeze(0)).squeeze(0).squeeze(0)  # (H, W)
-                gray2 = self._rgb_to_grayscale(frame2.unsqueeze(0)).squeeze(0).squeeze(0)  # (H, W)
-
-                # Convert to uint8 [0, 255]
-                gray1_u8 = (gray1 * 255.0).clamp(0, 255).byte()
-                gray2_u8 = (gray2 * 255.0).clamp(0, 255).byte()
-
-                # Upload to NVOF buffers
+                # Upload to NVOF buffers (only remaining overhead)
                 self._upload_to_nvof_buffer(gray1_u8, self.input_buffer1)
                 self._upload_to_nvof_buffer(gray2_u8, self.input_buffer2)
 

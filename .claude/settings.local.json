@@ -12,7 +12,9 @@
       "Bash(/c/Users/has/AppData/Local/Programs/Python/Python312/python.exe -m pip:*)",
       "Bash(/c/Users/has/AppData/Local/Programs/Python/Python312/python.exe:*)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m pip install:*)",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import tensorrt as trt; print(f''TensorRT version: {trt.__version__}'')\")"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import tensorrt as trt; print(f''TensorRT version: {trt.__version__}'')\")",
+      "Bash(\"%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe\" test_nvof_wrapper.py)",
+      "Bash(/c/TensorRT-10.13.3.9/bin/trtexec.exe:*)"
     ],
     "deny": [],
     "ask": []

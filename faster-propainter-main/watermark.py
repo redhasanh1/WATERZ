@@ -1261,5 +1261,5 @@ if __name__ == "__main__":
         out_fp,
         fp16=True,
         subvideo_length=80,
-        neighbor_length=20,
+        neighbor_length=10,  # Reduced from 20 to 10 (default) = 50% fewer RAFT calls
     )
