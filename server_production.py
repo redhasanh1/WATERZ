@@ -110,6 +110,7 @@ from celery import Celery, chord
 import cv2
 import numpy as np
 import io
+import json
 import time
 import hashlib
 import uuid
@@ -718,17 +719,17 @@ celery.conf.update(
 # Everything stays on ONE GPU for extreme speed
 
 import threading
-from celery import signals
 
 encoder_thread = None
 
-@signals.worker_process_init.connect
 def start_background_encoder(**kwargs):
     """
     Start background encoding thread when worker process initializes.
     This runs ONCE per worker process.
     """
     global encoder_thread
+
+    print("[BACKGROUND ENCODER INIT] Worker process starting, initializing background encoder...")
 
     if encoder_thread is None or not encoder_thread.is_alive():
         print("[BACKGROUND ENCODER] Starting real-time encoding thread...")
@@ -739,6 +740,8 @@ def start_background_encoder(**kwargs):
         )
         encoder_thread.start()
         print("[BACKGROUND ENCODER] Thread active - will encode segments as they complete!")
+    else:
+        print("[BACKGROUND ENCODER] Thread already running")
 
 
 def background_encoder_worker():
@@ -968,6 +971,11 @@ def trigger_finalization(redis_client, video_id, total_segments):
     # Store final result in Redis
     redis_client.set(f"video:{video_id}:final_path", final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
+
+# Connect background encoder to worker process init signal
+from celery import signals
+signals.worker_process_init.connect(start_background_encoder)
+print("[STARTUP] Background encoder signal handler registered")
 
 # ============================================================================
 # REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
@@ -1588,6 +1596,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 'width': width,
                 'height': height,
                 'fps': fps,
+                'video_path': video_path,  # For background encoder audio merge
                 'shared_mask_dir': shared_mask_dir,
                 'shared_frames_dir': shared_frames_dir,
                 'video_url': f"{api_base_url.rstrip('/')}/uploads/{os.path.basename(video_path)}",
@@ -1714,6 +1723,7 @@ def process_segment_task(self, segment_data):
         width = segment_data['width']
         height = segment_data['height']
         fps = segment_data['fps']
+        video_path = segment_data['video_path']  # For background encoder audio merge
 
         print(f"\n[SEGMENT] Worker processing segment {seg_idx+1}/{total_segments}: frames {start_frame}-{end_frame}")
         self.update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
@@ -2301,13 +2311,11 @@ def process_segment_task(self, segment_data):
         # Store segment metadata in Redis for background encoder
         redis_client = celery.backend.client
         segment_key = f"video:{video_id}:segment:{seg_idx}"
-        redis_client.hset(segment_key, mapping={
-            'cleaned_dir': seg_cleaned_dir,
-            'fps': str(fps),
-            'frame_count': str(cleaned_frame_count),
-            'base_name': base_name,
-            'status': 'ready_for_encoding'
-        })
+        redis_client.hset(segment_key, 'cleaned_dir', seg_cleaned_dir)
+        redis_client.hset(segment_key, 'fps', str(fps))
+        redis_client.hset(segment_key, 'frame_count', str(cleaned_frame_count))
+        redis_client.hset(segment_key, 'base_name', base_name)
+        redis_client.hset(segment_key, 'status', 'ready_for_encoding')
 
         # Set video-level metadata (idempotent - safe to set multiple times)
         redis_client.set(f"video:{video_id}:total_segments", total_segments)
