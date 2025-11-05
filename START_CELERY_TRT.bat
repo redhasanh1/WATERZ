@@ -24,7 +24,7 @@ if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
 REM Force TensorRT-only mode for YOLO (no .pt fallback)
 set YOLO_REQUIRE_TENSORRT=1
 
-REM TENSORRT: DISABLED (engine needs rebuild for TRT 10.14) - using PyTorch RAFT for now
+REM TENSORRT: DISABLED (engine not compatible with RTX 4090 yet) - using PyTorch RAFT
 set FORCE_TRT_RAFT=0
 set USE_NEUFLOW=0
 
@@ -38,13 +38,13 @@ echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 128 (800-1400 fps - 2x RTX 5070!)
-echo   - RAFT: PyTorch FP16 + TF32 (~10.5 it/s baseline)
+echo   - RAFT: PyTorch FP16 + TF32 (stable, TRT engine needs rebuild)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: Disabled
-echo   - Concurrency: 6 workers (max parallelism with model caching!)
+echo   - Concurrency: 5 workers (4 segments + 1 spare - 18-20s target!)
 echo ============================================================
 echo.
 
 REM Use module form; threads pool works best on Windows
-REM concurrency=6 for RTX 4090 (24GB VRAM - model caching enables true 6x parallelism!)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=6
+REM concurrency=5 for 4 YOLO segments (optimal parallelism)
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=5

@@ -31,9 +31,9 @@ except ValueError:
     _segment_workers_env = 2
 SEGMENT_WORKERS = max(1, _segment_workers_env)
 
-# Force parallel segmentation for multi-GPU/multi-worker distribution
-os.environ.setdefault('MIN_SEGMENTS', '4')  # Split videos into at least 4 segments for parallel processing
-os.environ.setdefault('MIN_CHUNK_FRAMES', '30')  # Minimum frames per segment
+# Force parallel segmentation for multi-GPU/multi-worker distribution (only if YOLO fails)
+os.environ.setdefault('MIN_SEGMENTS', '5')  # Fallback split if YOLO finds 0-1 segments
+os.environ.setdefault('MIN_CHUNK_FRAMES', '60')  # Minimum frames per chunk (fallback when YOLO fails)
 
 # Create directories
 for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR, PROPAINTER_OUTPUT_ROOT, PROPAINTER_MASK_ROOT]:
@@ -512,7 +512,7 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
                 mask_dilation=4,
                 ref_stride=10,
                 neighbor_length=10,
-                subvideo_length=60,
+                subvideo_length=120,
                 raft_iter=10,
                 mode="video_inpainting",
                 save_frames=True,
@@ -1276,9 +1276,11 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             min_segments = 0
             min_chunk_frames = 60
 
-        if min_segments and len(segments) < min_segments and frames_processed >= min_chunk_frames:
-            # Split the longest segment or the only segment into at least min_segments time chunks
-            base_seg = max(segments, key=lambda s: (s[1]-s[0]+1)) if segments else (0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])
+        # Force-split ONLY when YOLO fails (0-1 segments detected)
+        # If YOLO found multiple segments, preserve them - they represent distinct watermark regions
+        if min_segments and len(segments) <= 1 and frames_processed >= min_chunk_frames:
+            # YOLO failed - split video into time-based chunks for parallel processing
+            base_seg = segments[0] if segments else (0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])
             s0, e0, bb = base_seg
             duration = e0 - s0 + 1
             num_chunks = min_segments
@@ -1294,7 +1296,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     new_segments[-1] = (new_segments[-1][0], e0, new_segments[-1][2])
                     break
             segments = new_segments
-            print(f"🪓 Force-split enabled: created {len(segments)} time chunks (chunk≈{chunk} frames)")
+            print(f"🪓 Force-split enabled (YOLO fallback): created {len(segments)} time chunks (chunk≈{chunk} frames)")
 
         # Provide a base URL so OTHER workers can fetch frames/masks from this host
         temp_base_url = temp_base or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
@@ -1955,7 +1957,7 @@ def process_segment_task(self, segment_data):
                     mask_dilation=4,
                     ref_stride=15,
                     neighbor_length=10,
-                    subvideo_length=60,
+                    subvideo_length=120,
                     raft_iter=10,
                     mode="video_inpainting",
                     save_frames=True,
@@ -4002,22 +4004,6 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
-
-                # OPTIMIZATION: Broadcast video download to ALL workers in parallel
-                # This pre-caches the video on all workers before processing starts
-                video_id = task_id  # Use task_id as video_id
-                video_filename = os.path.basename(video_path)
-                video_url = f"{base.rstrip('/')}/uploads/{video_filename}"
-
-                print(f"📡 Broadcasting download to all workers...")
-                # Use Celery group to send to all workers simultaneously
-                from celery import group
-                try:
-                    broadcast_group = group(broadcast_video_download.s(video_id, video_url, video_filename))
-                    broadcast_result = broadcast_group.apply_async()
-                    print(f"   [OK] Broadcast initiated to all workers")
-                except Exception as e:
-                    print(f"   [WARNING]  Broadcast failed (continuing anyway): {e}")
 
                 # Call prepare_video_task which creates the chord internally
                 # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize

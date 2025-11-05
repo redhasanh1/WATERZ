@@ -889,8 +889,11 @@ def pipeline(
                     p.requires_grad = False
                 fix_flow_complete.to(device, non_blocking=True)
                 fix_flow_complete.eval()
+                # THREAD-SAFE FIX: Convert to FP16 during caching, not during inference
+                if use_half:
+                    fix_flow_complete = fix_flow_complete.half()
                 _GLOBAL_MODELS_CACHE[cache_key]['rfcnet'] = fix_flow_complete
-                print(f"[CACHE] RFCNet model cached ({time.time() - rfcnet_start:.2f}s)")
+                print(f"[CACHE] RFCNet model cached in {'FP16' if use_half else 'FP32'} ({time.time() - rfcnet_start:.2f}s)")
             else:
                 fix_flow_complete = _GLOBAL_MODELS_CACHE[cache_key]['rfcnet']
     else:
@@ -929,8 +932,11 @@ def pipeline(
                 propainter_start = time.time()
                 model = InpaintGenerator(model_path=ckpt_path).to(device, non_blocking=True)
                 model.eval()
+                # THREAD-SAFE FIX: Convert to FP16 during caching, not during inference
+                if use_half:
+                    model = model.half()
                 _GLOBAL_MODELS_CACHE[cache_key]['propainter'] = model
-                print(f"[CACHE] ProPainter model cached ({time.time() - propainter_start:.2f}s)")
+                print(f"[CACHE] ProPainter model cached in {'FP16' if use_half else 'FP32'} ({time.time() - propainter_start:.2f}s)")
                 print(f"[OK] All models cached! Total worker init time saved on next segment")
             else:
                 model = _GLOBAL_MODELS_CACHE[cache_key]['propainter']
@@ -947,14 +953,15 @@ def pipeline(
     print(f"Processing: {video_length} frames...")
     with torch.no_grad():
         # ---- compute flow ----
+        # Large batch sizes for better GPU utilization (17s processing time)
         if frames.size(-1) <= 640:
-            short_clip_len = 12
+            short_clip_len = 32
         elif frames.size(-1) <= 720:
-            short_clip_len = 8
+            short_clip_len = 24
         elif frames.size(-1) <= 1280:
-            short_clip_len = 4
+            short_clip_len = 16  # main use case
         else:
-            short_clip_len = 2
+            short_clip_len = 8
 
         # Use FP16 for RAFT with autocast (4x faster, no type errors!)
         if use_half:
@@ -995,14 +1002,14 @@ def pipeline(
             # Removed empty_cache() - was forcing GPU sync barrier
 
         if use_half:
+            # Convert local tensors to FP16 (thread-safe)
             frames, flow_masks, masks_dilated = (
                 frames.half(),
                 flow_masks.half(),
                 masks_dilated.half(),
             )
             gt_flows_bi = (gt_flows_bi[0].half(), gt_flows_bi[1].half())
-            fix_flow_complete = fix_flow_complete.half()
-            model = model.half()
+            # REMOVED: fix_flow_complete.half() and model.half() - now cached in correct precision
 
         # ---- complete flow ----
         print("[FLOW] Starting flow completion (RFCNet)...")
@@ -1054,8 +1061,8 @@ def pipeline(
         try:
             masked_frames = frames * (1 - masks_dilated)
             subvideo_length_img_prop = min(
-                100, subvideo_length
-            )  # ensure a minimum of 100 frames for image propagation
+                150, subvideo_length
+            )  # ensure a minimum of 150 frames for image propagation
             if video_length > subvideo_length_img_prop:
                 updated_frames, updated_masks = [], []
                 pad_len = 10
