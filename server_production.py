@@ -817,10 +817,17 @@ def encode_segment_background(redis_client, data):
 
     # Get segment metadata from Redis
     segment_key = f"video:{video_id}:segment:{seg_idx}"
-    segment_info = redis_client.hgetall(segment_key)
+    segment_info_raw = redis_client.hgetall(segment_key)
 
-    if not segment_info:
+    if not segment_info_raw:
         raise RuntimeError(f"Segment metadata not found in Redis: {segment_key}")
+
+    # Decode bytes to strings (Redis returns bytes)
+    segment_info = {
+        k.decode() if isinstance(k, bytes) else k:
+        v.decode() if isinstance(v, bytes) else v
+        for k, v in segment_info_raw.items()
+    }
 
     cleaned_dir = segment_info.get('cleaned_dir')
     fps = float(segment_info.get('fps', 30))
@@ -887,7 +894,10 @@ def trigger_finalization(redis_client, video_id, total_segments):
     segment_paths = []
     for seg_idx in range(total_segments):
         segment_key = f"video:{video_id}:segment:{seg_idx}"
-        encoded_path = redis_client.hget(segment_key, 'encoded_path')
+        encoded_path_raw = redis_client.hget(segment_key, 'encoded_path')
+
+        # Decode bytes to string
+        encoded_path = encoded_path_raw.decode() if isinstance(encoded_path_raw, bytes) else encoded_path_raw
 
         if not encoded_path or not os.path.exists(encoded_path):
             raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
@@ -896,9 +906,12 @@ def trigger_finalization(redis_client, video_id, total_segments):
 
     print(f"[FINALIZE] Found {len(segment_paths)} encoded segments")
 
-    # Get video metadata
-    base_name = redis_client.get(f"video:{video_id}:base_name") or 'video'
-    video_path = redis_client.get(f"video:{video_id}:video_path")  # Original video for audio
+    # Get video metadata (decode bytes)
+    base_name_raw = redis_client.get(f"video:{video_id}:base_name")
+    base_name = base_name_raw.decode() if isinstance(base_name_raw, bytes) else (base_name_raw or 'video')
+
+    video_path_raw = redis_client.get(f"video:{video_id}:video_path")
+    video_path = video_path_raw.decode() if isinstance(video_path_raw, bytes) else video_path_raw
 
     # Create concat list
     concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
@@ -2380,11 +2393,13 @@ def finalize_video_task(self, segment_results, prepare_result):
         wait_interval = 1  # Check every 1 second
 
         for elapsed in range(0, max_wait_seconds, wait_interval):
-            status = redis_client.get(f"video:{video_id}:status")
+            status_raw = redis_client.get(f"video:{video_id}:status")
+            status = status_raw.decode() if isinstance(status_raw, bytes) else status_raw
 
             if status == "complete":
                 # Background encoder finished!
-                final_path = redis_client.get(f"video:{video_id}:final_path")
+                final_path_raw = redis_client.get(f"video:{video_id}:final_path")
+                final_path = final_path_raw.decode() if isinstance(final_path_raw, bytes) else final_path_raw
 
                 if not final_path or not os.path.exists(final_path):
                     raise RuntimeError(f"Background encoder reported complete but final video not found: {final_path}")
@@ -2423,7 +2438,8 @@ def finalize_video_task(self, segment_results, prepare_result):
                 return result
 
             elif status == "error":
-                error_msg = redis_client.get(f"video:{video_id}:error") or "Unknown error"
+                error_msg_raw = redis_client.get(f"video:{video_id}:error")
+                error_msg = error_msg_raw.decode() if isinstance(error_msg_raw, bytes) else (error_msg_raw or "Unknown error")
                 raise RuntimeError(f"Background encoder reported error: {error_msg}")
 
             # Still processing - update progress
