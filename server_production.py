@@ -972,11 +972,6 @@ def trigger_finalization(redis_client, video_id, total_segments):
     redis_client.set(f"video:{video_id}:final_path", final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
 
-# Connect background encoder to worker process init signal
-from celery import signals
-signals.worker_process_init.connect(start_background_encoder)
-print("[STARTUP] Background encoder signal handler registered")
-
 # ============================================================================
 # REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
 # ============================================================================
@@ -1070,7 +1065,10 @@ from celery.signals import worker_ready
 def on_worker_ready(sender=None, **kwargs):
     """Called when Celery worker finishes initialization - pre-warm models"""
     print("[INIT] Worker ready - warming up models...")
+
+    # Start background threads
     start_redis_download_poller()
+    start_background_encoder()
 
     # Pre-load YOLO detector (saves 6-7s on first task)
     try:
