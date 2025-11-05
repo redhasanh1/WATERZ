@@ -41,10 +41,10 @@ echo   - YOLO: TensorRT batch 128 (800-1400 fps - 2x RTX 5070!)
 echo   - RAFT: PyTorch FP16 + TF32 (stable, TRT engine needs rebuild)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: Disabled
-echo   - Concurrency: 4 workers (4 segments parallel - 18-20s target!)
+echo   - Concurrency: 3 workers (conservative VRAM - stable processing)
 echo ============================================================
 echo.
 
 REM Use module form; threads pool works best on Windows
-REM concurrency=4 for 4 segments (VRAM safe: 4×5GB = 20GB < 24GB)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+REM concurrency=3 for VRAM safety (3×6GB = 18GB < 24GB with margin)
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=3
