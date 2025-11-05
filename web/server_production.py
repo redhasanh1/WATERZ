@@ -929,6 +929,27 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # Use provided video_id (from upload task_id) for cache consistency, fallback to Celery task ID
         video_id = video_id or (self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8])
 
+        # 🔒 DEDUPLICATION: Check if this video is already being prepared by another worker
+        try:
+            redis_client = celery.backend.client
+            lock_key = f'prepare_lock:{base_name}'
+
+            # Check if another worker is already processing this video
+            if redis_client.exists(lock_key):
+                print(f"[SKIP]  Video '{base_name}' already being prepared by another worker - skipping duplicate task")
+                cap.release()  # Clean up video capture
+                return {
+                    'status': 'skipped',
+                    'message': f'Video already being processed',
+                    'video_id': base_name
+                }
+
+            # Acquire lock for 5 minutes (YOLO detection + frame extraction time)
+            redis_client.setex(lock_key, 300, self.request.id if hasattr(self.request, 'id') else 'unknown')
+            print(f"🔒 Acquired processing lock for video '{base_name}'")
+        except Exception as e:
+            print(f"[WARNING]  Deduplication check failed: {e} - proceeding anyway")
+
         # 🚀 REDIS SIGNAL: Tell ALL workers to download this video in parallel!
         # This allows idle workers to start downloading immediately instead of waiting
         try:
@@ -3829,35 +3850,13 @@ def process_video():
                 video_filename = os.path.basename(video_path)
                 video_url = f"{base.rstrip('/')}/uploads/{video_filename}"
 
-                print(f"📡 Broadcasting download to all workers: {video_url}")
-                from celery import group
-                try:
-                    # Broadcast to all workers - each will download and cache in parallel
-                    broadcast_group = group(broadcast_video_download.s(video_id, video_url, video_filename))
-                    broadcast_result = broadcast_group.apply_async()
-                    print(f"   ✅ Broadcast initiated to all workers (task: {broadcast_result.id})")
-                except Exception as e:
-                    print(f"   ⚠️  Broadcast failed (continuing anyway): {e}")
-
-                # 🚀 PARALLEL YOLO: Send prepare_video to MULTIPLE workers!
-                # All workers race to do YOLO detection simultaneously
-                # First worker to finish dispatches segment tasks
-                # This eliminates idle time during YOLO phase (saves ~19 seconds!)
-                print(f"🚀 Sending prepare_video to multiple workers for parallel YOLO...")
-
-                # Send to 2 workers explicitly (adjust if you have more workers)
-                num_workers = 2
-                prepare_tasks = []
-                for i in range(num_workers):
-                    task = prepare_video_task.apply_async(
-                        args=[video_path],
-                        kwargs={'api_base': base, 'temp_base': base, 'video_id': task_id}
-                    )
-                    prepare_tasks.append(task)
-                    print(f"   ✅ Sent prepare task {i+1}/{num_workers}: {task.id}")
-
-                # Use first task ID for tracking
-                result = prepare_tasks[0] if prepare_tasks else None
+                # 🚀 Send prepare_video to single worker for YOLO detection
+                print(f"🚀 Sending prepare_video task for YOLO detection...")
+                result = prepare_video_task.apply_async(
+                    args=[video_path],
+                    kwargs={'api_base': base, 'temp_base': base, 'video_id': task_id}
+                )
+                print(f"   ✅ Task queued: {result.id}")
             print(f"✅ Task queued with ID: {result.id}")
             return jsonify({'status': 'success', 'task_id': result.id})
 
