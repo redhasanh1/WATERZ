@@ -1721,7 +1721,7 @@ def process_segment_task(self, segment_data):
                 print(f"   [WARNING]  Local mask copy failed: {copy_err} - will regenerate")
 
         # Fallback: HTTP download (different PC - SLOW but necessary for distributed workers)
-        elif origin_base and shared_mask_dir:
+        elif not masks_downloaded and origin_base and shared_mask_dir:
             print(f"   📥 Downloading masks from remote location...")
             self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
 

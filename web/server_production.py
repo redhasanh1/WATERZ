@@ -525,7 +525,7 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
         encode_cmd = [
             'ffmpeg', '-y', '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-c:v', 'h264_nvenc', '-preset', 'p7', '-cq', '18',
             '-pix_fmt', 'yuv420p',
             '-profile:v', 'main',
             seg_video_path
@@ -977,44 +977,84 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         zero_mask = np.zeros((height, width), dtype=np.uint8)
         last_valid_bbox = None
-        frames_processed = 0
-        frames_with_watermark = 0
+        # 🚀 BATCH YOLO DETECTION (128-frame batches for TensorRT speed!)
+        print(f"📦 Collecting frames for batch YOLO detection...")
         detect_interval = 3
         warmup_frames = 60
-        hit_found = False
         det_conf = 0.15
-        bboxes_per_frame = []
+
+        # Step 1: Collect all frames and determine which need detection
+        all_frames = []
+        frames_to_detect_indices = []
+        hit_found = False
+        frames_processed = 0
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            progress = 10 + int((frames_processed / max(total_frames, 1)) * 30)
-            self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Detection {frames_processed}/{total_frames}'})
+            all_frames.append(frame)
 
+            # Determine if this frame needs detection
             if (frames_processed % detect_interval == 0) or (not hit_found and frames_processed < warmup_frames):
-                detections = detector.detect(frame, confidence_threshold=det_conf, padding=0)
+                frames_to_detect_indices.append(frames_processed)
+
+            frames_processed += 1
+
+            if frames_processed % 100 == 0:
+                progress = 10 + int((frames_processed / max(total_frames, 1)) * 15)
+                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Loading frames {frames_processed}/{total_frames}'})
+
+        cap.release()
+
+        if frames_processed == 0:
+            raise RuntimeError("No frames processed - video may be corrupted")
+
+        print(f"✅ Loaded {frames_processed} frames, will detect on {len(frames_to_detect_indices)} frames")
+
+        # Step 2: Batch detect on selected frames (128 at a time for TensorRT)
+        print(f"🔍 Running batch YOLO detection...")
+        self.update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Batch YOLO detection'})
+
+        frames_to_detect = [all_frames[i] for i in frames_to_detect_indices]
+        batch_detections = detector.batch_detect(frames_to_detect, confidence_threshold=det_conf, padding=0, batch_size=128)
+
+        # Map detections back to frame indices
+        detection_map = dict(zip(frames_to_detect_indices, batch_detections))
+
+        # Step 3: Generate masks for all frames
+        print(f"🎭 Generating masks...")
+        frames_with_watermark = 0
+        last_valid_bbox = None
+        bboxes_per_frame = []
+
+        for frame_idx, frame in enumerate(all_frames):
+            if frame_idx in detection_map:
+                detections = detection_map[frame_idx]
                 if detections:
                     frames_with_watermark += 1
                     last_valid_bbox = detections[0]['bbox']
                     hit_found = True
                     bboxes_per_frame.append(last_valid_bbox)
+                    mask = detector.create_mask(frame, detections)
                 elif last_valid_bbox:
                     bboxes_per_frame.append(last_valid_bbox)
+                    mask = detector.create_mask(frame, [{'bbox': last_valid_bbox}])
                 else:
                     bboxes_per_frame.append(None)
-
-                mask = detector.create_mask(frame, detections) if detections else zero_mask
+                    mask = zero_mask
             else:
+                # Use last known bbox
                 bboxes_per_frame.append(last_valid_bbox)
                 mask = detector.create_mask(frame, [{'bbox': last_valid_bbox}]) if last_valid_bbox else zero_mask
 
-            mask_path = os.path.join(shared_mask_dir, f"{frames_processed:04d}.png")
+            mask_path = os.path.join(shared_mask_dir, f"{frame_idx:04d}.png")
             cv2.imwrite(mask_path, mask)
-            frames_processed += 1
 
-        cap.release()
+            if frame_idx % 50 == 0:
+                progress = 25 + int((frame_idx / frames_processed) * 20)
+                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Masks {frame_idx}/{frames_processed}'})
 
         if frames_processed == 0:
             raise RuntimeError("No frames processed - video may be corrupted")
@@ -1599,8 +1639,7 @@ def finalize_video_task(self, segment_results, prepare_result):
                 '-i', video_path,
                 '-map', '0:v:0',
                 '-map', '1:a:0',
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-                '-pix_fmt', 'yuv420p', '-profile:v', 'main',
+                '-c:v', 'copy',  # Segments already NVENC-encoded, just copy!
                 '-c:a', 'aac', '-b:a', '192k',
                 '-shortest',
                 final_output
@@ -1609,8 +1648,7 @@ def finalize_video_task(self, segment_results, prepare_result):
             merge_cmd = [
                 'ffmpeg', '-y',
                 '-i', temp_processed,
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-                '-pix_fmt', 'yuv420p', '-profile:v', 'main',
+                '-c:v', 'copy',  # Segments already NVENC-encoded, just copy!
                 final_output
             ]
 

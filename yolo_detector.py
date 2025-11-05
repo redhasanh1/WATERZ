@@ -145,6 +145,67 @@ class YOLOWatermarkDetector:
 
         return bboxes
 
+    def batch_detect(self, images, confidence_threshold=0.25, padding=30, batch_size=128):
+        """
+        Detect watermarks in multiple images using batched inference (FAST!)
+
+        Args:
+            images: List of numpy arrays [(H, W, 3) BGR, ...]
+            confidence_threshold: Minimum confidence for detections (0-1)
+            padding: Pixels to add around detected region
+            batch_size: Number of images to process per batch (default 128 for TensorRT)
+
+        Returns:
+            List of detection lists - one per image: [[{bbox, confidence}, ...], ...]
+        """
+        if not self.use_yolo or not images:
+            return [[] for _ in images]
+
+        # Force GPU for batch processing
+        if self._require_tensorrt:
+            if torch is None or not torch.cuda.is_available():
+                raise RuntimeError("TensorRT batch mode requires CUDA GPU")
+            device_arg = 0  # GPU only
+        else:
+            device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
+
+        all_results = []
+        num_images = len(images)
+
+        # Process in batches
+        for batch_start in range(0, num_images, batch_size):
+            batch_end = min(batch_start + batch_size, num_images)
+            batch_images = images[batch_start:batch_end]
+
+            # Run batched YOLO detection
+            results = self.model(batch_images, conf=confidence_threshold, device=device_arg, verbose=False)
+
+            # Parse results for each image in batch
+            for img, result in zip(batch_images, results):
+                h, w = img.shape[:2]
+                bboxes = []
+
+                boxes = result.boxes
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+
+                    # Add padding
+                    x1 = max(0, int(x1) - padding)
+                    y1 = max(0, int(y1) - padding)
+                    x2 = min(w, int(x2) + padding)
+                    y2 = min(h, int(y2) + padding)
+
+                    conf = float(box.conf[0])
+
+                    bboxes.append({
+                        'bbox': (x1, y1, x2, y2),
+                        'confidence': conf
+                    })
+
+                all_results.append(bboxes)
+
+        return all_results
+
     def detect_batch(self, images, confidence_threshold=0.25, padding=30, batch_size=128):
         """
         Batch detect watermarks in multiple images (EXTREME SPEED!)
