@@ -11,10 +11,6 @@ from PIL import Image
 import torch
 import torchvision
 
-# Essential optimization: Enable cuDNN autotuner (benchmarks kernels once, reuses best)
-# This is SAFE and provides 20-30% speedup without breaking anything
-torch.backends.cudnn.benchmark = True
-
 # Enable Flash Attention backends for Blackwell optimization
 if os.getenv("ENABLE_FLASH_ATTENTION", "0") == "1":
     try:
