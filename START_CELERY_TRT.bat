@@ -37,14 +37,14 @@ set ENABLE_FLASH_ATTENTION=0
 echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
-echo   - YOLO: TensorRT batch 192 (balanced speed/VRAM - RTX 4090)
+echo   - YOLO: TensorRT batch 192 (higher throughput)
 echo   - RAFT: PyTorch FP16 + TF32 (stable, TRT engine needs rebuild)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: Disabled
-echo   - Concurrency: 5 workers (4 segments + 1 spare - 18-20s target!)
+echo   - Concurrency: 4 workers (VRAM optimized for batch 192)
 echo ============================================================
 echo.
 
 REM Use module form; threads pool works best on Windows
-REM concurrency=5 for optimal parallelism (YOLO + 4 segments)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=5
+REM concurrency=4 with batch_size=192 for VRAM balance
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
