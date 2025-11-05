@@ -60,8 +60,8 @@ REM Disable Python buffering and mark production
 set "PYTHONUNBUFFERED=1"
 set "FLASK_ENV=production"
 
-REM Run the WEB server module (web\server_production.py) with Waitress
-cd /d "%~dp0web"
+REM Run the WEB server module (ROOT server_production.py) with Waitress
+REM Stay in ROOT directory - server_production.py is there now
 echo Starting production server on http://0.0.0.0:9000 ...
 python -u -m waitress --host=0.0.0.0 --port=9000 --threads=4 server_production:app
 
