@@ -711,6 +711,265 @@ celery.conf.update(
 )
 
 # ============================================================================
+# BACKGROUND ENCODER THREAD (Real-Time Continuous Encoding)
+# ============================================================================
+# Workers signal when segments ready → Background thread encodes immediately
+# Encoding happens continuously as segments complete (not all at once at end)
+# Everything stays on ONE GPU for extreme speed
+
+import threading
+from celery import signals
+
+encoder_thread = None
+
+@signals.worker_process_init.connect
+def start_background_encoder(**kwargs):
+    """
+    Start background encoding thread when worker process initializes.
+    This runs ONCE per worker process.
+    """
+    global encoder_thread
+
+    if encoder_thread is None or not encoder_thread.is_alive():
+        print("[BACKGROUND ENCODER] Starting real-time encoding thread...")
+        encoder_thread = threading.Thread(
+            target=background_encoder_worker,
+            daemon=True,  # Dies with worker process
+            name="BackgroundEncoder"
+        )
+        encoder_thread.start()
+        print("[BACKGROUND ENCODER] Thread active - will encode segments as they complete!")
+
+
+def background_encoder_worker():
+    """
+    Background thread that encodes segments in real-time as they complete.
+    Uses Redis pub/sub to receive segment completion notifications.
+    Encodes continuously - NOT waiting until end!
+    """
+    import json
+    import traceback
+
+    try:
+        redis_client = celery.backend.client
+        pubsub = redis_client.pubsub()
+        pubsub.subscribe('segment_ready')
+
+        print("[BACKGROUND ENCODER] Listening for segment completion signals...")
+
+        # Track videos being processed
+        video_segments = {}  # {video_id: set of encoded seg_indices}
+
+        for message in pubsub.listen():
+            if message['type'] == 'message':
+                try:
+                    data = json.loads(message['data'])
+                    video_id = data['video_id']
+                    seg_idx = data['seg_idx']
+                    total_segments = data['total_segments']
+
+                    # Track this video's segments
+                    if video_id not in video_segments:
+                        video_segments[video_id] = set()
+
+                    print(f"[BACKGROUND ENCODER] Segment {seg_idx+1}/{total_segments} ready for video {video_id} - encoding NOW!")
+
+                    # Encode segment immediately
+                    encode_segment_background(redis_client, data)
+
+                    # Track completion
+                    video_segments[video_id].add(seg_idx)
+                    encoded_count = len(video_segments[video_id])
+
+                    print(f"[BACKGROUND ENCODER] ✓ Segment {seg_idx+1} encoded! Progress: {encoded_count}/{total_segments}")
+
+                    # Check if all segments encoded for this video
+                    if encoded_count == total_segments:
+                        print(f"[BACKGROUND ENCODER] All {total_segments} segments encoded for {video_id}! Triggering finalization...")
+                        trigger_finalization(redis_client, video_id, total_segments)
+                        # Cleanup tracking
+                        del video_segments[video_id]
+                        print(f"[BACKGROUND ENCODER] ✓ Video {video_id} finalized!")
+
+                except Exception as e:
+                    print(f"[BACKGROUND ENCODER ERROR] Failed to process segment: {e}")
+                    traceback.print_exc()
+
+    except Exception as e:
+        print(f"[BACKGROUND ENCODER FATAL] Thread crashed: {e}")
+        traceback.print_exc()
+
+
+def encode_segment_background(redis_client, data):
+    """
+    Encode a segment using GPU NVENC (same encoding as before, just in background).
+    Called by background encoder thread continuously as segments complete.
+    """
+    import subprocess
+    import time
+
+    video_id = data['video_id']
+    seg_idx = data['seg_idx']
+    total_segments = data['total_segments']
+
+    # Get segment metadata from Redis
+    segment_key = f"video:{video_id}:segment:{seg_idx}"
+    segment_info = redis_client.hgetall(segment_key)
+
+    if not segment_info:
+        raise RuntimeError(f"Segment metadata not found in Redis: {segment_key}")
+
+    cleaned_dir = segment_info.get('cleaned_dir')
+    fps = float(segment_info.get('fps', 30))
+    frame_count = int(segment_info.get('frame_count', 0))
+    base_name = segment_info.get('base_name', 'video')
+
+    if not cleaned_dir or not os.path.exists(cleaned_dir):
+        raise RuntimeError(f"Cleaned frames directory not found: {cleaned_dir}")
+
+    # Create output path
+    seg_video_path = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_seg{seg_idx}.mp4")
+
+    print(f"[ENCODER] Encoding {frame_count} frames @ {fps} fps...")
+    encode_start = time.time()
+
+    # Encode with NVENC (GPU accelerated - same as inline encoding)
+    encode_cmd = [
+        FFMPEG_EXE, '-y',
+        '-framerate', str(fps),
+        '-i', os.path.join(cleaned_dir, '%04d.png'),
+        '-c:v', 'h264_nvenc',
+        '-preset', 'p4',  # Balanced speed/quality
+        '-b:v', '8M',
+        '-pix_fmt', 'yuv420p',
+        '-profile:v', 'main',
+        seg_video_path
+    ]
+
+    try:
+        result = subprocess.run(encode_cmd, capture_output=True, check=True, text=True, timeout=300)
+        encode_duration = time.time() - encode_start
+
+        encoded_size_mb = os.path.getsize(seg_video_path) / (1024 * 1024)
+        fps_actual = frame_count / encode_duration if encode_duration > 0 else 0
+
+        print(f"[ENCODER] ✓ Encoded: {encoded_size_mb:.2f} MB in {encode_duration:.2f}s ({fps_actual:.1f} fps)")
+
+        # Store encoded path in Redis
+        redis_client.hset(segment_key, 'encoded_path', seg_video_path)
+        redis_client.hset(segment_key, 'status', 'encoded')
+
+        # Cleanup frames after successful encoding
+        shutil.rmtree(cleaned_dir, ignore_errors=True)
+
+    except subprocess.CalledProcessError as e:
+        print(f"[ENCODER ERROR] Encoding failed for segment {seg_idx}!")
+        print(f"   stderr: {e.stderr}")
+        raise
+    except subprocess.TimeoutExpired:
+        print(f"[ENCODER ERROR] Encoding timed out after 300s for segment {seg_idx}")
+        raise
+
+
+def trigger_finalization(redis_client, video_id, total_segments):
+    """
+    Concatenate all encoded segments and merge audio.
+    Called automatically when all segments are encoded.
+    """
+    import subprocess
+
+    print(f"\n[FINALIZE] Starting finalization for video {video_id}")
+
+    # Collect all segment video paths from Redis (in order)
+    segment_paths = []
+    for seg_idx in range(total_segments):
+        segment_key = f"video:{video_id}:segment:{seg_idx}"
+        encoded_path = redis_client.hget(segment_key, 'encoded_path')
+
+        if not encoded_path or not os.path.exists(encoded_path):
+            raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
+
+        segment_paths.append(encoded_path)
+
+    print(f"[FINALIZE] Found {len(segment_paths)} encoded segments")
+
+    # Get video metadata
+    base_name = redis_client.get(f"video:{video_id}:base_name") or 'video'
+    video_path = redis_client.get(f"video:{video_id}:video_path")  # Original video for audio
+
+    # Create concat list
+    concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
+    with open(concat_list_path, 'w') as f:
+        for seg_path in segment_paths:
+            abs_path = os.path.abspath(seg_path).replace('\\', '/')
+            f.write(f"file '{abs_path}'\n")
+
+    # Concatenate with copy codec (instant - no re-encoding)
+    temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
+
+    concat_cmd = [
+        FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
+        '-i', concat_list_path,
+        '-c', 'copy',  # No re-encoding - instant!
+        temp_processed
+    ]
+
+    print(f"[FINALIZE] Concatenating segments with copy codec...")
+    subprocess.run(concat_cmd, capture_output=True, check=True, text=True, timeout=60)
+    concat_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
+    print(f"[FINALIZE] ✓ Concatenated: {concat_size_mb:.2f} MB")
+
+    # Merge audio from original
+    final_output = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
+
+    if video_path and os.path.exists(video_path):
+        # Check if original has audio
+        check_audio_cmd = [
+            FFPROBE_EXE, '-v', 'error', '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            video_path
+        ]
+        has_audio_check = subprocess.run(check_audio_cmd, capture_output=True, text=True, timeout=10)
+        has_audio = 'audio' in has_audio_check.stdout
+
+        if has_audio:
+            print(f"[FINALIZE] Merging audio from original...")
+            merge_cmd = [
+                FFMPEG_EXE, '-y',
+                '-i', temp_processed,
+                '-i', video_path,
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-c:v', 'copy',
+                '-c:a', 'copy',
+                '-shortest',
+                final_output
+            ]
+            subprocess.run(merge_cmd, capture_output=True, check=True, text=True, timeout=300)
+            os.remove(temp_processed)
+            print(f"[FINALIZE] ✓ Audio merged")
+        else:
+            os.rename(temp_processed, final_output)
+            print(f"[FINALIZE] No audio in original")
+    else:
+        os.rename(temp_processed, final_output)
+        print(f"[FINALIZE] Using processed video only")
+
+    # Cleanup
+    os.remove(concat_list_path)
+    for seg_path in segment_paths:
+        if os.path.exists(seg_path):
+            os.remove(seg_path)
+
+    final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
+    print(f"[FINALIZE] ✓ Final video ready: {final_output} ({final_size_mb:.2f} MB)")
+
+    # Store final result in Redis
+    redis_client.set(f"video:{video_id}:final_path", final_output)
+    redis_client.set(f"video:{video_id}:status", "complete")
+
+# ============================================================================
 # REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
 # ============================================================================
 
@@ -2028,57 +2287,55 @@ def process_segment_task(self, segment_data):
 
         # ⚡ PARALLEL ENCODING: Encode segment MP4 immediately (Blackwell NVENC!)
         print(f"   [OK] Cleaned frames ready in: {seg_cleaned_dir}")
-        self.update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Encoding segment video'})
+        # ⚡ BACKGROUND ENCODING OPTIMIZATION: Signal encoder thread instead of blocking!
+        # Worker returns immediately and starts next segment while encoding happens in background
+        self.update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
 
         # Count cleaned frames
         cleaned_frame_count = len([f for f in os.listdir(seg_cleaned_dir) if f.endswith('.png')])
         if cleaned_frame_count == 0:
             raise RuntimeError(f"No cleaned frames found in {seg_cleaned_dir}")
 
-        print(f"   [ENCODE] Encoding {cleaned_frame_count} frames with NVENC (Blackwell GPU acceleration)...")
+        print(f"   [OK] {cleaned_frame_count} cleaned frames ready - signaling background encoder!")
 
-        # Create segment video path
-        segment_video_path = os.path.join(RESULT_DIR, f"{seg_prefix}_encoded.mp4")
+        # Store segment metadata in Redis for background encoder
+        redis_client = celery.backend.client
+        segment_key = f"video:{video_id}:segment:{seg_idx}"
+        redis_client.hset(segment_key, mapping={
+            'cleaned_dir': seg_cleaned_dir,
+            'fps': str(fps),
+            'frame_count': str(cleaned_frame_count),
+            'base_name': base_name,
+            'status': 'ready_for_encoding'
+        })
 
-        # CRITICAL: Use identical encoding params for all segments (required for concat)
-        encode_cmd = [
-            FFMPEG_EXE, '-y', '-framerate', str(fps),
-            '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'h264_nvenc',  # Blackwell hardware encoding
-            '-preset', 'p4',       # Balanced speed/quality (MUST match across segments)
-            '-b:v', '8M',          # Bitrate (MUST match)
-            '-pix_fmt', 'yuv420p', # Pixel format (MUST match)
-            '-profile:v', 'main',  # H264 profile (MUST match)
-            segment_video_path
-        ]
+        # Set video-level metadata (idempotent - safe to set multiple times)
+        redis_client.set(f"video:{video_id}:total_segments", total_segments)
+        redis_client.set(f"video:{video_id}:base_name", base_name)
+        redis_client.set(f"video:{video_id}:video_path", video_path)  # For audio merge later
 
-        try:
-            result = subprocess.run(encode_cmd, capture_output=True, check=True, text=True, timeout=300)
-            encoded_size_mb = os.path.getsize(segment_video_path) / (1024 * 1024)
-            print(f"   [OK] Segment encoded: {encoded_size_mb:.2f} MB ({cleaned_frame_count} frames)")
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] FFmpeg encoding failed for segment {seg_idx}!")
-            print(f"   Command: {' '.join(encode_cmd)}")
-            print(f"   stderr: {e.stderr}")
-            raise RuntimeError(f"Segment encoding failed: {e.stderr}")
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"Segment encoding timed out after 300s")
-        except FileNotFoundError:
-            raise RuntimeError("FFmpeg not found! Ensure ffmpeg is in PATH")
+        # Signal background encoder thread via Redis pub/sub (REAL-TIME!)
+        redis_client.publish('segment_ready', json.dumps({
+            'video_id': video_id,
+            'seg_idx': seg_idx,
+            'total_segments': total_segments
+        }))
 
-        # Cleanup temp directories (cleaned frames no longer needed - we have MP4!)
-        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+        print(f"[OK] Segment {seg_idx+1}/{total_segments} signaled to background encoder - worker returning immediately!")
+
+        # Cleanup temp directories EXCEPT cleaned_dir (encoder needs it!)
+        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir]:
             shutil.rmtree(path, ignore_errors=True)
 
         result = {
             'seg_idx': seg_idx,
-            'segment_video_path': segment_video_path,  # MP4 video, not PNG directory!
             'start_frame': start_frame,
             'end_frame': end_frame,
             'frames_processed': seg_duration,
+            'status': 'ready_for_encoding',  # Background encoder will encode this
         }
 
-        print(f"[OK] Segment {seg_idx+1}/{total_segments} complete (encoded & ready)!")
+        print(f"[OK] Segment {seg_idx+1}/{total_segments} complete - worker free to process next segment!")
 
         # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
         # Celery automatically sets state to SUCCESS when the task returns normally
@@ -2096,200 +2353,83 @@ def process_segment_task(self, segment_data):
 @celery.task(bind=True, name='watermark.finalize_video')
 def finalize_video_task(self, segment_results, prepare_result):
     """
-    Phase 3: Finalize video after all segments are processed
-    - Collect all segment videos
-    - Concatenate in correct order
-    - Merge audio from original
-    - Upload final result
+    Phase 3: Wait for background encoder to finish finalization
+
+    NOTE: Actual finalization (concat + audio merge) happens in background encoder thread!
+    This task just waits for completion and returns the result.
     """
     try:
-        import requests
-        import subprocess
-        import shutil
+        import time
 
         video_id = prepare_result['video_id']
         base_name = prepare_result['base_name']
-        video_path = prepare_result['video_path']
-        fps = prepare_result['fps']
         total_segments = prepare_result['total_segments']
 
-        print(f"\n[SEGMENT] Finalizing video: {base_name} ({total_segments} segments)")
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Finalizing video'})
+        print(f"\n[FINALIZE TASK] Waiting for background encoder to finish video: {base_name} ({total_segments} segments)")
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Waiting for background encoder'})
 
-        # Sort segments by index
-        segment_results = sorted(segment_results, key=lambda x: x['seg_idx'])
+        # Wait for background encoder to finish (checks Redis status)
+        redis_client = celery.backend.client
+        max_wait_seconds = 600  # 10 minutes max wait
+        wait_interval = 1  # Check every 1 second
 
-        # ⚡ PARALLEL ENCODING OPTIMIZATION: Concat pre-encoded segment MP4s (NO re-encoding!)
-        print(f"🎬 Concatenating {total_segments} pre-encoded segment videos...")
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Concatenating segments'})
+        for elapsed in range(0, max_wait_seconds, wait_interval):
+            status = redis_client.get(f"video:{video_id}:status")
 
-        # Collect all segment video paths in order
-        segment_video_paths = []
-        for seg_result in segment_results:
-            seg_video = seg_result.get('segment_video_path')
-            if not seg_video or not os.path.exists(seg_video):
-                raise Exception(f"Segment video not found: {seg_video} (segment {seg_result['seg_idx']})")
-            segment_video_paths.append(seg_video)
+            if status == "complete":
+                # Background encoder finished!
+                final_path = redis_client.get(f"video:{video_id}:final_path")
 
-        print(f"[OK] Found {len(segment_video_paths)} segment videos")
+                if not final_path or not os.path.exists(final_path):
+                    raise RuntimeError(f"Background encoder reported complete but final video not found: {final_path}")
 
-        # Validate we have all segments
-        if len(segment_video_paths) != total_segments:
-            raise Exception(f"Missing segments! Expected {total_segments}, got {len(segment_video_paths)}")
+                print(f"[FINALIZE TASK] Background encoder finished! Final video: {final_path}")
 
-        # Create FFmpeg concat list file
-        concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat_list.txt")
-        with open(concat_list_path, 'w') as f:
-            for seg_video in segment_video_paths:
-                # FFmpeg concat requires absolute paths and proper escaping
-                abs_path = os.path.abspath(seg_video).replace('\\', '/')
-                f.write(f"file '{abs_path}'\n")
+                # Cleanup shared directories
+                shared_mask_dir = prepare_result.get('shared_mask_dir')
+                shared_frames_dir = prepare_result.get('shared_frames_dir')
+                if shared_mask_dir:
+                    import shutil
+                    shutil.rmtree(shared_mask_dir, ignore_errors=True)
+                if shared_frames_dir:
+                    import shutil
+                    shutil.rmtree(shared_frames_dir, ignore_errors=True)
 
-        print(f"[OK] Created concat list: {len(segment_video_paths)} segments")
+                result = {
+                    'path': final_path,
+                    'metadata': {
+                        'video_id': video_id,
+                        'total_segments': total_segments,
+                        'total_frames': prepare_result.get('total_frames', 0),
+                        'frames_with_watermark': prepare_result.get('frames_with_watermark', 0),
+                        'fps': prepare_result.get('fps', 30),
+                        'width': prepare_result.get('width', 0),
+                        'height': prepare_result.get('height', 0),
+                    }
+                }
 
-        # Concat segments with copy codec (NO re-encoding = instant!)
-        print(f"[CONCAT] Concatenating segments with copy codec (no re-encoding)...")
-        self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Concatenating videos'})
+                # Mark distributed task as complete in Redis (for status endpoint)
+                tracking_key = f"segments:{video_id}"
+                celery.backend.set(tracking_key, total_segments)
 
-        # Ensure output directory exists
-        os.makedirs(RESULT_DIR, exist_ok=True)
-        temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
+                print(f"[OK] Video finalized by background encoder: {final_path}")
+                self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
+                return result
 
-        concat_cmd = [
-            FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
-            '-i', concat_list_path,
-            '-c', 'copy',  # CRITICAL: Copy codec = NO re-encoding (instant!)
-            temp_processed
-        ]
+            elif status == "error":
+                error_msg = redis_client.get(f"video:{video_id}:error") or "Unknown error"
+                raise RuntimeError(f"Background encoder reported error: {error_msg}")
 
-        try:
-            concat_result = subprocess.run(concat_cmd, capture_output=True, check=True, text=True, timeout=60)
-            concat_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
-            print(f"[OK] Segments concatenated: {concat_size_mb:.2f} MB (copy codec, no re-encoding)")
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] FFmpeg concat failed!")
-            print(f"   Command: {' '.join(concat_cmd)}")
-            print(f"   stderr: {e.stderr}")
-            raise Exception(f"Concat failed: {e.stderr}")
-        except subprocess.TimeoutExpired:
-            raise Exception("Concat timed out after 60s")
-        except FileNotFoundError:
-            raise Exception("FFmpeg not found! Ensure ffmpeg is in PATH")
+            # Still processing - update progress
+            if elapsed % 5 == 0:  # Log every 5 seconds
+                print(f"[FINALIZE TASK] Waiting for background encoder... ({elapsed}s elapsed)")
+                progress = min(90, int(elapsed / max_wait_seconds * 90))
+                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': 'Background encoding/concat in progress'})
 
-        # Cleanup concat list and segment videos
-        try:
-            os.remove(concat_list_path)
-            for seg_video in segment_video_paths:
-                if os.path.exists(seg_video):
-                    os.remove(seg_video)
-            print(f"[CLEANUP] Removed {len(segment_video_paths)} segment videos")
-        except Exception as e:
-            print(f"[WARNING] Cleanup failed: {e}")
+            time.sleep(wait_interval)
 
-        print(f"[OK] Final video ready (parallel encoding + instant concat)")
-
-        # Merge audio from original video
-        print(f"🎵 Merging audio...")
-        self.update_state(state='PROCESSING', meta={'progress': 70, 'status': 'Merging audio'})
-
-        final_output = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
-
-        # Check if original has audio
-        check_audio_cmd = [
-            FFPROBE_EXE, '-v', 'error', '-select_streams', 'a:0',
-            '-show_entries', 'stream=codec_type',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            video_path
-        ]
-        has_audio_check = subprocess.run(check_audio_cmd, capture_output=True, text=True, timeout=10)
-        has_audio = 'audio' in has_audio_check.stdout
-
-        if has_audio:
-            merge_cmd = [
-                FFMPEG_EXE, '-y',
-                '-i', temp_processed,
-                '-i', video_path,
-                '-map', '0:v:0',
-                '-map', '1:a:0',
-                '-c:v', 'copy',  # Don't re-encode video, just copy!
-                '-c:a', 'copy',  # Copy audio stream directly (instant, no re-encoding!)
-                '-shortest',
-                final_output
-            ]
-        else:
-            merge_cmd = [
-                FFMPEG_EXE, '-y',
-                '-i', temp_processed,
-                '-c:v', 'copy',  # No audio, just copy video stream
-                final_output
-            ]
-
-        audio_result = subprocess.run(merge_cmd, capture_output=True, text=True, timeout=300)
-        if audio_result.returncode != 0:
-            print("[WARNING]  Audio merge failed, using video without audio")
-            final_output = temp_processed
-        else:
-            os.remove(temp_processed)
-
-        # Cleanup
-        print(f"[CLEANUP] Cleaning up...")
-        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Cleaning up'})
-
-        # Note: Segment videos already cleaned up during concat (line 2139-2144)
-        # Note: Cleaned frames already cleaned up in process_segment_task (line 2029)
-
-        # Cleanup shared directories
-        shared_mask_dir = prepare_result.get('shared_mask_dir')
-        shared_frames_dir = prepare_result.get('shared_frames_dir')
-        if shared_mask_dir:
-            shutil.rmtree(shared_mask_dir, ignore_errors=True)
-        if shared_frames_dir:
-            shutil.rmtree(shared_frames_dir, ignore_errors=True)
-
-        # Upload final result
-        uploaded_path = None
-        tunnel = get_tunnel_url()
-        if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
-            try:
-                upload_url = f"{tunnel.rstrip('/')}/api/upload-result"
-                # Quick connectivity test (15 second timeout) - fail fast if server down
-                requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
-                print(f"[UPLOAD]  Uploading final result to API server...")
-                with open(final_output, 'rb') as f:
-                    resp = requests.post(
-                        upload_url,
-                        headers={'ngrok-skip-browser-warning': 'true'},
-                        files={'file': (os.path.basename(final_output), f, 'video/mp4')},
-                        timeout=120
-                    )
-                if resp.ok:
-                    j = resp.json()
-                    if j.get('status') == 'success' and j.get('result_url'):
-                        uploaded_path = j['result_url']
-                        print(f"[OK] Final result uploaded")
-            except Exception as e:
-                print(f"[WARNING]  Upload failed: {e}")
-
-        result = {
-            'path': uploaded_path or final_output,
-            'metadata': {
-                'video_id': video_id,
-                'total_segments': total_segments,
-                'total_frames': prepare_result['total_frames'],
-                'frames_with_watermark': prepare_result['frames_with_watermark'],
-                'fps': fps,
-                'width': prepare_result['width'],
-                'height': prepare_result['height'],
-            }
-        }
-
-        # Mark distributed task as complete in Redis (for status endpoint)
-        tracking_key = f"segments:{video_id}"
-        celery.backend.set(tracking_key, total_segments)  # Set completed = total
-
-        print(f"[OK] Video finalized: {final_output}")
-        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
-        return result
+        # Timeout
+        raise RuntimeError(f"Background encoder did not complete within {max_wait_seconds}s")
 
     except Exception as e:
         print(f"[ERROR] Error finalizing video: {e}")
