@@ -15,6 +15,10 @@ import torchvision
 # This is SAFE and provides 20-30% speedup without breaking anything
 torch.backends.cudnn.benchmark = True
 
+# Enable TF32 for Ada Lovelace (RTX 4090) - Safe ~20% speedup on matmul operations
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 # Enable Flash Attention backends for Blackwell optimization
 if os.getenv("ENABLE_FLASH_ATTENTION", "0") == "1":
     try:
@@ -44,6 +48,12 @@ from model.misc import get_device
 import warnings
 
 warnings.filterwarnings("ignore")
+
+# ============================================================================
+# GLOBAL MODEL CACHE - Models persist across segments for true parallelism
+# ============================================================================
+_GLOBAL_MODELS_CACHE = None
+_MODEL_CACHE_LOCK = None
 
 pretrain_model_url = "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/"
 
@@ -232,6 +242,7 @@ def pipeline(
     fp16=False,
     frames_array=None,
     masks_array=None,
+    use_cached_models=True,  # Enable global model cache for true parallel speedup
 ):
 
     # Use fp16 precision during inference to reduce running memory cost
@@ -360,9 +371,9 @@ def pipeline(
     flow_masks = to_tensors()(flow_masks).unsqueeze(0)
     masks_dilated = to_tensors()(masks_dilated).unsqueeze(0)
     frames, flow_masks, masks_dilated = (
-        frames.to(device),
-        flow_masks.to(device),
-        masks_dilated.to(device),
+        frames.to(device, non_blocking=True),
+        flow_masks.to(device, non_blocking=True),
+        masks_dilated.to(device, non_blocking=True),
     )
 
     ##############################################
@@ -582,7 +593,46 @@ def pipeline(
             flows_b = torch.cat(flows_b, dim=0).unsqueeze(0)
             return flows_f, flows_b
 
-    fix_raft = _RAFTAdapter(device, use_half)
+    # ============================================================================
+    # MODEL CACHING: Load models once per worker, reuse across segments
+    # ============================================================================
+    global _GLOBAL_MODELS_CACHE, _MODEL_CACHE_LOCK
+    import threading
+
+    if _MODEL_CACHE_LOCK is None:
+        _MODEL_CACHE_LOCK = threading.Lock()
+
+    cache_key = f"{device}_{use_half}"
+
+    if use_cached_models:
+        with _MODEL_CACHE_LOCK:
+            if _GLOBAL_MODELS_CACHE is None:
+                print(f"[INIT] Creating global model cache (worker first-time initialization)...")
+                _GLOBAL_MODELS_CACHE = {}
+
+            if cache_key not in _GLOBAL_MODELS_CACHE:
+                print(f"[CACHE] Loading models for key={cache_key}... (this happens ONCE per worker)")
+                cache_start = time.time()
+
+                # Create models for the first time
+                _GLOBAL_MODELS_CACHE[cache_key] = {
+                    'raft': None,  # Will be set below
+                    'rfcnet': None,
+                    'propainter': None
+                }
+                print(f"[INFO] Model cache initialized for {cache_key}")
+
+                # Create RAFT model
+                raft_model = _RAFTAdapter(device, use_half)
+                _GLOBAL_MODELS_CACHE[cache_key]['raft'] = raft_model
+                print(f"[CACHE] RAFT model cached ({time.time() - cache_start:.2f}s)")
+            else:
+                print(f"[CACHE] Reusing cached models for {cache_key} (ZERO reload time!)")
+
+            fix_raft = _GLOBAL_MODELS_CACHE[cache_key]['raft']
+    else:
+        # Legacy behavior: create new models each time
+        fix_raft = _RAFTAdapter(device, use_half)
 
     ##############################################
     # set up RFCNet with TensorRT acceleration
@@ -701,7 +751,7 @@ def pipeline(
                 self._model = RecurrentFlowCompleteNet(ckpt_path)
                 for p in self._model.parameters():
                     p.requires_grad = False
-                self._model.to(device)
+                self._model.to(device, non_blocking=True)
                 self._model.eval()
 
         def forward(self, masked_flows: torch.Tensor, masks: torch.Tensor):
@@ -829,11 +879,27 @@ def pipeline(
     )
 
     # Initialize RFCNet (PyTorch with optional Torch-TensorRT compilation)
-    fix_flow_complete = RecurrentFlowCompleteNet(ckpt_path)
-    for p in fix_flow_complete.parameters():
-        p.requires_grad = False
-    fix_flow_complete.to(device)
-    fix_flow_complete.eval()
+    if use_cached_models:
+        with _MODEL_CACHE_LOCK:
+            if _GLOBAL_MODELS_CACHE[cache_key]['rfcnet'] is None:
+                # First time loading RFCNet
+                rfcnet_start = time.time()
+                fix_flow_complete = RecurrentFlowCompleteNet(ckpt_path)
+                for p in fix_flow_complete.parameters():
+                    p.requires_grad = False
+                fix_flow_complete.to(device, non_blocking=True)
+                fix_flow_complete.eval()
+                _GLOBAL_MODELS_CACHE[cache_key]['rfcnet'] = fix_flow_complete
+                print(f"[CACHE] RFCNet model cached ({time.time() - rfcnet_start:.2f}s)")
+            else:
+                fix_flow_complete = _GLOBAL_MODELS_CACHE[cache_key]['rfcnet']
+    else:
+        # Legacy behavior
+        fix_flow_complete = RecurrentFlowCompleteNet(ckpt_path)
+        for p in fix_flow_complete.parameters():
+            p.requires_grad = False
+        fix_flow_complete.to(device, non_blocking=True)
+        fix_flow_complete.eval()
 
     # torch.compile() with inductor backend (REQUIRED when RFCNET_TORCHTRT=1, no fallback)
     if os.getenv("RFCNET_TORCHTRT", "0").lower() in ("1", "true", "yes", "on"):
@@ -854,8 +920,24 @@ def pipeline(
         progress=True,
         file_name=None,
     )
-    model = InpaintGenerator(model_path=ckpt_path).to(device)
-    model.eval()
+
+    # ProPainter model initialization with caching
+    if use_cached_models:
+        with _MODEL_CACHE_LOCK:
+            if _GLOBAL_MODELS_CACHE[cache_key]['propainter'] is None:
+                # First time loading ProPainter
+                propainter_start = time.time()
+                model = InpaintGenerator(model_path=ckpt_path).to(device, non_blocking=True)
+                model.eval()
+                _GLOBAL_MODELS_CACHE[cache_key]['propainter'] = model
+                print(f"[CACHE] ProPainter model cached ({time.time() - propainter_start:.2f}s)")
+                print(f"[OK] All models cached! Total worker init time saved on next segment")
+            else:
+                model = _GLOBAL_MODELS_CACHE[cache_key]['propainter']
+    else:
+        # Legacy behavior
+        model = InpaintGenerator(model_path=ckpt_path).to(device, non_blocking=True)
+        model.eval()
 
     ##############################################
     # ProPainter inference
@@ -899,7 +981,7 @@ def pipeline(
 
                 gt_flows_f_list.append(flows_f)
                 gt_flows_b_list.append(flows_b)
-                torch.cuda.empty_cache()
+                # Removed empty_cache() - was forcing GPU sync barrier
 
             gt_flows_f = torch.cat(gt_flows_f_list, dim=1)
             gt_flows_b = torch.cat(gt_flows_b_list, dim=1)
@@ -910,7 +992,7 @@ def pipeline(
                     gt_flows_bi = fix_raft(frames, iters=raft_iter)
             else:
                 gt_flows_bi = fix_raft(frames, iters=raft_iter)
-            torch.cuda.empty_cache()
+            # Removed empty_cache() - was forcing GPU sync barrier
 
         if use_half:
             frames, flow_masks, masks_dilated = (
@@ -950,7 +1032,7 @@ def pipeline(
                 pred_flows_b.append(
                     pred_flows_bi_sub[1][:, pad_len_s : e_f - s_f - pad_len_e]
                 )
-                torch.cuda.empty_cache()
+                # Removed empty_cache() - was forcing GPU sync barrier
 
             pred_flows_f = torch.cat(pred_flows_f, dim=1)
             pred_flows_b = torch.cat(pred_flows_b, dim=1)
@@ -962,7 +1044,7 @@ def pipeline(
             pred_flows_bi = fix_flow_complete.combine_flow(
                 gt_flows_bi, pred_flows_bi, flow_masks
             )
-            torch.cuda.empty_cache()
+            # Removed empty_cache() - was forcing GPU sync barrier
 
         flow_time = time.time() - flow_start_time
         print(f"[OK] Flow completion completed in {flow_time:.2f}s")
@@ -1006,7 +1088,7 @@ def pipeline(
                     updated_masks.append(
                         updated_masks_sub[:, pad_len_s : e_f - s_f - pad_len_e]
                     )
-                    torch.cuda.empty_cache()
+                    # Removed empty_cache() - was forcing GPU sync barrier
 
                 updated_frames = torch.cat(updated_frames, dim=1)
                 updated_masks = torch.cat(updated_masks, dim=1)
@@ -1020,7 +1102,7 @@ def pipeline(
                     + prop_imgs.view(b, t, 3, h, w) * masks_dilated
                 )
                 updated_masks = updated_local_masks.view(b, t, 1, h, w)
-                torch.cuda.empty_cache()
+                # Removed empty_cache() - was forcing GPU sync barrier
             print("[OK] Image propagation completed")
         except Exception as e:
             print(f"[ERROR] Image propagation failed: {e}")
@@ -1096,7 +1178,7 @@ def pipeline(
 
                 comp_frames[idx] = comp_frames[idx].astype(np.uint8)
 
-        torch.cuda.empty_cache()
+        # Removed empty_cache() - was forcing GPU sync barrier
 
     prop_time = time.time() - prop_start_time
     print(f"[OK] Feature propagation + transformer completed in {prop_time:.2f}s")

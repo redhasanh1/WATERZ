@@ -388,7 +388,7 @@ def clear_gpu_memory():
         import torch
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+            # Removed torch.cuda.synchronize() - was creating hard barrier between parallel segments
             print(f"[CLEANUP] GPU memory cleared: {torch.cuda.memory_allocated() / 1024**2:.1f}MB allocated")
     except Exception as e:
         print(f"[WARNING]  GPU memory clear failed: {e}")

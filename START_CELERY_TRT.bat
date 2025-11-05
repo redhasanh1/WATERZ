@@ -18,14 +18,14 @@ REM Ensure TensorRT DLLs and tools are on PATH
 call "%~dp0SETUP_TRT_ENV.bat"
 
 REM Use explicit Python path to avoid Windows Store stub
-set PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python311\python.exe
+set PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python312\python.exe
 if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
 
 REM Force TensorRT-only mode for YOLO (no .pt fallback)
 set YOLO_REQUIRE_TENSORRT=1
 
-REM TENSORRT: Use TensorRT RAFT engine for 3-5x faster optical flow!
-set FORCE_TRT_RAFT=1
+REM TENSORRT: DISABLED (engine needs rebuild for TRT 10.14) - using PyTorch RAFT for now
+set FORCE_TRT_RAFT=0
 set USE_NEUFLOW=0
 
 REM Disable RFCNet torch.compile (requires Triton which isn't available on Windows)
@@ -36,14 +36,15 @@ set ENABLE_FLASH_ATTENTION=0
 
 echo.
 echo ============================================================
-echo TENSORRT CONFIG (RTX 4090):
+echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 128 (800-1400 fps - 2x RTX 5070!)
-echo   - RAFT: TensorRT FP16 engine (30-50+ it/s - 3-5x faster!)
+echo   - RAFT: PyTorch FP16 + TF32 (~10.5 it/s baseline)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: Disabled
+echo   - Concurrency: 6 workers (max parallelism with model caching!)
 echo ============================================================
 echo.
 
 REM Use module form; threads pool works best on Windows
-REM concurrency=4 recommended for RTX 4090 (24GB VRAM - can handle 4-5 parallel segments)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+REM concurrency=6 for RTX 4090 (24GB VRAM - model caching enables true 6x parallelism!)
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=6

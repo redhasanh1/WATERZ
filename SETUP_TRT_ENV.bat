@@ -15,7 +15,7 @@ if exist "%TRT_ROOT%\lib\nvinfer_10.dll" (
 )
 
 REM Add PyTorch cuDNN DLLs for ONNX Runtime (fixes Conv fallback to CPU)
-set "PYTORCH_LIB=%LOCALAPPDATA%\Programs\Python\Python311\Lib\site-packages\torch\lib"
+set "PYTORCH_LIB=%LOCALAPPDATA%\Programs\Python\Python312\Lib\site-packages\torch\lib"
 if exist "%PYTORCH_LIB%\cudnn64_9.dll" (
   set "PATH=%PYTORCH_LIB%;%PATH%"
   echo Added PyTorch cuDNN to PATH for ONNX Runtime
