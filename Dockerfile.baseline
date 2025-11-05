@@ -1,0 +1,156 @@
+# ============================================================================
+# Baseline + Parallel Encoder Docker Image
+# Optimized for RTX 5090 (32GB VRAM) on Salad Cloud
+# Image size target: <10GB
+# ============================================================================
+
+# Build stage for Python dependencies
+# CUDA 12.8 runtime with PyTorch cu128 for Blackwell GPU support
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8
+
+# Install Python 3.11 and build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    build-essential \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install PyTorch with CUDA 12.8 support (for Blackwell GPUs)
+# Using nightly cu128 wheels for RTX 50-series support
+RUN pip install --no-cache-dir \
+    torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# Install TensorRT for YOLO inference (matches your local cu13 version)
+RUN pip install --no-cache-dir \
+    tensorrt==10.13.3.9 \
+    tensorrt-cu13==10.13.3.9 \
+    tensorrt-cu13-bindings==10.13.3.9 \
+    tensorrt-cu13-libs==10.13.3.9
+
+# Install remaining Python dependencies
+RUN pip install --no-cache-dir \
+    celery[redis]==5.5.3 \
+    redis==5.2.1 \
+    opencv-python-headless==4.10.0.84 \
+    numpy==1.26.4 \
+    Pillow==11.0.0 \
+    ultralytics==8.3.53 \
+    requests==2.32.3 \
+    scipy==1.13.1 \
+    scikit-image==0.24.0 \
+    imageio==2.37.0 \
+    tqdm==4.67.1 \
+    einops==0.8.0 \
+    timm==1.0.11
+
+# ============================================================================
+# Runtime stage (final slim image)
+# ============================================================================
+# CUDA 12.8 runtime with PyTorch cu128 for Blackwell GPU support
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8
+
+# Install runtime dependencies including FFmpeg with NVENC
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    build-essential \
+    # OpenCV dependencies
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    # FFmpeg with NVENC support (CRITICAL for parallel encoding!)
+    ffmpeg \
+    # Utilities
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY server_production.py .
+COPY yolo_detector.py .
+COPY crop_utils.py .
+COPY segment_detector.py .
+
+# Copy python_packages (custom dependencies)
+COPY python_packages ./python_packages
+
+# Copy web folder (includes redis_url.txt as fallback if REDIS_URL env var not set)
+COPY web ./web
+
+# Copy ProPainter pipeline
+COPY faster-propainter-main ./faster-propainter-main
+
+# Copy ESSENTIAL model weights only (~506MB total)
+# YOLO PyTorch model (6MB)
+COPY runs/detect/new_sora_watermark/weights/best.pt \
+     ./runs/detect/new_sora_watermark/weights/best.pt
+
+# ProPainter weights (~500MB)
+COPY weights/ProPainter.pth ./weights/ProPainter.pth
+COPY weights/raft-things.pth ./weights/raft-things.pth
+COPY weights/recurrent_flow_completion.pth ./weights/recurrent_flow_completion.pth
+
+# Create necessary directories
+RUN mkdir -p temp uploads results cache pip_cache
+
+# Environment variables for baseline + encoder mode
+ENV PYTHONPATH=/app/python_packages:$PYTHONPATH \
+    # YOLO: Use PyTorch (frame-by-frame)
+    YOLO_REQUIRE_TENSORRT=0 \
+    # RAFT: Use PyTorch baseline (NO TensorRT - it's broken anyway!)
+    FORCE_TRT_RAFT=0 \
+    USE_NEUFLOW=0 \
+    # RFCNet: No torch.compile on baseline
+    RFCNET_TORCHTRT=0 \
+    # Flash Attention: Disabled for baseline
+    ENABLE_FLASH_ATTENTION=0 \
+    # PyTorch optimizations
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    TORCH_HOME=/app/cache \
+    XDG_CACHE_HOME=/app/cache \
+    OPENCV_TEMP_PATH=/app/temp \
+    PIP_CACHE_DIR=/app/pip_cache
+
+# Copy and set entrypoint script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+# Verify FFmpeg has NVENC support
+RUN ffmpeg -hide_banner -encoders 2>&1 | grep -q nvenc || \
+    (echo "ERROR: FFmpeg missing NVENC support!" && exit 1)
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import torch; assert torch.cuda.is_available()" || exit 1
+
+ENTRYPOINT ["/docker-entrypoint.sh"]

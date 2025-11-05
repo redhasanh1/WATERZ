@@ -1,0 +1,83 @@
+================================================================================
+RUNNING MULTIPLE PARALLEL CELERY WORKERS (RTX 5070)
+================================================================================
+
+## HOW IT WORKS
+Each Celery worker:
+- Connects to the SAME Redis queue
+- Has a UNIQUE hostname
+- Processes segments in parallel
+- Uses separate terminal/process
+
+When a video is submitted:
+- Prepared and split into 4-5 segments
+- Each worker grabs segments from the shared queue
+- All workers process simultaneously
+- Final assembly happens after all segments complete
+
+## RTX 5070 12GB VRAM - RECOMMENDED: 2 WORKERS
+With concurrency=2 per worker = 4 parallel segments total
+
+
+## TERMINAL 1 - WORKER 1
+py -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2 --hostname=worker1@%h
+
+
+## TERMINAL 2 - WORKER 2
+py -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2 --hostname=worker2@%h
+
+
+## OPTIONAL: 3 WORKERS (More parallelism, tight on VRAM)
+Reduce concurrency to 1 per worker to avoid OOM
+
+## TERMINAL 1 - WORKER 1
+py -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1 --hostname=worker1@%h
+
+## TERMINAL 2 - WORKER 2
+py -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1 --hostname=worker2@%h
+
+## TERMINAL 3 - WORKER 3
+py -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1 --hostname=worker3@%h
+
+
+## WINDOWS: RUN IN BACKGROUND (PowerShell)
+If you want workers running in background instead of multiple terminals:
+
+# Worker 1
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd E:\watermarkz; py -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2 --hostname=worker1@%h"
+
+# Worker 2
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd E:\watermarkz; py -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2 --hostname=worker2@%h"
+
+
+## MONITORING
+Check active workers:
+py -m celery -A server_production.celery inspect active
+
+Check stats:
+py -m celery -A server_production.celery inspect stats
+
+
+## STOPPING WORKERS
+Ctrl+C in each terminal
+OR
+py -m celery -A server_production.celery control shutdown
+
+
+## EXPECTED SPEEDUP
+1 worker (concurrency=2): ~35s for 300-frame video
+2 workers (concurrency=2 each): ~20-25s (1.5-2x faster)
+3 workers (concurrency=1 each): ~25-30s (similar, more queue flexibility)
+
+The speedup is sublinear because:
+- Segments vary in size/complexity
+- Queue distribution overhead
+- VRAM contention if too many workers
+- Final assembly is sequential
+
+
+## BEST CONFIGURATION FOR RTX 5070
+2 workers @ concurrency=2 = sweet spot
+- Good parallelism (4 segments at once)
+- No VRAM issues
+- ~1.5x faster than single worker
