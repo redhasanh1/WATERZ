@@ -905,9 +905,17 @@ def get_detector():
         print("Loading YOLO detector...")
         print("=" * 60)
         from yolo_detector import YOLOWatermarkDetector
+        import numpy as np
         # Force TensorRT-only mode (no fallback to .pt)
         # Will fail if engine not found - ensures maximum speed!
         detector = YOLOWatermarkDetector(require_tensorrt=True)
+
+        # WARMUP: Initialize TensorRT context (eliminates cold start overhead!)
+        print("[WARMUP] Running warmup inference to initialize TensorRT context...")
+        dummy_batch = [np.zeros((640, 640, 3), dtype=np.uint8) for _ in range(64)]
+        _ = detector.detect_batch(dummy_batch, confidence_threshold=0.15, batch_size=64)
+        print("[OK] YOLO warmed up! TensorRT context ready for max speed.")
+
         print("=" * 60)
         print("[OK] YOLO detector ready!")
         print("=" * 60)
@@ -1143,21 +1151,23 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
 
             # [INIT] EXTREME SPEED: Load all frames to memory for batch processing
-            print("📥 Loading all frames to memory for batch detection...")
+            print(f"📥 Loading {total_frames} frames to memory (batch processing)...")
+            # Pre-allocate list for speed
             all_frames = []
+            all_frames_reserve = [None] * int(total_frames)  # Reserve memory
             frames_loaded = 0
-            while True:
+
+            # Fast frame loading (no prints in loop!)
+            while frames_loaded < total_frames:
                 ret, frame = cap.read()
                 if not ret:
                     break
                 all_frames.append(frame)
                 frames_loaded += 1
-                if frames_loaded % 100 == 0:
-                    print(f"   Loaded {frames_loaded}/{total_frames} frames...")
 
             cap.release()
             frames_processed = len(all_frames)
-            print(f"[OK] Loaded {frames_processed} frames to memory")
+            print(f"[OK] Loaded {frames_processed} frames in memory (ZERO logging overhead)")
 
             # [RUNNING] BATCH DETECTION (EXTREME SPEED - 1-2ms per frame!)
             print(f"[RUNNING] Running BATCH detection on {frames_processed} frames (EXTREME SPEED!)...")
