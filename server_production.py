@@ -3550,12 +3550,17 @@ def get_status(task_id):
                 import json
                 prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
                 if prepare_result_json:
+                    # Decode bytes to string if needed
+                    if isinstance(prepare_result_json, bytes):
+                        prepare_result_json = prepare_result_json.decode()
                     prepare_result = json.loads(prepare_result_json)
                     base_name = prepare_result.get('base_name', video_id)
                     result_filename = f"{base_name}_propainter.mp4"
+                    print(f"[STATUS] Using base_name from prepare_result: {base_name}")
                 else:
                     # Fallback if prepare_result not found
                     result_filename = f"{video_id}_propainter.mp4"
+                    print(f"[STATUS WARNING] prepare_result not found, using video_id fallback: {result_filename}")
 
                 return jsonify({
                     'state': 'SUCCESS',
