@@ -1165,8 +1165,8 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
             import time
             batch_start = time.time()
-            # Batch detect ALL frames at once! (batch_size=256 - RTX 4090 extreme speed!)
-            all_detections = detector.detect_batch(all_frames, confidence_threshold=0.15, padding=0, batch_size=256)
+            # Batch detect ALL frames at once! (batch_size=192 - balanced speed/VRAM)
+            all_detections = detector.detect_batch(all_frames, confidence_threshold=0.15, padding=0, batch_size=192)
             batch_duration = time.time() - batch_start
             ms_per_frame = (batch_duration / max(frames_processed, 1)) * 1000
             print(f"[OK] Batch detection complete: {batch_duration:.3f}s ({ms_per_frame:.2f}ms per frame)")

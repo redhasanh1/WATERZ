@@ -37,7 +37,7 @@ set ENABLE_FLASH_ATTENTION=0
 echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
-echo   - YOLO: TensorRT batch 256 (EXTREME SPEED - RTX 4090!)
+echo   - YOLO: TensorRT batch 192 (balanced speed/VRAM - RTX 4090)
 echo   - RAFT: PyTorch FP16 + TF32 (stable, TRT engine needs rebuild)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: Disabled
