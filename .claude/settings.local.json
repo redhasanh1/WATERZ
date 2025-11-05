@@ -1,19 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(\"/c/Users/has/AppData/Local/Programs/Python/Python312/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe\" -encoders)",
-      "Bash(dir \"%LOCALAPPDATA%\\Programs\\Python\\Python312\\Lib\\site-packages\\imageio_ffmpeg\\binaries\")",
-      "Bash(pip show:*)",
-      "Bash(where:*)",
-      "Bash(dir \"C:\\ffmpeg\\bin\" 2)",
-      "Bash(dir:*)",
-      "Bash(python -m pip:*)",
-      "Bash(findstr:*)",
-      "WebFetch(domain:stackoverflow.com)",
-      "WebFetch(domain:pypi.org)",
-      "Bash(cat:*)",
-      "Bash(netstat:*)",
-      "Bash(tasklist:*)"
+      "Bash(./BUILD_RAFT_ENGINE_FP16.bat)",
+      "Bash(python benchmark_raft.py:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\":*)",
+      "Bash(python:*)",
+      "Bash(nul)",
+      "Bash(\"%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe\" -c \"import sys; print(f''Python 3.12: {sys.executable}'')\")",
+      "Bash(\"%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe\" -m pip show tensorrt 2)",
+      "Bash(py:*)",
+      "Bash(/c/Users/has/AppData/Local/Programs/Python/Python312/python.exe -m pip:*)",
+      "Bash(/c/Users/has/AppData/Local/Programs/Python/Python312/python.exe:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m pip install:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import tensorrt as trt; print(f''TensorRT version: {trt.__version__}'')\")"
     ],
     "deny": [],
     "ask": []

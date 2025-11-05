@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import time
+import threading
 
 from tqdm import tqdm
 import cv2
@@ -220,6 +221,11 @@ def get_ref_index(mid_neighbor_id, neighbor_ids, length, ref_stride=10, ref_num=
                     break
                 ref_index.append(i)
     return ref_index
+
+
+# Global lock for TensorRT RAFT execution (thread-pool worker safety)
+# Multiple threads sharing the same TensorRT context will corrupt it without serialization
+_TRT_EXEC_LOCK = threading.Lock()
 
 
 def pipeline(
@@ -488,6 +494,11 @@ def pipeline(
                                 self._stream = None
                         self._trt_ready = True
                         print(f"[OK] Using TensorRT RAFT engine: {engine_path}")
+                        # DEBUG: Print engine shape ranges
+                        if self._use_v3:
+                            print(f"[TRT DEBUG] Input tensor: {self._in_name}, Output tensor: {self._out_name}")
+                        else:
+                            print(f"[TRT DEBUG] Input binding: {self._in_idx}, Output binding: {self._out_idx}")
                     except Exception as e:
                         if self._force_trt:
                             raise
@@ -546,31 +557,53 @@ def pipeline(
                         out = torch.empty((B, 2, H, W), device=inp.device, dtype=torch.float16 if out_half else torch.float32)
                 else:
                     out = torch.empty((B, 2, H, W), device=inp.device, dtype=torch.float16 if out_half else torch.float32)
-                # Execute depending on TRT API
-                if not getattr(self, '_use_v3', False):
-                    # Legacy bindings API
-                    self._ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
-                    # Query num_bindings safely
-                    try:
-                        nb = self._engine.num_bindings
-                    except Exception:
-                        nb = 2
-                    bindings = [None] * int(nb)
-                    bindings[self._in_idx] = int(inp.data_ptr())
-                    bindings[self._out_idx] = int(out.data_ptr())
-                    ok = self._ctx.execute_v2(bindings)
-                else:
-                    # TensorRT 10 v3 API
-                    self._ctx.set_input_shape(self._in_name, tuple(inp.shape))
-                    self._ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
-                    self._ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
-                    if self._stream is not None:
-                        stream_ptr = int(self._stream.cuda_stream)
+                # DEBUG: Log shape before execution (only first time)
+                if not hasattr(self, '_trt_shape_logged'):
+                    print(f"[TRT EXEC] Input shape: {inp.shape}, dtype: {inp.dtype}")
+                    print(f"[TRT EXEC] Output shape: {out.shape}, dtype: {out.dtype}")
+                    print(f"[TRT THREAD-SAFE] Using global lock to serialize TensorRT execution")
+                    self._trt_shape_logged = True
+
+                # CRITICAL: Lock TensorRT execution for thread safety
+                # Thread-pool workers share the same TensorRT context, which is NOT thread-safe
+                with _TRT_EXEC_LOCK:
+                    # Execute depending on TRT API
+                    if not getattr(self, '_use_v3', False):
+                        # Legacy bindings API
+                        self._ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
+                        # Query num_bindings safely
+                        try:
+                            nb = self._engine.num_bindings
+                        except Exception:
+                            nb = 2
+                        bindings = [None] * int(nb)
+                        bindings[self._in_idx] = int(inp.data_ptr())
+                        bindings[self._out_idx] = int(out.data_ptr())
+                        ok = self._ctx.execute_v2(bindings)
                     else:
-                        stream_ptr = int(torch.cuda.current_stream().cuda_stream)
-                    ok = self._ctx.execute_async_v3(stream_ptr)
+                        # TensorRT 10 v3 API
+                        try:
+                            success = self._ctx.set_input_shape(self._in_name, tuple(inp.shape))
+                            if not success:
+                                print(f"[TRT ERROR] set_input_shape failed for shape {inp.shape}")
+                        except Exception as e:
+                            print(f"[TRT ERROR] Exception in set_input_shape: {e}")
+                            raise
+                        self._ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
+                        self._ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
+                        if self._stream is not None:
+                            stream_ptr = int(self._stream.cuda_stream)
+                        else:
+                            stream_ptr = int(torch.cuda.current_stream().cuda_stream)
+                        ok = self._ctx.execute_async_v3(stream_ptr)
+
                 if not ok:
-                    raise RuntimeError('TRT execute failed')
+                    # DEBUG: Print shapes and binding info to understand failure
+                    print(f"[TRT FAIL] Input shape: {inp.shape}, dtype: {inp.dtype}")
+                    print(f"[TRT FAIL] Output shape: {out.shape}, dtype: {out.dtype}")
+                    print(f"[TRT FAIL] Expected input: {self._in_name}, output: {self._out_name}")
+                    print(f"[TRT FAIL] Device: {inp.device}")
+                    raise RuntimeError(f'TRT execute failed - input shape: {inp.shape}, output shape: {out.shape}')
                 return out
 
             # Prepare frame tensors on device
