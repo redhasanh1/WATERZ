@@ -43,7 +43,7 @@ def train_sora_model():
         data='sora_dataset.yaml',     # dataset config
         epochs=100,                   # train for 100 epochs
         imgsz=640,                    # image size
-        batch=8,                      # batch size (adjust based on GPU memory)
+        batch=16,                     # batch size (doubled for RTX 4090 - 24GB VRAM)
         name='sora_watermark',        # experiment name
         patience=20,                  # early stopping patience
         save=True,                    # save checkpoints

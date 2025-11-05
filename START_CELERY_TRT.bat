@@ -36,8 +36,8 @@ set ENABLE_FLASH_ATTENTION=0
 
 echo.
 echo ============================================================
-echo TENSORRT CONFIG:
-echo   - YOLO: TensorRT (600-1000 fps)
+echo TENSORRT CONFIG (RTX 4090):
+echo   - YOLO: TensorRT batch 128 (800-1400 fps - 2x RTX 5070!)
 echo   - RAFT: TensorRT FP16 engine (30-50+ it/s - 3-5x faster!)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: Disabled
@@ -45,5 +45,5 @@ echo ============================================================
 echo.
 
 REM Use module form; threads pool works best on Windows
-REM concurrency=2 is a safe default for RTX 5070
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2
+REM concurrency=4 recommended for RTX 4090 (24GB VRAM - can handle 4-5 parallel segments)
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4

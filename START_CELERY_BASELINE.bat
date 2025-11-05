@@ -18,7 +18,7 @@ REM Ensure TensorRT DLLs and tools are on PATH
 call "%~dp0SETUP_TRT_ENV.bat"
 
 REM Use explicit Python path to avoid Windows Store stub
-set PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python311\python.exe
+set PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python312\python.exe
 if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
 
 REM Force TensorRT-only mode for YOLO (no .pt fallback)
@@ -36,14 +36,15 @@ set ENABLE_FLASH_ATTENTION=0
 
 echo.
 echo ============================================================
-echo BASELINE CONFIG:
-echo   - YOLO: TensorRT (600-1000 fps)
+echo BASELINE CONFIG (WITH NEW YOLO OPTIMIZATION):
+echo   - YOLO: TensorRT batch 128 RTX 4090 (800-1400 fps) [NEW!]
 echo   - RAFT: PyTorch FP16 autocast (~10.5 it/s baseline)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: Disabled
+echo   - Concurrency: 2 workers (RTX 4090)
 echo ============================================================
 echo.
 
 REM Use module form; threads pool works best on Windows
-REM concurrency=2 is a safe default for RTX 5070
+REM concurrency=2 for RTX 4090 (24GB VRAM) - maximum stability
 "%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2

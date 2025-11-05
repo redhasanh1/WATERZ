@@ -34,6 +34,22 @@ python_packages/
 Thumbs.db
 node_modules/
 
+# SSH keys (NEVER commit these!)
+*.pem
+*.pub
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+hasancool
+hasancool.pub
+
+# Reserved Windows filenames
+nul
+CON
+PRN
+AUX
+
 # Ignore external ProPainter submodule/code until needed
 ProPainter/
 ProPainter-main/

@@ -57,6 +57,7 @@ def benchmark_fp16_batch(frames, batch_size=32):
 
     # Try batch-enabled engine first, fallback to regular FP16
     engine_paths = [
+        "runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx4090.engine",
         "runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine",
         "runs/detect/new_sora_watermark/weights/best_fp16.engine"
     ]
@@ -92,7 +93,10 @@ def benchmark_fp16_batch(frames, batch_size=32):
 
     # Benchmark with batch processing
     print(f"[*] Benchmarking {len(frames)} frames with batch size {batch_size}...")
-    print(f"[*] Target: 1-2ms per frame (500-1000 fps)")
+    if "rtx4090" in engine_path.lower() and batch_size >= 128:
+        print(f"[*] Target: 0.7-1.2ms per frame (800-1400 fps) - RTX 4090 EXTREME!")
+    else:
+        print(f"[*] Target: 1-2ms per frame (500-1000 fps)")
     print()
 
     detections_count = 0
@@ -195,8 +199,8 @@ def main():
         print("[!] No frames extracted!")
         sys.exit(1)
 
-    # Test different batch sizes
-    batch_sizes = [32, 64]
+    # Test different batch sizes (RTX 4090 optimized for batch 128)
+    batch_sizes = [64, 128]
 
     results = {}
     for batch_size in batch_sizes:

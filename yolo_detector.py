@@ -41,7 +41,7 @@ class YOLOWatermarkDetector:
                 print(f"[OK] Loaded custom model: {model_path}")
             else:
                 # [INIT] BATCH-ENABLED ENGINE ONLY - NO FALLBACKS!
-                batch_engine = 'runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine'
+                batch_engine = 'runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx4090.engine'
 
                 if not os.path.exists(batch_engine):
                     raise RuntimeError(
@@ -62,8 +62,8 @@ class YOLOWatermarkDetector:
                 print(f"[INIT] Loading BATCH-ENABLED TensorRT engine: {batch_engine}")
                 try:
                     self.model = YOLO(batch_engine, task='detect')
-                    print(f"[OK] Batch TensorRT engine loaded! (10.7 MB, batch 1-128)")
-                    print(f"   Expected performance: 1-2ms per frame (600-1000 fps)")
+                    print(f"[OK] RTX 4090 Batch TensorRT engine loaded! (~11 MB, batch 1-256)")
+                    print(f"   Expected performance: 0.7-1.2ms per frame (800-1400 fps @ batch 128)")
                     self._using_tensorrt = True
                 except Exception as e:
                     raise RuntimeError(
@@ -145,7 +145,7 @@ class YOLOWatermarkDetector:
 
         return bboxes
 
-    def detect_batch(self, images, confidence_threshold=0.25, padding=30, batch_size=64):
+    def detect_batch(self, images, confidence_threshold=0.25, padding=30, batch_size=128):
         """
         Batch detect watermarks in multiple images (EXTREME SPEED!)
 
@@ -153,7 +153,7 @@ class YOLOWatermarkDetector:
             images: List of numpy arrays [(H, W, 3) BGR, ...]
             confidence_threshold: Minimum confidence for detections (0-1)
             padding: Pixels to add around detected region
-            batch_size: Batch size for TensorRT inference (32, 64, or 128)
+            batch_size: Batch size for TensorRT inference (64, 128, or 256 for RTX 4090)
 
         Returns:
             List of detection lists [

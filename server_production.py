@@ -119,6 +119,35 @@ import threading
 import secrets
 import hmac
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import subprocess
+
+# [INIT] FFmpeg/FFprobe path detection with fallback
+def get_ffmpeg_executables():
+    """Get FFmpeg and FFprobe paths with fallback to static-ffmpeg."""
+    # Try system PATH first (best performance)
+    ffmpeg_path = shutil.which('ffmpeg')
+    ffprobe_path = shutil.which('ffprobe')
+
+    if ffmpeg_path and ffprobe_path:
+        print(f"[OK] Using system FFmpeg: {ffmpeg_path}")
+        return ffmpeg_path, ffprobe_path
+
+    # Fallback to static-ffmpeg (includes BOTH ffmpeg and ffprobe!)
+    try:
+        from static_ffmpeg import run
+        ffmpeg_path, ffprobe_path = run.get_or_fetch_platform_executables_else_raise()
+        print(f"[OK] Using static-ffmpeg: {ffmpeg_path}")
+        print(f"[OK] FFprobe available: {ffprobe_path}")
+        return ffmpeg_path, ffprobe_path
+    except ImportError:
+        print("[ERROR] static-ffmpeg not installed and no system FFmpeg found")
+        raise RuntimeError("FFmpeg/FFprobe not available. Install via: pip install static-ffmpeg")
+    except Exception as e:
+        print(f"[ERROR] Failed to get static-ffmpeg executables: {e}")
+        raise RuntimeError(f"FFmpeg/FFprobe initialization failed: {e}")
+
+# Initialize FFmpeg paths at module level (before Celery workers start)
+FFMPEG_EXE, FFPROBE_EXE = get_ffmpeg_executables()
 
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
@@ -586,7 +615,7 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
     try:
         # Try faster preset p1 for maximum speed, fallback to p4 if fails
         encode_cmd = [
-            'ffmpeg', '-y',
+            FFMPEG_EXE, '-y',
             '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
             '-c:v', 'h264_nvenc',
@@ -1136,8 +1165,8 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
             import time
             batch_start = time.time()
-            # Batch detect ALL frames at once! (batch_size=64)
-            all_detections = detector.detect_batch(all_frames, confidence_threshold=0.15, padding=0, batch_size=64)
+            # Batch detect ALL frames at once! (batch_size=128 - RTX 4090 optimized)
+            all_detections = detector.detect_batch(all_frames, confidence_threshold=0.15, padding=0, batch_size=128)
             batch_duration = time.time() - batch_start
             ms_per_frame = (batch_duration / max(frames_processed, 1)) * 1000
             print(f"[OK] Batch detection complete: {batch_duration:.3f}s ({ms_per_frame:.2f}ms per frame)")
@@ -1756,8 +1785,8 @@ def process_segment_task(self, segment_data):
                     if frame is not None:
                         frames_for_detection.append(frame)
 
-            # Batch detect ALL frames at once!
-            all_detections = detector.detect_batch(frames_for_detection, confidence_threshold=det_conf, padding=0, batch_size=64)
+            # Batch detect ALL frames at once! (RTX 4090 optimized)
+            all_detections = detector.detect_batch(frames_for_detection, confidence_threshold=det_conf, padding=0, batch_size=128)
 
             # Find last valid bbox
             for detections_list in all_detections:
@@ -2001,7 +2030,7 @@ def process_segment_task(self, segment_data):
 
         # CRITICAL: Use identical encoding params for all segments (required for concat)
         encode_cmd = [
-            'ffmpeg', '-y', '-framerate', str(fps),
+            FFMPEG_EXE, '-y', '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
             '-c:v', 'h264_nvenc',  # Blackwell hardware encoding
             '-preset', 'p4',       # Balanced speed/quality (MUST match across segments)
@@ -2115,7 +2144,7 @@ def finalize_video_task(self, segment_results, prepare_result):
         temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
 
         concat_cmd = [
-            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+            FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
             '-i', concat_list_path,
             '-c', 'copy',  # CRITICAL: Copy codec = NO re-encoding (instant!)
             temp_processed
@@ -2155,7 +2184,7 @@ def finalize_video_task(self, segment_results, prepare_result):
 
         # Check if original has audio
         check_audio_cmd = [
-            'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+            FFPROBE_EXE, '-v', 'error', '-select_streams', 'a:0',
             '-show_entries', 'stream=codec_type',
             '-of', 'default=noprint_wrappers=1:nokey=1',
             video_path
@@ -2165,19 +2194,19 @@ def finalize_video_task(self, segment_results, prepare_result):
 
         if has_audio:
             merge_cmd = [
-                'ffmpeg', '-y',
+                FFMPEG_EXE, '-y',
                 '-i', temp_processed,
                 '-i', video_path,
                 '-map', '0:v:0',
                 '-map', '1:a:0',
                 '-c:v', 'copy',  # Don't re-encode video, just copy!
-                '-c:a', 'aac', '-b:a', '192k',
+                '-c:a', 'copy',  # Copy audio stream directly (instant, no re-encoding!)
                 '-shortest',
                 final_output
             ]
         else:
             merge_cmd = [
-                'ffmpeg', '-y',
+                FFMPEG_EXE, '-y',
                 '-i', temp_processed,
                 '-c:v', 'copy',  # No audio, just copy video stream
                 final_output
@@ -2211,6 +2240,8 @@ def finalize_video_task(self, segment_results, prepare_result):
         if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
             try:
                 upload_url = f"{tunnel.rstrip('/')}/api/upload-result"
+                # Quick connectivity test (15 second timeout) - fail fast if server down
+                requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
                 print(f"[UPLOAD]  Uploading final result to API server...")
                 with open(final_output, 'rb') as f:
                     resp = requests.post(
@@ -2623,6 +2654,8 @@ def process_image_task(self, image_path):
             try:
                 import requests
                 upload_url = tunnel.rstrip('/') + '/api/upload-result'
+                # Quick connectivity test (15 second timeout) - fail fast if server down
+                requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
                 print(f"[UPLOAD]  Uploading result to API host: {upload_url}")
                 with open(out_path, 'rb') as fp:
                     resp = requests.post(
@@ -2812,7 +2845,7 @@ def process_video_task(self, video_path):
 
             print(f"📷 Extracting original frames for merging...")
             extract_cmd = [
-                'ffmpeg', '-i', video_path,
+                FFMPEG_EXE, '-i', video_path,
                 '-qscale:v', '2',
                 '-start_number', '0',  # Start numbering at 0 to match frame indices
                 os.path.join(original_frames_dir, '%04d.png')
@@ -2979,7 +3012,7 @@ def process_video_task(self, video_path):
 
             temp_processed = os.path.join(RESULT_DIR, f"{base_name}_propainter_video.mp4")
             concat_cmd = [
-                'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+                FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
                 '-i', concat_list_file,
                 '-c', 'copy',
                 temp_processed
@@ -3066,7 +3099,7 @@ def process_video_task(self, video_path):
 
         try:
             check_audio_cmd = [
-                'ffprobe',
+                FFPROBE_EXE,
                 '-v', 'error',
                 '-select_streams', 'a:0',
                 '-show_entries', 'stream=codec_type',
@@ -3079,21 +3112,20 @@ def process_video_task(self, video_path):
 
             if has_audio:
                 cmd = [
-                    'ffmpeg',
+                    FFMPEG_EXE,
                     '-y',
                     '-i', temp_processed,
                     '-i', video_path,
                     '-map', '0:v:0',
                     '-map', '1:a:0',
                     '-c:v', 'copy',         # Don't re-encode, just copy video stream!
-                    '-c:a', 'aac',
-                    '-b:a', '192k',
+                    '-c:a', 'copy',         # Copy audio stream directly (instant, no re-encoding!)
                     '-shortest',
                     final_output
                 ]
             else:
                 cmd = [
-                    'ffmpeg',
+                    FFMPEG_EXE,
                     '-y',
                     '-i', temp_processed,
                     '-c:v', 'copy',         # No audio, just copy video stream
@@ -3110,7 +3142,7 @@ def process_video_task(self, video_path):
             else:
                 if has_audio:
                     verify_cmd = [
-                        'ffprobe',
+                        FFPROBE_EXE,
                         '-v', 'error',
                         '-select_streams', 'a:0',
                         '-show_entries', 'stream=codec_type',
@@ -3146,6 +3178,8 @@ def process_video_task(self, video_path):
             try:
                 import requests
                 upload_url = tunnel.rstrip('/') + '/api/upload-result'
+                # Quick connectivity test (15 second timeout) - fail fast if server down
+                requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
                 print(f"[UPLOAD]  Uploading result to API host: {upload_url}")
                 with open(final_output, 'rb') as fp:
                     resp = requests.post(

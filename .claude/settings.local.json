@@ -1,20 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "Bash(powershell -Command:*)",
-      "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" -m pip install:*)",
-      "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\":*)",
-      "Bash(ls:*)",
-      "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" fix_onnx_shapes.py faster-propainter-main/engines/rfcnet/rfcnet.onnx)",
-      "Bash(./BUILD_RFCNET_ENGINE_FP16.bat)",
-      "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" add_reshape_after_dcnv2.py faster-propainter-main/engines/rfcnet/rfcnet.onnx)",
-      "Bash(py -c:*)",
-      "WebSearch",
-      "Bash(curl:*)",
-      "Bash(\"$USERPROFILE/AppData/Local/Programs/Python/Python311/python.exe\" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2)",
-      "WebFetch(domain:github.com)",
-      "Bash(py -m celery:*)",
-      "Read(//c/Users/Hasan/AppData/Local/Programs/Python/Python311/Lib/site-packages/torch/lib/**)"
+      "Bash(\"/c/Users/has/AppData/Local/Programs/Python/Python312/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe\" -encoders)",
+      "Bash(dir \"%LOCALAPPDATA%\\Programs\\Python\\Python312\\Lib\\site-packages\\imageio_ffmpeg\\binaries\")",
+      "Bash(pip show:*)",
+      "Bash(where:*)",
+      "Bash(dir \"C:\\ffmpeg\\bin\" 2)",
+      "Bash(dir:*)",
+      "Bash(python -m pip:*)",
+      "Bash(findstr:*)",
+      "WebFetch(domain:stackoverflow.com)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(cat:*)",
+      "Bash(netstat:*)",
+      "Bash(tasklist:*)"
     ],
     "deny": [],
     "ask": []
