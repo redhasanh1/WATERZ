@@ -31,8 +31,8 @@ set USE_NEUFLOW=0
 REM Disable RFCNet torch.compile (requires Triton which isn't available on Windows)
 set RFCNET_TORCHTRT=0
 
-REM Disable Flash Attention
-set ENABLE_FLASH_ATTENTION=0
+REM ⚡ FLASH ATTENTION: 3-5x speedup on transformer attention operations (FREE!)
+set ENABLE_FLASH_ATTENTION=1
 
 echo.
 echo ============================================================
@@ -40,7 +40,7 @@ echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
 echo   - Optical Flow: FastFlowNet TensorRT FP16 (thread-safe, ~5ms/pair)
 echo   - RFCNet: PyTorch (no torch.compile)
-echo   - Flash Attention: Disabled
+echo   - Flash Attention: ENABLED (3-5x transformer speedup!)
 echo   - Concurrency: 4 workers (optimal VRAM balance)
 echo   - neighbor_length: 10, raft_iter: 10 (optimized for speed)
 echo ============================================================
