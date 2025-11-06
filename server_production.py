@@ -748,59 +748,101 @@ def background_encoder_worker():
     """
     Background thread that encodes segments in real-time as they complete.
     Uses Redis pub/sub to receive segment completion notifications.
-    Encodes continuously - NOT waiting until end!
+    PARALLEL ENCODING: Encodes multiple segments simultaneously using ThreadPoolExecutor.
     """
     import json
     import traceback
+    import time
+    from concurrent.futures import ThreadPoolExecutor
 
-    try:
-        redis_client = celery.backend.client
-        pubsub = redis_client.pubsub()
-        pubsub.subscribe('segment_ready')
+    # Track videos being processed
+    video_futures = {}  # {video_id: {seg_idx: future, ...}}
+    video_metadata = {}  # {video_id: {'total_segments': N, 'redis_client': client}}
 
-        print("[BACKGROUND ENCODER] Listening for segment completion signals...")
+    while True:  # Auto-reconnect loop
+        try:
+            redis_client = celery.backend.client
 
-        # Track videos being processed
-        video_segments = {}  # {video_id: set of encoded seg_indices}
+            # Configure pubsub with NO timeout and keepalive
+            pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
+            pubsub.connection_pool.connection_kwargs['socket_timeout'] = None
+            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = True
+            pubsub.connection_pool.connection_kwargs['socket_keepalive_options'] = {
+                1: 60,   # TCP_KEEPIDLE
+                2: 10,   # TCP_KEEPINTVL
+                3: 6     # TCP_KEEPCNT
+            }
 
-        for message in pubsub.listen():
-            if message['type'] == 'message':
-                try:
-                    data = json.loads(message['data'])
-                    video_id = data['video_id']
-                    seg_idx = data['seg_idx']
-                    total_segments = data['total_segments']
+            pubsub.subscribe('segment_ready')
 
-                    # Track this video's segments
-                    if video_id not in video_segments:
-                        video_segments[video_id] = set()
+            print("[BACKGROUND ENCODER] Listening for segment completion signals...")
+            print("[BACKGROUND ENCODER] Socket keepalive enabled - NO timeout!")
+            print("[BACKGROUND ENCODER] PARALLEL MODE: Up to 4 concurrent NVENC streams!")
 
-                    print(f"[BACKGROUND ENCODER] Segment {seg_idx+1}/{total_segments} ready for video {video_id} - encoding NOW!")
+            # Create thread pool for parallel encoding (4 matches SEGMENT_WORKERS)
+            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="EncoderThread") as executor:
+                for message in pubsub.listen():
+                    if message['type'] == 'message':
+                        try:
+                            data = json.loads(message['data'])
+                            video_id = data['video_id']
+                            seg_idx = data['seg_idx']
+                            total_segments = data['total_segments']
 
-                    # Encode segment immediately
-                    encode_segment_background(redis_client, data)
+                            # Initialize tracking for new video
+                            if video_id not in video_futures:
+                                video_futures[video_id] = {}
+                                video_metadata[video_id] = {
+                                    'total_segments': total_segments,
+                                    'redis_client': redis_client
+                                }
 
-                    # Track completion
-                    video_segments[video_id].add(seg_idx)
-                    encoded_count = len(video_segments[video_id])
+                            print(f"[BACKGROUND ENCODER] Segment {seg_idx+1}/{total_segments} ready for video {video_id} - submitting to parallel encoder!")
 
-                    print(f"[BACKGROUND ENCODER] ✓ Segment {seg_idx+1} encoded! Progress: {encoded_count}/{total_segments}")
+                            # Submit encoding to thread pool (NON-BLOCKING!)
+                            future = executor.submit(encode_segment_background, redis_client, data)
+                            video_futures[video_id][seg_idx] = future
 
-                    # Check if all segments encoded for this video
-                    if encoded_count == total_segments:
-                        print(f"[BACKGROUND ENCODER] All {total_segments} segments encoded for {video_id}! Triggering finalization...")
-                        trigger_finalization(redis_client, video_id, total_segments)
-                        # Cleanup tracking
-                        del video_segments[video_id]
-                        print(f"[BACKGROUND ENCODER] ✓ Video {video_id} finalized!")
+                            # Check if all segments have been submitted for this video
+                            if len(video_futures[video_id]) == total_segments:
+                                print(f"[BACKGROUND ENCODER] All {total_segments} segments submitted for {video_id} - waiting for completion...")
 
-                except Exception as e:
-                    print(f"[BACKGROUND ENCODER ERROR] Failed to process segment: {e}")
-                    traceback.print_exc()
+                                # Wait for all encoding futures to complete
+                                completed_count = 0
+                                failed_segments = []
 
-    except Exception as e:
-        print(f"[BACKGROUND ENCODER FATAL] Thread crashed: {e}")
-        traceback.print_exc()
+                                for seg_idx, future in video_futures[video_id].items():
+                                    try:
+                                        future.result()  # Block until this segment completes
+                                        completed_count += 1
+                                        print(f"[BACKGROUND ENCODER] ✓ Segment {seg_idx+1} encoded! Progress: {completed_count}/{total_segments}")
+                                    except Exception as e:
+                                        print(f"[BACKGROUND ENCODER ERROR] Segment {seg_idx+1} failed: {e}")
+                                        traceback.print_exc()
+                                        failed_segments.append(seg_idx)
+
+                                # Finalize if all segments succeeded
+                                if not failed_segments:
+                                    print(f"[BACKGROUND ENCODER] All {total_segments} segments encoded for {video_id}! Triggering finalization...")
+                                    trigger_finalization(redis_client, video_id, total_segments)
+                                    print(f"[BACKGROUND ENCODER] ✓ Video {video_id} finalized!")
+                                else:
+                                    print(f"[BACKGROUND ENCODER ERROR] Video {video_id} had {len(failed_segments)} failed segments: {failed_segments}")
+
+                                # Cleanup tracking
+                                del video_futures[video_id]
+                                del video_metadata[video_id]
+
+                        except Exception as e:
+                            print(f"[BACKGROUND ENCODER ERROR] Failed to process segment: {e}")
+                            traceback.print_exc()
+
+        except Exception as e:
+            print(f"[BACKGROUND ENCODER] Connection lost: {e}")
+            traceback.print_exc()
+            print("[BACKGROUND ENCODER] Reconnecting in 2 seconds...")
+            time.sleep(2)
+            # Loop continues - auto-reconnect!
 
 
 def encode_segment_background(redis_client, data):
@@ -2419,83 +2461,36 @@ def process_segment_task(self, segment_data):
 @celery.task(bind=True, name='watermark.finalize_video')
 def finalize_video_task(self, segment_results, prepare_result):
     """
-    Phase 3: Wait for background encoder to finish finalization
+    Phase 3: Return immediately - encoding happens in background encoder thread!
 
-    NOTE: Actual finalization (concat + audio merge) happens in background encoder thread!
-    This task just waits for completion and returns the result.
+    NOTE: This task returns immediately. The background encoder handles all encoding + finalization asynchronously.
+    Check Redis for final video status: video:{video_id}:status and video:{video_id}:final_path
     """
     try:
-        import time
-
         video_id = prepare_result['video_id']
         base_name = prepare_result['base_name']
         total_segments = prepare_result['total_segments']
 
-        print(f"\n[FINALIZE TASK] Waiting for background encoder to finish video: {base_name} ({total_segments} segments)")
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Waiting for background encoder'})
+        print(f"\n[FINALIZE TASK] All segments complete! Background encoder handling finalization for: {base_name}")
+        print(f"[FINALIZE TASK] Encoding + concatenation happening asynchronously in background (parallel NVENC)")
 
-        # Wait for background encoder to finish (checks Redis status)
-        redis_client = celery.backend.client
-        max_wait_seconds = 600  # 10 minutes max wait
-        wait_interval = 1  # Check every 1 second
+        # Return immediately - don't block Celery worker!
+        # Background encoder will update Redis when complete:
+        # - video:{video_id}:status = "complete"
+        # - video:{video_id}:final_path = <path to final video>
 
-        for elapsed in range(0, max_wait_seconds, wait_interval):
-            status_raw = redis_client.get(f"video:{video_id}:status")
-            status = status_raw.decode() if isinstance(status_raw, bytes) else status_raw
+        result = {
+            'status': 'background_encoding',
+            'message': f'Segments complete. Encoding + finalization in progress (background thread)',
+            'video_id': video_id,
+            'total_segments': total_segments,
+            'check_status_key': f'video:{video_id}:status',
+            'final_path_key': f'video:{video_id}:final_path'
+        }
 
-            if status == "complete":
-                # Background encoder finished!
-                final_path_raw = redis_client.get(f"video:{video_id}:final_path")
-                final_path = final_path_raw.decode() if isinstance(final_path_raw, bytes) else final_path_raw
-
-                if not final_path or not os.path.exists(final_path):
-                    raise RuntimeError(f"Background encoder reported complete but final video not found: {final_path}")
-
-                print(f"[FINALIZE TASK] Background encoder finished! Final video: {final_path}")
-
-                # Cleanup shared directories
-                shared_mask_dir = prepare_result.get('shared_mask_dir')
-                shared_frames_dir = prepare_result.get('shared_frames_dir')
-                if shared_mask_dir:
-                    import shutil
-                    shutil.rmtree(shared_mask_dir, ignore_errors=True)
-                if shared_frames_dir:
-                    import shutil
-                    shutil.rmtree(shared_frames_dir, ignore_errors=True)
-
-                result = {
-                    'path': final_path,
-                    'metadata': {
-                        'video_id': video_id,
-                        'total_segments': total_segments,
-                        'total_frames': prepare_result.get('total_frames', 0),
-                        'frames_with_watermark': prepare_result.get('frames_with_watermark', 0),
-                        'fps': prepare_result.get('fps', 30),
-                        'width': prepare_result.get('width', 0),
-                        'height': prepare_result.get('height', 0),
-                    }
-                }
-
-                # Mark distributed task as complete in Redis (for status endpoint)
-                tracking_key = f"segments:{video_id}"
-                celery.backend.set(tracking_key, total_segments)
-
-                print(f"[OK] Video finalized by background encoder: {final_path}")
-                self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
-                return result
-
-            elif status == "error":
-                error_msg_raw = redis_client.get(f"video:{video_id}:error")
-                error_msg = error_msg_raw.decode() if isinstance(error_msg_raw, bytes) else (error_msg_raw or "Unknown error")
-                raise RuntimeError(f"Background encoder reported error: {error_msg}")
-
-            # Still processing - update progress
-            if elapsed % 5 == 0:  # Log every 5 seconds
-                print(f"[FINALIZE TASK] Waiting for background encoder... ({elapsed}s elapsed)")
-                progress = min(90, int(elapsed / max_wait_seconds * 90))
-                self.update_state(state='PROCESSING', meta={'progress': progress, 'status': 'Background encoding/concat in progress'})
-
-            time.sleep(wait_interval)
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Background encoding in progress'})
+        print(f"[FINALIZE TASK] Returned immediately - worker free! Check Redis keys for completion.")
+        return result
 
         # Timeout
         raise RuntimeError(f"Background encoder did not complete within {max_wait_seconds}s")
@@ -3644,6 +3639,47 @@ def get_status(task_id):
             print(f"[POLL] DEBUG - task.result type: {type(result_data)}, value: {result_data}")
 
             if isinstance(result_data, dict):
+                # Check if this is a finalize task with background encoding
+                if result_data.get('status') == 'background_encoding':
+                    video_id = result_data.get('video_id')
+                    print(f"[POLL] Background encoding in progress for video {video_id}, checking Redis...")
+
+                    # Check if encoding is complete in Redis
+                    try:
+                        redis_client = celery.backend.client
+                        encoding_status = redis_client.get(f"video:{video_id}:status")
+
+                        if encoding_status and encoding_status.decode() == "complete":
+                            # Encoding is done! Get the final path
+                            final_path_raw = redis_client.get(f"video:{video_id}:final_path")
+                            if final_path_raw:
+                                final_path = final_path_raw.decode()
+                                filename = os.path.basename(final_path)
+                                print(f"[POLL] Background encoding COMPLETE for {video_id}! Returning result_url")
+                                response['result'] = {
+                                    'result_url': f'/results/{filename}'
+                                }
+                                if 'metadata' in result_data:
+                                    response['metadata'] = result_data['metadata']
+                                return jsonify(response)  # Return SUCCESS with result_url
+                        else:
+                            # Encoding still in progress - keep frontend polling
+                            print(f"[POLL] Background encoding not complete yet for {video_id}, status: {encoding_status}")
+                            response['state'] = 'PROCESSING'
+                            response['progress'] = result_data.get('message', 'Encoding in progress...')
+                            response['info'] = {
+                                'progress': 95,
+                                'status': 'Video encoding in background (almost done!)'
+                            }
+                            return jsonify(response)  # Keep polling
+                    except Exception as e:
+                        print(f"[ERROR] Failed to check Redis for background encoding status: {e}")
+                        # Fall through to normal error handling
+                        response['state'] = 'PROCESSING'
+                        response['progress'] = 'Encoding in progress...'
+                        response['info'] = {'progress': 95, 'status': 'Background encoding'}
+                        return jsonify(response)
+
                 # Check if this is a prepare task that returned chord_id
                 if 'chord_id' in result_data:
                     chord_id = result_data['chord_id']
