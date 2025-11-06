@@ -223,9 +223,9 @@ def get_ref_index(mid_neighbor_id, neighbor_ids, length, ref_stride=10, ref_num=
     return ref_index
 
 
-# Global lock for TensorRT RAFT execution (thread-pool worker safety)
-# Multiple threads sharing the same TensorRT context will corrupt it without serialization
-_TRT_EXEC_LOCK = threading.Lock()
+# TensorRT 10.x is thread-safe with per-instance contexts
+# Each model instance has its own TensorRT context - NO LOCK NEEDED!
+# Full parallel execution across 4 worker threads!
 
 
 def pipeline(
@@ -561,41 +561,39 @@ def pipeline(
                 if not hasattr(self, '_trt_shape_logged'):
                     print(f"[TRT EXEC] Input shape: {inp.shape}, dtype: {inp.dtype}")
                     print(f"[TRT EXEC] Output shape: {out.shape}, dtype: {out.dtype}")
-                    print(f"[TRT THREAD-SAFE] Using global lock to serialize TensorRT execution")
+                    print(f"[TRT PARALLEL] Per-instance context - NO LOCK, full parallel execution!")
                     self._trt_shape_logged = True
 
-                # CRITICAL: Lock TensorRT execution for thread safety
-                # Thread-pool workers share the same TensorRT context, which is NOT thread-safe
-                with _TRT_EXEC_LOCK:
-                    # Execute depending on TRT API
-                    if not getattr(self, '_use_v3', False):
-                        # Legacy bindings API
-                        self._ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
-                        # Query num_bindings safely
-                        try:
-                            nb = self._engine.num_bindings
-                        except Exception:
-                            nb = 2
-                        bindings = [None] * int(nb)
-                        bindings[self._in_idx] = int(inp.data_ptr())
-                        bindings[self._out_idx] = int(out.data_ptr())
-                        ok = self._ctx.execute_v2(bindings)
+                # TensorRT 10.x: Each instance has its own context - fully thread-safe!
+                # Execute depending on TRT API
+                if not getattr(self, '_use_v3', False):
+                    # Legacy bindings API
+                    self._ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
+                    # Query num_bindings safely
+                    try:
+                        nb = self._engine.num_bindings
+                    except Exception:
+                        nb = 2
+                    bindings = [None] * int(nb)
+                    bindings[self._in_idx] = int(inp.data_ptr())
+                    bindings[self._out_idx] = int(out.data_ptr())
+                    ok = self._ctx.execute_v2(bindings)
+                else:
+                    # TensorRT 10 v3 API
+                    try:
+                        success = self._ctx.set_input_shape(self._in_name, tuple(inp.shape))
+                        if not success:
+                            print(f"[TRT ERROR] set_input_shape failed for shape {inp.shape}")
+                    except Exception as e:
+                        print(f"[TRT ERROR] Exception in set_input_shape: {e}")
+                        raise
+                    self._ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
+                    self._ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
+                    if self._stream is not None:
+                        stream_ptr = int(self._stream.cuda_stream)
                     else:
-                        # TensorRT 10 v3 API
-                        try:
-                            success = self._ctx.set_input_shape(self._in_name, tuple(inp.shape))
-                            if not success:
-                                print(f"[TRT ERROR] set_input_shape failed for shape {inp.shape}")
-                        except Exception as e:
-                            print(f"[TRT ERROR] Exception in set_input_shape: {e}")
-                            raise
-                        self._ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
-                        self._ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
-                        if self._stream is not None:
-                            stream_ptr = int(self._stream.cuda_stream)
-                        else:
-                            stream_ptr = int(torch.cuda.current_stream().cuda_stream)
-                        ok = self._ctx.execute_async_v3(stream_ptr)
+                        stream_ptr = int(torch.cuda.current_stream().cuda_stream)
+                    ok = self._ctx.execute_async_v3(stream_ptr)
 
                 if not ok:
                     # DEBUG: Print shapes and binding info to understand failure
