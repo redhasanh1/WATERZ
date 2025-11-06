@@ -223,10 +223,10 @@ def get_ref_index(mid_neighbor_id, neighbor_ids, length, ref_stride=10, ref_num=
     return ref_index
 
 
-# Global lock for TensorRT RAFT execution (thread-pool worker safety)
-# NOTE: Threads share TensorRT context - need lock until we implement thread-local contexts
+# Thread-local storage for TensorRT contexts - each thread gets its own context
+# This enables TRUE PARALLEL execution without locks or memory corruption
 import threading
-_TRT_EXEC_LOCK = threading.Lock()
+_thread_local = threading.local()
 
 
 def pipeline(
@@ -457,7 +457,8 @@ def pipeline(
                             self._engine = runtime.deserialize_cuda_engine(f.read())
                         if self._engine is None:
                             raise RuntimeError('TRT engine deserialize failed')
-                        self._ctx = self._engine.create_execution_context()
+                        # Don't create context here - will be created per-thread lazily
+                        self._ctx = None
                         # Resolve bindings robustly (support legacy and TensorRT 10 v3 I/O)
                         try:
                             nb = self._engine.num_bindings  # may not exist on TRT 10
@@ -522,6 +523,20 @@ def pipeline(
                     self._raft = RAFT_bi(ckpt_path, device)
                     print("[OK] RAFT PyTorch model initialized")
 
+        def _get_thread_context(self):
+            """Get or create TensorRT execution context for current thread"""
+            if not hasattr(_thread_local, 'trt_contexts'):
+                _thread_local.trt_contexts = {}
+
+            thread_id = threading.get_ident()
+            if thread_id not in _thread_local.trt_contexts:
+                # Create new context for this thread
+                ctx = self._engine.create_execution_context()
+                _thread_local.trt_contexts[thread_id] = ctx
+                print(f"[TRT] Created new execution context for thread {thread_id}")
+
+            return _thread_local.trt_contexts[thread_id]
+
         @torch.no_grad()
         def __call__(self, frames_btchw: torch.Tensor, iters: int = 20):
             # frames: [B, T, C, H, W]
@@ -562,40 +577,41 @@ def pipeline(
                 if not hasattr(self, '_trt_shape_logged'):
                     print(f"[TRT EXEC] Input shape: {inp.shape}, dtype: {inp.dtype}")
                     print(f"[TRT EXEC] Output shape: {out.shape}, dtype: {out.dtype}")
-                    print(f"[TRT] Using lock for thread safety (will switch to process pool for parallel)")
+                    print(f"[TRT] Thread-local contexts enabled - TRUE PARALLEL execution!")
                     self._trt_shape_logged = True
 
-                # Lock TensorRT execution (threads share context)
-                with _TRT_EXEC_LOCK:
-                    # Execute depending on TRT API
-                    if not getattr(self, '_use_v3', False):
-                        # Legacy bindings API
-                        self._ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
-                        # Query num_bindings safely
-                        try:
-                            nb = self._engine.num_bindings
-                        except Exception:
-                            nb = 2
-                        bindings = [None] * int(nb)
-                        bindings[self._in_idx] = int(inp.data_ptr())
-                        bindings[self._out_idx] = int(out.data_ptr())
-                        ok = self._ctx.execute_v2(bindings)
+                # Get thread-local context (NO LOCK NEEDED - each thread has its own!)
+                ctx = self._get_thread_context()
+
+                # Execute depending on TRT API
+                if not getattr(self, '_use_v3', False):
+                    # Legacy bindings API
+                    ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
+                    # Query num_bindings safely
+                    try:
+                        nb = self._engine.num_bindings
+                    except Exception:
+                        nb = 2
+                    bindings = [None] * int(nb)
+                    bindings[self._in_idx] = int(inp.data_ptr())
+                    bindings[self._out_idx] = int(out.data_ptr())
+                    ok = ctx.execute_v2(bindings)
+                else:
+                    # TensorRT 10 v3 API
+                    try:
+                        success = ctx.set_input_shape(self._in_name, tuple(inp.shape))
+                        if not success:
+                            print(f"[TRT ERROR] set_input_shape failed for shape {inp.shape}")
+                    except Exception as e:
+                        print(f"[TRT ERROR] Exception in set_input_shape: {e}")
+                        raise
+                    ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
+                    ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
+                    if self._stream is not None:
+                        stream_ptr = int(self._stream.cuda_stream)
                     else:
-                        # TensorRT 10 v3 API
-                        try:
-                            success = self._ctx.set_input_shape(self._in_name, tuple(inp.shape))
-                            if not success:
-                                print(f"[TRT ERROR] set_input_shape failed for shape {inp.shape}")
-                        except Exception as e:
-                            print(f"[TRT ERROR] Exception in set_input_shape: {e}")
-                            raise
-                        self._ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
-                        self._ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
-                        if self._stream is not None:
-                            stream_ptr = int(self._stream.cuda_stream)
-                        else:
-                            stream_ptr = int(torch.cuda.current_stream().cuda_stream)
-                        ok = self._ctx.execute_async_v3(stream_ptr)
+                        stream_ptr = int(torch.cuda.current_stream().cuda_stream)
+                    ok = ctx.execute_async_v3(stream_ptr)
 
                 if not ok:
                     # DEBUG: Print shapes and binding info to understand failure
@@ -739,7 +755,8 @@ def pipeline(
                         self._engine = runtime.deserialize_cuda_engine(f.read())
                     if self._engine is None:
                         raise RuntimeError('TRT engine deserialize failed')
-                    self._ctx = self._engine.create_execution_context()
+                    # Don't create context here - will be created per-thread lazily
+                    self._ctx = None
 
                     # Use TensorRT 10 v3 API (named tensors)
                     self._use_v3 = True
@@ -804,6 +821,20 @@ def pipeline(
             else:
                 return self._model.forward(masked_flows, masks)
 
+        def _get_thread_context(self):
+            """Get or create TensorRT execution context for current thread"""
+            if not hasattr(_thread_local, 'rfcnet_contexts'):
+                _thread_local.rfcnet_contexts = {}
+
+            thread_id = threading.get_ident()
+            if thread_id not in _thread_local.rfcnet_contexts:
+                # Create new context for this thread
+                ctx = self._engine.create_execution_context()
+                _thread_local.rfcnet_contexts[thread_id] = ctx
+                print(f"[TRT RFCNet] Created new execution context for thread {thread_id}")
+
+            return _thread_local.rfcnet_contexts[thread_id]
+
         def _forward_trt(self, masked_flows: torch.Tensor, masks: torch.Tensor):
             """TensorRT execution path."""
             # Convert to FP16 if needed
@@ -824,14 +855,17 @@ def pipeline(
             else:
                 flow_out = torch.empty((B, T, 2, H, W), device=self.device, dtype=dtype)
 
+            # Get thread-local context (NO LOCK NEEDED - each thread has its own!)
+            ctx = self._get_thread_context()
+
             # Set input shapes
-            self._ctx.set_input_shape(self._in_names[0], tuple(masked_flows.shape))
-            self._ctx.set_input_shape(self._in_names[1], tuple(masks.shape))
+            ctx.set_input_shape(self._in_names[0], tuple(masked_flows.shape))
+            ctx.set_input_shape(self._in_names[1], tuple(masks.shape))
 
             # Set tensor addresses
-            self._ctx.set_tensor_address(self._in_names[0], int(masked_flows.data_ptr()))
-            self._ctx.set_tensor_address(self._in_names[1], int(masks.data_ptr()))
-            self._ctx.set_tensor_address(self._out_name, int(flow_out.data_ptr()))
+            ctx.set_tensor_address(self._in_names[0], int(masked_flows.data_ptr()))
+            ctx.set_tensor_address(self._in_names[1], int(masks.data_ptr()))
+            ctx.set_tensor_address(self._out_name, int(flow_out.data_ptr()))
 
             # Execute
             if self._stream is not None:
@@ -839,7 +873,7 @@ def pipeline(
             else:
                 stream_ptr = int(torch.cuda.current_stream().cuda_stream)
 
-            ok = self._ctx.execute_async_v3(stream_ptr)
+            ok = ctx.execute_async_v3(stream_ptr)
             if not ok:
                 raise RuntimeError('TRT RFCNet execute failed')
 
