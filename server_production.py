@@ -1079,6 +1079,53 @@ def on_worker_ready(sender=None, **kwargs):
     """Called when Celery worker finishes initialization - pre-warm models"""
     print("[INIT] Worker ready - warming up models...")
 
+    # ============================================================================
+    # ENVIRONMENT VARIABLE VALIDATION - Critical for performance!
+    # ============================================================================
+    print("=" * 70)
+    print("WORKER ENVIRONMENT VALIDATION")
+    print("=" * 70)
+
+    # Check critical performance environment variables
+    env_vars_status = {
+        'USE_NEUFLOW': os.environ.get('USE_NEUFLOW', '0'),
+        'FORCE_TRT_RAFT': os.environ.get('FORCE_TRT_RAFT', '0'),
+        'ENABLE_FLASH_ATTENTION': os.environ.get('ENABLE_FLASH_ATTENTION', '0'),
+        'RFCNET_TORCHTRT': os.environ.get('RFCNET_TORCHTRT', '0'),
+    }
+
+    print("Critical Performance Variables:")
+    for var, value in env_vars_status.items():
+        is_enabled = value in ('1', 'true', 'yes', 'on')
+        status_icon = "✓" if is_enabled else "✗"
+        print(f"  {status_icon} {var:<25} = {value}")
+
+    # Check if NeuFlow model file exists
+    neuflow_path = os.path.join(os.getcwd(), 'faster-propainter-main', 'models', 'neuflow_things.onnx')
+    neuflow_exists = os.path.exists(neuflow_path)
+    print()
+    print("Model Files:")
+    print(f"  {'✓' if neuflow_exists else '✗'} NeuFlow v2 ONNX: {neuflow_path}")
+
+    # Performance warnings
+    print()
+    print("Performance Analysis:")
+    if env_vars_status['USE_NEUFLOW'] == '1':
+        if neuflow_exists:
+            print("  ✓ NeuFlow v2 enabled - OPTIMAL PERFORMANCE (10-70x faster optical flow)")
+        else:
+            print("  ✗ WARNING: USE_NEUFLOW=1 but model file missing!")
+            print("    → Download from: https://github.com/ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow/releases")
+    else:
+        print("  ⚠ Using PyTorch RAFT - SLOW! (4-5s per segment)")
+        print("    → Set USE_NEUFLOW=1 for 10-70x speedup")
+
+    if env_vars_status['ENABLE_FLASH_ATTENTION'] != '1':
+        print("  ⚠ Flash Attention disabled - missing 3-5x transformer speedup")
+
+    print("=" * 70)
+    print()
+
     # Start background threads
     start_redis_download_poller()
     start_background_encoder()

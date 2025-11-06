@@ -13,12 +13,14 @@ class NeuFlow_bi(nn.Module):
     """
     def __init__(self, model_path='models/neuflow_things.onnx', device='cuda'):
         super().__init__()
-        self.device = device
+        self.device = torch.device(device) if isinstance(device, str) else device
         self.model_path = model_path
+        self.ort = None  # Store onnxruntime module reference
 
         # Initialize ONNX Runtime session with CUDA provider
         try:
             import onnxruntime as ort
+            self.ort = ort  # Store reference for IOBinding
 
             # Configure CUDA execution provider (NO CPU FALLBACK!)
             providers = [
@@ -60,6 +62,7 @@ class NeuFlow_bi(nn.Module):
                     f"Install onnxruntime-gpu with CUDA support or check your GPU setup."
                 )
             print("[OK] CUDA acceleration VERIFIED for NeuFlow v2 - NO CPU FALLBACK!")
+            print("[PERF] Using IOBinding to eliminate GPU↔CPU transfers")
 
         except ImportError:
             raise ImportError("onnxruntime-gpu is required. Install: pip install onnxruntime-gpu")
@@ -99,11 +102,10 @@ class NeuFlow_bi(nn.Module):
 
     def _compute_flow(self, image1, image2, iters):
         """
-        Run NeuFlow v2 inference on batch of image pairs.
+        Run NeuFlow v2 inference on batch of image pairs using IOBinding for GPU efficiency.
 
         NeuFlow ONNX model has fixed input shape [1, 3, 432, 768].
-        This method handles batching and resizing to work with ProPainter's
-        variable batch sizes and cropped frame resolutions.
+        Uses ONNX Runtime IOBinding to keep all tensors on GPU and eliminate GPU↔CPU transfers.
 
         Args:
             image1: First images [B, C, H, W] in range [0, 1]
@@ -120,7 +122,7 @@ class NeuFlow_bi(nn.Module):
 
         flows = []
 
-        # Process each frame pair individually (ONNX batch size = 1)
+        # Process each frame pair using IOBinding (stays on GPU!)
         for i in range(B):
             # Extract single pair
             img1 = image1[i:i+1]  # [1, C, H, W]
@@ -132,32 +134,53 @@ class NeuFlow_bi(nn.Module):
                 size=(TARGET_H, TARGET_W),
                 mode='bilinear',
                 align_corners=False
-            )
+            ).contiguous()  # Ensure contiguous for IOBinding
+
             img2_resized = F.interpolate(
                 img2,
                 size=(TARGET_H, TARGET_W),
                 mode='bilinear',
                 align_corners=False
+            ).contiguous()
+
+            # Use IOBinding to keep tensors on GPU (eliminates 4 GPU↔CPU transfers per pair!)
+            io_binding = self.session.io_binding()
+
+            # Bind inputs on GPU
+            io_binding.bind_input(
+                name=self.input_names[0],
+                device_type='cuda',
+                device_id=0,
+                element_type=np.float32,
+                shape=tuple(img1_resized.shape),
+                buffer_ptr=img1_resized.data_ptr()
+            )
+            io_binding.bind_input(
+                name=self.input_names[1],
+                device_type='cuda',
+                device_id=0,
+                element_type=np.float32,
+                shape=tuple(img2_resized.shape),
+                buffer_ptr=img2_resized.data_ptr()
             )
 
-            # Convert to numpy for ONNX Runtime
-            img1_np = img1_resized.cpu().numpy().astype(np.float32)
-            img2_np = img2_resized.cpu().numpy().astype(np.float32)
+            # Allocate output on GPU
+            flow_output = torch.empty((1, 2, TARGET_H, TARGET_W), dtype=torch.float32, device=self.device).contiguous()
+            io_binding.bind_output(
+                name=self.output_names[0],
+                device_type='cuda',
+                device_id=0,
+                element_type=np.float32,
+                shape=(1, 2, TARGET_H, TARGET_W),
+                buffer_ptr=flow_output.data_ptr()
+            )
 
-            # Run ONNX inference
-            inputs = {
-                self.input_names[0]: img1_np,
-                self.input_names[1]: img2_np,
-            }
-            outputs = self.session.run(self.output_names, inputs)
-            flow_np = outputs[0]  # [1, 2, 432, 768]
-
-            # Convert back to PyTorch
-            flow_torch = torch.from_numpy(flow_np).to(self.device)
+            # Run inference (100% GPU, ZERO CPU transfers!)
+            self.session.run_with_iobinding(io_binding)
 
             # Resize flow back to original resolution
             flow_resized = F.interpolate(
-                flow_torch,
+                flow_output,
                 size=(H_orig, W_orig),
                 mode='bilinear',
                 align_corners=False

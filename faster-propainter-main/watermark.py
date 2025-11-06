@@ -32,7 +32,41 @@ if os.getenv("ENABLE_FLASH_ATTENTION", "0") == "1":
         print(f"[WARNING] Could not enable Flash Attention backends: {e}")
 
 # Conditional import: Use NeuFlow v2 or RAFT based on environment variable
-if os.getenv("USE_NEUFLOW", "0") == "1":
+# ============================================================================
+# STARTUP DIAGNOSTICS - Optical Flow Model Selection
+# ============================================================================
+_USE_NEUFLOW = os.getenv("USE_NEUFLOW", "0") == "1"
+_FORCE_TRT_RAFT = os.getenv("FORCE_TRT_RAFT", "0").lower() in ("1", "true", "yes", "on")
+_NEUFLOW_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "neuflow_things.onnx") if os.path.dirname(__file__) else "models/neuflow_things.onnx"
+_NEUFLOW_EXISTS = os.path.exists(_NEUFLOW_MODEL_PATH)
+
+print("=" * 70)
+print("OPTICAL FLOW MODEL CONFIGURATION")
+print("=" * 70)
+print(f"Environment Variables:")
+print(f"  USE_NEUFLOW       = {os.getenv('USE_NEUFLOW', '0')} (Active: {_USE_NEUFLOW})")
+print(f"  FORCE_TRT_RAFT    = {os.getenv('FORCE_TRT_RAFT', '0')} (Active: {_FORCE_TRT_RAFT})")
+print(f"  ENABLE_FLASH_ATTENTION = {os.getenv('ENABLE_FLASH_ATTENTION', '0')}")
+print(f"  RFCNET_TORCHTRT   = {os.getenv('RFCNET_TORCHTRT', '0')}")
+print()
+print(f"Model File Status:")
+print(f"  NeuFlow v2 ONNX   = {'✓ EXISTS' if _NEUFLOW_EXISTS else '✗ NOT FOUND'} ({_NEUFLOW_MODEL_PATH})")
+print()
+print(f"Expected Behavior:")
+if _USE_NEUFLOW:
+    if _NEUFLOW_EXISTS:
+        print(f"  → Will use NeuFlow v2 ONNX (10-70x faster than RAFT)")
+    else:
+        print(f"  → ERROR: USE_NEUFLOW=1 but model file missing!")
+        print(f"  → Download from: https://github.com/ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow/releases")
+elif _FORCE_TRT_RAFT:
+    print(f"  → Will attempt TensorRT RAFT FP16 (fallback to PyTorch if not available)")
+else:
+    print(f"  → Will use PyTorch RAFT (slowest, but most compatible)")
+print("=" * 70)
+print()
+
+if _USE_NEUFLOW:
     from model.modules.flow_comp_neuflow import NeuFlow_bi as RAFT_bi
     print("[OK] Using NeuFlow v2 for optical flow (10-70x faster than RAFT)")
 else:
@@ -402,6 +436,7 @@ def pipeline(
             self._out_name = None
             self._use_v3 = False
             self._stream = None
+            self._model_type = "unknown"  # Track which model is actually loaded
             # Enforce TensorRT-only mode when requested (no PyTorch fallback)
             def _parse_bool(val: str) -> bool:
                 return str(val).lower() in ("1", "true", "yes", "on")
@@ -418,6 +453,7 @@ def pipeline(
                         f"Download it from: https://github.com/ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow/releases"
                     )
                 self._raft = RAFT_bi(model_path, device)
+                self._model_type = "NeuFlow v2 ONNX"
                 print("[OK] NeuFlow v2 ONNX Runtime initialized (NO TensorRT/RAFT FALLBACK)")
                 print("[OK] Expected speedup: 10-70x faster than RAFT baseline")
                 self._trt_ready = False  # Disable TensorRT path in __call__
@@ -495,6 +531,7 @@ def pipeline(
                             except Exception:
                                 self._stream = None
                         self._trt_ready = True
+                        self._model_type = "TensorRT RAFT FP16"
                         print(f"[OK] Using TensorRT RAFT engine: {engine_path}")
                         # DEBUG: Print engine shape ranges
                         if self._use_v3:
@@ -521,7 +558,13 @@ def pipeline(
                         file_name=None,
                     )
                     self._raft = RAFT_bi(ckpt_path, device)
+                    self._model_type = "PyTorch RAFT"
                     print("[OK] RAFT PyTorch model initialized")
+
+        @property
+        def model_type(self) -> str:
+            """Return the actual optical flow model type being used"""
+            return self._model_type
 
         def _get_thread_context(self):
             """Get or create TensorRT execution context for current thread"""
@@ -674,14 +717,17 @@ def pipeline(
                 # Create RAFT model
                 raft_model = _RAFTAdapter(device, use_half)
                 _GLOBAL_MODELS_CACHE[cache_key]['raft'] = raft_model
-                print(f"[CACHE] RAFT model cached ({time.time() - cache_start:.2f}s)")
+                print(f"[CACHE] Optical flow model cached: {raft_model.model_type} ({time.time() - cache_start:.2f}s)")
             else:
                 print(f"[CACHE] Reusing cached models for {cache_key} (ZERO reload time!)")
 
             fix_raft = _GLOBAL_MODELS_CACHE[cache_key]['raft']
+            # Validate which optical flow model is actually loaded
+            print(f"[VALIDATION] Active optical flow model: {fix_raft.model_type}")
     else:
         # Legacy behavior: create new models each time
         fix_raft = _RAFTAdapter(device, use_half)
+        print(f"[VALIDATION] Active optical flow model: {fix_raft.model_type}")
 
     ##############################################
     # set up RFCNet with TensorRT acceleration
@@ -1030,13 +1076,16 @@ def pipeline(
         else:
             short_clip_len = 8
 
-        # Use FP16 for RAFT with autocast (4x faster, no type errors!)
+        # Use FP16 for optical flow with autocast (4x faster, no type errors!)
+        flow_model_name = fix_raft.model_type
         if use_half:
-            print("[RAFT] Using FP16 autocast for RAFT optical flow")
+            print(f"[OPTICAL FLOW] Using FP16 autocast for {flow_model_name}")
+        else:
+            print(f"[OPTICAL FLOW] Using FP32 for {flow_model_name}")
 
         if frames.size(1) > short_clip_len:
             gt_flows_f_list, gt_flows_b_list = [], []
-            for f in tqdm(range(0, video_length, short_clip_len), desc="RAFT"):
+            for f in tqdm(range(0, video_length, short_clip_len), desc=f"Optical Flow ({flow_model_name})"):
             # for f in range(0, video_length, short_clip_len):
                 end_f = min(video_length, f + short_clip_len)
 
