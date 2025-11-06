@@ -34,6 +34,9 @@ set RFCNET_TORCHTRT=0
 REM ⚡ FLASH ATTENTION: 3-5x speedup on transformer attention operations (FREE!)
 set ENABLE_FLASH_ATTENTION=1
 
+REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (must match --concurrency!)
+set SEGMENT_WORKERS=4
+
 echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
