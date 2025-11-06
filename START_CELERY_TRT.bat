@@ -24,9 +24,9 @@ if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
 REM Force TensorRT-only mode for YOLO (no .pt fallback)
 set YOLO_REQUIRE_TENSORRT=1
 
-REM Use PyTorch RAFT (TensorRT is 10-20x SLOWER due to dynamic shapes!)
+REM Use NeuFlow v2 ONNX (10-70x faster than RAFT!)
 set FORCE_TRT_RAFT=0
-set USE_NEUFLOW=0
+set USE_NEUFLOW=1
 
 REM Disable RFCNet torch.compile (requires Triton which isn't available on Windows)
 set RFCNET_TORCHTRT=0
@@ -41,11 +41,11 @@ echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
-echo   - Optical Flow: PyTorch RAFT (TensorRT broken - 10x slower!)
+echo   - Optical Flow: NeuFlow v2 ONNX (10-70x faster than RAFT!)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: ENABLED (3-5x transformer speedup!)
 echo   - Concurrency: 4 workers (TRUE parallel with thread-local contexts)
-echo   - neighbor_length: 10, raft_iter: 20 (default RAFT)
+echo   - neighbor_length: 10, SEGMENT_WORKERS: 4 (4-way parallel)
 echo ============================================================
 echo.
 
