@@ -44,8 +44,8 @@ echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
 echo   - Optical Flow: NeuFlow v2 ONNX (10-70x faster than RAFT!)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: ENABLED (3-5x transformer speedup!)
-echo   - Concurrency: 4 workers (TRUE parallel with thread-local contexts)
-echo   - neighbor_length: 10, SEGMENT_WORKERS: 4 (4-way parallel)
+echo   - Concurrency: 4 workers (TRUE 4-way parallel!)
+echo   - SEGMENT_WORKERS: 4 (all segments process simultaneously)
 echo ============================================================
 echo.
 
