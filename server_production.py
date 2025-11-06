@@ -695,7 +695,7 @@ celery.conf.update(
     enable_utc=True,
     task_track_started=True,
     task_time_limit=600,  # 10 minute timeout
-    worker_prefetch_multiplier=1,  # Process one task at a time
+    worker_prefetch_multiplier=4,  # Prefetch up to 4 tasks for TRUE parallel execution
     worker_max_tasks_per_child=100,  # Restart worker after 100 tasks (prevent memory leaks)
     result_expires=3600,  # Results expire after 1 hour
     broker_connection_retry_on_startup=True,
