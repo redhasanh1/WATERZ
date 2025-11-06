@@ -46,6 +46,8 @@ echo   - neighbor_length: 10, raft_iter: 10 (optimized for speed)
 echo ============================================================
 echo.
 
-REM Use module form; threads pool works best on Windows
-REM concurrency=4 with batch_size=192 for VRAM balance
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+REM Use process pool for TRUE PARALLEL execution (no shared memory = no locks!)
+REM Each process gets its own TensorRT context - full parallel, no corruption
+REM concurrency=4 = 4 separate processes on RTX 4090 (24GB VRAM is plenty)
+REM Windows-specific: disable heartbeat/gossip/mingle for prefork compatibility
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=prefork --concurrency=4 --without-heartbeat --without-gossip --without-mingle
