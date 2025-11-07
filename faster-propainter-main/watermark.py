@@ -37,7 +37,7 @@ if os.getenv("ENABLE_FLASH_ATTENTION", "0") == "1":
 # ============================================================================
 _USE_NEUFLOW = os.getenv("USE_NEUFLOW", "0") == "1"
 _FORCE_TRT_RAFT = os.getenv("FORCE_TRT_RAFT", "0").lower() in ("1", "true", "yes", "on")
-_NEUFLOW_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "neuflow_things.onnx") if os.path.dirname(__file__) else "models/neuflow_things.onnx"
+_NEUFLOW_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "neuflow_things_fp16.engine") if os.path.dirname(__file__) else "models/neuflow_things_fp16.engine"
 _NEUFLOW_EXISTS = os.path.exists(_NEUFLOW_MODEL_PATH)
 
 print("=" * 70)
@@ -50,19 +50,19 @@ print(f"  ENABLE_FLASH_ATTENTION = {os.getenv('ENABLE_FLASH_ATTENTION', '0')}")
 print(f"  RFCNET_TORCHTRT   = {os.getenv('RFCNET_TORCHTRT', '0')}")
 print()
 print(f"Model File Status:")
-print(f"  NeuFlow v2 ONNX   = {'✓ EXISTS' if _NEUFLOW_EXISTS else '✗ NOT FOUND'} ({_NEUFLOW_MODEL_PATH})")
+print(f"  NeuFlow v2 TensorRT FP16 = {'[OK] EXISTS' if _NEUFLOW_EXISTS else '[X] NOT FOUND'} ({_NEUFLOW_MODEL_PATH})")
 print()
 print(f"Expected Behavior:")
 if _USE_NEUFLOW:
     if _NEUFLOW_EXISTS:
-        print(f"  → Will use NeuFlow v2 ONNX (10-70x faster than RAFT)")
+        print(f"  -> Will use NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX Runtime, 10-70x faster than RAFT)")
     else:
-        print(f"  → ERROR: USE_NEUFLOW=1 but model file missing!")
-        print(f"  → Download from: https://github.com/ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow/releases")
+        print(f"  -> ERROR: USE_NEUFLOW=1 but model file missing!")
+        print(f"  -> Build TensorRT engine using: tools/BUILD_NEUFLOW_TRT.bat")
 elif _FORCE_TRT_RAFT:
-    print(f"  → Will attempt TensorRT RAFT FP16 (fallback to PyTorch if not available)")
+    print(f"  -> Will attempt TensorRT RAFT FP16 (fallback to PyTorch if not available)")
 else:
-    print(f"  → Will use PyTorch RAFT (slowest, but most compatible)")
+    print(f"  -> Will use PyTorch RAFT (slowest, but most compatible)")
 print("=" * 70)
 print()
 
@@ -444,18 +444,18 @@ def pipeline(
 
             # PRIORITY 1: Check USE_NEUFLOW FIRST (takes precedence over TensorRT)
             if os.getenv("USE_NEUFLOW", "0") == "1":
-                # NeuFlow v2 uses ONNX model - MANDATORY when USE_NEUFLOW=1
+                # NeuFlow v2 uses TensorRT FP16 engine - MANDATORY when USE_NEUFLOW=1
                 # Use absolute path based on this script's location
-                model_path = os.path.join(os.path.dirname(__file__), "models", "neuflow_things.onnx")
+                model_path = os.path.join(os.path.dirname(__file__), "models", "neuflow_things_fp16.engine")
                 if not os.path.exists(model_path):
                     raise FileNotFoundError(
                         f"USE_NEUFLOW=1 but NeuFlow model not found: {model_path}\n"
                         f"Download it from: https://github.com/ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow/releases"
                     )
                 self._raft = RAFT_bi(model_path, device)
-                self._model_type = "NeuFlow v2 ONNX"
-                print("[OK] NeuFlow v2 ONNX Runtime initialized (NO TensorRT/RAFT FALLBACK)")
-                print("[OK] Expected speedup: 10-70x faster than RAFT baseline")
+                self._model_type = "NeuFlow v2 TensorRT FP16"
+                print("[OK] Using NeuFlow v2 for optical flow (10-70x faster than RAFT)")
+                print("[PERF] TensorRT FP16 = 3-4X FASTER than ONNX Runtime!")
                 self._trt_ready = False  # Disable TensorRT path in __call__
             else:
                 # PRIORITY 2: Try TensorRT RAFT (only when USE_NEUFLOW=0 AND FORCE_TRT_RAFT=1)
@@ -833,7 +833,7 @@ def pipeline(
 
                     self._trt_ready = True
                     print(f"[OK] Using TensorRT RFCNet engine: {engine_path}")
-                    print(f"   Expected speedup: 8.45x (30.78ms → 3.64ms per inference)")
+                    print(f"   Expected speedup: 8.45x (30.78ms -> 3.64ms per inference)")
                 except Exception as e:
                     if self._force_trt:
                         raise

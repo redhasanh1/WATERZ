@@ -7,7 +7,9 @@ try:
     import triton
     import triton.language as tl
 
-    _TRITON_AVAILABLE = True
+    # DISABLED: Triton autotuner is NOT thread-safe and crashes with --concurrency > 1
+    # Multiple threads corrupt cache: TypeError('NoneType' object is not a mapping)
+    _TRITON_AVAILABLE = False  # Force PyTorch fallback for thread safety
 except ImportError:  # pragma: no cover - only executed when Triton is missing.
     triton = None
     tl = None

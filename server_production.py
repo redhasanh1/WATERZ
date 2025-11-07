@@ -905,7 +905,7 @@ def encode_segment_background(redis_client, data):
         encoded_size_mb = os.path.getsize(seg_video_path) / (1024 * 1024)
         fps_actual = frame_count / encode_duration if encode_duration > 0 else 0
 
-        print(f"[ENCODER] ✓ Encoded: {encoded_size_mb:.2f} MB in {encode_duration:.2f}s ({fps_actual:.1f} fps)")
+        print(f"[ENCODER] [OK] Encoded: {encoded_size_mb:.2f} MB in {encode_duration:.2f}s ({fps_actual:.1f} fps)")
 
         # Store encoded path in Redis
         redis_client.hset(segment_key, 'encoded_path', seg_video_path)

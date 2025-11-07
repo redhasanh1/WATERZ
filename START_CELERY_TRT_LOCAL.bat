@@ -1,10 +1,11 @@
 @echo off
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
-echo Starting Celery worker (TensorRT NeuFlow v2 FP16 - 3-4x faster than ONNX!)...
+echo Starting LOCAL TensorRT test (same config as Celery worker)...
 echo.
 echo ============================================================
-echo TENSORRT MODE: NeuFlow v2 TensorRT FP16 (4 execution contexts, pure GPU)
+echo LOCAL TENSORRT TEST: videostotrain\first.mp4
+echo SAME CONFIG AS CELERY WORKER (no upload/download overhead)
 echo ============================================================
 echo.
 
@@ -34,22 +35,22 @@ set RFCNET_TORCHTRT=0
 REM ⚡ FLASH ATTENTION: 3-5x speedup on transformer attention operations (FREE!)
 set ENABLE_FLASH_ATTENTION=1
 
-REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (must match --concurrency!)
+REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers
 set SEGMENT_WORKERS=4
 
 echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
-echo   - Optical Flow: NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX, 10-70x faster than RAFT!)
+echo   - Optical Flow: NeuFlow v2 ONNX (10-70x faster than RAFT!)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: ENABLED (3-5x transformer speedup!)
-echo   - Concurrency: 4 workers (TRUE 4-way parallel!)
-echo   - SEGMENT_WORKERS: 4 (all segments process simultaneously)
+echo   - Input: videostotrain\first.mp4
+echo   - Output: results\first_no_watermark.mp4
 echo ============================================================
 echo.
 
-REM Use thread pool with THREAD-LOCAL TensorRT contexts for TRUE PARALLEL execution!
-REM Each thread gets its own TensorRT context = NO LOCKS = FULL PARALLEL!
-REM concurrency=4 = 4 threads, each with separate context (minimal VRAM overhead)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+REM Run local test with same environment as Celery
+"%PYTHON_PATH%" test_local_propainter_trt.py
+
+pause
