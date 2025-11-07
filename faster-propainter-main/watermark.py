@@ -1112,6 +1112,7 @@ def pipeline(
     video_length = frames.size(1)
     # print(f'\nProcessing: {video_name} [{video_length} frames]...')
     print(f"Processing: {video_length} frames...")
+    propainter_total_start = time.time()
     with torch.no_grad():
         # ---- compute flow ----
         # Large batch sizes for better GPU utilization (17s processing time)
@@ -1131,6 +1132,7 @@ def pipeline(
         else:
             print(f"[OPTICAL FLOW] Using FP32 for {flow_model_name}")
 
+        optical_flow_start_time = time.time()
         if frames.size(1) > short_clip_len:
             gt_flows_f_list, gt_flows_b_list = [], []
             for f in tqdm(range(0, video_length, short_clip_len), desc=f"Optical Flow ({flow_model_name})"):
@@ -1174,6 +1176,9 @@ def pipeline(
             )
             gt_flows_bi = (gt_flows_bi[0].half(), gt_flows_bi[1].half())
             # REMOVED: fix_flow_complete.half() and model.half() - now cached in correct precision
+
+        optical_flow_time = time.time() - optical_flow_start_time
+        print(f"[OK] Optical flow completed in {optical_flow_time:.2f}s")
 
         # ---- complete flow ----
         print("[FLOW] Starting flow completion (RFCNet)...")
@@ -1222,6 +1227,7 @@ def pipeline(
 
         # ---- image propagation ----
         print("[IMG] Starting image propagation...")
+        img_prop_start_time = time.time()
         try:
             masked_frames = frames * (1 - masks_dilated)
             subvideo_length_img_prop = min(
@@ -1274,7 +1280,8 @@ def pipeline(
                 )
                 updated_masks = updated_local_masks.view(b, t, 1, h, w)
                 # Removed empty_cache() - was forcing GPU sync barrier
-            print("[OK] Image propagation completed")
+            img_prop_time = time.time() - img_prop_start_time
+            print(f"[OK] Image propagation completed in {img_prop_time:.2f}s")
         except Exception as e:
             print(f"[ERROR] Image propagation failed: {e}")
             import traceback
@@ -1353,6 +1360,23 @@ def pipeline(
 
     prop_time = time.time() - prop_start_time
     print(f"[OK] Feature propagation + transformer completed in {prop_time:.2f}s")
+
+    # Print timing breakdown
+    propainter_total_time = time.time() - propainter_total_start
+    print(f"\n{'='*70}")
+    print(f"PROPAINTER TIMING BREAKDOWN ({video_length} frames)")
+    print(f"{'='*70}")
+    print(f"  1. Optical Flow:          {optical_flow_time:6.2f}s ({optical_flow_time/propainter_total_time*100:5.1f}%)")
+    print(f"  2. Flow Completion:       {flow_time:6.2f}s ({flow_time/propainter_total_time*100:5.1f}%)")
+    print(f"  3. Image Propagation:     {img_prop_time:6.2f}s ({img_prop_time/propainter_total_time*100:5.1f}%)")
+    print(f"  4. Feature Prop+Trans:    {prop_time:6.2f}s ({prop_time/propainter_total_time*100:5.1f}%)")
+    accounted_time = optical_flow_time + flow_time + img_prop_time + prop_time
+    other_time = propainter_total_time - accounted_time
+    print(f"  5. Other (overhead):      {other_time:6.2f}s ({other_time/propainter_total_time*100:5.1f}%)")
+    print(f"  {'─'*70}")
+    print(f"  TOTAL:                    {propainter_total_time:6.2f}s (100.0%)")
+    print(f"  Per-frame avg:            {propainter_total_time/video_length*1000:6.1f}ms")
+    print(f"{'='*70}\n")
 
     # save each frame
     if save_frames:
