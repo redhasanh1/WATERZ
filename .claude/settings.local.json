@@ -27,7 +27,14 @@
       "Bash(set:*)",
       "Bash(\"D:\\watermarkz\\TensorRT-10.13.3.9\\bin\\trtexec.exe\":*)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz\\faster-propainter-main''); from model.modules.flow_comp_neuflow import NeuFlow_bi; print(''[SUCCESS] TensorRT NeuFlow imported successfully!'')\")",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" test_local_propainter_trt.py)"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" test_local_propainter_trt.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" setup.py build_ext --inplace)",
+      "Bash(where:*)",
+      "WebFetch(domain:developer.nvidia.com)",
+      "Bash(dir:*)",
+      "Bash(./BUILD_DCNV4.bat)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz\\DCNv4\\DCNv4_op''); from DCNv4 import DCNv4, FlashDeformAttn; print(''[SUCCESS] DCNv4 compiled and working with PyTorch 2.4.1!'')\")",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" test_dcnv4_integration.py)"
     ],
     "deny": [],
     "ask": []

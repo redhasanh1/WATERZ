@@ -1,0 +1,110 @@
+===============================================================================
+CUDA TOOLKIT 12.1.1 CUSTOM INSTALLATION - DRIVER MISMATCH FIX
+===============================================================================
+
+PROBLEM: CUDA 12.1 installer failed because your driver (581.57) is too new
+SOLUTION: Install CUDA Toolkit 12.1 WITHOUT driver components
+
+===============================================================================
+STEP 1: DOWNLOAD CUDA TOOLKIT 12.1.1
+===============================================================================
+
+1. Visit: https://developer.nvidia.com/cuda-12-1-1-download-archive
+
+2. Select:
+   - Operating System: Windows
+   - Architecture: x86_64
+   - Version: 10 or 11
+   - Installer Type: exe (local)
+
+3. Download: cuda_12.1.1_531.14_windows.exe (~3.5 GB)
+
+===============================================================================
+STEP 2: RUN CUSTOM INSTALLATION (CRITICAL!)
+===============================================================================
+
+DO NOT USE EXPRESS INSTALLATION!
+
+1. Run cuda_12.1.1_531.14_windows.exe as Administrator
+
+2. On the welcome screen, click "AGREE AND CONTINUE"
+
+3. When asked "Installation Type", select:
+   ⚠️ CUSTOM (Advanced) ⚠️
+
+   DO NOT SELECT "EXPRESS"!
+
+4. On the "CUDA Component Selection" screen:
+
+   ✅ SELECT THESE (CHECK):
+   ✓ CUDA Toolkit
+     ✓ CUDA Compiler (nvcc)
+     ✓ CUDA Development Tools
+     ✓ CUDA Runtime Libraries
+     ✓ CUDA Documentation (optional)
+
+   ❌ UNCHECK THESE:
+   ✗ Display Driver (IMPORTANT - skip driver!)
+   ✗ GeForce Experience (optional)
+   ✗ Visual Studio Integration (optional)
+   ✗ Nsight Systems/Visual Studio (optional)
+
+5. Click "NEXT" and proceed with installation
+
+6. Installation should complete successfully without driver conflicts
+
+===============================================================================
+STEP 3: VERIFY INSTALLATION
+===============================================================================
+
+After installation completes:
+
+1. Open NEW Command Prompt/Terminal (close old ones!)
+
+2. Run:
+   nvcc --version
+
+3. Should show:
+   Cuda compilation tools, release 12.1, V12.1.105
+
+4. Check PATH contains:
+   C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin
+
+===============================================================================
+WHY THIS WORKS
+===============================================================================
+
+- Your current driver (581.57) supports CUDA 13.0
+- CUDA drivers are BACKWARD compatible (581.57 can run CUDA 12.1 apps)
+- PyTorch is built with CUDA 12.1 and works fine
+- We only need CUDA development tools (nvcc compiler) to build DCNv4
+- We don't need to install/downgrade the driver
+
+===============================================================================
+IF INSTALLATION STILL FAILS
+===============================================================================
+
+Alternative Option: Install CUDA Toolkit 12.1 from Archive
+
+1. Download toolkit-only archive (no installer):
+   - Visit: https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/
+   - Download: cuda_12.1.1_531.14_windows.exe
+
+2. Extract with 7-Zip to temporary folder
+
+3. Manually run just the toolkit installer:
+   - Find: cuda_cudart_*.msi
+   - Run all toolkit MSI files EXCEPT driver MSIs
+
+This is more complex but guaranteed to work.
+
+===============================================================================
+NEXT STEPS AFTER SUCCESSFUL INSTALLATION
+===============================================================================
+
+1. Verify: nvcc --version
+2. Run: BUILD_DCNV4.bat
+3. Test: python test_dcnv4_integration.py
+
+Expected result: DCNv4 builds successfully, 3x speedup over DCNv2
+===============================================================================

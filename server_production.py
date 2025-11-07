@@ -1005,7 +1005,8 @@ def trigger_finalization(redis_client, video_id, total_segments):
                 final_output
             ]
             subprocess.run(merge_cmd, capture_output=True, check=True, text=True, timeout=300)
-            os.remove(temp_processed)
+            if os.path.exists(temp_processed):
+                os.remove(temp_processed)
             print(f"[FINALIZE] ✓ Audio merged")
         else:
             os.rename(temp_processed, final_output)
@@ -1015,7 +1016,8 @@ def trigger_finalization(redis_client, video_id, total_segments):
         print(f"[FINALIZE] Using processed video only")
 
     # Cleanup
-    os.remove(concat_list_path)
+    if os.path.exists(concat_list_path):
+        os.remove(concat_list_path)
     for seg_path in segment_paths:
         if os.path.exists(seg_path):
             os.remove(seg_path)
