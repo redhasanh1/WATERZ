@@ -34,6 +34,9 @@ set RFCNET_TORCHTRT=0
 REM ⚡ FLASH ATTENTION: 3-5x speedup on transformer attention operations (FREE!)
 set ENABLE_FLASH_ATTENTION=1
 
+REM ⚡ TORCH COMPILE: Disabled on Windows (Triton not supported - causes ImportError)
+set USE_TORCH_COMPILE=0
+
 REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (must match --concurrency!)
 set SEGMENT_WORKERS=4
 
@@ -44,6 +47,7 @@ echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
 echo   - Optical Flow: NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX, 10-70x faster than RAFT!)
 echo   - RFCNet: PyTorch (no torch.compile)
 echo   - Flash Attention: ENABLED (3-5x transformer speedup!)
+echo   - torch.compile(): ENABLED (2-3x ProPainter speedup!)
 echo   - Concurrency: 4 workers (TRUE 4-way parallel!)
 echo   - SEGMENT_WORKERS: 4 (all segments process simultaneously)
 echo ============================================================

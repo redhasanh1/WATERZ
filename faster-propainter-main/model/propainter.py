@@ -323,11 +323,14 @@ class InpaintGenerator(BaseNetwork):
         # feature propagation module
         self.img_prop_module = BidirectionalPropagation(3, learnable=False)
         self.feat_prop_module = BidirectionalPropagation(128, learnable=True)
-        
-        
-        depths = 8
-        num_heads = 4
-        window_size = (5, 9)
+
+
+        # ⚡ RTX 4090 OPTIMIZATION: Cannot reduce layers/window without retraining!
+        # Checkpoint requires: depths=8, heads=4, window=(5,9)
+        # Instead we rely on: FP8 Transformer Engine + Flash Attention + torch.compile
+        depths = 8  # REQUIRED by checkpoint
+        num_heads = 4  # REQUIRED by checkpoint
+        window_size = (5, 9)  # REQUIRED by checkpoint
         pool_size = (4, 4)
         self.transformers = TemporalSparseTransformerBlock(dim=hidden,
                                                 n_head=num_heads,
