@@ -109,8 +109,9 @@ class SimpleTokenMerger(nn.Module):
     def __init__(self, merge_ratio=0.5):
         super().__init__()
         self.merge_ratio = merge_ratio
-        # Pool size to achieve target merge ratio
-        self.pool_size = int(1.0 / (1.0 - merge_ratio) ** 0.5)
+        # Pool size to achieve target merge ratio (with proper rounding!)
+        self.pool_size = int(1.0 / (1.0 - merge_ratio) ** 0.5 + 0.5)
+        self._logged = False  # For debug logging
 
     def forward(self, x):
         """
@@ -133,6 +134,12 @@ class SimpleTokenMerger(nn.Module):
 
         # Reshape back to [B, T, H', W', C]
         merged = merged.reshape(B, T, C, H_new, W_new).permute(0, 1, 3, 4, 2)
+
+        # Debug logging (once per model instance)
+        if not self._logged:
+            reduction = (H * W) / (H_new * W_new)
+            print(f"[TOKEN MERGE] {H}×{W} → {H_new}×{W_new} (pool_size={self.pool_size}, {reduction:.2f}x token reduction)")
+            self._logged = True
 
         def unmerge_fn(merged_tokens):
             """Restore original size with bilinear upsampling"""
