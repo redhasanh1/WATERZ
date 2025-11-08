@@ -54,13 +54,13 @@ REM ⚡ FP8 TRANSFORMER: 1.3-1.5x speedup on Linear layers (RTX 4090 Ada Lovelac
 REM    Combined with DCNv4 + Flash Attention = 5-10x faster transformers!
 set ENABLE_FP8_TRANSFORMER=1
 
-REM ⚡ TOKEN MERGING: 1.5x speedup on transformer by reducing spatial tokens
-REM    Merges similar spatial tokens within each frame (reduces H*W by 25%%)
-REM    O(N^2) attention benefits hugely from reduced sequence length!
-REM    Quality: Conservative setting to minimize visual degradation
-REM    Expected: 13s per video to 9-10s (saves 3-4s with minimal quality loss)
-set ENABLE_TOKEN_MERGING=1
-set TOKEN_MERGE_RATIO=0.25
+REM ❌ TOKEN MERGING: DISABLED (quality takes priority over speed)
+REM    Even conservative 25%% reduction still degraded quality
+REM    Disabling restores full quality at cost of 3-4s speedup
+REM    Still benefits from Flash Attention + FP8 (2.5x faster baseline)
+REM    Expected: 13s per video to ~11s (still 2s faster, perfect quality)
+set ENABLE_TOKEN_MERGING=0
+REM set TOKEN_MERGE_RATIO=0.25
 
 REM ⚡ FP8 ENCODER/DECODER: 1.3-1.5x speedup on Conv2d layers (11-16% pipeline speedup!)
 REM    Uses FP8Conv2d for all encoder/decoder convolutions (Ada 4th Gen Tensor Cores)
