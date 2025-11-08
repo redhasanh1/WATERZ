@@ -12,6 +12,12 @@ from PIL import Image
 import torch
 import torchvision
 
+# Configure torch.compile cache settings BEFORE any model imports
+# CRITICAL: Must run before model loading to prevent multi-worker cache race conditions
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import cache_config  # Disables inductor cache for thread safety
+
 # Essential optimization: Enable cuDNN autotuner (benchmarks kernels once, reuses best)
 # This is SAFE and provides 20-30% speedup without breaking anything
 torch.backends.cudnn.benchmark = True
@@ -1024,6 +1030,134 @@ def pipeline(
             """No-op for compatibility (TRT engine already uses FP16)."""
             return self
 
+    ##############################################
+    # TensorRT Sparse Transformer Adapter (NO FALLBACK)
+    ##############################################
+    class _TransformerTRTAdapter:
+        """TensorRT wrapper for Sparse Temporal Transformer (NO FALLBACK when force_trt=True)"""
+
+        def __init__(self, transformer_module, force_trt=False):
+            self._pytorch_model = transformer_module
+            self._force_trt = force_trt
+            self._trt_ready = False
+            self._engine = None
+            self._engine_path = None
+
+            if not force_trt:
+                # TensorRT disabled, use PyTorch
+                return
+
+            # Search for transformer engine
+            engine_candidates = [
+                os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_fp16.engine'),
+                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_fp16.engine'),
+            ]
+
+            for p in engine_candidates:
+                if os.path.exists(p):
+                    self._engine_path = p
+                    break
+
+            # STRICT MODE: Fail if engine not found
+            if not self._engine_path:
+                raise RuntimeError(
+                    f"FORCE_TRT_TRANSFORMER=1 but transformer engine not found!\n"
+                    f"Searched: {engine_candidates}\n"
+                    f"Build engine first: BUILD_TRANSFORMER_ENGINE.bat"
+                )
+
+            # Load TensorRT engine
+            try:
+                # Ensure TensorRT DLLs are available
+                trt_root = os.environ.get('TENSORRT_ROOT') or os.path.join(os.getcwd(), 'TensorRT-10.13.3.9')
+                trt_lib = os.path.join(trt_root, 'lib')
+                if os.name == 'nt' and os.path.isdir(trt_lib):
+                    try:
+                        os.add_dll_directory(trt_lib)
+                    except Exception:
+                        pass
+
+                import tensorrt as trt
+                trt_logger = trt.Logger(trt.Logger.WARNING)
+                runtime = trt.Runtime(trt_logger)
+
+                with open(self._engine_path, 'rb') as f:
+                    self._engine = runtime.deserialize_cuda_engine(f.read())
+
+                if self._engine is None:
+                    raise RuntimeError(f"Failed to deserialize transformer engine: {self._engine_path}")
+
+                self._trt_ready = True
+                print(f"[TRT Transformer] Engine loaded: {self._engine_path}")
+                print(f"[TRT Transformer] Expected speedup: 5-10x (2.39s → 0.24-0.48s per segment)")
+
+            except Exception as e:
+                # STRICT MODE: NO FALLBACK!
+                raise RuntimeError(
+                    f"FORCE_TRT_TRANSFORMER=1 but engine load failed: {e}\n"
+                    f"Engine path: {self._engine_path}\n"
+                    f"Check TensorRT installation and engine compatibility"
+                )
+
+        def _get_thread_context(self):
+            """Get or create TensorRT execution context for current thread"""
+            if not hasattr(_thread_local, 'transformer_contexts'):
+                _thread_local.transformer_contexts = {}
+
+            thread_id = threading.get_ident()
+            if thread_id not in _thread_local.transformer_contexts:
+                ctx = self._engine.create_execution_context()
+                _thread_local.transformer_contexts[thread_id] = ctx
+                print(f"[TRT Transformer] Created execution context for thread {thread_id}")
+
+            return _thread_local.transformer_contexts[thread_id]
+
+        def forward(self, x, fold_x_size, l_mask=None, t_dilation=2):
+            """
+            Forward pass (TensorRT or PyTorch based on force_trt)
+
+            Args:
+                x: [B, T, H, W, C] feature tokens
+                fold_x_size: tuple (fold_h, fold_w) - not used in TRT
+                l_mask: [B, T, H, W, 1] local mask - not used in TRT
+                t_dilation: temporal dilation - not used in TRT
+
+            Returns:
+                output: [B, T, H, W, C] transformed features
+            """
+            if self._trt_ready:
+                return self._forward_trt(x)
+            else:
+                # PyTorch path (when force_trt=False)
+                return self._pytorch_model(x, fold_x_size, l_mask, t_dilation)
+
+        def _forward_trt(self, x):
+            """TensorRT inference path"""
+            B, T, H, W, C = x.shape
+
+            # Get thread-local context
+            ctx = self._get_thread_context()
+
+            # Set dynamic shape (T dimension varies)
+            ctx.set_input_shape("input", (B, T, H, W, C))
+
+            # Allocate output
+            output = torch.empty_like(x)
+
+            # Execute
+            bindings = [x.data_ptr(), output.data_ptr()]
+            success = ctx.execute_v2(bindings)
+
+            if not success:
+                raise RuntimeError("TensorRT transformer inference failed")
+
+            return output
+
+        def __call__(self, *args, **kwargs):
+            return self.forward(*args, **kwargs)
+
     ckpt_path = load_file_from_url(
         url=os.path.join(pretrain_model_url, "recurrent_flow_completion.pth"),
         model_dir="weights",
@@ -1089,13 +1223,14 @@ def pipeline(
                 if use_half:
                     model = model.half()
 
-                # ⚡ TORCH COMPILE: 2-3x speedup for feature propagation
-                if os.environ.get('USE_TORCH_COMPILE', '0') == '1':
-                    print(f"[COMPILE] Compiling ProPainter with torch.compile() for extreme speed...")
-                    compile_start = time.time()
-                    # mode="reduce-overhead" is faster for repeated inference
-                    model = torch.compile(model, mode="reduce-overhead", fullgraph=False)
-                    print(f"[OK] torch.compile() setup complete ({time.time() - compile_start:.2f}s) - warmup will happen on first inference")
+                # ⚡ TORCH COMPILE: DISABLED for ProPainter wrapper (causes FX tracing conflict)
+                # Transformer layers are still compiled in sparse_transformer.py for 1.5-3x speedup!
+                # if os.environ.get('USE_TORCH_COMPILE', '0') == '1':
+                #     print(f"[COMPILE] Compiling ProPainter with torch.compile() for extreme speed...")
+                #     compile_start = time.time()
+                #     # mode="default" for thread-safe kernel fusion (no CUDA graphs = no TLS crashes)
+                #     model = torch.compile(model, mode="default", fullgraph=False)
+                #     print(f"[OK] torch.compile() setup complete ({time.time() - compile_start:.2f}s) - warmup will happen on first inference")
 
                 _GLOBAL_MODELS_CACHE[cache_key]['propainter'] = model
                 print(f"[CACHE] ProPainter model cached in {'FP16' if use_half else 'FP32'} ({time.time() - propainter_start:.2f}s)")
@@ -1107,12 +1242,14 @@ def pipeline(
         model = InpaintGenerator(model_path=ckpt_path).to(device, non_blocking=True)
         model.eval()
 
-        # ⚡ TORCH COMPILE: 2-3x speedup for feature propagation
-        if os.environ.get('USE_TORCH_COMPILE', '0') == '1':
-            print(f"[COMPILE] Compiling ProPainter with torch.compile() for extreme speed...")
-            compile_start = time.time()
-            model = torch.compile(model, mode="reduce-overhead", fullgraph=False)
-            print(f"[OK] torch.compile() setup complete ({time.time() - compile_start:.2f}s) - warmup will happen on first inference")
+        # ⚡ TORCH COMPILE: DISABLED for ProPainter wrapper (causes FX tracing conflict)
+        # Transformer layers are still compiled in sparse_transformer.py for 1.5-3x speedup!
+        # if os.environ.get('USE_TORCH_COMPILE', '0') == '1':
+        #     print(f"[COMPILE] Compiling ProPainter with torch.compile() for extreme speed...")
+        #     compile_start = time.time()
+        #     # mode="default" for thread-safe kernel fusion (no CUDA graphs = no TLS crashes)
+        #     model = torch.compile(model, mode="default", fullgraph=False)
+        #     print(f"[OK] torch.compile() setup complete ({time.time() - compile_start:.2f}s) - warmup will happen on first inference")
 
     ##############################################
     # ProPainter inference

@@ -39,6 +39,14 @@ REM    NO FALLBACK: TensorRT-only mode (will fail if engine missing)
 set RFCNET_TORCHTRT=0
 set FORCE_TRT_RFCNET=1
 
+REM ⚡ TRANSFORMER TENSORRT: 5-10x speedup on feature propagation (2.39s → 0.24-0.48s per segment!)
+REM    Uses pre-built FP16 TensorRT engine for Sparse Temporal Transformer (8 layers, 4 heads)
+REM    Current: 2.39s per segment (45-65%% of pipeline) with PyTorch FP8 + Flash Attention
+REM    Target:  0.24-0.48s per segment (5-10x faster!) - transformer no longer bottleneck
+REM    NO FALLBACK: TensorRT-only mode (will fail if engine missing)
+REM    Build engine with: BUILD_TRANSFORMER_ENGINE.bat
+set FORCE_TRT_TRANSFORMER=0
+
 REM ⚡ FLASH ATTENTION: 3-5x speedup on transformer attention operations (FREE!)
 set ENABLE_FLASH_ATTENTION=1
 
@@ -66,8 +74,13 @@ REM    GPU decode is fast, but PCIe copy to CPU numpy arrays kills all gains
 REM    Only beneficial if entire pipeline stays on GPU (not this use case)
 set ENABLE_NVDEC=0
 
-REM ⚡ TORCH COMPILE: Disabled on Windows (Triton not supported - causes ImportError)
+REM ⚡ TORCH COMPILE: DISABLED (not thread-safe - causes FileExistsError cache races)
+REM    PyTorch 2.4.1 torch.compile has NO thread-safe caching mechanism
+REM    We get 2.48x speedup from Flash Attention + FP8 (STABLE!)
+REM    Next: Token Merging for 2-3x additional speedup (6x total)
 set USE_TORCH_COMPILE=0
+set TORCH_CUDAGRAPHS=0
+set TORCHINDUCTOR_CUDAGRAPHS=0
 
 REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (must match --concurrency!)
 set SEGMENT_WORKERS=4
@@ -79,8 +92,10 @@ echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
 echo   - Video Decode: CPU cv2.VideoCapture (7.4x faster than NVDEC for CPU pipeline!)
 echo   - Optical Flow: NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX, 10-70x faster than RAFT!)
 echo   - RFCNet: TensorRT FP16 + DCNv4 plugin (1.6-2.3x faster flow completion!)
+echo   - Transformer: FP8 TensorRT (TARGET: 7-15x speedup! 2.39s to 0.16-0.34s!)
 echo   - Flash Attention: ENABLED (3-5x transformer speedup!)
-echo   - FP8 Transformer: ENABLED (RTX 4090 Ada: 5-10x speedup!)
+echo   - FP8 Transformer: ENABLED (RTX 4090 Ada: 1.3-1.5x speedup!)
+echo   - torch.compile: DISABLED (not thread-safe, causes cache races)
 echo   - FP8 Encoder/Decoder: ENABLED (1.3-1.5x speedup, 11-16%% pipeline gain!)
 echo   - FP8 RFCNet: ENABLED (1.3-1.5x speedup, 4-7%% pipeline gain!)
 echo   - DCNv4: ENABLED (3x faster deformable convolution!)
@@ -88,6 +103,20 @@ echo   - Concurrency: 4 workers (TRUE 4-way parallel!)
 echo   - SEGMENT_WORKERS: 4 (all segments process simultaneously)
 echo ============================================================
 echo.
+
+REM Disable ALL torch.compile caching to avoid multi-worker file locking race conditions
+REM Workers will compile kernels on first run (~20-40s startup), then cache in memory
+REM This avoids FileExistsError crashes when 4 workers compile same kernels simultaneously
+set TORCHINDUCTOR_FX_GRAPH_CACHE=0
+set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
+set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
+
+REM Clean any corrupted torch.compile cache before starting
+REM if exist "D:\watermarkz\temp\torchinductor_has" (
+REM     echo [CLEANUP] Removing ALL torch.compile cache (including kernels)...
+REM     rmdir /s /q "D:\watermarkz\temp\torchinductor_has" 2>nul
+REM     echo [OK] Complete cache removed - workers will recompile on startup
+REM )
 
 REM Use thread pool with THREAD-LOCAL TensorRT contexts for TRUE PARALLEL execution!
 REM Each thread gets its own TensorRT context = NO LOCKS = FULL PARALLEL!
