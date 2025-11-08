@@ -441,7 +441,38 @@ class TemporalSparseTransformerBlock(nn.Module):
         T = x.size(1)
         T_ind = [torch.arange(i, T, t_dilation) for i in range(t_dilation)] * (self.depths // t_dilation)
 
+        # Token Merging: Reduce spatial tokens before processing
+        unmerge_fn = None
+        original_fold_x_size = fold_x_size  # Save original for proportional scaling
+        if self.enable_token_merging and self.token_merger is not None:
+            original_H, original_W = x.shape[2], x.shape[3]
+            x, unmerge_fn = self.token_merger(x)
+            H_new, W_new = x.shape[2], x.shape[3]
+
+            # Scale fold_x_size proportionally to match reduced spatial dimensions
+            # This ensures MLP's n_vecs calculation aligns with actual token count
+            scale_H = H_new / original_H
+            scale_W = W_new / original_W
+            fold_x_size = (
+                int(original_fold_x_size[0] * scale_H),
+                int(original_fold_x_size[1] * scale_W)
+            )
+
+            # Resize mask if provided
+            if l_mask is not None:
+                # Use actual l_mask dimensions (B, T, H, W, C may ALL differ from x!)
+                B_mask, T_mask, l_mask_H, l_mask_W = l_mask.shape[0], l_mask.shape[1], l_mask.shape[2], l_mask.shape[3]
+                l_mask = torch.nn.functional.interpolate(
+                    l_mask.permute(0, 1, 4, 2, 3).reshape(-1, 1, l_mask_H, l_mask_W),
+                    size=(H_new, W_new),
+                    mode='nearest'
+                ).reshape(B_mask, T_mask, 1, H_new, W_new).permute(0, 1, 3, 4, 2)
+
         for i in range(0, self.depths):
             x = self.transformer[i](x, fold_x_size, l_mask, T_ind[i])
+
+        # Unmerge: Restore original spatial dimensions
+        if unmerge_fn is not None:
+            x = unmerge_fn(x)
 
         return x
