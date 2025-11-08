@@ -782,10 +782,11 @@ def pipeline(
                 return str(val).lower() in ("1", "true", "yes", "on")
             self._force_trt = _parse_bool(os.getenv("FORCE_TRT_RFCNET", "0"))
 
-            # Candidate engine paths
+            # Candidate engine paths (DCNv4 version)
             engine_candidates = [
-                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'rfcnet', 'rfcnet_fp16.engine'),
-                os.path.join(os.path.dirname(__file__), 'engines', 'rfcnet', 'rfcnet_fp16.engine'),
+                os.path.join(os.getcwd(), 'engines', 'rfcnet', 'rfcnet_dcnv4_fp16.engine'),
+                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'rfcnet', 'rfcnet_dcnv4_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), 'engines', 'rfcnet', 'rfcnet_dcnv4_fp16.engine'),
             ]
             engine_path = None
             for p in engine_candidates:
@@ -807,24 +808,31 @@ def pipeline(
                         except Exception:
                             pass
 
-                    # Load DCNv2 plugin (required for RFCNet TensorRT engine)
+                    # Load DCNv4 plugin (required for RFCNet TensorRT engine)
                     import ctypes
-                    plugin_path = os.path.join(trt_lib, 'mmdeploy_tensorrt_ops.dll')
+                    plugin_path = os.path.join(os.getcwd(), 'dcnv4_tensorrt_plugin', 'build', 'Release', 'dcnv4_plugin.dll')
+                    # Also add plugin directory to DLL search path for dependencies
+                    plugin_dir = os.path.dirname(plugin_path)
+                    if os.path.isdir(plugin_dir):
+                        try:
+                            os.add_dll_directory(plugin_dir)
+                        except Exception:
+                            pass
                     if os.path.exists(plugin_path):
                         try:
                             ctypes.CDLL(plugin_path)
                         except Exception as e:
                             if self._force_trt:
-                                raise RuntimeError(f'Failed to load DCNv2 plugin from {plugin_path}: {e}')
+                                raise RuntimeError(f'Failed to load DCNv4 plugin from {plugin_path}: {e}')
                             else:
-                                print(f"[WARNING] DCNv2 plugin load failed: {e}")
+                                print(f"[WARNING] DCNv4 plugin load failed: {e}")
                                 raise
                     else:
                         if self._force_trt:
-                            raise RuntimeError(f'DCNv2 plugin not found at {plugin_path}')
+                            raise RuntimeError(f'DCNv4 plugin not found at {plugin_path}')
                         else:
-                            print(f"[WARNING] DCNv2 plugin not found at {plugin_path}")
-                            raise FileNotFoundError(f'DCNv2 plugin not found at {plugin_path}')
+                            print(f"[WARNING] DCNv4 plugin not found at {plugin_path}")
+                            raise FileNotFoundError(f'DCNv4 plugin not found at {plugin_path}')
 
                     import tensorrt as trt
                     logger = trt.Logger(trt.Logger.WARNING)

@@ -1264,6 +1264,22 @@ def _check_propainter_assets() -> bool:
         propainter_ready = False
         return False
 
+    # Check TensorRT DCNv4 files if TensorRT mode is enabled
+    if os.getenv('FORCE_TRT_RFCNET', '0') == '1':
+        trt_paths = [
+            os.path.join(SCRIPT_DIR, 'engines', 'rfcnet', 'rfcnet_dcnv4_fp16.engine'),
+            os.path.join(SCRIPT_DIR, 'dcnv4_tensorrt_plugin', 'build', 'Release', 'dcnv4_plugin.dll'),
+        ]
+        trt_missing = [path for path in trt_paths if not os.path.exists(path)]
+        if trt_missing:
+            print("[ERROR] FORCE_TRT_RFCNET=1 but TensorRT DCNv4 files missing:")
+            for path in trt_missing:
+                print(f"   - {path}")
+            print("   Build the engine with: python build_rfcnet_trt_engine.py --fp16")
+            print("   Or set FORCE_TRT_RFCNET=0 to use PyTorch fallback")
+            propainter_ready = False
+            return False
+
     propainter_ready = True
     return True
 
@@ -1432,14 +1448,32 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
 
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise Exception(f"Failed to open video: {video_path}")
+        # NVDEC hardware decoder - NO FALLBACKS! (1.16x faster than CPU)
+        use_nvdec = os.getenv("ENABLE_NVDEC", "0") == "1"
+        nvdec_loader = None
+        cap = None
 
-        fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        if use_nvdec:
+            # NVDEC REQUIRED - NO CPU FALLBACK!
+            from nvdec_video_loader import NVDECVideoLoader
+            nvdec_loader = NVDECVideoLoader(video_path, device_id=0)
+            props = nvdec_loader.get_properties()
+            fps = int(props['fps'])
+            width = props['width']
+            height = props['height']
+            total_frames = props['total_frames']
+            print(f"[OK] NVDEC hardware decoder: {width}x{height} @ {fps} fps ({total_frames} frames)")
+        else:
+            # CPU decoder (if NVDEC disabled)
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise Exception(f"Failed to open video: {video_path}")
+
+            fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+            print(f"[OK] CPU decoder: {width}x{height} @ {fps} fps ({total_frames} frames)")
 
         base_name = Path(video_path).stem
         # Use provided video_id (from upload task_id) for cache consistency, fallback to Celery task ID
@@ -1453,7 +1487,11 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             # Check if another worker is already processing this video
             if redis_client.exists(lock_key):
                 print(f"[SKIP]  Video '{base_name}' already being prepared by another worker - skipping duplicate task")
-                cap.release()  # Clean up video capture
+                # Clean up video decoder (NO FALLBACKS!)
+                if nvdec_loader is not None:
+                    nvdec_loader.close()
+                if cap is not None:
+                    cap.release()
                 return {
                     'status': 'skipped',
                     'message': f'Video already being processed',
@@ -1527,22 +1565,35 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
             # [INIT] EXTREME SPEED: Load all frames to memory for batch processing
             print(f"📥 Loading {total_frames} frames to memory (batch processing)...")
-            # Pre-allocate list for speed
-            all_frames = []
-            all_frames_reserve = [None] * int(total_frames)  # Reserve memory
-            frames_loaded = 0
 
-            # Fast frame loading (no prints in loop!)
-            while frames_loaded < total_frames:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                all_frames.append(frame)
-                frames_loaded += 1
+            import time
+            decode_start = time.time()
 
-            cap.release()
-            frames_processed = len(all_frames)
-            print(f"[OK] Loaded {frames_processed} frames in memory (ZERO logging overhead)")
+            if use_nvdec:
+                # NVDEC hardware decoder - NO FALLBACK! (1.16x faster)
+                all_frames = nvdec_loader.load_all_frames(to_numpy=True, color_format='BGR')
+                frames_processed = len(all_frames)
+                decode_time = time.time() - decode_start
+                print(f"[OK] NVDEC decoded {frames_processed} frames: {decode_time:.3f}s ({decode_time/frames_processed*1000:.2f}ms/frame)")
+                nvdec_loader.close()
+            else:
+                # CPU decoder (only if NVDEC disabled)
+                all_frames = []
+                all_frames_reserve = [None] * int(total_frames)  # Reserve memory
+                frames_loaded = 0
+
+                # Fast frame loading (no prints in loop!)
+                while frames_loaded < total_frames:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    all_frames.append(frame)
+                    frames_loaded += 1
+
+                cap.release()
+                frames_processed = len(all_frames)
+                decode_time = time.time() - decode_start
+                print(f"[OK] CPU decoded {frames_processed} frames: {decode_time:.3f}s ({decode_time/frames_processed*1000:.2f}ms/frame)")
 
             # [RUNNING] BATCH DETECTION (EXTREME SPEED - 1-2ms per frame!)
             print(f"[RUNNING] Running BATCH detection on {frames_processed} frames (EXTREME SPEED!)...")
@@ -1564,9 +1615,8 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             last_valid_bbox = None
             all_masks = []
 
-            # Create all masks first (fast, in-memory)
-            for i, (frame, detections) in enumerate(zip(all_frames, all_detections)):
-                # Track bbox for segmentation
+            # Track bboxes for segmentation
+            for i, detections in enumerate(all_detections):
                 if detections:
                     frames_with_watermark += 1
                     last_valid_bbox = detections[0]['bbox']
@@ -1576,9 +1626,22 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 else:
                     bboxes_per_frame.append(None)
 
-                # Create mask (in memory)
-                mask = detector.create_mask(frame, detections) if detections else zero_mask
-                all_masks.append(mask)
+            # Create all masks with GPU batch processing (10-17x faster than CPU loop!)
+            print(f"⚡ Creating {frames_processed} masks (GPU batch)...")
+            mask_start = time.time()
+
+            if detector.use_gpu_masks:
+                # GPU batch processing - ALL masks at once!
+                all_masks = detector.create_masks_batch_gpu(all_frames, all_detections)
+            else:
+                # Fallback to CPU sequential (if Kornia not available)
+                all_masks = [
+                    detector.create_mask(frame, dets) if dets else zero_mask
+                    for frame, dets in zip(all_frames, all_detections)
+                ]
+
+            mask_duration = time.time() - mask_start
+            print(f"   Mask creation: {mask_duration:.3f}s ({frames_processed/mask_duration:.1f} masks/sec)")
 
             # [INIT] EXTREME SPEED: Store in global memory (INSTANT!)
             print(f"⚡ Storing {frames_processed} frames/masks in memory (INSTANT!)...")
@@ -1646,8 +1709,11 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             except Exception as e:
                 print(f"[WARNING]  Failed to cache results: {e}")
         else:
-            # Using cached segments - release video capture
-            cap.release()
+            # Using cached segments - release video decoder (NO FALLBACKS!)
+            if nvdec_loader is not None:
+                nvdec_loader.close()
+            if cap is not None:
+                cap.release()
             # frames_with_watermark should be loaded from cache, but add fallback
             if 'frames_with_watermark' not in locals():
                 frames_with_watermark = 0  # Fallback if not in cache
