@@ -3,6 +3,7 @@ Token Merging for Sparse Temporal Transformer
 Reduces spatial tokens (H*W) while preserving temporal structure (T)
 Based on ToMe (Token Merging) by Meta, adapted for [B, T, H, W, C] format
 """
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -109,8 +110,9 @@ class SimpleTokenMerger(nn.Module):
     def __init__(self, merge_ratio=0.5):
         super().__init__()
         self.merge_ratio = merge_ratio
-        # Pool size to achieve target merge ratio (with proper rounding!)
-        self.pool_size = int(1.0 / (1.0 - merge_ratio) ** 0.5 + 0.5)
+        # Pool size to achieve target merge ratio (using ceil for proper rounding!)
+        # For merge_ratio=0.5: ceil(1.414) = 2 (not int(1.914)=1!)
+        self.pool_size = math.ceil(1.0 / (1.0 - merge_ratio) ** 0.5)
         self._logged = False  # For debug logging
 
     def forward(self, x):
