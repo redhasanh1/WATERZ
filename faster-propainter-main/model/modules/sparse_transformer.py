@@ -437,6 +437,8 @@ class TemporalSparseTransformerBlock(nn.Module):
         Returns:
             out_tokens: shape [B T H W C]
         """
+        import time
+
         assert self.depths % t_dilation == 0, 'wrong t_dilation input.'
         T = x.size(1)
         T_ind = [torch.arange(i, T, t_dilation) for i in range(t_dilation)] * (self.depths // t_dilation)
@@ -444,7 +446,12 @@ class TemporalSparseTransformerBlock(nn.Module):
         # Token Merging: Reduce spatial tokens before processing
         unmerge_fn = None
         original_fold_x_size = fold_x_size  # Save original for proportional scaling
+
+        merge_time_ms = 0.0
         if self.enable_token_merging and self.token_merger is not None:
+            torch.cuda.synchronize()
+            t_merge_start = time.perf_counter()
+
             original_H, original_W = x.shape[2], x.shape[3]
             x, unmerge_fn = self.token_merger(x)
             H_new, W_new = x.shape[2], x.shape[3]
@@ -468,11 +475,47 @@ class TemporalSparseTransformerBlock(nn.Module):
                     mode='nearest'
                 ).reshape(B_mask, T_mask, 1, H_new, W_new).permute(0, 1, 3, 4, 2)
 
+            torch.cuda.synchronize()
+            t_merge_end = time.perf_counter()
+            merge_time_ms = (t_merge_end - t_merge_start) * 1000
+
+        # Transformer layers
+        torch.cuda.synchronize()
+        t_transformer_start = time.perf_counter()
+        layer_times = []
+
         for i in range(0, self.depths):
+            torch.cuda.synchronize()
+            t_layer_start = time.perf_counter()
             x = self.transformer[i](x, fold_x_size, l_mask, T_ind[i])
+            torch.cuda.synchronize()
+            t_layer_end = time.perf_counter()
+            layer_times.append((t_layer_end - t_layer_start) * 1000)
+
+        torch.cuda.synchronize()
+        t_transformer_end = time.perf_counter()
+        transformer_time_ms = (t_transformer_end - t_transformer_start) * 1000
 
         # Unmerge: Restore original spatial dimensions
+        unmerge_time_ms = 0.0
         if unmerge_fn is not None:
+            torch.cuda.synchronize()
+            t_unmerge_start = time.perf_counter()
             x = unmerge_fn(x)
+            torch.cuda.synchronize()
+            t_unmerge_end = time.perf_counter()
+            unmerge_time_ms = (t_unmerge_end - t_unmerge_start) * 1000
+
+        # Log timing (once per model instance)
+        if self.enable_token_merging and not hasattr(self, '_timing_logged'):
+            print(f"\n[TOKEN MERGE PROFILE]")
+            print(f"  Merge time:        {merge_time_ms:6.2f}ms")
+            print(f"  Transformer total: {transformer_time_ms:6.2f}ms")
+            print(f"    Avg per layer:   {transformer_time_ms/self.depths:6.2f}ms")
+            print(f"    Layer times:     {[f'{t:.2f}' for t in layer_times]}")
+            print(f"  Unmerge time:      {unmerge_time_ms:6.2f}ms")
+            print(f"  Total overhead:    {merge_time_ms + unmerge_time_ms:6.2f}ms")
+            print(f"  Net time:          {merge_time_ms + transformer_time_ms + unmerge_time_ms:6.2f}ms\n")
+            self._timing_logged = True
 
         return x
