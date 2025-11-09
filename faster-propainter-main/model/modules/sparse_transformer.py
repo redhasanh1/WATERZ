@@ -70,46 +70,41 @@ class SoftComp(nn.Module):
 
 
 class FusionFeedForward(nn.Module):
+    """
+    Standard transformer MLP - TensorRT compatible.
+    Replaced fold/unfold operations to avoid Col2Im ONNX operator.
+
+    Original FusionFeedForward used spatial fold/unfold for token mixing,
+    but this exports to Col2Im which TensorRT doesn't support.
+
+    This version uses standard Linear -> GELU -> Linear pattern.
+    """
     def __init__(self, dim, hidden_dim=1960, t2t_params=None):
         super(FusionFeedForward, self).__init__()
         # We set hidden_dim as a default to 1960
+        # t2t_params kept for backward compatibility but unused
 
         # FP8 control (RTX 4090 Ada Lovelace optimization)
         use_fp8 = FP8_AVAILABLE and os.getenv("ENABLE_FP8_TRANSFORMER", "0") == "1"
         LinearLayer = FP8Linear if use_fp8 else nn.Linear
 
-        self.fc1 = nn.Sequential(LinearLayer(dim, hidden_dim))
-        self.fc2 = nn.Sequential(nn.GELU(), LinearLayer(hidden_dim, dim))
-        assert t2t_params is not None
-        self.t2t_params = t2t_params
-        self.kernel_shape = reduce((lambda x, y: x * y), t2t_params['kernel_size']) # 49
+        # Standard transformer MLP: Linear -> GELU -> Linear
+        self.fc1 = LinearLayer(dim, hidden_dim)
+        self.act = nn.GELU()
+        self.fc2 = LinearLayer(hidden_dim, dim)
 
-    def forward(self, x, output_size):
-        n_vecs = 1
-        for i, d in enumerate(self.t2t_params['kernel_size']):
-            n_vecs *= int((output_size[i] + 2 * self.t2t_params['padding'][i] -
-                           (d - 1) - 1) / self.t2t_params['stride'][i] + 1)
+    def forward(self, x):
+        """
+        Standard feedforward pass (TensorRT-compatible)
 
+        Args:
+            x: [B, N, C] where N = T*H*W
+
+        Returns:
+            x: [B, N, C]
+        """
         x = self.fc1(x)
-        b, n, c = x.size()
-        normalizer = x.new_ones(b, n, self.kernel_shape).view(-1, n_vecs, self.kernel_shape).permute(0, 2, 1)
-        normalizer = F.fold(normalizer,
-                            output_size=output_size,
-                            kernel_size=self.t2t_params['kernel_size'],
-                            padding=self.t2t_params['padding'],
-                            stride=self.t2t_params['stride'])
-
-        x = F.fold(x.view(-1, n_vecs, c).permute(0, 2, 1),
-                   output_size=output_size,
-                   kernel_size=self.t2t_params['kernel_size'],
-                   padding=self.t2t_params['padding'],
-                   stride=self.t2t_params['stride'])
-
-        x = F.unfold(x / normalizer,
-                     kernel_size=self.t2t_params['kernel_size'],
-                     padding=self.t2t_params['padding'],
-                     stride=self.t2t_params['stride']).permute(
-                         0, 2, 1).contiguous().view(b, n, c)
+        x = self.act(x)
         x = self.fc2(x)
         return x
 
@@ -201,6 +196,11 @@ class SparseWindowAttention(nn.Module):
 
     def forward(self, x, mask=None, T_ind=None, attn_mask=None):
         b, t, h, w, c = x.shape # 20 36
+
+        # ONNX Export Fix: Create dummy mask if None (required for mask.size() and max_pool later)
+        if mask is None:
+            mask = torch.ones(b, t, h, w, 1, device=x.device, dtype=x.dtype)
+
         w_h, w_w = self.window_size[0], self.window_size[1]
         c_head = c // self.n_head
         n_wh = math.ceil(h / self.window_size[0])
@@ -211,7 +211,7 @@ class SparseWindowAttention(nn.Module):
         pad_b = new_h - h
         # reverse order
         if pad_r > 0 or pad_b > 0:
-            x = F.pad(x,(0, 0, 0, pad_r, 0, pad_b, 0, 0), mode='constant', value=0) 
+            x = F.pad(x,(0, 0, 0, pad_r, 0, pad_b, 0, 0), mode='constant', value=0)
             mask = F.pad(mask,(0, 0, 0, pad_r, 0, pad_b, 0, 0), mode='constant', value=0) 
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -264,70 +264,75 @@ class SparseWindowAttention(nn.Module):
             pool_v = pool_v.contiguous().view(b, n_wh*n_ww, self.n_head, t, p_h*p_w, c_head)
             win_v = torch.cat((win_v, pool_v), dim=4)
 
-        # [b, n_wh*n_ww, n_head, t, w_h*w_w, c_head]
-        out = torch.zeros_like(win_q)
-        l_t = mask.size(1)
+        # TensorRT-compatible: Process all windows uniformly (no dynamic masking)
+        # This removes NonZero operations and allows static shape inference
+        # All windows now use enhanced K/V (with rolled neighbors and pooling tokens)
 
-        # TensorRT-compatible: Add channel dimension for MaxPool2d (expects 4D: [N, C, H, W])
-        mask = self.max_pool(mask.view(b * l_t, 1, new_h, new_w))
-        mask = mask.view(b, l_t, n_wh*n_ww)
-        mask = torch.sum(mask, dim=1) # [b, n_wh*n_ww]
-        for i in range(win_q.shape[0]):
-            ### For masked windows
-            mask_ind_i = mask[i].nonzero(as_tuple=False).view(-1)
-            # mask out quary in current window
-            # [b, n_wh*n_ww, n_head, t, w_h*w_w, c_head]
-            mask_n = len(mask_ind_i)
-            if mask_n > 0:
-                win_q_t = win_q[i, mask_ind_i].view(mask_n, self.n_head, t*w_h*w_w, c_head)
-                win_k_t = win_k[i, mask_ind_i] 
-                win_v_t = win_v[i, mask_ind_i] 
-                # mask out key and value
-                if T_ind is not None:
-                    # key [n_wh*n_ww, n_head, t, w_h*w_w, c_head]
-                    win_k_t = win_k_t[:, :, T_ind.view(-1)].view(mask_n, self.n_head, -1, c_head)
-                    # value
-                    win_v_t = win_v_t[:, :, T_ind.view(-1)].view(mask_n, self.n_head, -1, c_head)
-                else:
-                    win_k_t = win_k_t.view(n_wh*n_ww, self.n_head, t*w_h*w_w, c_head)
-                    win_v_t = win_v_t.view(n_wh*n_ww, self.n_head, t*w_h*w_w, c_head)
+        # Reshape Q for batch processing: [b, n_wh*n_ww, n_head, t, w_h*w_w, c_head] -> [b*n_wh*n_ww, n_head, t*w_h*w_w, c_head]
+        win_q_all = win_q.view(b * n_wh * n_ww, self.n_head, t * w_h * w_w, c_head)
 
-                # Use Flash Attention if enabled (Blackwell-optimized)
-                if self.use_flash_attn:
-                    y_t = F.scaled_dot_product_attention(
-                        win_q_t, win_k_t, win_v_t,
-                        dropout_p=self.attn_drop_p if self.training else 0.0
-                    )
-                else:
-                    # Fallback: manual attention computation
-                    att_t = (win_q_t @ win_k_t.transpose(-2, -1)) * (1.0 / math.sqrt(win_q_t.size(-1)))
-                    att_t = F.softmax(att_t, dim=-1)
-                    att_t = self.attn_drop(att_t)
-                    y_t = att_t @ win_v_t 
-                
-                out[i, mask_ind_i] = y_t.view(-1, self.n_head, t, w_h*w_w, c_head)
+        # Reshape K/V for batch processing
+        # K/V may include: original (w_h*w_w) + rolled neighbors + pooled tokens
+        k_seq_len = win_k.size(4)  # Total sequence length in K/V
+        win_k_all = win_k.view(b * n_wh * n_ww, self.n_head, t * k_seq_len, c_head)
+        win_v_all = win_v.view(b * n_wh * n_ww, self.n_head, t * k_seq_len, c_head)
 
-            ### For unmasked windows
-            unmask_ind_i = (mask[i] == 0).nonzero(as_tuple=False).view(-1)
-            # mask out quary in current window
-            # [b, n_wh*n_ww, n_head, t, w_h*w_w, c_head]
-            win_q_s = win_q[i, unmask_ind_i]
-            win_k_s = win_k[i, unmask_ind_i, :, :, :w_h*w_w]
-            win_v_s = win_v[i, unmask_ind_i, :, :, :w_h*w_w]
+        # Apply temporal dilation if specified
+        if T_ind is not None:
+            # Select specific temporal frames: [b*n_wh*n_ww, n_head, t*k_seq_len, c_head]
+            # T_ind selects which frames to attend to (e.g., [0, 2, 4] for stride-2 sampling)
 
-            # Use Flash Attention if enabled (Blackwell-optimized)
-            if self.use_flash_attn:
-                y_s = F.scaled_dot_product_attention(
-                    win_q_s, win_k_s, win_v_s,
-                    dropout_p=self.attn_drop_p if self.training else 0.0
-                )
-            else:
-                # Fallback: manual attention computation
-                att_s = (win_q_s @ win_k_s.transpose(-2, -1)) * (1.0 / math.sqrt(win_q_s.size(-1)))
-                att_s = F.softmax(att_s, dim=-1)
-                att_s = self.attn_drop(att_s)
-                y_s = att_s @ win_v_s
-            out[i, unmask_ind_i] = y_s
+            # Reshape K/V to separate temporal dimension: [b*n_wh*n_ww, n_head, t, k_seq_len, c_head]
+            win_k_all = win_k_all.view(b * n_wh * n_ww, self.n_head, t, k_seq_len, c_head)
+            win_v_all = win_v_all.view(b * n_wh * n_ww, self.n_head, t, k_seq_len, c_head)
+
+            # Create index tensor for gathering: T_ind contains temporal indices
+            # Shape needed: [b*n_wh*n_ww, n_head, t_dilated, k_seq_len, c_head]
+            t_dilated = T_ind.size(0)
+            T_ind_tensor = T_ind.view(1, 1, t_dilated, 1, 1).to(win_k_all.device)
+            T_ind_tensor = T_ind_tensor.expand(b * n_wh * n_ww, self.n_head, t_dilated, k_seq_len, c_head)
+
+            # Gather along temporal dimension (dim=2)
+            win_k_all = torch.gather(win_k_all, 2, T_ind_tensor)
+            win_v_all = torch.gather(win_v_all, 2, T_ind_tensor)
+
+            # Flatten back: [b*n_wh*n_ww, n_head, t_dilated*k_seq_len, c_head]
+            win_k_all = win_k_all.view(b * n_wh * n_ww, self.n_head, -1, c_head)
+            win_v_all = win_v_all.view(b * n_wh * n_ww, self.n_head, -1, c_head)
+
+        # Create attention mask from input mask to prevent attention leakage
+        # Partition mask into windows: [b, t, h, w, 1] -> [b, n_wh*n_ww, t, w_h, w_w, 1]
+        win_mask = window_partition(mask.contiguous(), self.window_size, n_head=1).view(b, n_wh*n_ww, t, w_h*w_w, 1)
+
+        # Reshape mask for attention: [b*n_wh*n_ww, 1, t*w_h*w_w, 1]
+        # This will broadcast across heads and k/v sequence length
+        win_mask_q = win_mask.view(b * n_wh * n_ww, 1, t * w_h * w_w, 1)
+
+        # Create attention mask: where mask=0 (invalid), attention should be -inf
+        # Shape: [b*n_wh*n_ww, 1, t*w_h*w_w, 1] - broadcasts to [b*n_wh*n_ww, n_head, t*w_h*w_w, t*k_seq_len]
+        attn_mask_tensor = torch.where(
+            win_mask_q > 0.5,  # Valid regions (mask=1)
+            torch.zeros_like(win_mask_q),  # Allow attention (additive mask = 0)
+            torch.full_like(win_mask_q, float('-inf'))  # Block attention (additive mask = -inf)
+        )
+
+        # Single attention pass for all windows (Flash Attention or manual)
+        if self.use_flash_attn:
+            out_all = F.scaled_dot_product_attention(
+                win_q_all, win_k_all, win_v_all,
+                attn_mask=attn_mask_tensor,  # Add masking to prevent leakage
+                dropout_p=self.attn_drop_p if self.training else 0.0
+            )
+        else:
+            # Manual attention computation with masking
+            att_all = (win_q_all @ win_k_all.transpose(-2, -1)) * (1.0 / math.sqrt(c_head))
+            att_all = att_all + attn_mask_tensor  # Apply additive mask (-inf blocks attention)
+            att_all = F.softmax(att_all, dim=-1)
+            att_all = self.attn_drop(att_all)
+            out_all = att_all @ win_v_all
+
+        # Reshape back to window format: [b*n_wh*n_ww, n_head, t*w_h*w_w, c_head] -> [b, n_wh*n_ww, n_head, t, w_h*w_w, c_head]
+        out = out_all.view(b, n_wh * n_ww, self.n_head, t, w_h * w_w, c_head)
 
         # re-assemble all head outputs side by side
         out = out.view(b, n_wh, n_ww, self.n_head, t, w_h, w_w, c_head)
@@ -370,7 +375,7 @@ class TemporalSparseTransformer(nn.Module):
         # FFN
         x = shortcut + att_x
         y = self.norm2(x)
-        x = x + self.mlp(y.view(B, T * H * W, C), fold_x_size).view(B, T, H, W, C)
+        x = x + self.mlp(y.view(B, T * H * W, C)).view(B, T, H, W, C)
 
         return x
 

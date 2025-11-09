@@ -7,8 +7,11 @@ Production Server for Watermark Removal SaaS
 - ALL FILES STAY ON D DRIVE (inside watermarkz folder)
 """
 
-import sys
+# CRITICAL: Add TensorRT/cuDNN to PATH BEFORE any imports (fixes Error 127)
 import os
+os.environ['PATH'] = r"D:\watermarkz\TensorRT-10.13.3.9\lib;" + os.environ.get('PATH', '')
+
+import sys
 import importlib
 import shutil
 from pathlib import Path
@@ -2307,15 +2310,26 @@ def process_segment_task(self, segment_data):
                         mask_path = os.path.join(seg_mask_dir, frame_file)
                         cv2.imwrite(mask_path, mask)
             else:
-                # Masks were downloaded - crop them to the region
-                print(f"   [CROP]  Cropping downloaded masks to region...")
-                for frame_idx in range(frames_copied):
-                    mask_file = f"{frame_idx:04d}.png"
-                    mask_path = os.path.join(seg_mask_dir, mask_file)
-                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-                    if mask is not None:
+                # Masks were downloaded - check if in memory or on disk
+                if len(segment_masks_memory) == frames_copied:
+                    # Masks are in memory - crop them in-memory (FAST!)
+                    print(f"   [CROP]  Cropping in-memory masks to region...")
+                    cropped_masks_memory = []
+                    for mask in segment_masks_memory:
                         cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                        cv2.imwrite(mask_path, cropped_mask)
+                        cropped_masks_memory.append(cropped_mask)
+                    segment_masks_memory = cropped_masks_memory
+                    print(f"   [OK] Cropped {len(segment_masks_memory)} masks in memory")
+                else:
+                    # Masks are on disk - crop them from disk files
+                    print(f"   [CROP]  Cropping downloaded masks to region...")
+                    for frame_idx in range(frames_copied):
+                        mask_file = f"{frame_idx:04d}.png"
+                        mask_path = os.path.join(seg_mask_dir, mask_file)
+                        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                        if mask is not None:
+                            cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                            cv2.imwrite(mask_path, cropped_mask)
         elif using_memory_pipeline:
             print(f"   ⚡ Skipping disk-based cropping - using in-memory pipeline (saves ~600ms!)")
 

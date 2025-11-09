@@ -18,6 +18,8 @@ pip_cache/
 *.pth
 *.engine
 *.onnx
+*.trt
+*.BUGGY_BACKUP
 
 # Results and uploads
 uploads/
