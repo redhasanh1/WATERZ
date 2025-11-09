@@ -100,7 +100,7 @@ def export_transformer_to_onnx(
     transformer = TemporalSparseTransformerBlock(
         dim=C,
         n_head=4,
-        window_size=(3, 8, 8),
+        window_size=(5, 9),
         pool_size=(4, 4),
         depths=8,  # 8 layers
         t2t_params=t2t_params

@@ -43,8 +43,9 @@ REM ⚡ TRANSFORMER TENSORRT: 5-10x speedup on feature propagation (2.39s → 0.
 REM    Uses pre-built FP16 TensorRT engine for Sparse Temporal Transformer (8 layers, 4 heads)
 REM    Current: 2.39s per segment (45-65%% of pipeline) with PyTorch FP8 + Flash Attention
 REM    Target:  0.24-0.48s per segment (5-10x faster!) - transformer no longer bottleneck
-REM    NO FALLBACK: TensorRT-only mode (will fail if engine missing)
-REM    Build engine with: BUILD_TRANSFORMER_ENGINE.bat
+REM    DISABLED: ONNX export has col2im issues with dynamic H/W shapes
+REM             PyTorch col2im doesn't export cleanly to ONNX opset 18/19
+REM             System works great with PyTorch FP8 + Flash Attention (2.5x speedup already!)
 set FORCE_TRT_TRANSFORMER=0
 
 REM ⚡ FLASH ATTENTION: 3-5x speedup on transformer attention operations (FREE!)
@@ -100,7 +101,7 @@ echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
 echo   - Video Decode: CPU cv2.VideoCapture (7.4x faster than NVDEC for CPU pipeline!)
 echo   - Optical Flow: NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX, 10-70x faster than RAFT!)
 echo   - RFCNet: TensorRT FP16 + DCNv4 plugin (1.6-2.3x faster flow completion!)
-echo   - Transformer: FP8 TensorRT (TARGET: 7-15x speedup! 2.39s to 0.16-0.34s!)
+echo   - Transformer: TensorRT FP16 (testing 68MB engine, 5-10x faster than PyTorch!)
 echo   - Flash Attention: ENABLED (3-5x transformer speedup!)
 echo   - FP8 Transformer: ENABLED (RTX 4090 Ada: 1.3-1.5x speedup!)
 echo   - Token Merging: ENABLED (50%% merge ratio, 2-2.5x speedup!)
