@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-# CRITICAL: Add TensorRT/cuDNN to PATH BEFORE any imports (fixes Error 127)
 import os
-os.environ['PATH'] = r"D:\watermarkz\TensorRT-10.13.3.9\lib;" + os.environ.get('PATH', '')
-
 import time
 import threading
 
@@ -13,7 +10,6 @@ import numpy as np
 import scipy.ndimage
 from PIL import Image
 import torch
-import torch.nn as nn
 import torchvision
 
 # Configure torch.compile cache settings BEFORE any model imports
@@ -22,9 +18,12 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import cache_config  # Disables inductor cache for thread safety
 
-# Essential optimization: Enable cuDNN autotuner (benchmarks kernels once, reuses best)
-# This is SAFE and provides 20-30% speedup without breaking anything
-torch.backends.cudnn.benchmark = True
+# cuDNN Configuration - Fix for "FIND unable to find engine" errors
+# Disable benchmark mode to force cuDNN to find compatible algorithms
+# (FP16 + large tensors can fail with benchmark=True on some configurations)
+torch.backends.cudnn.benchmark = False  # Was True, causes FIND errors with dynamic shapes
+torch.backends.cudnn.deterministic = False  # Keep non-deterministic for speed
+torch.backends.cudnn.enabled = True  # Keep cuDNN enabled
 
 # Enable TF32 for Ada Lovelace (RTX 4090) - Safe ~20% speedup on matmul operations
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -102,6 +101,54 @@ from core.utils import to_tensors
 from model.misc import get_device
 
 # from mytimer import timer_decorator
+
+# ============================================================================
+# Module-level TensorRT Col2Im Plugin Initialization (Thread-Safe)
+# ============================================================================
+# CRITICAL: Plugin must be loaded ONCE per process BEFORE any TensorRT operations
+# This prevents context creation failures in multi-threaded Celery workers
+_trt_plugin_lock = threading.Lock()
+_trt_plugin_loaded = False
+
+def _load_col2im_plugin_once():
+    """Load Col2Im TensorRT plugin once per process (thread-safe)"""
+    global _trt_plugin_loaded
+
+    if _trt_plugin_loaded:
+        return True
+
+    with _trt_plugin_lock:
+        # Double-check after acquiring lock
+        if _trt_plugin_loaded:
+            return True
+
+        import ctypes
+        plugin_candidates = [
+            r"D:\watermarkz\col2im_tensorrt_plugin\build\Release\col2im_plugin.dll",
+            r"D:\watermarkz\TensorRT-10.13.3.9\lib\col2im_plugin.dll",
+        ]
+
+        for plugin_path in plugin_candidates:
+            if os.path.exists(plugin_path):
+                try:
+                    ctypes.CDLL(plugin_path)
+
+                    # Initialize TensorRT plugin registry
+                    import tensorrt as trt
+                    trt_logger = trt.Logger(trt.Logger.WARNING)
+                    trt.init_libnvinfer_plugins(trt_logger, "")
+
+                    _trt_plugin_loaded = True
+                    print(f"[TRT Plugin] Col2Im plugin loaded at module import: {plugin_path}")
+                    return True
+                except Exception as e:
+                    print(f"[WARNING] Failed to load Col2Im plugin from {plugin_path}: {e}")
+
+        return False
+
+# Load Col2Im plugin at module import time (if TensorRT transformer is enabled)
+if os.getenv('FORCE_TRT_TRANSFORMER') == '1':
+    _load_col2im_plugin_once()
 
 import warnings
 
@@ -284,34 +331,6 @@ def get_ref_index(mid_neighbor_id, neighbor_ids, length, ref_stride=10, ref_num=
 # This enables TRUE PARALLEL execution without locks or memory corruption
 import threading
 _thread_local = threading.local()
-
-# CRITICAL FIX: Singleton TensorRT Runtime to prevent CUDA context corruption
-# Each TensorRT engine (YOLO, NeuFlow, RFCNet, Transformer) was creating ephemeral Runtime objects
-# When Runtime gets GC'd, it corrupts CUDA primary context → error 700 in subsequent engines
-# Solution: ONE shared Runtime for all engines (thread-safe, never GC'd)
-_GLOBAL_TRT_RUNTIME = None
-_RUNTIME_LOCK = threading.Lock()
-
-def get_trt_runtime():
-    """
-    Get or create singleton TensorRT Runtime
-
-    This prevents CUDA context corruption in multi-threaded Celery workers.
-    Without this, each engine's Runtime gets garbage collected, corrupting
-    CUDA context for subsequently loaded engines (especially Transformer after RFCNet/DCNv4).
-
-    Returns:
-        tensorrt.Runtime: Singleton Runtime shared by all TensorRT engines
-    """
-    global _GLOBAL_TRT_RUNTIME
-
-    with _RUNTIME_LOCK:
-        if _GLOBAL_TRT_RUNTIME is None:
-            import tensorrt as trt
-            _GLOBAL_TRT_RUNTIME = trt.Runtime(trt.Logger(trt.Logger.WARNING))
-            print("[TRT] Created singleton Runtime (shared by all engines)")
-
-    return _GLOBAL_TRT_RUNTIME
 
 
 def pipeline(
@@ -552,7 +571,7 @@ def pipeline(
                                 pass
                         import tensorrt as trt
                         logger = trt.Logger(trt.Logger.WARNING)
-                        runtime = get_trt_runtime()  # Use singleton Runtime (prevents CUDA context corruption)
+                        runtime = trt.Runtime(logger)
                         with open(engine_path, 'rb') as f:
                             self._engine = runtime.deserialize_cuda_engine(f.read())
                         if self._engine is None:
@@ -874,7 +893,7 @@ def pipeline(
 
                     import tensorrt as trt
                     logger = trt.Logger(trt.Logger.WARNING)
-                    runtime = get_trt_runtime()  # Use singleton Runtime (prevents CUDA context corruption)
+                    runtime = trt.Runtime(logger)
                     with open(engine_path, 'rb') as f:
                         self._engine = runtime.deserialize_cuda_engine(f.read())
                     if self._engine is None:
@@ -1065,7 +1084,7 @@ def pipeline(
     ##############################################
     # TensorRT Sparse Transformer Adapter (NO FALLBACK)
     ##############################################
-    class _TransformerTRTAdapter(nn.Module):
+    class _TransformerTRTAdapter(torch.nn.Module):
         """TensorRT wrapper for Sparse Temporal Transformer (NO FALLBACK when force_trt=True)"""
 
         def __init__(self, transformer_module, force_trt=False):
@@ -1080,12 +1099,18 @@ def pipeline(
                 # TensorRT disabled, use PyTorch
                 return
 
-            # Search for transformer engine
+            # Search for transformer engine (golden path first, then legacy)
             engine_candidates = [
-                os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_fp16.engine'),
-                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_fp16.engine'),
-                os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_fp16.engine'),
-                os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_fp16.engine'),
+                # Golden path engine (segfault-proof, Conv1x1 projections)
+                os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_golden_path.engine'),
+                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_golden_path.engine'),
+                os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_golden_path.engine'),
+                os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_golden_path.engine'),
+                # Legacy engines (fallback)
+                os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
+                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
             ]
 
             for p in engine_candidates:
@@ -1103,14 +1128,6 @@ def pipeline(
 
             # Load TensorRT engine
             try:
-                # CRITICAL: Clean CUDA state before loading transformer engine
-                # This prevents context corruption from earlier TensorRT engines (DCNv4, YOLO, RFCNet)
-                print("[TRT Transformer] Synchronizing CUDA before engine load...")
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-                    print("[TRT Transformer] CUDA state cleaned")
-
                 # Ensure TensorRT DLLs are available
                 trt_root = os.environ.get('TENSORRT_ROOT') or os.path.join(os.getcwd(), 'TensorRT-10.13.3.9')
                 trt_lib = os.path.join(trt_root, 'lib')
@@ -1120,56 +1137,28 @@ def pipeline(
                     except Exception:
                         pass
 
-                import tensorrt as trt
-                # Use INFO level to see more diagnostic messages
-                trt_logger = trt.Logger(trt.Logger.INFO)
-                runtime = get_trt_runtime()  # Use singleton Runtime (prevents CUDA context corruption)
+                # Verify Col2Im plugin was loaded at module import
+                if not _trt_plugin_loaded:
+                    raise RuntimeError(
+                        "Col2Im plugin not loaded! This should have been loaded at module import.\n"
+                        "Check module-level _load_col2im_plugin_once() function."
+                    )
 
-                print(f"[TRT Transformer] Loading engine from: {self._engine_path}")
-                print(f"[TRT Transformer] Engine size: {os.path.getsize(self._engine_path) / (1024*1024):.1f} MB")
+                import tensorrt as trt
+                trt_logger = trt.Logger(trt.Logger.WARNING)
+                runtime = trt.Runtime(trt_logger)
 
                 with open(self._engine_path, 'rb') as f:
-                    engine_data = f.read()
-                    self._engine = runtime.deserialize_cuda_engine(engine_data)
+                    self._engine = runtime.deserialize_cuda_engine(f.read())
 
                 if self._engine is None:
                     raise RuntimeError(f"Failed to deserialize transformer engine: {self._engine_path}")
 
-                # Verify CUDA state is still valid after engine deserialization
-                print("[TRT Transformer] Verifying CUDA state after engine load...")
-                if torch.cuda.is_available():
-                    try:
-                        torch.cuda.synchronize()
-                        print("[TRT Transformer] CUDA state valid")
-                    except RuntimeError as cuda_err:
-                        raise RuntimeError(
-                            f"CUDA error detected after engine deserialization: {cuda_err}\n"
-                            f"This suggests CUDA context corruption from earlier operations.\n"
-                            f"Try disabling DCNv4 (set ENABLE_DCNV4_RFCNET=0) or RFCNet TRT (set FORCE_TRT_RFCNET=0)"
-                        )
-
-                # Print engine info for diagnostics
-                num_io_tensors = self._engine.num_io_tensors
-                print(f"[TRT Transformer] Engine loaded successfully")
-                print(f"[TRT Transformer]   I/O tensors: {num_io_tensors}")
-
-                # Print input/output tensor info
-                for i in range(num_io_tensors):
-                    tensor_name = self._engine.get_tensor_name(i)
-                    tensor_shape = self._engine.get_tensor_shape(tensor_name)
-                    tensor_mode = self._engine.get_tensor_mode(tensor_name)
-                    mode_str = "INPUT" if tensor_mode == trt.TensorIOMode.INPUT else "OUTPUT"
-                    print(f"[TRT Transformer]   [{mode_str}] {tensor_name}: shape={tensor_shape}")
-
-                # ⚡ CRITICAL FIX: Enable TensorRT 10.x v3 API (execute_async_v3 + set_tensor_address)
-                # The old execute_v2(bindings) API causes CUDA error 700 in multi-threaded execution
-                self._use_v3 = True
+                # Get input/output names by checking tensor I/O mode (not by index!)
+                # TensorRT does NOT guarantee tensor ordering, must check mode explicitly
                 self._in_name = None
                 self._out_name = None
-                self._stream = None
-
-                # Detect input/output tensor names from engine
-                for i in range(num_io_tensors):
+                for i in range(self._engine.num_io_tensors):
                     name = self._engine.get_tensor_name(i)
                     mode = self._engine.get_tensor_mode(name)
                     if mode == trt.TensorIOMode.INPUT:
@@ -1177,32 +1166,38 @@ def pipeline(
                     elif mode == trt.TensorIOMode.OUTPUT:
                         self._out_name = name
 
-                # Verify tensors found
-                if not self._in_name or not self._out_name:
+                if self._in_name is None or self._out_name is None:
                     raise RuntimeError(
-                        f"Failed to detect I/O tensors from engine!\n"
-                        f"  Input tensor: {self._in_name}\n"
-                        f"  Output tensor: {self._out_name}\n"
-                        f"  Check engine build"
+                        f"Failed to identify input/output tensors in engine\n"
+                        f"Found {self._engine.num_io_tensors} I/O tensors:\n" +
+                        "\n".join([
+                            f"  [{i}] {self._engine.get_tensor_name(i)}: "
+                            f"{'INPUT' if self._engine.get_tensor_mode(self._engine.get_tensor_name(i)) == trt.TensorIOMode.INPUT else 'OUTPUT'}"
+                            for i in range(self._engine.num_io_tensors)
+                        ])
                     )
 
-                print(f"[TRT Transformer]   Using TensorRT 10.x v3 API (execute_async_v3)")
-                print(f"[TRT Transformer]   Input tensor: {self._in_name}")
-                print(f"[TRT Transformer]   Output tensor: {self._out_name}")
-
-                # Create dedicated CUDA stream for async execution
-                if torch.cuda.is_available():
-                    try:
-                        self._stream = torch.cuda.Stream()
-                        print(f"[TRT Transformer]   Created dedicated CUDA stream")
-                    except Exception as e:
-                        print(f"[TRT Transformer]   WARNING: Could not create CUDA stream: {e}")
-                        print(f"[TRT Transformer]   Will use default stream")
-                        self._stream = None
+                # TensorRT dtype to PyTorch dtype mapping
+                self._dtype_map = {
+                    trt.float32: torch.float32,
+                    trt.float16: torch.float16,
+                    trt.int32: torch.int32,
+                    trt.int8: torch.int8,
+                }
 
                 self._trt_ready = True
+                # Detect engine type
+                is_golden_path = 'golden_path' in os.path.basename(self._engine_path)
+                engine_type = "GOLDEN PATH (Conv1x1, segfault-proof)" if is_golden_path else "Legacy"
+                print(f"[TRT Transformer] Engine loaded ({engine_type}): {self._engine_path}")
+                print(f"[TRT Transformer] Input: {self._in_name}, Output: {self._out_name}")
+
+                # Print engine I/O details for debugging
+                input_dtype = self._engine.get_tensor_dtype(self._in_name)
+                output_dtype = self._engine.get_tensor_dtype(self._out_name)
+                print(f"[TRT Transformer] Input dtype: {input_dtype}, Output dtype: {output_dtype}")
+                print(f"[TRT Transformer] Optimization profiles: {self._engine.num_optimization_profiles}")
                 print(f"[TRT Transformer] Expected speedup: 5-10x (2.39s → 0.24-0.48s per segment)")
-                print(f"[TRT Transformer] Dynamic shapes supported: T∈[5,20], H∈[15,25], W∈[10,40]")
 
             except Exception as e:
                 # STRICT MODE: NO FALLBACK!
@@ -1213,66 +1208,35 @@ def pipeline(
                 )
 
         def _get_thread_context(self):
-            """Get or create TensorRT execution context for current thread"""
+            """Get or create TensorRT execution context + CUDA stream for current thread"""
             if not hasattr(_thread_local, 'transformer_contexts'):
                 _thread_local.transformer_contexts = {}
+            if not hasattr(_thread_local, 'transformer_streams'):
+                _thread_local.transformer_streams = {}
 
             thread_id = threading.get_ident()
             if thread_id not in _thread_local.transformer_contexts:
-                # Create execution context with retry logic to handle transient CUDA errors
-                ctx = None
-                for attempt in range(2):
-                    ctx = self._engine.create_execution_context()
+                ctx = self._engine.create_execution_context()
 
-                    if ctx is not None:
-                        # Success!
-                        break
-
-                    if attempt == 0:
-                        # First attempt failed - try cleaning CUDA state and retry
-                        print(f"[TRT Transformer] Context creation failed on attempt 1, cleaning CUDA and retrying...")
-                        if torch.cuda.is_available():
-                            torch.cuda.synchronize()
-                            torch.cuda.empty_cache()
-                        time.sleep(0.1)  # Brief pause to let CUDA settle
-                    # If attempt 1 (second try) also fails, ctx will still be None and we'll raise error below
-
+                # CRITICAL: Check if context creation succeeded
                 if ctx is None:
-                    # Context creation failed - this is a CRITICAL error
-                    engine_size_mb = os.path.getsize(self._engine_path) / (1024*1024) if os.path.exists(self._engine_path) else 0
-                    error_msg = (
-                        f"\n{'='*80}\n"
-                        f"[TRT Transformer] CRITICAL: create_execution_context() returned None\n"
-                        f"{'='*80}\n"
-                        f"  Engine path: {self._engine_path}\n"
-                        f"  Engine size: {engine_size_mb:.1f} MB\n"
-                        f"  Thread ID: {thread_id}\n"
-                        f"\n"
+                    raise RuntimeError(
+                        f"TensorRT failed to create execution context for thread {thread_id}.\n"
                         f"Possible causes:\n"
-                        f"  1. Engine was built with incompatible TensorRT version\n"
-                        f"  2. Insufficient GPU memory for execution context\n"
-                        f"  3. Engine has dynamic shapes without optimization profile\n"
-                        f"  4. Engine file is corrupted or incomplete\n"
-                        f"  5. CUDA context initialization failed\n"
-                        f"\n"
-                        f"Troubleshooting:\n"
-                        f"  1. Check TensorRT logs above for warnings/errors\n"
-                        f"  2. Rebuild engine with dynamic shapes:\n"
-                        f"     python build_transformer_trt_engine.py \\\n"
-                        f"       --onnx transformer_dynamic.onnx \\\n"
-                        f"       --engine engines/transformer/transformer_fp16.engine \\\n"
-                        f"       --fp16 --workspace 8\n"
-                        f"  3. Verify engine built with TensorRT 10.13.3.9\n"
-                        f"  4. Check GPU memory: nvidia-smi\n"
-                        f"  5. Try disabling TensorRT: set FORCE_TRT_TRANSFORMER=0\n"
-                        f"{'='*80}\n"
+                        f"  1. Col2Im plugin not loaded (check _trt_plugin_loaded={_trt_plugin_loaded})\n"
+                        f"  2. Engine corrupted: {self._engine_path}\n"
+                        f"  3. Insufficient GPU memory\n"
+                        f"  4. TensorRT version mismatch"
                     )
-                    raise RuntimeError(error_msg)
+
+                # Create non-default CUDA stream for this thread (CRITICAL for thread safety!)
+                stream = torch.cuda.Stream(priority=0)
 
                 _thread_local.transformer_contexts[thread_id] = ctx
+                _thread_local.transformer_streams[thread_id] = stream
                 print(f"[TRT Transformer] Created execution context for thread {thread_id}")
 
-            return _thread_local.transformer_contexts[thread_id]
+            return _thread_local.transformer_contexts[thread_id], _thread_local.transformer_streams[thread_id]
 
         def forward(self, x, fold_x_size, l_mask=None, t_dilation=2):
             """
@@ -1294,68 +1258,99 @@ def pipeline(
                 return self._pytorch_model(x, fold_x_size, l_mask, t_dilation)
 
         def _forward_trt(self, x):
-            """TensorRT inference path using TensorRT 10.x v3 API"""
+            """TensorRT inference path with thread-safe non-default CUDA streams"""
+            import tensorrt as trt
+
             B, T, H, W, C = x.shape
 
-            # Validate input shape (engine expects specific ranges)
-            if B != 1:
-                raise ValueError(f"Transformer TRT engine expects B=1, got {B}")
-            if not (5 <= T <= 20):
-                raise ValueError(f"T must be in [5,20], got {T} (temporal frames)")
-            if not (15 <= H <= 25):
-                raise ValueError(f"H must be in [15,25], got {H} (height tokens)")
-            if not (10 <= W <= 40):
-                raise ValueError(f"W must be in [10,40], got {W} (width tokens)")
-            if C != 512:
-                raise ValueError(f"C must be 512, got {C} (channels)")
+            # CRITICAL: Save original input dtype for dtype-transparent behavior
+            # TRT may use different precision internally, but we return same dtype as input
+            x_original_dtype = x.dtype
 
-            # Get thread-local context
-            ctx = self._get_thread_context()
+            # Validate shape is in supported range
+            if not (2 <= T <= 16 and 6 <= H <= 15 and 9 <= W <= 15 and B == 1 and C == 512):
+                print(f"[TRT Transformer] ERROR: Shape [{B},{T},{H},{W},{C}] outside valid range!")
+                print(f"[TRT Transformer] Valid: B=1, T∈[2,16], H∈[6,15], W∈[9,15], C=512")
+                raise ValueError(f"Invalid shape for TensorRT engine: [{B},{T},{H},{W},{C}]")
 
-            # Set dynamic input shape using named tensor (TensorRT 10.x v3 API)
-            success = ctx.set_input_shape(self._in_name, (B, T, H, W, C))
-            if not success:
+            # Ensure input is contiguous (TensorRT requires contiguous memory)
+            x = x.contiguous()
+
+            # Get thread-local context AND non-default stream
+            ctx, stream = self._get_thread_context()
+
+            # CRITICAL FIX #1: Set optimization profile BEFORE setting input shape
+            # Even if only 1 profile, it must be selected for dynamic shapes to work
+            if self._engine.num_optimization_profiles > 0:
+                ctx.set_optimization_profile_async(0, stream.cuda_stream)
+
+            # CRITICAL FIX #2: Set input shape for dynamic shape support (required per inference)
+            ctx.set_input_shape(self._in_name, (B, T, H, W, C))
+
+            # CRITICAL FIX #3: Query output dtype from engine (don't assume it matches input!)
+            output_dtype_trt = self._engine.get_tensor_dtype(self._out_name)
+            output_dtype = self._dtype_map.get(output_dtype_trt, torch.float32)
+
+            # CRITICAL FIX #4: Query runtime output shape from context (don't assume it equals input!)
+            # Must query AFTER setting input shape for dynamic shape inference to complete
+            output_shape = tuple(ctx.get_tensor_shape(self._out_name))
+
+            # Validate output shape is fully resolved (no -1 dimensions)
+            if any(d < 0 for d in output_shape):
                 raise RuntimeError(
-                    f"set_input_shape failed for shape {(B, T, H, W, C)}\n"
-                    f"  Input tensor: {self._in_name}\n"
-                    f"  Expected ranges: B=1, T∈[5,20], H∈[15,25], W∈[10,40], C=512"
+                    f"TensorRT output shape not fully resolved: {output_shape}\n"
+                    f"Input shape: {(B, T, H, W, C)}\n"
+                    f"This indicates shape inference failed - check engine build"
                 )
 
-            # Convert to FP16 if needed (TensorRT FP16 engine expects FP16 input)
-            if x.dtype == torch.float32:
-                x = x.half()
-            elif x.dtype != torch.float16:
-                raise ValueError(f"Unsupported input dtype: {x.dtype}, expected float16 or float32")
+            # Allocate output buffer with CORRECT dtype and shape from engine
+            output = torch.empty(output_shape, dtype=output_dtype, device=x.device)
 
-            # Allocate output tensor (FP16)
-            output = torch.empty((B, T, H, W, C), dtype=torch.float16, device=x.device)
+            # Validate input dtype matches expected (convert if needed)
+            input_dtype_trt = self._engine.get_tensor_dtype(self._in_name)
+            input_dtype_expected = self._dtype_map.get(input_dtype_trt, torch.float32)
+            if x.dtype != input_dtype_expected:
+                x = x.to(input_dtype_expected)
 
-            # Set tensor addresses (TensorRT 10.x v3 API - replaces deprecated bindings array)
-            ctx.set_tensor_address(self._in_name, int(x.data_ptr()))
-            ctx.set_tensor_address(self._out_name, int(output.data_ptr()))
+            # Execute on non-default stream (avoids race conditions with PyTorch default stream)
+            with torch.cuda.stream(stream):
+                # Set tensor addresses (TensorRT v3 API)
+                ctx.set_tensor_address(self._in_name, int(x.data_ptr()))
+                ctx.set_tensor_address(self._out_name, int(output.data_ptr()))
 
-            # Execute with async CUDA stream (TensorRT 10.x v3 API)
-            if self._stream is not None:
-                stream_ptr = int(self._stream.cuda_stream)
-            else:
-                stream_ptr = int(torch.cuda.current_stream().cuda_stream)
+                # Execute asynchronously on our dedicated stream
+                ok = ctx.execute_async_v3(stream.cuda_stream)
 
-            success = ctx.execute_async_v3(stream_ptr)
+                if not ok:
+                    raise RuntimeError(
+                        f"TensorRT execute_async_v3 failed\n"
+                        f"Input: {self._in_name} shape={x.shape} dtype={x.dtype}\n"
+                        f"Output: {self._out_name} shape={output.shape} dtype={output.dtype}\n"
+                        f"This usually means tensor addresses not set or shape inference failed"
+                    )
 
-            if not success:
-                raise RuntimeError(
-                    f"TensorRT transformer inference failed (execute_async_v3)\n"
-                    f"  Input shape: {x.shape}\n"
-                    f"  Input tensor: {self._in_name}\n"
-                    f"  Output tensor: {self._out_name}\n"
-                    f"  This may indicate CUDA context corruption or memory issues"
+            # Synchronize only THIS stream (not global sync)
+            stream.synchronize()
+
+            # Sanity check: output should not be all zeros (indicates buffer not written)
+            if torch.all(output == 0):
+                import warnings
+                warnings.warn(
+                    f"[TRT Transformer] WARNING: Output is all zeros!\n"
+                    f"This usually indicates TensorRT did not write to the output buffer.\n"
+                    f"Check optimization profile, shape settings, and tensor bindings."
                 )
 
-            # Wait for stream completion (synchronize with main stream)
-            if self._stream is not None:
-                torch.cuda.current_stream().wait_stream(self._stream)
+            # CRITICAL: Convert output back to original input dtype for PyTorch model compatibility
+            # TRT engine may use FP32 internally, but PyTorch model expects FP16
+            # This makes the wrapper dtype-transparent (FP16 in → FP32 TRT → FP16 out)
+            if output.dtype != x_original_dtype:
+                output = output.to(x_original_dtype)
 
             return output
+
+        def __call__(self, *args, **kwargs):
+            return self.forward(*args, **kwargs)
 
     ckpt_path = load_file_from_url(
         url=os.path.join(pretrain_model_url, "recurrent_flow_completion.pth"),
@@ -1364,23 +1359,31 @@ def pipeline(
         file_name=None,
     )
 
-    # Initialize RFCNet (TensorRT with PyTorch fallback via _RFCNetAdapter)
+    # Initialize RFCNet (PyTorch with optional Torch-TensorRT compilation)
     if use_cached_models:
         with _MODEL_CACHE_LOCK:
             if _GLOBAL_MODELS_CACHE[cache_key]['rfcnet'] is None:
                 # First time loading RFCNet
-                # CRITICAL FIX: Use _RFCNetAdapter instead of RecurrentFlowCompleteNet
-                # This enables TensorRT engine loading when FORCE_TRT_RFCNET=1
-                # Prevents CUDA context corruption from PyTorch multi-worker initialization race
                 rfcnet_start = time.time()
-                fix_flow_complete = _RFCNetAdapter(device, use_half, ckpt_path)
+                fix_flow_complete = RecurrentFlowCompleteNet(ckpt_path)
+                for p in fix_flow_complete.parameters():
+                    p.requires_grad = False
+                fix_flow_complete.to(device, non_blocking=True)
+                fix_flow_complete.eval()
+                # THREAD-SAFE FIX: Convert to FP16 during caching, not during inference
+                if use_half:
+                    fix_flow_complete = fix_flow_complete.half()
                 _GLOBAL_MODELS_CACHE[cache_key]['rfcnet'] = fix_flow_complete
-                print(f"[CACHE] RFCNet adapter cached ({'TensorRT' if getattr(fix_flow_complete, '_trt_ready', False) else 'PyTorch'} {'FP16' if use_half else 'FP32'}) ({time.time() - rfcnet_start:.2f}s)")
+                print(f"[CACHE] RFCNet model cached in {'FP16' if use_half else 'FP32'} ({time.time() - rfcnet_start:.2f}s)")
             else:
                 fix_flow_complete = _GLOBAL_MODELS_CACHE[cache_key]['rfcnet']
     else:
-        # Legacy behavior - also use adapter for consistency
-        fix_flow_complete = _RFCNetAdapter(device, use_half, ckpt_path)
+        # Legacy behavior
+        fix_flow_complete = RecurrentFlowCompleteNet(ckpt_path)
+        for p in fix_flow_complete.parameters():
+            p.requires_grad = False
+        fix_flow_complete.to(device, non_blocking=True)
+        fix_flow_complete.eval()
 
     # torch.compile() with inductor backend (REQUIRED when RFCNET_TORCHTRT=1, no fallback)
     if os.getenv("RFCNET_TORCHTRT", "0").lower() in ("1", "true", "yes", "on"):
@@ -1423,6 +1426,19 @@ def pipeline(
                 #     model = torch.compile(model, mode="default", fullgraph=False)
                 #     print(f"[OK] torch.compile() setup complete ({time.time() - compile_start:.2f}s) - warmup will happen on first inference")
 
+                # ⚡ TensorRT Transformer Integration (5-10x speedup!)
+                if os.environ.get('FORCE_TRT_TRANSFORMER', '0') == '1':
+                    print(f"[TRT] Wrapping transformer with TensorRT adapter...")
+                    force_trt = True
+                    wrapper = _TransformerTRTAdapter(model.transformers, force_trt=force_trt)
+                    # CRITICAL: Move wrapper to same device/dtype as model (FP16 on CUDA)
+                    if use_half:
+                        wrapper = wrapper.to(device).half()
+                    else:
+                        wrapper = wrapper.to(device)
+                    model.transformers = wrapper
+                    print(f"[OK] Transformer TensorRT adapter enabled (device={device}, dtype={'FP16' if use_half else 'FP32'})")
+
                 _GLOBAL_MODELS_CACHE[cache_key]['propainter'] = model
                 print(f"[CACHE] ProPainter model cached in {'FP16' if use_half else 'FP32'} ({time.time() - propainter_start:.2f}s)")
                 print(f"[OK] All models cached! Total worker init time saved on next segment")
@@ -1442,16 +1458,15 @@ def pipeline(
         #     model = torch.compile(model, mode="default", fullgraph=False)
         #     print(f"[OK] torch.compile() setup complete ({time.time() - compile_start:.2f}s) - warmup will happen on first inference")
 
-    # ⚡ TENSORRT TRANSFORMER INTEGRATION
-    # Wrap transformer with TensorRT adapter for 5-10x speedup
-    if os.getenv("FORCE_TRT_TRANSFORMER", "0") == "1":
-        print("[TRT] Wrapping transformer with TensorRT adapter...")
-        trt_start = time.time()
-        model.transformers = _TransformerTRTAdapter(
-            model.transformers,
-            force_trt=True  # Strict mode: fail if TRT engine not available
-        )
-        print(f"[OK] Transformer TensorRT integration activated ({time.time() - trt_start:.2f}s)")
+        # ⚡ TensorRT Transformer Integration (5-10x speedup!)
+        if os.environ.get('FORCE_TRT_TRANSFORMER', '0') == '1':
+            print(f"[TRT] Wrapping transformer with TensorRT adapter...")
+            force_trt = True
+            wrapper = _TransformerTRTAdapter(model.transformers, force_trt=force_trt)
+            # CRITICAL: Move wrapper to same device/dtype as model (FP16 on CUDA)
+            wrapper = wrapper.to(device).half()
+            model.transformers = wrapper
+            print(f"[OK] Transformer TensorRT adapter enabled (device={device}, dtype=FP16)")
 
     ##############################################
     # ProPainter inference
