@@ -28,7 +28,9 @@ if exist "models\neuflow_things_fp16.engine" (
 )
 
 REM Build TensorRT engine with FP16 optimization
-echo [INFO] Building TensorRT engine...
+REM CRITICAL: Set TF32=0 to match runtime environment (fixes transformer drift)
+set NVIDIA_TF32_OVERRIDE=0
+echo [INFO] Building TensorRT engine with NVIDIA_TF32_OVERRIDE=0...
 echo [INFO] This may take 5-10 minutes (one-time cost)
 echo.
 
