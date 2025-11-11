@@ -2578,6 +2578,7 @@ def process_segment_task(self, segment_data):
             # Load all frames into memory first (faster than disk I/O in loop)
             # [INIT] EXTREME SPEED: Use in-memory frames if available (no disk reads!)
             original_frames = []
+            original_masks = []  # 🔥 MASK COMPOSITING: Need masks for alpha blending
             cleaned_frames = []
 
             # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
@@ -2588,15 +2589,19 @@ def process_segment_task(self, segment_data):
             if using_memory_pipeline:
                 # Use already-loaded memory frames (ZERO disk I/O!)
                 # Extract ONLY core segment frames (skip padding)
-                print(f"   ⚡ Extracting core segment frames from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
+                print(f"   ⚡ Extracting core segment frames + masks from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
                 original_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
+                original_masks = segment_masks_memory[padding_offset:padding_offset + seg_duration]
             else:
                 # Disk-based fallback
-                print(f"   [MASKS] Loading {seg_duration} original frames from disk...")
+                print(f"   [MASKS] Loading {seg_duration} original frames + masks from disk...")
                 for frame_idx in range(seg_duration):
                     frame_file = f"{frame_idx:04d}.png"
                     orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
                     original_frames.append(orig)
+                    # Load corresponding mask
+                    mask = cv2.imread(os.path.join(seg_mask_dir, frame_file), cv2.IMREAD_GRAYSCALE)
+                    original_masks.append(mask)
 
             # Load cleaned frames from ProPainter output (skip padding frames)
             print(f"   [OUTPUT] Extracting core segment from ProPainter output (frames {padding_offset} to {padding_offset + seg_duration})...")
@@ -2607,8 +2612,8 @@ def process_segment_task(self, segment_data):
 
             # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
             # This allows multiple segments to cooperatively edit the same frames
-            print(f"   🔗 Merging to shared frame buffer (supports multi-segment cooperative editing)...")
-            for local_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
+            print(f"   🔗 Merging to shared frame buffer with mask-based alpha compositing...")
+            for local_idx, (original, cleaned_crop, segment_mask) in enumerate(zip(original_frames, cleaned_frames, original_masks)):
                 # Use GLOBAL frame index for shared buffer
                 global_frame_idx = start_frame + local_idx
                 frame_file = f"{global_frame_idx:04d}.png"
@@ -2625,9 +2630,26 @@ def process_segment_task(self, segment_data):
                 else:
                     continue
 
-                # Apply this segment's edit (merge cleaned region onto full frame)
-                if cleaned_crop is not None and result_frame is not None:
-                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                # 🔥 MASK COMPOSITING: Use mask to blend only the inpainted region
+                # This preserves other segments' work in non-masked areas
+                if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
+                    # Crop mask to ROI
+                    cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+
+                    # Convert mask to 3-channel float [0, 1] for alpha blending
+                    if len(cropped_mask.shape) == 2:
+                        # Grayscale mask - convert to 3 channels
+                        mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
+                    else:
+                        mask_3ch = cropped_mask.astype(float) / 255.0
+
+                    # Alpha composite: blend cleaned region using mask as alpha
+                    roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
+                    cleaned_crop_float = cleaned_crop.astype(float)
+                    blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+
+                    # Paste blended result back
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
 
                 # Save back to shared buffer
                 cv2.imwrite(shared_frame_path, result_frame)
