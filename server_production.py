@@ -875,6 +875,9 @@ def encode_segment_background(redis_client, data):
     fps = float(segment_info.get('fps', 30))
     frame_count = int(segment_info.get('frame_count', 0))
     base_name = segment_info.get('base_name', 'video')
+    # 🔥 SHARED BUFFER: Get frame range for this segment
+    start_frame = int(segment_info.get('start_frame', 0))
+    end_frame = int(segment_info.get('end_frame', frame_count - 1))
 
     if not cleaned_dir or not os.path.exists(cleaned_dir):
         raise RuntimeError(f"Cleaned frames directory not found: {cleaned_dir}")
@@ -882,14 +885,33 @@ def encode_segment_background(redis_client, data):
     # Create output path
     seg_video_path = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_seg{seg_idx}.mp4")
 
-    print(f"[ENCODER] Encoding {frame_count} frames @ {fps} fps...")
+    print(f"[ENCODER] Encoding segment {seg_idx}: frames {start_frame}-{end_frame} ({frame_count} frames) @ {fps} fps...")
     encode_start = time.time()
 
-    # Encode with NVENC (GPU accelerated - same as inline encoding)
+    # 🔥 SHARED BUFFER: Create file list for this segment's frames only
+    # (frames are named by global index in shared buffer)
+    file_list_path = os.path.join(TEMP_DIR, f"encode_seg{seg_idx}_{video_id}.txt")
+    with open(file_list_path, 'w') as f:
+        for global_idx in range(start_frame, end_frame + 1):
+            frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
+            if os.path.exists(frame_path):
+                # Write absolute path for ffmpeg concat
+                abs_path = os.path.abspath(frame_path).replace('\\', '/')
+                # Use duration 1/fps for each frame
+                f.write(f"file '{abs_path}'\n")
+                f.write(f"duration {1/fps}\n")
+        # Last frame needs to be repeated for proper duration
+        last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
+        if os.path.exists(last_frame_path):
+            abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
+            f.write(f"file '{abs_path}'\n")
+
+    # Encode with NVENC using file list (concat demuxer)
     encode_cmd = [
         FFMPEG_EXE, '-y',
-        '-framerate', str(fps),
-        '-i', os.path.join(cleaned_dir, '%04d.png'),
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', file_list_path,
         '-c:v', 'h264_nvenc',
         '-preset', 'p4',  # Balanced speed/quality
         '-b:v', '8M',
@@ -911,8 +933,12 @@ def encode_segment_background(redis_client, data):
         redis_client.hset(segment_key, 'encoded_path', seg_video_path)
         redis_client.hset(segment_key, 'status', 'encoded')
 
-        # Cleanup frames after successful encoding
-        shutil.rmtree(cleaned_dir, ignore_errors=True)
+        # Cleanup file list and frames after successful encoding
+        if os.path.exists(file_list_path):
+            os.remove(file_list_path)
+
+        # Note: Don't cleanup shared_cleaned_dir yet - other segments may need it!
+        # Final cleanup happens after all segments are encoded
 
     except subprocess.CalledProcessError as e:
         print(f"[ENCODER ERROR] Encoding failed for segment {seg_idx}!")
@@ -1021,6 +1047,16 @@ def trigger_finalization(redis_client, video_id, total_segments):
     for seg_path in segment_paths:
         if os.path.exists(seg_path):
             os.remove(seg_path)
+
+    # 🔥 SHARED BUFFER: Cleanup shared frame directory after finalization
+    # Get shared_cleaned_dir from first segment's metadata
+    segment_key = f"video:{video_id}:segment:0"
+    shared_cleaned_dir_raw = redis_client.hget(segment_key, 'cleaned_dir')
+    if shared_cleaned_dir_raw:
+        shared_cleaned_dir = shared_cleaned_dir_raw.decode() if isinstance(shared_cleaned_dir_raw, bytes) else shared_cleaned_dir_raw
+        if shared_cleaned_dir and os.path.exists(shared_cleaned_dir):
+            print(f"[FINALIZE] Cleaning up shared frame buffer: {shared_cleaned_dir}")
+            shutil.rmtree(shared_cleaned_dir, ignore_errors=True)
 
     final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
     print(f"[FINALIZE] ✓ Final video ready: {final_output} ({final_size_mb:.2f} MB)")
@@ -1989,7 +2025,11 @@ def process_segment_task(self, segment_data):
         seg_cropped_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cropped")
         seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
         seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
-        seg_cleaned_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cleaned")
+
+        # 🔥 SHARED FRAME BUFFER FIX: All segments merge onto same directory
+        # This allows multiple segments to cooperatively edit the same frames
+        shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned")
+        seg_cleaned_dir = shared_cleaned_dir  # Backwards compatibility alias
 
         for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
             os.makedirs(path, exist_ok=True)
@@ -2430,22 +2470,33 @@ def process_segment_task(self, segment_data):
             self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
 
             # Copy original frames to cleaned dir (no processing needed)
+            # 🔥 SHARED BUFFER: Use global frame indices
             if using_memory_pipeline:
                 # Write from memory (only core segment, skip padding)
                 # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
                 padding_offset = start_frame - padded_start
                 core_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
-                print(f"   💾 Writing {len(core_frames)} core segment frames from memory to cleaned dir (skipping {padding_offset} padding frames)...")
-                for frame_idx, frame in enumerate(core_frames):
-                    dst = os.path.join(seg_cleaned_dir, f"{frame_idx:04d}.png")
-                    cv2.imwrite(dst, frame)
+                print(f"   💾 Writing {len(core_frames)} core segment frames from memory to shared buffer (skipping {padding_offset} padding frames)...")
+                for local_idx, frame in enumerate(core_frames):
+                    # Use GLOBAL frame index for shared buffer
+                    global_frame_idx = start_frame + local_idx
+                    frame_file = f"{global_frame_idx:04d}.png"
+                    dst = os.path.join(shared_cleaned_dir, frame_file)
+
+                    # Only write if not already written by another segment
+                    if not os.path.exists(dst):
+                        cv2.imwrite(dst, frame)
             else:
                 # Copy from disk
-                for frame_idx in range(frames_copied):
-                    frame_file = f"{frame_idx:04d}.png"
-                    src = os.path.join(seg_frames_dir, frame_file)
-                    dst = os.path.join(seg_cleaned_dir, frame_file)
-                    if os.path.exists(src):
+                for local_idx in range(frames_copied):
+                    # Use GLOBAL frame index for shared buffer
+                    global_frame_idx = start_frame + local_idx
+                    frame_file = f"{global_frame_idx:04d}.png"
+                    src = os.path.join(seg_frames_dir, f"{local_idx:04d}.png")  # Local source
+                    dst = os.path.join(shared_cleaned_dir, frame_file)  # Global destination
+
+                    # Only write if not already written by another segment
+                    if os.path.exists(src) and not os.path.exists(dst):
                         shutil.copy2(src, dst)
 
         else:
@@ -2554,15 +2605,34 @@ def process_segment_task(self, segment_data):
                 clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
                 cleaned_frames.append(clean)
 
-            # Merge in memory and write in one pass
-            for frame_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
-                frame_file = f"{frame_idx:04d}.png"
-                if cleaned_crop is not None and original is not None:
-                    result_frame = original.copy()
-                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
-                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+            # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
+            # This allows multiple segments to cooperatively edit the same frames
+            print(f"   🔗 Merging to shared frame buffer (supports multi-segment cooperative editing)...")
+            for local_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
+                # Use GLOBAL frame index for shared buffer
+                global_frame_idx = start_frame + local_idx
+                frame_file = f"{global_frame_idx:04d}.png"
+                shared_frame_path = os.path.join(shared_cleaned_dir, frame_file)
+
+                # Load existing state (may have edits from other segments) or original
+                if os.path.exists(shared_frame_path):
+                    # Another segment already edited this frame - load current state
+                    result_frame = cv2.imread(shared_frame_path)
+                    if result_frame is None:
+                        result_frame = original.copy() if original is not None else np.zeros((height, width, 3), dtype=np.uint8)
                 elif original is not None:
-                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+                    result_frame = original.copy()
+                else:
+                    continue
+
+                # Apply this segment's edit (merge cleaned region onto full frame)
+                if cleaned_crop is not None and result_frame is not None:
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+
+                # Save back to shared buffer
+                cv2.imwrite(shared_frame_path, result_frame)
+
+            print(f"   [OK] Merged {len(cleaned_frames)} frames to shared buffer: {shared_cleaned_dir}")
 
         # ⚡ PARALLEL ENCODING: Encode segment MP4 immediately (Blackwell NVENC!)
         print(f"   [OK] Cleaned frames ready in: {seg_cleaned_dir}")
@@ -2585,6 +2655,9 @@ def process_segment_task(self, segment_data):
         redis_client.hset(segment_key, 'frame_count', str(cleaned_frame_count))
         redis_client.hset(segment_key, 'base_name', base_name)
         redis_client.hset(segment_key, 'status', 'ready_for_encoding')
+        # 🔥 SHARED BUFFER: Store frame range for encoder
+        redis_client.hset(segment_key, 'start_frame', str(start_frame))
+        redis_client.hset(segment_key, 'end_frame', str(end_frame))
 
         # Set video-level metadata (idempotent - safe to set multiple times)
         redis_client.set(f"video:{video_id}:total_segments", total_segments)
