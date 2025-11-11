@@ -286,7 +286,7 @@ def benchmark_transformer_cuda_graphs():
         drop_path=0.0,
         norm_layer=nn.LayerNorm,
         use_checkpoint=False
-    ).cuda()
+    ).to('cuda', non_blocking=True)
 
     # Create dummy input
     input_shape = (batch, T, H, W, C)

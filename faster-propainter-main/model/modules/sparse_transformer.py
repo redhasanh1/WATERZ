@@ -12,6 +12,64 @@ try:
 except ImportError:
     FP8_AVAILABLE = False
 
+# SageAttention support for RTX 4090 (INT8 attention, 3x speedup)
+ENABLE_SAGE_ATTENTION = os.getenv("ENABLE_SAGE_ATTENTION", "1") == "1"
+try:
+    if ENABLE_SAGE_ATTENTION:
+        from sageattention import sageattn
+        SAGE_ATTENTION_AVAILABLE = True
+        print("[SPARSE_TRANSFORMER] SageAttention enabled (INT8 kernels)")
+    else:
+        SAGE_ATTENTION_AVAILABLE = False
+except ImportError:
+    SAGE_ATTENTION_AVAILABLE = False
+    if ENABLE_SAGE_ATTENTION:
+        print("[SPARSE_TRANSFORMER] SageAttention not available, using Flash Attention fallback")
+
+def sage_scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False):
+    """
+    SageAttention wrapper for scaled dot product attention
+    Falls back to F.scaled_dot_product_attention if SageAttention unavailable
+    """
+    if not SAGE_ATTENTION_AVAILABLE:
+        return F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal)
+
+    # SageAttention expects [batch, seq_len, num_heads, head_dim]
+    # Current format: [batch, num_heads, seq_len, head_dim]
+    # Need to transpose
+    q_t = q.transpose(1, 2)  # [B, S, H, D]
+    k_t = k.transpose(1, 2)
+    v_t = v.transpose(1, 2)
+
+    # Convert to FP16 for INT8 quantization (SageAttention requirement)
+    original_dtype = q.dtype
+    if q_t.dtype == torch.float32:
+        q_t = q_t.half()
+        k_t = k_t.half()
+        v_t = v_t.half()
+
+    try:
+        # Call SageAttention with INT8 kernels
+        out = sageattn(
+            q_t, k_t, v_t,
+            attn_mask=attn_mask,
+            is_causal=is_causal,
+            tensor_layout="HND"  # [Batch, SeqLen, NumHeads, HeadDim]
+        )
+
+        # Transpose back to [B, H, S, D]
+        out = out.transpose(1, 2)
+
+        # Convert back to original dtype if needed
+        if out.dtype != original_dtype:
+            out = out.to(original_dtype)
+
+        return out
+    except Exception as e:
+        # Fallback to standard SDPA on error
+        print(f"[WARNING] SageAttention failed: {e}, using SDPA fallback")
+        return F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal)
+
 class SoftSplit(nn.Module):
     def __init__(self, channel, hidden, kernel_size, stride, padding):
         super(SoftSplit, self).__init__()
@@ -292,9 +350,9 @@ class SparseWindowAttention(nn.Module):
                     win_k_t = win_k_t.view(n_wh*n_ww, self.n_head, t*w_h*w_w, c_head)
                     win_v_t = win_v_t.view(n_wh*n_ww, self.n_head, t*w_h*w_w, c_head)
 
-                # Use Flash Attention if enabled (Blackwell-optimized)
+                # Use SageAttention (INT8) or Flash Attention if enabled
                 if self.use_flash_attn:
-                    y_t = F.scaled_dot_product_attention(
+                    y_t = sage_scaled_dot_product_attention(
                         win_q_t, win_k_t, win_v_t,
                         dropout_p=self.attn_drop_p if self.training else 0.0
                     )
@@ -315,9 +373,9 @@ class SparseWindowAttention(nn.Module):
             win_k_s = win_k[i, unmask_ind_i, :, :, :w_h*w_w]
             win_v_s = win_v[i, unmask_ind_i, :, :, :w_h*w_w]
 
-            # Use Flash Attention if enabled (Blackwell-optimized)
+            # Use SageAttention (INT8) or Flash Attention if enabled
             if self.use_flash_attn:
-                y_s = F.scaled_dot_product_attention(
+                y_s = sage_scaled_dot_product_attention(
                     win_q_s, win_k_s, win_v_s,
                     dropout_p=self.attn_drop_p if self.training else 0.0
                 )
@@ -439,9 +497,6 @@ class TemporalSparseTransformerBlock(nn.Module):
         """
         import time
 
-        # Note: TensorRT integration handled by watermark.py via FORCE_TRT_TRANSFORMER=1
-        # The entire model.transformers is wrapped with thread-safe TensorRT adapter during init
-
         assert self.depths % t_dilation == 0, 'wrong t_dilation input.'
         T = x.size(1)
         T_ind = [torch.arange(i, T, t_dilation) for i in range(t_dilation)] * (self.depths // t_dilation)
@@ -483,29 +538,29 @@ class TemporalSparseTransformerBlock(nn.Module):
             merge_time_ms = (t_merge_end - t_merge_start) * 1000
 
         # Transformer layers
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()  # REMOVED: Blocks GPU pipeline
         t_transformer_start = time.perf_counter()
         layer_times = []
 
         for i in range(0, self.depths):
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()  # REMOVED: Blocks GPU pipeline
             t_layer_start = time.perf_counter()
             x = self.transformer[i](x, fold_x_size, l_mask, T_ind[i])
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()  # REMOVED: Blocks GPU pipeline
             t_layer_end = time.perf_counter()
             layer_times.append((t_layer_end - t_layer_start) * 1000)
 
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()  # REMOVED: Blocks GPU pipeline
         t_transformer_end = time.perf_counter()
         transformer_time_ms = (t_transformer_end - t_transformer_start) * 1000
 
         # Unmerge: Restore original spatial dimensions
         unmerge_time_ms = 0.0
         if unmerge_fn is not None:
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()  # REMOVED: Blocks GPU pipeline
             t_unmerge_start = time.perf_counter()
             x = unmerge_fn(x)
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()  # REMOVED: Blocks GPU pipeline
             t_unmerge_end = time.perf_counter()
             unmerge_time_ms = (t_unmerge_end - t_unmerge_start) * 1000
 
