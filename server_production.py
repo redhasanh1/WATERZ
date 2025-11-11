@@ -1646,22 +1646,74 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     bboxes_per_frame.append(None)
 
             # Create all masks with GPU batch processing (10-17x faster than CPU loop!)
-            print(f"⚡ Creating {frames_processed} masks (GPU batch)...")
-            mask_start = time.time()
+            # OR use SAM2 for temporal consistency (BEST QUALITY!)
+            use_sam2 = os.getenv('USE_SAM2_TRACKING', '0') == '1'
 
-            # Compatibility: Check if GPU masks are available (older commits may not have this)
-            if hasattr(detector, 'use_gpu_masks') and detector.use_gpu_masks:
-                # GPU batch processing - ALL masks at once!
-                all_masks = detector.create_masks_batch_gpu(all_frames, all_detections)
+            if use_sam2 and frames_with_watermark > 0:
+                print(f"⚡ Using SAM2-Tiny for temporal mask tracking (44ms/frame)...")
+                mask_start = time.time()
+
+                # Import SAM2 tracker
+                import sys
+                sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'faster-propainter-main'))
+                from sam2_tracker import SAM2Tracker
+
+                # Get first bbox from YOLO detection
+                first_bbox = None
+                for bbox in bboxes_per_frame:
+                    if bbox is not None:
+                        first_bbox = bbox
+                        break
+
+                if first_bbox is None:
+                    print("[WARNING] No bbox found - falling back to GPU masks")
+                    if hasattr(detector, 'use_gpu_masks') and detector.use_gpu_masks:
+                        all_masks = detector.create_masks_batch_gpu(all_frames, all_detections)
+                    else:
+                        all_masks = [
+                            detector.create_mask(frame, dets) if dets else zero_mask
+                            for frame, dets in zip(all_frames, all_detections)
+                        ]
+                else:
+                    # Initialize SAM2-Tiny tracker
+                    tracker = SAM2Tracker(device="cuda")
+
+                    # Convert YOLO bbox [x1, y1, x2, y2] format for SAM2
+                    bbox_xyxy = [int(first_bbox[0]), int(first_bbox[1]),
+                                 int(first_bbox[2]), int(first_bbox[3])]
+
+                    # Track watermark across all frames
+                    masks_bool = tracker.track_from_box(
+                        video_frames=all_frames,
+                        bbox=bbox_xyxy,
+                        frame_idx=0,
+                        video_path=video_path
+                    )
+
+                    # Convert boolean masks to uint8 [0, 255]
+                    all_masks = [(mask * 255).astype(np.uint8) for mask in masks_bool]
+
+                    print(f"[OK] SAM2 tracked {len(all_masks)} frames with temporal consistency")
+
+                mask_duration = time.time() - mask_start
+                print(f"   SAM2 tracking: {mask_duration:.3f}s ({mask_duration/frames_processed*1000:.2f}ms/frame)")
             else:
-                # Fallback to CPU sequential (if Kornia not available)
-                all_masks = [
-                    detector.create_mask(frame, dets) if dets else zero_mask
-                    for frame, dets in zip(all_frames, all_detections)
-                ]
+                print(f"⚡ Creating {frames_processed} masks (GPU batch)...")
+                mask_start = time.time()
 
-            mask_duration = time.time() - mask_start
-            print(f"   Mask creation: {mask_duration:.3f}s ({frames_processed/mask_duration:.1f} masks/sec)")
+                # Compatibility: Check if GPU masks are available (older commits may not have this)
+                if hasattr(detector, 'use_gpu_masks') and detector.use_gpu_masks:
+                    # GPU batch processing - ALL masks at once!
+                    all_masks = detector.create_masks_batch_gpu(all_frames, all_detections)
+                else:
+                    # Fallback to CPU sequential (if Kornia not available)
+                    all_masks = [
+                        detector.create_mask(frame, dets) if dets else zero_mask
+                        for frame, dets in zip(all_frames, all_detections)
+                    ]
+
+                mask_duration = time.time() - mask_start
+                print(f"   Mask creation: {mask_duration:.3f}s ({frames_processed/mask_duration:.1f} masks/sec)")
 
             # [INIT] EXTREME SPEED: Store in global memory (INSTANT!)
             print(f"⚡ Storing {frames_processed} frames/masks in memory (INSTANT!)...")
@@ -2015,15 +2067,26 @@ def process_segment_task(self, segment_data):
             memory_hits = 0
             segment_frames_memory = []  # Store frames in memory (skip disk!)
 
+            # 🔥 TEMPORAL CONTEXT FIX: Extract with neighbor padding for ProPainter
+            # neighbor_length=10 means ±5 frames needed for temporal context
+            neighbor_padding = 5
+            padded_start = max(0, start_frame - neighbor_padding)
+            padded_end = end_frame + neighbor_padding  # Will be recalculated with total_frames from cache
+
             if cache_key in FRAME_CACHE:
                 # INSTANT access to frames in memory!
-                print(f"   ⚡ Loading from memory cache (ZERO disk I/O!)...")
+                print(f"   ⚡ Loading from memory cache WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
                 with FRAME_CACHE_LOCK:
                     cached = FRAME_CACHE[cache_key]
                     cached_frames = cached['frames']
+                    total_frames = len(cached_frames)  # Update total_frames from cache
 
-                    # Extract frames directly to memory (NO disk writes!)
-                    for frame_idx in range(start_frame, end_frame + 1):
+                    # Recalculate padded_end with correct total_frames
+                    padded_end = min(total_frames - 1, end_frame + neighbor_padding)
+
+                    # Extract frames WITH PADDING for temporal context
+                    print(f"   [CONTEXT] Extracting frames {padded_start}-{padded_end} (core: {start_frame}-{end_frame}, padding: ±{neighbor_padding})")
+                    for frame_idx in range(padded_start, padded_end + 1):
                         if frame_idx < len(cached_frames):
                             frame = cached_frames[frame_idx]
                             segment_frames_memory.append(frame)
@@ -2031,7 +2094,7 @@ def process_segment_task(self, segment_data):
                             memory_hits += 1
 
                 if memory_hits > 0:
-                    print(f"   [OK] Loaded {memory_hits} frames from memory (ZERO disk I/O!)")
+                    print(f"   [OK] Loaded {memory_hits} frames from memory (including ±{neighbor_padding} neighbor padding for temporal context!)")
 
             # Fallback: Try other sources if memory cache incomplete
             if frames_copied < (end_frame - start_frame + 1):
@@ -2111,18 +2174,20 @@ def process_segment_task(self, segment_data):
         print(f"   [MASKS] Loading masks...")
         self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Loading masks'})
 
-        masks_needed = list(range(start_frame, end_frame + 1))
+        # 🔥 TEMPORAL CONTEXT FIX: Load masks WITH PADDING (same range as frames)
+        masks_needed = list(range(padded_start, padded_end + 1))
         masks_succeeded = 0
         memory_mask_hits = 0
         segment_masks_memory = []  # Store masks in memory (skip disk!)
 
         # Priority 1: Memory cache (INSTANT!)
         if cache_key in FRAME_CACHE:
-            print(f"   ⚡ Loading masks from memory (ZERO disk I/O!)...")
+            print(f"   ⚡ Loading masks from memory WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
             with FRAME_CACHE_LOCK:
                 cached = FRAME_CACHE[cache_key]
                 cached_masks = cached['masks']
 
+                print(f"   [CONTEXT] Extracting masks {padded_start}-{padded_end} (core: {start_frame}-{end_frame}, padding: ±{neighbor_padding})")
                 for abs_frame_idx in masks_needed:
                     if abs_frame_idx < len(cached_masks):
                         mask = cached_masks[abs_frame_idx]
@@ -2332,7 +2397,7 @@ def process_segment_task(self, segment_data):
         elif using_memory_pipeline:
             print(f"   ⚡ Skipping disk-based cropping - using in-memory pipeline (saves ~600ms!)")
 
-        print(f"   [OK] Prepared {frames_copied} frames and masks")
+        print(f"   [OK] Prepared {frames_copied} frames and masks (including ±{neighbor_padding} neighbor padding)")
 
         # VALIDATION: Check first mask to catch bugs early
         if last_valid_bbox and frames_with_watermark > 0:
@@ -2366,9 +2431,12 @@ def process_segment_task(self, segment_data):
 
             # Copy original frames to cleaned dir (no processing needed)
             if using_memory_pipeline:
-                # Write from memory
-                print(f"   💾 Writing {len(segment_frames_memory)} frames from memory to cleaned dir...")
-                for frame_idx, frame in enumerate(segment_frames_memory):
+                # Write from memory (only core segment, skip padding)
+                # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
+                padding_offset = start_frame - padded_start
+                core_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
+                print(f"   💾 Writing {len(core_frames)} core segment frames from memory to cleaned dir (skipping {padding_offset} padding frames)...")
+                for frame_idx, frame in enumerate(core_frames):
                     dst = os.path.join(seg_cleaned_dir, f"{frame_idx:04d}.png")
                     cv2.imwrite(dst, frame)
             else:
@@ -2461,10 +2529,16 @@ def process_segment_task(self, segment_data):
             original_frames = []
             cleaned_frames = []
 
+            # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
+            # ProPainter processed frames WITH padding, we only need core segment frames
+            padding_offset = start_frame - padded_start  # How many padding frames before core segment
+            print(f"   [CONTEXT] ProPainter processed {len(segment_frames_memory)} frames (padding offset: {padding_offset})")
+
             if using_memory_pipeline:
                 # Use already-loaded memory frames (ZERO disk I/O!)
-                print(f"   ⚡ Using {len(segment_frames_memory)} original frames from memory (ZERO disk I/O!)")
-                original_frames = segment_frames_memory[:seg_duration]
+                # Extract ONLY core segment frames (skip padding)
+                print(f"   ⚡ Extracting core segment frames from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
+                original_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
             else:
                 # Disk-based fallback
                 print(f"   [MASKS] Loading {seg_duration} original frames from disk...")
@@ -2473,8 +2547,9 @@ def process_segment_task(self, segment_data):
                     orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
                     original_frames.append(orig)
 
-            # Load cleaned frames from ProPainter output
-            for frame_idx in range(seg_duration):
+            # Load cleaned frames from ProPainter output (skip padding frames)
+            print(f"   [OUTPUT] Extracting core segment from ProPainter output (frames {padding_offset} to {padding_offset + seg_duration})...")
+            for frame_idx in range(padding_offset, padding_offset + seg_duration):
                 frame_file = f"{frame_idx:04d}.png"
                 clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
                 cleaned_frames.append(clean)
