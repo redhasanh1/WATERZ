@@ -1,0 +1,89 @@
+================================================================================
+NATIVE TENSORRT TRANSFORMER BUILDER
+Build transformer directly using TensorRT Python API (no ONNX)
+================================================================================
+================================================================================
+EXTRACTING PYTORCH WEIGHTS
+================================================================================
+[INFO] SparseWindowAttention: Using manual attention (Flash Attention disabled)
+
+[1/3] Created PyTorch transformer model
+        Layers: 8
+        Dim: 512, Heads: 4
+
+[2/3] Extracted weights from layer 0
+        attn.query.weight              shape: (512, 512)
+        attn.query.bias                shape: (512,)
+        attn.key.weight                shape: (512, 512)
+        attn.key.bias                  shape: (512,)
+        attn.value.weight              shape: (512, 512)
+        attn.value.bias                shape: (512,)
+        attn.proj.weight               shape: (512, 512)
+        attn.proj.bias                 shape: (512,)
+        norm1.weight                   shape: (512,)
+        norm1.bias                     shape: (512,)
+        norm2.weight                   shape: (512,)
+        norm2.bias                     shape: (512,)
+        mlp.fc1.weight                 shape: (1960, 512)
+        mlp.fc1.bias                   shape: (1960,)
+        mlp.fc2.weight                 shape: (512, 1960)
+        mlp.fc2.bias                   shape: (512,)
+
+[3/3] Weight extraction complete
+
+================================================================================
+BUILDING TENSORRT NETWORK (NATIVE API)
+================================================================================
+
+[STEP 1/6] TensorRT builder created
+
+[STEP 2/6] Input tensor added: (1, 12, 20, 36, 512)
+[STEP 2/6] Mask tensor added: (1, 12, 20, 36, 1)
+
+[STEP 3/6] Building windowed attention layer...
+
+================================================================================
+BUILDING WINDOWED ATTENTION LAYER (NATIVE TENSORRT)
+================================================================================
+
+[CONFIG] n_head=4, dim=512, c_head=128
+[CONFIG] window_size=(12, 9)
+[CONFIG] input_shape=[1, 12, 20, 36, 512]
+
+[LAYER 1] Layer Normalization
+        Shape: (1, 12, 20, 36, 512) -> (1, 12, 20, 36, 512)
+
+[LAYER 2-4] Q, K, V Projections
+        Q, K, V projections: [B*T*H*W, 512]
+
+[LAYER 5] Window Partition
+        Partitioning Q, K, V into windows of size (12, 9)
+        Padding 20x36 to 24x36
+        Padding 20x36 to 24x36
+        Padding 20x36 to 24x36
+        Windows created: num_windows=8, tokens_per_window=108
+        Q/K/V windows shape: [1, 8, 4, 12, 108, 128]
+
+[LAYER 6] Windowed Attention
+        Processing attention for 8 windows in parallel
+        Windowed attention complete: [1, 8, 4, 12, 108, 128]
+
+[LAYER 7] Window Unpartition
+        Reassembling windows back to spatial format
+        Removing padding from 24x36 to 20x36
+        Output shape: [1, 12, 20, 36, 512]
+
+[LAYER 8] Output Projection
+
+[STATUS] Windowed attention layer complete
+[MEMORY] Attention matrix per window: [108, 108] (vs global [8640, 8640])
+
+[STEP 4/6] Output marked: (1, 12, 20, 36, 512)
+
+[STEP 5/6] Configuring builder...
+        FP32 mode
+
+[STEP 6/6] Building engine...
+        This may take a few minutes...
+        Network has 64 layers
+        Network has 2 inputs, 1 outputs
