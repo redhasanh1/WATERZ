@@ -7,11 +7,8 @@ Production Server for Watermark Removal SaaS
 - ALL FILES STAY ON D DRIVE (inside watermarkz folder)
 """
 
-# CRITICAL: Add TensorRT/cuDNN to PATH BEFORE any imports (fixes Error 127)
-import os
-os.environ['PATH'] = r"D:\watermarkz\TensorRT-10.13.3.9\lib;" + os.environ.get('PATH', '')
-
 import sys
+import os
 import importlib
 import shutil
 from pathlib import Path
@@ -52,6 +49,13 @@ os.environ['PIP_CACHE_DIR'] = os.path.join(SCRIPT_DIR, 'pip_cache')
 os.environ['TRANSFORMERS_CACHE'] = CACHE_DIR
 os.environ['HF_HOME'] = CACHE_DIR
 os.environ['OPENCV_TEMP_PATH'] = TEMP_DIR
+
+# Enable PyTorch transformer wrapper (bypasses TRT buffer routing issue)
+os.environ['FORCE_PYTORCH_WRAPPER'] = '1'
+# Disable ALL other transformer options to avoid conflicts
+os.environ['FORCE_CUSTOM_KERNEL_TRANSFORMER'] = '0'
+os.environ['FORCE_HYBRID_TRANSFORMER'] = '0'
+os.environ['FORCE_TRT_TRANSFORMER'] = '0'
 
 
 def _ensure_cuda_torch():
@@ -1636,19 +1640,15 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 else:
                     bboxes_per_frame.append(None)
 
-            # Create all masks with GPU batch processing (10-17x faster than CPU loop!)
-            print(f"⚡ Creating {frames_processed} masks (GPU batch)...")
+            # Create all masks with CPU processing (benchmarks show CPU is 6.6x faster than GPU)
+            print(f"⚡ Creating {frames_processed} masks...")
             mask_start = time.time()
 
-            if detector.use_gpu_masks:
-                # GPU batch processing - ALL masks at once!
-                all_masks = detector.create_masks_batch_gpu(all_frames, all_detections)
-            else:
-                # Fallback to CPU sequential (if Kornia not available)
-                all_masks = [
-                    detector.create_mask(frame, dets) if dets else zero_mask
-                    for frame, dets in zip(all_frames, all_detections)
-                ]
+            # CPU sequential processing (optimal per benchmarks - GPU has 600MB transfer overhead)
+            all_masks = [
+                detector.create_mask(frame, dets) if dets else zero_mask
+                for frame, dets in zip(all_frames, all_detections)
+            ]
 
             mask_duration = time.time() - mask_start
             print(f"   Mask creation: {mask_duration:.3f}s ({frames_processed/mask_duration:.1f} masks/sec)")
@@ -2310,26 +2310,15 @@ def process_segment_task(self, segment_data):
                         mask_path = os.path.join(seg_mask_dir, frame_file)
                         cv2.imwrite(mask_path, mask)
             else:
-                # Masks were downloaded - check if in memory or on disk
-                if len(segment_masks_memory) == frames_copied:
-                    # Masks are in memory - crop them in-memory (FAST!)
-                    print(f"   [CROP]  Cropping in-memory masks to region...")
-                    cropped_masks_memory = []
-                    for mask in segment_masks_memory:
+                # Masks were downloaded - crop them to the region
+                print(f"   [CROP]  Cropping downloaded masks to region...")
+                for frame_idx in range(frames_copied):
+                    mask_file = f"{frame_idx:04d}.png"
+                    mask_path = os.path.join(seg_mask_dir, mask_file)
+                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                    if mask is not None:
                         cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                        cropped_masks_memory.append(cropped_mask)
-                    segment_masks_memory = cropped_masks_memory
-                    print(f"   [OK] Cropped {len(segment_masks_memory)} masks in memory")
-                else:
-                    # Masks are on disk - crop them from disk files
-                    print(f"   [CROP]  Cropping downloaded masks to region...")
-                    for frame_idx in range(frames_copied):
-                        mask_file = f"{frame_idx:04d}.png"
-                        mask_path = os.path.join(seg_mask_dir, mask_file)
-                        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-                        if mask is not None:
-                            cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                            cv2.imwrite(mask_path, cropped_mask)
+                        cv2.imwrite(mask_path, cropped_mask)
         elif using_memory_pipeline:
             print(f"   ⚡ Skipping disk-based cropping - using in-memory pipeline (saves ~600ms!)")
 

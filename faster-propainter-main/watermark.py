@@ -1087,10 +1087,11 @@ def pipeline(
     class _TransformerTRTAdapter(torch.nn.Module):
         """TensorRT wrapper for Sparse Temporal Transformer (NO FALLBACK when force_trt=True)"""
 
-        def __init__(self, transformer_module, force_trt=False):
+        def __init__(self, transformer_module, force_trt=False, hybrid_mode=False):
             super().__init__()
             self._pytorch_model = transformer_module
             self._force_trt = force_trt
+            self._hybrid_mode = hybrid_mode
             self._trt_ready = False
             self._engine = None
             self._engine_path = None
@@ -1099,25 +1100,34 @@ def pipeline(
                 # TensorRT disabled, use PyTorch
                 return
 
-            # Search for transformer engine (full transformer first, then fallbacks)
-            engine_candidates = [
-                # FULL TRANSFORMER v2 (Pre-LN + Attention + Res + Post-LN + FFN + Res)
-                # Complete transformer block implementation - NO PyTorch fallback needed
-                os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_full_v2.engine'),
-                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_full_v2.engine'),
-                os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_full_v2.engine'),
-                os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_full_v2.engine'),
-                # Golden path engine (attention-only, requires PyTorch for LayerNorm+FFN)
-                os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_golden_path.engine'),
-                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_golden_path.engine'),
-                os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_golden_path.engine'),
-                os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_golden_path.engine'),
-                # Legacy engines (fallback)
-                os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
-                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
-                os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
-                os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
-            ]
+            # Search for transformer engine (hybrid first if enabled, then full transformer, then fallbacks)
+            if hybrid_mode:
+                engine_candidates = [
+                    # HYBRID TRT+PyTorch engine (FP16 I/O + FP32 PyTorch compute for quality)
+                    os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_hybrid_fp16.trt'),
+                    os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_hybrid_fp16.trt'),
+                    os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_hybrid_fp16.trt'),
+                    os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_hybrid_fp16.trt'),
+                ]
+            else:
+                engine_candidates = [
+                    # FULL TRANSFORMER v2 (Pre-LN + Attention + Res + Post-LN + FFN + Res)
+                    # Complete transformer block implementation - NO PyTorch fallback needed
+                    os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_full_v2.engine'),
+                    os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_full_v2.engine'),
+                    os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_full_v2.engine'),
+                    os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_full_v2.engine'),
+                    # Golden path engine (attention-only, requires PyTorch for LayerNorm+FFN)
+                    os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_golden_path.engine'),
+                    os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_golden_path.engine'),
+                    os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_golden_path.engine'),
+                    os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_golden_path.engine'),
+                    # Legacy engines (fallback)
+                    os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
+                    os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
+                    os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
+                    os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_unfolded_fp16.engine'),
+                ]
 
             for p in engine_candidates:
                 if os.path.exists(p):
@@ -1461,7 +1471,39 @@ def pipeline(
                 #     print(f"[OK] torch.compile() setup complete ({time.time() - compile_start:.2f}s) - warmup will happen on first inference")
 
                 # ⚡ TensorRT Transformer Integration (5-10x speedup!)
-                if os.environ.get('FORCE_TRT_TRANSFORMER', '0') == '1':
+                if os.environ.get('FORCE_CUSTOM_KERNEL_TRANSFORMER', '0') == '1':
+                    print(f"[CUSTOM KERNEL] Wrapping transformer with fused plugin engine...")
+                    import sys
+                    sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+                    from custom_kernel_transformer import CustomKernelTransformer
+                    wrapper = CustomKernelTransformer()
+                    if use_half:
+                        wrapper = wrapper.to(device).half()
+                    else:
+                        wrapper = wrapper.to(device)
+                    model.transformers = wrapper
+                    print(f"[OK] Custom fused transformer enabled (device={device}, dtype={'FP16' if use_half else 'FP32'})")
+                elif os.environ.get('FORCE_HYBRID_TRANSFORMER', '0') == '1':
+                    print(f"[HYBRID] Wrapping transformer with TRT FP16 + PyTorch FP32 plugin...")
+                    print(f"[HYBRID] Quality: std ≈ 1.0 (vs 3.7 pure TRT), Speed: ~98% of pure TRT")
+                    import ctypes
+                    # Preload plugin DLL
+                    plugin_dll_path = os.path.join(os.path.dirname(__file__), '..', 'cuda_kernels', 'build_ninja', 'fused_transformer_plugin.dll')
+                    if os.path.exists(plugin_dll_path):
+                        ctypes.CDLL(os.path.abspath(plugin_dll_path))
+                        print(f"[HYBRID] Plugin DLL loaded: {plugin_dll_path}")
+                    else:
+                        print(f"[HYBRID] WARNING: Plugin DLL not found: {plugin_dll_path}")
+                    # Use TRT adapter with hybrid engine
+                    force_trt = True
+                    wrapper = _TransformerTRTAdapter(model.transformers, force_trt=force_trt, hybrid_mode=True)
+                    if use_half:
+                        wrapper = wrapper.to(device).half()
+                    else:
+                        wrapper = wrapper.to(device)
+                    model.transformers = wrapper
+                    print(f"[OK] Hybrid transformer enabled (FP16 I/O, FP32 compute, device={device})")
+                elif os.environ.get('FORCE_TRT_TRANSFORMER', '0') == '1':
                     print(f"[TRT] Wrapping transformer with TensorRT adapter...")
                     force_trt = True
                     wrapper = _TransformerTRTAdapter(model.transformers, force_trt=force_trt)
@@ -1472,6 +1514,19 @@ def pipeline(
                         wrapper = wrapper.to(device)
                     model.transformers = wrapper
                     print(f"[OK] Transformer TensorRT adapter enabled (device={device}, dtype={'FP16' if use_half else 'FP32'})")
+                elif os.environ.get('FORCE_PYTORCH_WRAPPER', '0') == '1':
+                    print(f"[PyTorch] Wrapping transformer with pure PyTorch adapter...")
+                    print(f"[PyTorch] This bypasses TRT buffer routing issue while maintaining quality")
+                    from model.modules.pytorch_transformer_adapter import PyTorchTransformerAdapter
+                    wrapper = PyTorchTransformerAdapter(checkpoint_path=ckpt_path, device=device)
+                    # Wrapper handles FP16 I/O internally, always keeps internal model as FP32
+                    if use_half:
+                        wrapper = wrapper.to(device).half()
+                    else:
+                        wrapper = wrapper.to(device)
+                    model.transformers = wrapper
+                    print(f"[OK] PyTorch transformer adapter enabled (FP16 I/O, FP32 internal, device={device})")
+                    print(f"[OK] Expected performance: ~64ms per frame batch, 15 FPS")
 
                 _GLOBAL_MODELS_CACHE[cache_key]['propainter'] = model
                 print(f"[CACHE] ProPainter model cached in {'FP16' if use_half else 'FP32'} ({time.time() - propainter_start:.2f}s)")
@@ -1493,7 +1548,33 @@ def pipeline(
         #     print(f"[OK] torch.compile() setup complete ({time.time() - compile_start:.2f}s) - warmup will happen on first inference")
 
         # ⚡ TensorRT Transformer Integration (5-10x speedup!)
-        if os.environ.get('FORCE_TRT_TRANSFORMER', '0') == '1':
+        if os.environ.get('FORCE_CUSTOM_KERNEL_TRANSFORMER', '0') == '1':
+            print(f"[CUSTOM KERNEL] Wrapping transformer with fused plugin engine...")
+            import sys
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+            from custom_kernel_transformer import CustomKernelTransformer
+            wrapper = CustomKernelTransformer()
+            wrapper = wrapper.to(device).half()
+            model.transformers = wrapper
+            print(f"[OK] Custom fused transformer enabled (device={device}, dtype=FP16)")
+        elif os.environ.get('FORCE_HYBRID_TRANSFORMER', '0') == '1':
+            print(f"[HYBRID] Wrapping transformer with TRT FP16 + PyTorch FP32 plugin...")
+            print(f"[HYBRID] Quality: std ≈ 1.0 (vs 3.7 pure TRT), Speed: ~98% of pure TRT")
+            import ctypes
+            # Preload plugin DLL
+            plugin_dll_path = os.path.join(os.path.dirname(__file__), '..', 'cuda_kernels', 'build_ninja', 'fused_transformer_plugin.dll')
+            if os.path.exists(plugin_dll_path):
+                ctypes.CDLL(os.path.abspath(plugin_dll_path))
+                print(f"[HYBRID] Plugin DLL loaded: {plugin_dll_path}")
+            else:
+                print(f"[HYBRID] WARNING: Plugin DLL not found: {plugin_dll_path}")
+            # Use TRT adapter with hybrid engine
+            force_trt = True
+            wrapper = _TransformerTRTAdapter(model.transformers, force_trt=force_trt, hybrid_mode=True)
+            wrapper = wrapper.to(device).half()
+            model.transformers = wrapper
+            print(f"[OK] Hybrid transformer enabled (FP16 I/O, FP32 compute, device={device})")
+        elif os.environ.get('FORCE_TRT_TRANSFORMER', '0') == '1':
             print(f"[TRT] Wrapping transformer with TensorRT adapter...")
             force_trt = True
             wrapper = _TransformerTRTAdapter(model.transformers, force_trt=force_trt)

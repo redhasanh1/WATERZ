@@ -40,8 +40,8 @@ class TransformerONNXWrapper(nn.Module):
         Returns:
             output: [B, T, H, W, C] tensor
         """
-        # Static fold_x_size (known at export time)
-        fold_x_size = (self.H, self.W)
+        # Static fold_x_size (encoder feature map size, 3x transformer patches due to stride=3)
+        fold_x_size = (self.H * 3, self.W * 3)
 
         # Dummy mask for ONNX export (all ones = no masking)
         # Shape: [B, T, H, W, 1]
@@ -60,8 +60,8 @@ class TransformerONNXWrapper(nn.Module):
 def export_transformer_to_onnx(
     checkpoint_path=None,
     output_path="transformer_fp16.onnx",
-    static_shape=(1, 5, 15, 15, 512),  # After token merging: 15x15
-    opset_version=17,
+    static_shape=(1, 12, 20, 36, 512),  # Typical production shape (no token merging for now)
+    opset_version=18,  # opset 18 for col2im support
     simplify=True
 ):
     """
@@ -136,8 +136,13 @@ def export_transformer_to_onnx(
         output = wrapper(dummy_input)
     print(f"   Output shape: {output.shape}")
 
+    # Register Col2Im symbolic for fold operations
+    print(f"\n5. Registering Col2Im symbolic for fold operations...")
+    from register_col2im_symbolic import register_col2im_symbolic
+    register_col2im_symbolic(opset_version=opset_version)
+
     # Export to ONNX
-    print(f"\n5. Exporting to ONNX...")
+    print(f"\n6. Exporting to ONNX...")
     print(f"   Output: {output_path}")
     print(f"   Opset: {opset_version}")
 
@@ -148,13 +153,16 @@ def export_transformer_to_onnx(
             output_path,
             input_names=['input'],
             output_names=['output'],
-            dynamic_axes=None,  # Static shapes for TensorRT optimization
+            dynamic_axes={
+                'input': {1: 'T', 2: 'H', 3: 'W'},  # Dynamic temporal, height, width
+                'output': {1: 'T', 2: 'H', 3: 'W'}  # Match input dynamics
+            },
             opset_version=opset_version,
             do_constant_folding=True,
             verbose=False,
         )
 
-    print(f"   ✓ ONNX exported: {output_path}")
+    print(f"   [OK] ONNX exported: {output_path}")
 
     # Simplify ONNX (optional but recommended)
     if simplify:
@@ -162,18 +170,18 @@ def export_transformer_to_onnx(
             import onnx
             from onnxsim import simplify as onnx_simplify
 
-            print(f"\n6. Simplifying ONNX...")
+            print(f"\n7. Simplifying ONNX...")
             model = onnx.load(output_path)
             model_simp, check = onnx_simplify(model)
 
             if check:
                 onnx.save(model_simp, output_path)
-                print(f"   ✓ ONNX simplified")
+                print(f"   [OK] ONNX simplified")
             else:
-                print(f"   ⚠ Simplification failed (using original)")
+                print(f"   [WARNING] Simplification failed (using original)")
 
         except ImportError:
-            print(f"\n6. ONNX simplifier not available (pip install onnx-simplifier)")
+            print(f"\n7. ONNX simplifier not available (pip install onnx-simplifier)")
 
     print("\n" + "="*60)
     print("EXPORT COMPLETE!")
@@ -240,7 +248,7 @@ def build_tensorrt_engine(
                 print(f"  - {parser.get_error(error)}")
             return None
 
-    print(f"   ✓ ONNX parsed successfully")
+    print(f"   [OK] ONNX parsed successfully")
 
     # Configure builder
     print(f"\n3. Configuring TensorRT builder...")
@@ -249,7 +257,7 @@ def build_tensorrt_engine(
 
     if fp16:
         config.set_flag(trt.BuilderFlag.FP16)
-        print(f"   ✓ FP16 mode enabled")
+        print(f"   [OK] FP16 mode enabled")
 
     print(f"   Workspace: {workspace_mb} MB")
 
@@ -266,7 +274,7 @@ def build_tensorrt_engine(
     with open(engine_path, 'wb') as f:
         f.write(serialized_engine)
 
-    print(f"   ✓ Engine saved: {engine_path}")
+    print(f"   [OK] Engine saved: {engine_path}")
 
     print("\n" + "="*60)
     print("ENGINE BUILD COMPLETE!")
@@ -306,7 +314,7 @@ if __name__ == "__main__":
         checkpoint_path=args.checkpoint,
         output_path=args.output,
         static_shape=static_shape,
-        opset_version=17,
+        opset_version=18,  # opset 18 for col2im support
         simplify=True
     )
 

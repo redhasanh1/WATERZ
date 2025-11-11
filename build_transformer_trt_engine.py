@@ -201,23 +201,30 @@ def build_engine(onnx_path, engine_path, fp16=True, fp8=False, int8=False, works
         except Exception as e:
             print(f"[WARNING] FP8 flag failed: {e}")
 
-    # Set optimization profile for dynamic shapes (must be done BEFORE INT8 calibrator setup)
-    print("[BUILD] Setting optimization profile for dynamic T, H, W dimensions...")
-    profile = builder.create_optimization_profile()
+    # Check if input has dynamic dimensions
+    input_tensor = network.get_input(0)
+    has_dynamic_shape = any(dim == -1 for dim in input_tensor.shape)
 
-    # Input shape: [B, T, H, W, C] = [1, T, H, W, 512]
-    # T is dynamic (varies from 5 to 20 frames per segment based on neighbor frames)
-    # H is dynamic (varies from 15 to 25 tokens based on video height)
-    # W is dynamic (varies from 10 to 40 tokens based on video width)
-    input_name = network.get_input(0).name
-    profile.set_shape(
-        input_name,
-        min=(1, 5, 15, 10, 512),     # Min: 5 frames, small video (boundary case)
-        opt=(1, 12, 20, 36, 512),    # Optimal: 12 frames, 480x872 video (typical)
-        max=(1, 20, 25, 40, 512)     # Max: 20 frames, large video (with ref frames)
-    )
-    config.add_optimization_profile(profile)
-    print("[OK] Optimization profile set (T: 5-20, H: 15-25, W: 10-40)")
+    if has_dynamic_shape:
+        # Set optimization profile for dynamic shapes (must be done BEFORE INT8 calibrator setup)
+        print("[BUILD] Setting optimization profile for dynamic T, H, W dimensions...")
+        profile = builder.create_optimization_profile()
+
+        # Input shape: [B, T, H, W, C] = [1, T, H, W, 512]
+        # T is dynamic (varies from 5 to 20 frames per segment based on neighbor frames)
+        # H is dynamic (varies from 15 to 25 tokens based on video height)
+        # W is dynamic (varies from 10 to 40 tokens based on video width)
+        input_name = network.get_input(0).name
+        profile.set_shape(
+            input_name,
+            min=(1, 5, 15, 10, 512),     # Min: 5 frames, small video (boundary case)
+            opt=(1, 12, 20, 36, 512),    # Optimal: 12 frames, 480x872 video (typical)
+            max=(1, 20, 25, 40, 512)     # Max: 20 frames, large video (with ref frames)
+        )
+        config.add_optimization_profile(profile)
+        print("[OK] Optimization profile set (T: 5-20, H: 15-25, W: 10-40)")
+    else:
+        print("[INFO] Input has static shape, skipping optimization profile")
 
     # Setup INT8 calibrator (must be done AFTER optimization profile)
     if int8:
@@ -238,7 +245,8 @@ def build_engine(onnx_path, engine_path, fp16=True, fp8=False, int8=False, works
                     cache_file=cache_file,
                     batch_size=1
                 )
-                config.set_calibration_profile(profile)
+                if has_dynamic_shape:
+                    config.set_calibration_profile(profile)
                 config.int8_calibrator = calibrator
                 print("[CALIBRATOR] Calibrator configured")
                 print("[CALIBRATOR] Expected: 1.5-2.0x speedup over FP16")

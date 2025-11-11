@@ -96,38 +96,52 @@ class DeformableAlignment(ModulatedDeformConv2d):
                                                 self.dilation, mask)
 
 
-class DeformableAlignmentDCNv4(nn.Module):
+class DeformableAlignmentDCNv4(ModulatedDeformConv2d):
     """DCNv4-based deformable alignment (3x faster than DCNv2).
 
     Handles format conversion between ProPainter's [N,C,H,W] and DCNv4's [N,L,C].
+    Falls back to standard modulated deformable convolution when ENABLE_DCNV4_RFCNET=0.
     """
     def __init__(self, in_channels, out_channels, kernel_size, padding=1, deform_groups=16, max_residue_magnitude=3):
-        super(DeformableAlignmentDCNv4, self).__init__()
+        # Initialize base class (provides weight, bias, stride, padding, dilation, deform_groups)
+        super(DeformableAlignmentDCNv4, self).__init__(
+            in_channels, out_channels, kernel_size,
+            padding=padding, deform_groups=deform_groups
+        )
 
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.padding = padding
-        self.deform_groups = deform_groups
         self.max_residue_magnitude = max_residue_magnitude
 
-        # DCNv4 constraint: channels/group must be divisible by 16
-        # For out_channels=128, deform_groups=16: 128/16=8 (not divisible by 16)
-        # We need to find valid group size where out_channels/group % 16 == 0
-        dcnv4_group = 1
-        for g in [8, 4, 2, 1]:  # Try groups in descending order
-            if (out_channels // g) % 16 == 0:
-                dcnv4_group = g
-                break
+        # Check if DCNv4 should be enabled via environment variable
+        self.use_dcnv4 = (os.getenv('ENABLE_DCNV4_RFCNET', '0') == '1') and DCNV4_AVAILABLE
 
-        # DCNv4 module (expects [N, L, C] where L=H*W)
-        self.dcnv4 = DCNv4Module(
-            channels=out_channels,
-            kernel_size=kernel_size,
-            stride=1,
-            pad=padding,
-            group=dcnv4_group,
-        )
+        if self.use_dcnv4:
+            # DCNv4 constraint: channels/group must be divisible by 16
+            # For out_channels=128, deform_groups=16: 128/16=8 (not divisible by 16)
+            # We need to find valid group size where out_channels/group % 16 == 0
+            dcnv4_group = 1
+            for g in [8, 4, 2, 1]:  # Try groups in descending order
+                if (out_channels // g) % 16 == 0:
+                    dcnv4_group = g
+                    break
+
+            # DCNv4 module (expects [N, L, C] where L=H*W)
+            self.dcnv4 = DCNv4Module(
+                channels=out_channels,
+                kernel_size=kernel_size,
+                stride=1,
+                pad=padding,
+                group=dcnv4_group,
+            )
+
+            # Input projection (DCNv4 handles channel transform internally)
+            if in_channels != out_channels:
+                self.input_proj = nn.Conv2d(in_channels, out_channels, 1)
+            else:
+                self.input_proj = nn.Identity()
+
+            print(f"[ProPainter] Using DCNv4 deformable alignment (3x faster)")
+        else:
+            print(f"[ProPainter] Using standard modulated deformable convolution (ENABLE_DCNV4_RFCNET=0)")
 
         # Offset generation network (same as original)
         self.conv_offset = nn.Sequential(
@@ -159,22 +173,40 @@ class DeformableAlignmentDCNv4(nn.Module):
         Returns:
             out: [N, C, H, W] - aligned features
         """
-        # NOTE: DCNv4 generates offsets internally, unlike DCNv2
-        # We keep conv_offset for future compatibility but don't use its outputs
-        # (The conv_offset weights loaded from checkpoint are ignored)
+        if self.use_dcnv4:
+            # DCNv4 path (3x faster, but has CUDA bugs)
+            # DCNv4 generates offsets internally, unlike DCNv2
+            x_proj = self.input_proj(x)
+            N, C, H, W = x_proj.shape
+            x_nlc = x_proj.permute(0, 2, 3, 1).reshape(N, H*W, C)
 
-        # Project input if needed
-        x_proj = self.input_proj(x)
+            # Apply DCNv4 (generates offsets internally)
+            x_out = self.dcnv4(x_nlc, shape=(H, W))
 
-        # Convert [N,C,H,W] -> [N,L,C] for DCNv4
-        N, C, H, W = x_proj.shape
-        x_nlc = x_proj.permute(0, 2, 3, 1).reshape(N, H*W, C)
+            # Convert back [N,L,C] -> [N,C,H,W]
+            x_out = x_out.reshape(N, H, W, C).permute(0, 3, 1, 2)
+        else:
+            # Fallback: Standard modulated deformable convolution (same as DeformableAlignment)
+            # Generate offset and mask from conditioning features
+            out = self.conv_offset(cond_feat)
+            o1, o2, mask = torch.chunk(out, 3, dim=1)
 
-        # Apply DCNv4 (generates offsets internally - 3x faster than DCNv2)
-        x_out = self.dcnv4(x_nlc, shape=(H, W))
+            # Offset with residue magnitude and flow
+            offset = self.max_residue_magnitude * torch.tanh(torch.cat((o1, o2), dim=1))
+            offset = offset + flow.flip(1).repeat(1, offset.size(1) // 2, 1, 1)
 
-        # Convert back [N,L,C] -> [N,C,H,W]
-        x_out = x_out.reshape(N, H, W, C).permute(0, 3, 1, 2)
+            # Mask
+            mask = torch.sigmoid(mask)
+
+            # Apply modulated deformable convolution (stable, no CUDA errors)
+            if MMCV_AVAILABLE:
+                x_out = modulated_deform_conv2d(x, offset, mask, self.weight, self.bias,
+                                              self.stride, self.padding,
+                                              self.dilation, self.deform_groups)
+            else:
+                x_out = torchvision.ops.deform_conv2d(x, offset, self.weight, self.bias,
+                                                    self.stride, self.padding,
+                                                    self.dilation, mask)
 
         return x_out
 

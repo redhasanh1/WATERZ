@@ -62,12 +62,13 @@ def build_attention_golden_path():
     Wproj = attn.proj.weight.detach().cpu().numpy()
     bproj = attn.proj.bias.detach().cpu().numpy()
 
-    # Convert Linear weights to Conv1x1 format
+    # Convert Linear weights to Conv1x1 format (FP16 for precision match with PyTorch)
     def linear_to_conv1x1(W_linear, b):
-        """Convert [out, in] -> [out, in, 1, 1]"""
+        """Convert [out, in] -> [out, in, 1, 1] with FP16 precision"""
         W_conv = W_linear.reshape(W_linear.shape[0], W_linear.shape[1], 1, 1)
-        W_conv = np.ascontiguousarray(W_conv.astype(np.float32))
-        b = np.ascontiguousarray(b.astype(np.float32))
+        # Use FP16 to match PyTorch model precision (avoids FP32→FP16 quality loss)
+        W_conv = np.ascontiguousarray(W_conv.astype(np.float16))
+        b = np.ascontiguousarray(b.astype(np.float16))
         return W_conv, b
 
     Wq_conv, bq_conv = linear_to_conv1x1(Wq, bq)
@@ -107,8 +108,9 @@ def build_attention_golden_path():
     # ========== STEP 0: 5D -> 4D (edge only) ==========
     print(f"\n[STEP 0] 5D -> 4D NCHW (edge)")
     # Dynamic shape input: -1 for T, H, W dimensions
-    x5d = network.add_input(name="input", dtype=trt.float32, shape=(B, -1, -1, -1, C))
-    print(f"        Input: [{B}, -1, -1, -1, {C}] (5D - T/H/W dynamic)")
+    # Use FP16 to match PyTorch model precision (model.half())
+    x5d = network.add_input(name="input", dtype=trt.float16, shape=(B, -1, -1, -1, C))
+    print(f"        Input: [{B}, -1, -1, -1, {C}] (5D - T/H/W dynamic, FP16)")
 
     # Extract dynamic shape dimensions using IShapeLayer
     shape_layer = network.add_shape(x5d)  # Get shape as [1, T, H, W, 512]
@@ -182,8 +184,9 @@ def build_attention_golden_path():
 
     def add_conv1x1(input_4d, W_conv, b_conv, out_channels, name):
         """Add 1x1 convolution layer"""
-        W_trt = trt.Weights(trt.float32, W_conv.ctypes.data, int(np.prod(W_conv.shape)))
-        b_trt = trt.Weights(trt.float32, b_conv.ctypes.data, int(np.prod(b_conv.shape)))
+        # CRITICAL: Weights are FP16 (converted in linear_to_conv1x1), must match dtype
+        W_trt = trt.Weights(trt.float16, W_conv.ctypes.data, int(np.prod(W_conv.shape)))
+        b_trt = trt.Weights(trt.float16, b_conv.ctypes.data, int(np.prod(b_conv.shape)))
         conv = network.add_convolution_nd(input_4d, out_channels, trt.Dims([1, 1]), W_trt, b_trt)
         conv.stride_nd = trt.Dims([1, 1])
         conv.padding_nd = trt.Dims([0, 0])
@@ -289,11 +292,12 @@ def build_attention_golden_path():
     print(f"        Scores: [{N_prime}, {n_head}, {tokens}, {tokens}]")
 
     # Scale by 1/sqrt(d_head) - broadcastable [1,1,1,1]
+    # CRITICAL: Use FP16 to match attention scores dtype (prevents saturation)
     scale = 1.0 / np.sqrt(float(d_head))
-    scale_arr = np.array([[[[scale]]]], dtype=np.float32)  # [1,1,1,1]
+    scale_arr = np.array([[[[scale]]]], dtype=np.float16)  # [1,1,1,1]
     scale_const = network.add_constant(
         trt.Dims([1, 1, 1, 1]),
-        trt.Weights(trt.float32, scale_arr.ctypes.data, int(scale_arr.size))
+        trt.Weights(trt.float16, scale_arr.ctypes.data, int(scale_arr.size))
     )
     scale_const.name = "attn_scale"
     scaled = network.add_elementwise(attn_scores, scale_const.get_output(0), trt.ElementWiseOperation.PROD)
@@ -412,9 +416,18 @@ def build_attention_golden_path():
     shOut.second_transpose = (0, 1, 2, 3, 4)  # identity for rank-5
     shOut.name = "output_4d_to_5d"
     y5d = shOut.get_output(0)
-    print(f"        Output: [B, T, H, W, C] (5D - dynamic)")
 
-    network.mark_output(y5d)
+    # CRITICAL: Cast output to FP16 (matches PyTorch model.half())
+    cast_out = network.add_cast(y5d, trt.float16)
+    cast_out.name = "cast_output_to_fp16"
+    y5d_fp16 = cast_out.get_output(0)
+
+    # Mark as output FIRST before setting dtype (TRT requirement)
+    network.mark_output(y5d_fp16)
+
+    # Set output tensor precision explicitly (must be after mark_output)
+    y5d_fp16.dtype = trt.float16
+    print(f"        Output: [B, T, H, W, C] (5D - dynamic, FP16)")
 
     print(f"\n[BUILD] Total layers: {network.num_layers}")
 
@@ -427,6 +440,10 @@ def build_attention_golden_path():
         1 << int(trt.TacticSource.CUBLAS_LT)
     )
     config.builder_optimization_level = 3
+
+    # Enable FP16 precision mode (matches PyTorch model.half())
+    config.set_flag(trt.BuilderFlag.FP16)
+    print(f"\n[BUILD] FP16 mode enabled (matches PyTorch precision)")
 
     profile = builder.create_optimization_profile()
     # Dynamic shape support for all production resolutions

@@ -70,41 +70,46 @@ class SoftComp(nn.Module):
 
 
 class FusionFeedForward(nn.Module):
-    """
-    Standard transformer MLP - TensorRT compatible.
-    Replaced fold/unfold operations to avoid Col2Im ONNX operator.
-
-    Original FusionFeedForward used spatial fold/unfold for token mixing,
-    but this exports to Col2Im which TensorRT doesn't support.
-
-    This version uses standard Linear -> GELU -> Linear pattern.
-    """
     def __init__(self, dim, hidden_dim=1960, t2t_params=None):
         super(FusionFeedForward, self).__init__()
         # We set hidden_dim as a default to 1960
-        # t2t_params kept for backward compatibility but unused
 
         # FP8 control (RTX 4090 Ada Lovelace optimization)
         use_fp8 = FP8_AVAILABLE and os.getenv("ENABLE_FP8_TRANSFORMER", "0") == "1"
         LinearLayer = FP8Linear if use_fp8 else nn.Linear
 
-        # Standard transformer MLP: Linear -> GELU -> Linear
-        self.fc1 = LinearLayer(dim, hidden_dim)
-        self.act = nn.GELU()
-        self.fc2 = LinearLayer(hidden_dim, dim)
+        self.fc1 = nn.Sequential(LinearLayer(dim, hidden_dim))
+        self.fc2 = nn.Sequential(nn.GELU(), LinearLayer(hidden_dim, dim))
+        assert t2t_params is not None
+        self.t2t_params = t2t_params
+        self.kernel_shape = reduce((lambda x, y: x * y), t2t_params['kernel_size']) # 49
 
-    def forward(self, x):
-        """
-        Standard feedforward pass (TensorRT-compatible)
+    def forward(self, x, output_size):
+        n_vecs = 1
+        for i, d in enumerate(self.t2t_params['kernel_size']):
+            n_vecs *= int((output_size[i] + 2 * self.t2t_params['padding'][i] -
+                           (d - 1) - 1) / self.t2t_params['stride'][i] + 1)
 
-        Args:
-            x: [B, N, C] where N = T*H*W
-
-        Returns:
-            x: [B, N, C]
-        """
         x = self.fc1(x)
-        x = self.act(x)
+        b, n, c = x.size()
+        normalizer = x.new_ones(b, n, self.kernel_shape).view(-1, n_vecs, self.kernel_shape).permute(0, 2, 1)
+        normalizer = F.fold(normalizer,
+                            output_size=output_size,
+                            kernel_size=self.t2t_params['kernel_size'],
+                            padding=self.t2t_params['padding'],
+                            stride=self.t2t_params['stride'])
+
+        x = F.fold(x.view(-1, n_vecs, c).permute(0, 2, 1),
+                   output_size=output_size,
+                   kernel_size=self.t2t_params['kernel_size'],
+                   padding=self.t2t_params['padding'],
+                   stride=self.t2t_params['stride'])
+
+        x = F.unfold(x / normalizer,
+                     kernel_size=self.t2t_params['kernel_size'],
+                     padding=self.t2t_params['padding'],
+                     stride=self.t2t_params['stride']).permute(
+                         0, 2, 1).contiguous().view(b, n, c)
         x = self.fc2(x)
         return x
 
@@ -365,7 +370,7 @@ class TemporalSparseTransformer(nn.Module):
         # FFN
         x = shortcut + att_x
         y = self.norm2(x)
-        x = x + self.mlp(y.view(B, T * H * W, C)).view(B, T, H, W, C)
+        x = x + self.mlp(y.view(B, T * H * W, C), fold_x_size).view(B, T, H, W, C)
 
         return x
 
@@ -433,6 +438,9 @@ class TemporalSparseTransformerBlock(nn.Module):
             out_tokens: shape [B T H W C]
         """
         import time
+
+        # Note: TensorRT integration handled by watermark.py via FORCE_TRT_TRANSFORMER=1
+        # The entire model.transformers is wrapped with thread-safe TensorRT adapter during init
 
         assert self.depths % t_dilation == 0, 'wrong t_dilation input.'
         T = x.size(1)
