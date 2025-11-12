@@ -2010,13 +2010,20 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                         seg_bbox, crop_w, crop_h, padding_ratio=0.15, min_size=128
                     )
 
-                    # Extract segment frames and masks
+                    # Extract segment frames and masks WITH TEMPORAL PADDING for context
                     seg_frames_dir = os.path.join(output_dir, f"segment_{seg_idx}_frames")
                     seg_masks_dir = os.path.join(output_dir, f"segment_{seg_idx}_masks")
                     os.makedirs(seg_frames_dir, exist_ok=True)
                     os.makedirs(seg_masks_dir, exist_ok=True)
 
-                    for frame_idx in range(start_f, end_f + 1):
+                    # Add temporal padding for ProPainter context (allows seeing frames before/after segment)
+                    TEMPORAL_PADDING = 15  # frames to add on each side
+                    pad_start = max(0, start_f - TEMPORAL_PADDING)
+                    pad_end = min(extracted_frames - 1, end_f + TEMPORAL_PADDING)
+
+                    print(f"[SAM2 TEMPORAL] Segment {seg_idx+1}: extracting frames {pad_start}-{pad_end} (includes ±{TEMPORAL_PADDING} padding) for frames {start_f}-{end_f}")
+
+                    for frame_idx in range(pad_start, pad_end + 1):
                         frame_file = f"{frame_idx:04d}.png"
                         src_frame = os.path.join(cropped_dir, frame_file)
                         src_mask = os.path.join(sam2_masks_dir, frame_file)
@@ -2024,18 +2031,22 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                         if os.path.exists(src_frame):
                             frame = cv2.imread(src_frame)
                             seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                            dst_frame = os.path.join(seg_frames_dir, f"{frame_idx-start_f:04d}.png")
+                            dst_frame = os.path.join(seg_frames_dir, f"{frame_idx-pad_start:04d}.png")
                             cv2.imwrite(dst_frame, seg_frame)
 
-                        # Always create mask file for every frame (ProPainter needs matching frame/mask counts)
-                        if os.path.exists(src_mask):
-                            mask = cv2.imread(src_mask, cv2.IMREAD_GRAYSCALE)
-                            seg_mask = mask[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                        else:
-                            # Create empty mask for neighbor frames (used for optical flow only, no inpainting)
+                        # Create mask: empty for padding frames, actual for segment frames
+                        if frame_idx < start_f or frame_idx > end_f:
+                            # Padding frame: create empty mask (provides context, no inpainting)
                             seg_mask = np.zeros((seg_crop_h, seg_crop_w), dtype=np.uint8)
+                        else:
+                            # Segment frame: extract actual mask
+                            if os.path.exists(src_mask):
+                                mask = cv2.imread(src_mask, cv2.IMREAD_GRAYSCALE)
+                                seg_mask = mask[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                            else:
+                                seg_mask = np.zeros((seg_crop_h, seg_crop_w), dtype=np.uint8)
 
-                        dst_mask = os.path.join(seg_masks_dir, f"{frame_idx-start_f:04d}.png")
+                        dst_mask = os.path.join(seg_masks_dir, f"{frame_idx-pad_start:04d}.png")
                         cv2.imwrite(dst_mask, seg_mask)
 
                     # Generate debug video with mask overlay
@@ -2063,10 +2074,10 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                     debug_frames_dir = os.path.join(debug_output_dir, f"segment_{seg_idx}_frames{start_f}-{end_f}_DEBUG")
                     os.makedirs(debug_frames_dir, exist_ok=True)
 
-                    # Create frames with purple mask overlay
+                    # Create frames with purple mask overlay (only segment frames, not padding)
                     frames_created = 0
                     for frame_idx in range(start_f, end_f + 1):
-                        frame_file = f"{frame_idx-start_f:04d}.png"
+                        frame_file = f"{frame_idx-pad_start:04d}.png"  # Adjusted for padding
                         src_frame = os.path.join(seg_frames_dir, frame_file)
                         src_mask = os.path.join(seg_masks_dir, frame_file)
 
@@ -2157,10 +2168,14 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
                 # Step 2: Paste cleaned segments on top
                 print(f"[SAM2 ADAPTIVE] Step 2: Pasting {len(segments)} cleaned segments...")
+                TEMPORAL_PADDING = 15  # Must match extraction padding
                 for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
                     seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
                         seg_bbox, crop_w, crop_h, padding_ratio=0.15, min_size=128
                     )
+
+                    # Recalculate padding for this segment (must match extraction)
+                    pad_start = max(0, start_f - TEMPORAL_PADDING)
 
                     print(f"[SAM2 DEBUG] Segment {seg_idx}: crop region = ({seg_crop_x}, {seg_crop_y}, {seg_crop_w}, {seg_crop_h})")
 
@@ -2179,11 +2194,11 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                                 print(f"[ERROR]   - {item}")
                         continue
 
-                    # Paste segment frames on top of originals
+                    # Paste segment frames on top of originals (only actual segment frames, not padding)
                     paste_count = 0
                     error_count = 0
                     for frame_idx in range(start_f, end_f + 1):
-                        src_file = os.path.join(seg_propainter_output, f"{frame_idx-start_f:04d}.png")
+                        src_file = os.path.join(seg_propainter_output, f"{frame_idx-pad_start:04d}.png")  # Adjusted for padding
 
                         if not os.path.exists(src_file):
                             print(f"[ERROR] Segment {seg_idx} frame {frame_idx}: cleaned frame not found at {src_file}")
