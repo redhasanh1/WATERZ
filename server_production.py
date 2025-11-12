@@ -1807,8 +1807,8 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         # Detect motion-based segments for adaptive optimization (AFTER cropping masks!)
         print(f"[SAM2 INTERACTIVE] Detecting segments from CROPPED masks...")
         from segment_detector import detect_segments_from_masks, merge_adjacent_segments
-        position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '100'))  # Very lenient: allow 100px movement
-        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '1'))  # NEVER drop segments, even 1-frame
+        position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '5'))  # Strict: only 5px movement (YOLO approach)
+        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '10'))  # Minimum 10 frames (YOLO approach)
 
         max_segments = int(os.getenv('SAM2_MAX_SEGMENTS', '80'))
         segments = detect_segments_from_masks(
@@ -1819,8 +1819,8 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         )
 
         if len(segments) > 1:
-            # Merge adjacent similar segments (very aggressive: 100 frame gap)
-            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=100)
+            # Merge adjacent similar segments (YOLO approach: 30 frame gap)
+            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=30)
             print(f"[SAM2 ADAPTIVE] After merging: {len(segments)} segments")
 
         # Expand segments by 5 frames on each side for temporal context
@@ -1854,58 +1854,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         print(f"[SAM2 COVERAGE] Coverage: {len(covered_frames)}/{len(frames_with_masks)} ({len(covered_frames)/len(frames_with_masks)*100:.1f}%)")
 
         if uncovered_frames:
-            # Group consecutive uncovered frames
-            gaps = []
-            gap_start = uncovered_frames[0]
-            gap_end = uncovered_frames[0]
-            for frame in uncovered_frames[1:]:
-                if frame == gap_end + 1:
-                    gap_end = frame
-                else:
-                    gaps.append((gap_start, gap_end))
-                    gap_start = frame
-                    gap_end = frame
-            gaps.append((gap_start, gap_end))
-
-            print(f"[SAM2 COVERAGE] WARNING: {len(uncovered_frames)} frames with masks have NO segment coverage!")
-            print(f"[SAM2 COVERAGE] Uncovered ranges:")
-            for start, end in gaps:
-                print(f"[SAM2 COVERAGE]   - Frames {start}-{end} ({end-start+1}f)")
-
-            # CRITICAL FIX: Fill gaps by creating segments for ALL uncovered frames
-            print(f"[SAM2 COVERAGE] Creating filler segments for {len(uncovered_frames)} uncovered frames...")
-            filler_count = 0
-
-            for frame_idx in uncovered_frames:
-                mask_path = os.path.join(sam2_masks_dir, f"{frame_idx:04d}.png")
-                if os.path.exists(mask_path):
-                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-                    if mask is not None:
-                        coords = cv2.findNonZero(mask)
-                        if coords is not None:
-                            x, y, w, h = cv2.boundingRect(coords)
-                            bbox = (x, y, x+w, y+h)
-
-                            # CRITICAL: Expand to minimum 10 frames for proper temporal context
-                            # ProPainter needs surrounding frames for quality inpainting
-                            context_frames = 5  # Add 5 frames before and after
-                            start_frame = max(0, frame_idx - context_frames)
-                            end_frame = min(extracted_frames - 1, frame_idx + context_frames)
-
-                            segments.append((start_frame, end_frame, bbox))
-                            filler_count += 1
-
-            # Re-sort segments by start frame
-            segments.sort(key=lambda seg: seg[0])
-            print(f"[SAM2 COVERAGE] Created {filler_count} filler segments for uncovered frames")
-            print(f"[SAM2 COVERAGE] Total segments after gap filling: {len(segments)}")
-
-            # Recalculate coverage
-            frames_in_segments = set()
-            for start_f, end_f, _ in segments:
-                frames_in_segments.update(range(start_f, end_f + 1))
-            covered_frames = sorted(frames_with_masks & frames_in_segments)
-            print(f"[SAM2 COVERAGE] Final coverage: {len(covered_frames)}/{len(frames_with_masks)} ({len(covered_frames)/len(frames_with_masks)*100:.1f}%)")
+            print(f"[SAM2 COVERAGE] Note: {len(uncovered_frames)} frames with masks not in segments (using strict YOLO detection)")
 
         # Run ProPainter with adaptive segment-based optimization
         print(f"[SAM2 ADAPTIVE] Running ProPainter with {len(segments) if segments else 1} segment(s)...")
