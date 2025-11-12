@@ -46,7 +46,16 @@
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" test_sam2_watermark.py first.mp4 ./output)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" test_sam2_watermark.py sora_with_watermark.mp4 ./output_sam2)",
       "Bash(cmd /c \"RUN_MANUAL_SAM2_OPTIMIZED.bat sora_with_watermark.mp4 ./output_manual_optimized\")",
-      "Bash(START_ALL.bat)"
+      "Bash(START_ALL.bat)",
+      "Bash(cat:*)",
+      "WebFetch(domain:markremoverai.com)",
+      "Bash(tasklist:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m pip show python-dotenv)",
+      "Bash(start /B \"\" \"D:\\watermarkz\\START_CELERY.bat\")",
+      "Bash(celery_output.log)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []
