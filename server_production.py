@@ -1735,7 +1735,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
             print(f"[SAM2 INTERACTIVE] Detected union bbox (all frames): {bbox}")
             print(f"   - Object movement: {max_x - min_x}px width x {max_y - min_y}px height")
 
-        # Calculate crop region with padding
+        # Calculate crop region with padding (BEFORE segment detection!)
         from crop_utils import calculate_crop_region
         crop_x, crop_y, crop_w, crop_h = calculate_crop_region(bbox, width, height, padding_ratio=0.2, min_size=128)
         print(f"[SAM2 INTERACTIVE] Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h}")
@@ -1752,7 +1752,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                 cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                 cv2.imwrite(os.path.join(cropped_dir, frame_file), cropped)
 
-        # Crop masks to same region
+        # Crop masks to same region (CRITICAL: Do this BEFORE segment detection!)
         print(f"[SAM2 INTERACTIVE] Cropping {len(mask_files)} masks to watermark region...")
         for i in range(len(mask_files)):
             mask_file = f"{i:04d}.png"
@@ -1762,8 +1762,27 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                 cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                 cv2.imwrite(mask_path, cropped_mask)
 
-        # Run ProPainter with full optimizations
-        print(f"[SAM2 INTERACTIVE] Running ProPainter with full optimizations...")
+        # Detect motion-based segments for adaptive optimization (AFTER cropping masks!)
+        print(f"[SAM2 INTERACTIVE] Detecting segments from CROPPED masks...")
+        from segment_detector import detect_segments_from_masks, merge_adjacent_segments
+        position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '50'))  # Looser: allow 50px movement
+        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '10'))  # Shorter: 10 frames minimum
+
+        max_segments = int(os.getenv('SAM2_MAX_SEGMENTS', '80'))
+        segments = detect_segments_from_masks(
+            sam2_masks_dir,
+            position_tolerance=position_tolerance,
+            min_segment_length=min_segment_length,
+            max_segments=max_segments
+        )
+
+        if len(segments) > 1:
+            # Merge adjacent similar segments
+            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=30)
+            print(f"[SAM2 ADAPTIVE] After merging: {len(segments)} segments")
+
+        # Run ProPainter with adaptive segment-based optimization
+        print(f"[SAM2 ADAPTIVE] Running ProPainter with {len(segments) if segments else 1} segment(s)...")
         self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Running ProPainter'})
 
         try:
@@ -1772,24 +1791,297 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
             import torch
             use_fp16 = torch.cuda.is_available()
-            print(f"[SAM2 INTERACTIVE] GPU available: {use_fp16}, Running ProPainter...")
 
-            faster_propainter_pipeline(
-                video=cropped_dir,
-                mask=sam2_masks_dir,
-                output=output_dir,
-                resize_ratio=1.0,
-                mask_dilation=4,
-                ref_stride=15,
-                neighbor_length=10,
-                subvideo_length=120,
-                raft_iter=10,
-                mode="video_inpainting",
-                save_frames=True,
-                fp16=use_fp16,
-                frames_array=None,  # Use disk-based for simplicity
-                masks_array=None
-            )
+            if len(segments) == 0 or len(segments) == 1:
+                # Single segment or no segments detected - process entire video
+                if len(segments) == 1:
+                    start_f, end_f, seg_bbox = segments[0]
+                    movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
+                    is_stationary = movement < int(os.getenv('SAM2_STATIONARY_THRESHOLD', '10'))
+                else:
+                    is_stationary = False
+
+                # Adaptive parameters based on motion
+                if is_stationary:
+                    print(f"[SAM2 ADAPTIVE] Stationary watermark detected - using ULTRA-FAST settings!")
+                    neighbor_length, subvideo_length = 4, 20
+                else:
+                    neighbor_length, subvideo_length = 6, 40
+
+                print(f"[SAM2 ADAPTIVE] Processing full video with neighbor_length={neighbor_length}, subvideo_length={subvideo_length}")
+
+                faster_propainter_pipeline(
+                    video=cropped_dir,
+                    mask=sam2_masks_dir,
+                    output=output_dir,
+                    resize_ratio=1.0,
+                    mask_dilation=4,
+                    ref_stride=15,
+                    neighbor_length=neighbor_length,
+                    subvideo_length=subvideo_length,
+                    raft_iter=10,
+                    mode="video_inpainting",
+                    save_frames=True,
+                    fp16=use_fp16,
+                    frames_array=None,
+                    masks_array=None
+                )
+
+                # Set propainter_output for single segment path
+                video_name = os.path.basename(cropped_dir)
+                propainter_output = os.path.join(output_dir, video_name, "frames")
+
+            else:
+                # Multiple segments - process each with adaptive crop and params
+                print(f"[SAM2 ADAPTIVE] Processing {len(segments)} segments sequentially with individual crops...")
+
+                # Create segment output directories
+                seg_outputs = []
+                for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                    seg_output = os.path.join(output_dir, f"segment_{seg_idx}")
+                    os.makedirs(seg_output, exist_ok=True)
+                    seg_outputs.append(seg_output)
+
+                # Process each segment
+                for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                    duration = end_f - start_f + 1
+                    movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
+                    is_stationary = movement < int(os.getenv('SAM2_STATIONARY_THRESHOLD', '10'))
+
+                    # Adaptive parameters
+                    if is_stationary:
+                        neighbor_length, subvideo_length = 4, 20
+                        opt_label = "ULTRA-FAST"
+                    else:
+                        neighbor_length, subvideo_length = 6, 40
+                        opt_label = "BALANCED"
+
+                    print(f"\n[SAM2 ADAPTIVE] Segment {seg_idx+1}/{len(segments)}: frames {start_f}-{end_f} ({duration}f)")
+                    print(f"[SAM2 ADAPTIVE]   - Bbox: {seg_bbox}, movement: {movement}px")
+                    print(f"[SAM2 ADAPTIVE]   - Optimization: {opt_label} (neighbor={neighbor_length}, subvideo={subvideo_length})")
+
+                    # Calculate segment-specific crop
+                    seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
+                        seg_bbox, crop_w, crop_h, padding_ratio=0.15, min_size=128
+                    )
+
+                    # Extract segment frames and masks
+                    seg_frames_dir = os.path.join(output_dir, f"segment_{seg_idx}_frames")
+                    seg_masks_dir = os.path.join(output_dir, f"segment_{seg_idx}_masks")
+                    os.makedirs(seg_frames_dir, exist_ok=True)
+                    os.makedirs(seg_masks_dir, exist_ok=True)
+
+                    for frame_idx in range(start_f, end_f + 1):
+                        frame_file = f"{frame_idx:04d}.png"
+                        src_frame = os.path.join(cropped_dir, frame_file)
+                        src_mask = os.path.join(sam2_masks_dir, frame_file)
+
+                        if os.path.exists(src_frame):
+                            frame = cv2.imread(src_frame)
+                            seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                            dst_frame = os.path.join(seg_frames_dir, f"{frame_idx-start_f:04d}.png")
+                            cv2.imwrite(dst_frame, seg_frame)
+
+                        if os.path.exists(src_mask):
+                            mask = cv2.imread(src_mask, cv2.IMREAD_GRAYSCALE)
+                            seg_mask = mask[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                            dst_mask = os.path.join(seg_masks_dir, f"{frame_idx-start_f:04d}.png")
+                            cv2.imwrite(dst_mask, seg_mask)
+
+                    # Generate debug video with mask overlay
+                    print(f"[DEBUG] Creating debug video for segment {seg_idx+1}...")
+
+                    # Check what we actually extracted
+                    seg_frame_count = len([f for f in os.listdir(seg_frames_dir) if f.endswith('.png')])
+                    seg_mask_count = len([f for f in os.listdir(seg_masks_dir) if f.endswith('.png')])
+                    print(f"[DEBUG] Segment {seg_idx+1}: extracted {seg_frame_count} frames, {seg_mask_count} masks")
+
+                    # Check if masks have any content
+                    sample_mask_path = os.path.join(seg_masks_dir, "0000.png")
+                    if os.path.exists(sample_mask_path):
+                        sample_mask = cv2.imread(sample_mask_path, cv2.IMREAD_GRAYSCALE)
+                        if sample_mask is not None:
+                            mask_nonzero = np.count_nonzero(sample_mask)
+                            mask_total = sample_mask.size
+                            print(f"[DEBUG] Sample mask coverage: {mask_nonzero}/{mask_total} pixels ({mask_nonzero/mask_total*100:.2f}%)")
+                            if mask_nonzero == 0:
+                                print(f"[WARNING] Segment {seg_idx+1} masks are EMPTY (all black)!")
+
+                    debug_output_dir = os.path.join("D:\\watermarkz\\results", "debug_segments")
+                    os.makedirs(debug_output_dir, exist_ok=True)
+
+                    debug_frames_dir = os.path.join(debug_output_dir, f"segment_{seg_idx}_frames{start_f}-{end_f}_DEBUG")
+                    os.makedirs(debug_frames_dir, exist_ok=True)
+
+                    # Create frames with purple mask overlay
+                    frames_created = 0
+                    for frame_idx in range(start_f, end_f + 1):
+                        frame_file = f"{frame_idx-start_f:04d}.png"
+                        src_frame = os.path.join(seg_frames_dir, frame_file)
+                        src_mask = os.path.join(seg_masks_dir, frame_file)
+
+                        if os.path.exists(src_frame):
+                            frame = cv2.imread(src_frame)
+                            if frame is not None:
+                                # Overlay mask in purple
+                                if os.path.exists(src_mask):
+                                    mask = cv2.imread(src_mask, cv2.IMREAD_GRAYSCALE)
+                                    if mask is not None:
+                                        # Create purple overlay where mask exists
+                                        purple_overlay = np.zeros_like(frame)
+                                        purple_overlay[:, :] = [255, 0, 255]  # BGR: Magenta/Purple
+
+                                        # Apply mask with alpha blending
+                                        mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) / 255.0
+                                        frame = (frame * (1 - mask_3ch * 0.5) + purple_overlay * mask_3ch * 0.5).astype(np.uint8)
+
+                                # Save debug frame
+                                debug_frame_path = os.path.join(debug_frames_dir, frame_file)
+                                cv2.imwrite(debug_frame_path, frame)
+                                frames_created += 1
+
+                    print(f"[DEBUG] Created {frames_created} debug frames in: {debug_frames_dir}")
+
+                    # Encode debug video
+                    debug_video_path = os.path.join(debug_output_dir, f"segment_{seg_idx}_frames{start_f}-{end_f}.mp4")
+                    try:
+                        import subprocess
+                        ffmpeg_exec, _ = get_ffmpeg_executables()
+                        cmd = [
+                            ffmpeg_exec,
+                            '-y',
+                            '-framerate', '30',
+                            '-i', os.path.join(debug_frames_dir, '%04d.png'),
+                            '-c:v', 'libx264',
+                            '-preset', 'ultrafast',
+                            '-crf', '18',
+                            '-pix_fmt', 'yuv420p',
+                            debug_video_path
+                        ]
+                        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                        print(f"[DEBUG] Saved debug video: {debug_video_path}")
+                        print(f"[DEBUG] Debug frames kept at: {debug_frames_dir}")
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to create debug video: {e}")
+                        print(f"[DEBUG] Debug frames available at: {debug_frames_dir} (check manually)")
+                        if hasattr(e, 'stderr'):
+                            print(f"[DEBUG] FFmpeg error: {e.stderr}")
+
+                    # Process segment
+                    faster_propainter_pipeline(
+                        video=seg_frames_dir,
+                        mask=seg_masks_dir,
+                        output=seg_outputs[seg_idx],
+                        resize_ratio=1.0,
+                        mask_dilation=4,
+                        ref_stride=15,
+                        neighbor_length=neighbor_length,
+                        subvideo_length=subvideo_length,
+                        raft_iter=10,
+                        mode="video_inpainting",
+                        save_frames=True,
+                        fp16=use_fp16,
+                        frames_array=None,
+                        masks_array=None
+                    )
+
+                    print(f"[SAM2 ADAPTIVE] Segment {seg_idx+1} complete!")
+
+                    # Clear GPU memory between segments
+                    clear_gpu_memory()
+
+                # Merge segments back into cropped frames
+                print(f"[SAM2 ADAPTIVE] Merging {len(segments)} segments back into full video...")
+
+                # Create unified output directory
+                merged_output = os.path.join(output_dir, "merged_frames")
+                os.makedirs(merged_output, exist_ok=True)
+
+                # Step 1: Copy ALL original cropped frames first (base layer)
+                print(f"[SAM2 ADAPTIVE] Step 1: Copying all {extracted_frames} original frames...")
+                for i in range(extracted_frames):
+                    src_frame = os.path.join(cropped_dir, f"{i:04d}.png")
+                    dst_frame = os.path.join(merged_output, f"{i:04d}.png")
+                    if os.path.exists(src_frame):
+                        shutil.copy2(src_frame, dst_frame)
+
+                # Step 2: Paste cleaned segments on top
+                print(f"[SAM2 ADAPTIVE] Step 2: Pasting {len(segments)} cleaned segments...")
+                for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                    seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
+                        seg_bbox, crop_w, crop_h, padding_ratio=0.15, min_size=128
+                    )
+
+                    print(f"[SAM2 DEBUG] Segment {seg_idx}: crop region = ({seg_crop_x}, {seg_crop_y}, {seg_crop_w}, {seg_crop_h})")
+
+                    # Find ProPainter output for this segment (simplified path construction)
+                    video_dirname = f"segment_{seg_idx}_frames"
+                    seg_propainter_output = os.path.join(seg_outputs[seg_idx], video_dirname, "frames")
+
+                    print(f"[SAM2 DEBUG] Looking for ProPainter output at: {seg_propainter_output}")
+
+                    if not os.path.exists(seg_propainter_output):
+                        print(f"[ERROR] Segment {seg_idx} ProPainter output not found: {seg_propainter_output}")
+                        # List what's actually in the segment output directory
+                        if os.path.exists(seg_outputs[seg_idx]):
+                            print(f"[ERROR] Contents of {seg_outputs[seg_idx]}:")
+                            for item in os.listdir(seg_outputs[seg_idx]):
+                                print(f"[ERROR]   - {item}")
+                        continue
+
+                    # Paste segment frames on top of originals
+                    paste_count = 0
+                    error_count = 0
+                    for frame_idx in range(start_f, end_f + 1):
+                        src_file = os.path.join(seg_propainter_output, f"{frame_idx-start_f:04d}.png")
+
+                        if not os.path.exists(src_file):
+                            print(f"[ERROR] Segment {seg_idx} frame {frame_idx}: cleaned frame not found at {src_file}")
+                            error_count += 1
+                            continue
+
+                        # Load cleaned segment
+                        cleaned_seg = cv2.imread(src_file)
+                        if cleaned_seg is None:
+                            print(f"[ERROR] Segment {seg_idx} frame {frame_idx}: failed to load cleaned frame from {src_file}")
+                            error_count += 1
+                            continue
+
+                        # Load full cropped frame from merged output
+                        dst_file = os.path.join(merged_output, f"{frame_idx:04d}.png")
+                        full_frame = cv2.imread(dst_file)
+
+                        if full_frame is None:
+                            print(f"[ERROR] Segment {seg_idx} frame {frame_idx}: failed to load base frame from {dst_file}")
+                            error_count += 1
+                            continue
+
+                        # Validate dimensions
+                        expected_shape = (seg_crop_h, seg_crop_w, 3)
+                        if cleaned_seg.shape != expected_shape:
+                            print(f"[WARNING] Segment {seg_idx} frame {frame_idx}: dimension mismatch!")
+                            print(f"[WARNING]   Expected: {expected_shape}, Got: {cleaned_seg.shape}")
+                            print(f"[WARNING]   Resizing to match...")
+                            # Resize to match expected dimensions
+                            cleaned_seg = cv2.resize(cleaned_seg, (seg_crop_w, seg_crop_h), interpolation=cv2.INTER_LINEAR)
+
+                        # Paste cleaned segment region
+                        try:
+                            full_frame[seg_crop_y:seg_crop_y+seg_crop_h,
+                                     seg_crop_x:seg_crop_x+seg_crop_w] = cleaned_seg
+
+                            # Save back to merged output
+                            cv2.imwrite(dst_file, full_frame)
+                            paste_count += 1
+                        except Exception as e:
+                            print(f"[ERROR] Segment {seg_idx} frame {frame_idx}: failed to paste - {e}")
+                            error_count += 1
+
+                    print(f"[SAM2 DEBUG] Segment {seg_idx} pasting complete: {paste_count} frames pasted, {error_count} errors")
+
+                # Update propainter_output to point to merged frames
+                print(f"[SAM2 ADAPTIVE] Segment merging complete! All {extracted_frames} frames ready.")
+                propainter_output = merged_output
 
             print(f"[SAM2 INTERACTIVE] ProPainter complete!")
         except Exception as e:
@@ -1802,10 +2094,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         print(f"[SAM2 INTERACTIVE] Merging cleaned regions back into original frames...")
         self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Merging results'})
 
-        # ProPainter creates subdirectory: {output_dir}/{video_name}/frames/
-        video_name = os.path.basename(cropped_dir)
-        propainter_output = os.path.join(output_dir, video_name, "frames")
-
+        # propainter_output is already set by the processing logic above
         print(f"[SAM2 INTERACTIVE] ProPainter output location: {propainter_output}")
 
         if not os.path.exists(propainter_output):
@@ -3010,8 +3299,8 @@ def process_segment_task(self, segment_data):
                     resize_ratio=1.0,
                     mask_dilation=4,
                     ref_stride=15,
-                    neighbor_length=10,
-                    subvideo_length=120,
+                    neighbor_length=6,
+                    subvideo_length=40,
                     raft_iter=10,
                     mode="video_inpainting",
                     save_frames=True,

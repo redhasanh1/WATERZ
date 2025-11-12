@@ -447,6 +447,9 @@ def pipeline(
     if device == torch.device("cpu"):
         use_half = False
 
+    # [VRAM DEBUG] Log actual parameters being used
+    print(f"[VRAM CONFIG] neighbor_length={neighbor_length}, subvideo_length={subvideo_length}, fp16={fp16}")
+
     # 🔥 EXTREME SPEED: Use numpy arrays directly if provided (skip disk I/O!)
     if frames_array is not None:
         # Convert numpy arrays (BGR) to PIL Images (RGB)
@@ -1520,18 +1523,21 @@ def pipeline(
         try:
             masked_frames = frames * (1 - masks_dilated)
             subvideo_length_img_prop = min(
-                150, subvideo_length
-            )  # ensure a minimum of 150 frames for image propagation
+                40, subvideo_length
+            )  # reduced from 150 to 40 for lower VRAM usage during image propagation
+            print(f"[IMG PROP] Using subvideo_length_img_prop={subvideo_length_img_prop} for {video_length} frames")
             if video_length > subvideo_length_img_prop:
                 updated_frames, updated_masks = [], []
                 pad_len = 10
-                for f in range(0, video_length, subvideo_length_img_prop):
+                total_chunks = (video_length + subvideo_length_img_prop - 1) // subvideo_length_img_prop
+                for chunk_idx, f in enumerate(range(0, video_length, subvideo_length_img_prop)):
                     s_f = max(0, f - pad_len)
                     e_f = min(video_length, f + subvideo_length_img_prop + pad_len)
                     pad_len_s = max(0, f) - s_f
                     pad_len_e = e_f - min(video_length, f + subvideo_length_img_prop)
 
                     b, t, _, _, _ = masks_dilated[:, s_f:e_f].size()
+                    print(f"[IMG PROP] Chunk {chunk_idx+1}/{total_chunks}: processing frames {s_f}-{e_f} ({t} frames)")
                     pred_flows_bi_sub = (
                         pred_flows_bi[0][:, s_f : e_f - 1],
                         pred_flows_bi[1][:, s_f : e_f - 1],
@@ -1542,6 +1548,7 @@ def pipeline(
                         masks_dilated[:, s_f:e_f],
                         "nearest",
                     )
+                    print(f"[IMG PROP] Chunk {chunk_idx+1}/{total_chunks} complete")
                     updated_frames_sub = (
                         frames[:, s_f:e_f] * (1 - masks_dilated[:, s_f:e_f])
                         + prop_imgs_sub.view(b, t, 3, h, w) * masks_dilated[:, s_f:e_f]
@@ -1588,6 +1595,7 @@ def pipeline(
 
     # ---- feature propagation + transformer ----
     print("[PROP] Starting feature propagation + transformer...")
+    print(f"[PROP CONFIG] neighbor_stride={neighbor_stride}, ref_num={ref_num}, total_iterations={(video_length + neighbor_stride - 1) // neighbor_stride}")
     prop_start_time = time.time()
     for f in tqdm(range(0, video_length, neighbor_stride), desc="feature propagation"):
     # for f in range(0, video_length, neighbor_stride):
@@ -1609,6 +1617,8 @@ def pipeline(
         with torch.inference_mode():
             # 1.0 indicates mask
             l_t = len(neighbor_ids)
+            if f % (neighbor_stride * 10) == 0:  # Log every 10 iterations
+                print(f"[PROP] Frame {f}/{video_length}: processing {l_t} neighbor frames + {len(ref_ids)} ref frames")
 
             # pred_img = selected_imgs # results of image propagation
             pred_img = model(
