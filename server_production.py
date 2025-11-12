@@ -102,12 +102,29 @@ def _ensure_cuda_torch():
     sys.modules['torch'] = torch_cuda
 
 
-_ensure_cuda_torch()
+# Try to initialize CUDA/torch (local workers only)
+# Railway deployment runs API-only mode (no GPU needed)
+GPU_AVAILABLE = False
+try:
+    _ensure_cuda_torch()
+    GPU_AVAILABLE = True
+    print("[OK] GPU/CUDA initialized successfully - worker mode enabled")
+except Exception as e:
+    print(f"[INFO] Running in API-only mode (no GPU): {e}")
+    print("[INFO] This is normal for Railway deployment - local workers handle GPU processing")
 
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 from celery import Celery, chord
-import cv2
+
+# Conditional imports for GPU processing (only needed on local workers)
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+    if not GPU_AVAILABLE:
+        print("[INFO] cv2 not available (API-only mode)")
+
 import numpy as np
 import io
 import json
@@ -148,7 +165,13 @@ def get_ffmpeg_executables():
         raise RuntimeError(f"FFmpeg/FFprobe initialization failed: {e}")
 
 # Initialize FFmpeg paths at module level (before Celery workers start)
-FFMPEG_EXE, FFPROBE_EXE = get_ffmpeg_executables()
+# FFmpeg only needed on local workers (video processing), not on Railway API
+try:
+    FFMPEG_EXE, FFPROBE_EXE = get_ffmpeg_executables()
+except Exception as e:
+    FFMPEG_EXE, FFPROBE_EXE = None, None
+    if not GPU_AVAILABLE:
+        print(f"[INFO] FFmpeg not available (API-only mode): {e}")
 
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
