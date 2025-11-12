@@ -245,6 +245,35 @@ def health_check():
         'message': 'Flask API server running - workers handle processing'
     })
 
+@app.route('/api/debug/files', methods=['GET'])
+def debug_files():
+    """Debug endpoint to check what files exist in web/ folder"""
+    try:
+        import glob
+        web_files = []
+        static_folder = app.static_folder
+
+        # List files in web/ directory
+        if os.path.exists(static_folder):
+            for root, dirs, files in os.walk(static_folder):
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), static_folder)
+                    web_files.append(rel_path)
+
+        return jsonify({
+            'static_folder': static_folder,
+            'static_folder_exists': os.path.exists(static_folder),
+            'cwd': os.getcwd(),
+            'script_dir': os.path.dirname(os.path.abspath(__file__)),
+            'web_files_count': len(web_files),
+            'web_files': web_files[:50],  # First 50 files
+            'config_exists': os.path.exists(os.path.join(static_folder, 'config.js')),
+            'index_exists': os.path.exists(os.path.join(static_folder, 'index.html')),
+            'emblem_exists': os.path.exists(os.path.join(static_folder, 'emblem.png'))
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # Security headers middleware
 @app.after_request
 def add_security_headers(response):
