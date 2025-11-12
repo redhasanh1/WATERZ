@@ -1,6 +1,17 @@
 @echo off
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
+
+REM ✅ AUTO-LOAD REDIS_URL from redis_url.txt
+if exist redis_url.txt (
+    for /f "usebackq tokens=*" %%A in ("redis_url.txt") do set REDIS_URL=%%A
+    echo [REDIS] Loaded from redis_url.txt: %REDIS_URL%
+) else (
+    echo [REDIS] Using default localhost (redis_url.txt not found)
+    set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
+)
+echo.
+
 echo Starting Celery worker (TensorRT NeuFlow v2 FP16 - 3-4x faster than ONNX!)...
 echo.
 echo ============================================================
