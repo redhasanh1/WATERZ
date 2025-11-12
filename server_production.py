@@ -1544,6 +1544,371 @@ def broadcast_video_download(self, video_id, video_url, upload_filename):
         return {'status': 'failed', 'error': str(e)}
 
 
+@celery.task(bind=True, name='watermark.process_sam2_interactive')
+def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None):
+    """
+    SAM2 Interactive Mode: Process video with user-provided SAM2 masks
+    - Skip YOLO detection completely
+    - Load SAM2 masks from provided folder
+    - Run ProPainter with full optimizations
+    - Return processed video
+
+    Args:
+        video_path: Path to input video
+        masks_folder: Path to folder containing SAM2 masks (PNG files, numbered)
+        video_id: Optional video ID for tracking
+    """
+    try:
+        import shutil
+        import json
+        import numpy as np
+
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Loading SAM2 masks'})
+
+        if not _check_propainter_assets():
+            raise RuntimeError("ProPainter assets missing")
+
+        # Generate video ID if not provided
+        if not video_id:
+            video_id = os.path.basename(video_path).split('.')[0][:8]
+
+        print(f"\n[SAM2 INTERACTIVE] Processing video: {video_path}")
+        print(f"[SAM2 INTERACTIVE] Loading masks from: {masks_folder}")
+
+        # Check if masks folder exists
+        if not os.path.exists(masks_folder):
+            raise ValueError(f"Masks folder not found: {masks_folder}")
+
+        # Get video metadata using FFprobe (cv2 might not be available in worker mode)
+        import subprocess
+        try:
+            result = subprocess.run([
+                str(FFPROBE_EXE),
+                '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=width,height,r_frame_rate,nb_frames',
+                '-of', 'json',
+                video_path
+            ], capture_output=True, text=True, timeout=10)
+
+            import json
+            data = json.loads(result.stdout)
+            stream = data['streams'][0]
+
+            width = int(stream['width'])
+            height = int(stream['height'])
+
+            # Parse frame rate (e.g., "30/1" -> 30.0)
+            fps_parts = stream['r_frame_rate'].split('/')
+            fps = float(fps_parts[0]) / float(fps_parts[1])
+
+            # Get frame count (might not be available for all formats)
+            total_frames = int(stream.get('nb_frames', 0))
+            if total_frames == 0:
+                # Fallback: count mask files
+                mask_files = sorted([f for f in os.listdir(masks_folder) if f.endswith('.png')])
+                total_frames = len(mask_files)
+        except Exception as e:
+            print(f"[ERROR] Failed to get video metadata: {e}")
+            # Fallback to mask count
+            mask_files = sorted([f for f in os.listdir(masks_folder) if f.endswith('.png')])
+            total_frames = len(mask_files)
+            width = 1920  # Default fallback
+            height = 1080
+            fps = 30.0
+
+        print(f"[SAM2 INTERACTIVE] Video: {width}x{height} @ {fps}fps, {total_frames} frames")
+
+        # Load SAM2 masks
+        mask_files = sorted([f for f in os.listdir(masks_folder) if f.endswith('.png')])
+        print(f"[SAM2 INTERACTIVE] Found {len(mask_files)} SAM2 masks")
+
+        if len(mask_files) != total_frames:
+            print(f"[WARNING] Mask count mismatch: {len(mask_files)} masks vs {total_frames} frames")
+
+        # Create prepare_result compatible with existing pipeline
+        # We'll use the prepare_video_task structure but skip YOLO detection
+        prepare_result = {
+            'video_id': video_id,
+            'video_path': video_path,
+            'fps': fps,
+            'total_frames': total_frames,
+            'width': width,
+            'height': height,
+            'sam2_masks_folder': masks_folder,  # Special flag for SAM2 mode
+            'use_interactive_sam2': True,
+            'segments': [{
+                'seg_idx': 0,
+                'start_frame': 0,
+                'end_frame': total_frames - 1,
+                'bbox': [0, 0, width, height],  # Full frame bbox
+                'frames_processed': total_frames
+            }]
+        }
+
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Extracting frames'})
+
+        # Create temp directories for processing
+        base_name = os.path.basename(video_path).rsplit('.', 1)[0]
+        temp_prefix = f"{base_name}_{video_id}_sam2"
+        frames_dir = os.path.join(TEMP_DIR, f"{temp_prefix}_frames")
+        cropped_dir = os.path.join(TEMP_DIR, f"{temp_prefix}_cropped")
+        sam2_masks_dir = os.path.join(TEMP_DIR, f"{temp_prefix}_masks")
+        output_dir = os.path.join(TEMP_DIR, f"{temp_prefix}_output")
+
+        for path in [frames_dir, cropped_dir, sam2_masks_dir, output_dir]:
+            os.makedirs(path, exist_ok=True)
+
+        # Extract frames from video
+        print(f"[SAM2 INTERACTIVE] Extracting frames from video...")
+        import cv2
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise RuntimeError(f"Failed to open video: {video_path}")
+
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_path = os.path.join(frames_dir, f"{frame_idx:04d}.png")
+            cv2.imwrite(frame_path, frame)
+            frame_idx += 1
+        cap.release()
+
+        extracted_frames = frame_idx
+        print(f"[SAM2 INTERACTIVE] Extracted {extracted_frames} frames")
+
+        # Copy SAM2 masks to working directory
+        print(f"[SAM2 INTERACTIVE] Loading {len(mask_files)} SAM2 masks...")
+        self.update_state(state='PROCESSING', meta={'progress': 20, 'status': 'Loading SAM2 masks'})
+
+        for i, mask_file in enumerate(mask_files):
+            src = os.path.join(masks_folder, mask_file)
+            dst = os.path.join(sam2_masks_dir, f"{i:04d}.png")
+            shutil.copy2(src, dst)
+
+        # Calculate bounding box from ALL masks to handle moving objects
+        print(f"[SAM2 INTERACTIVE] Analyzing ALL {len(mask_files)} masks to determine crop region...")
+        min_x, min_y = width, height
+        max_x, max_y = 0, 0
+        masks_with_content = 0
+        total_white_pixels = 0
+
+        for i, mask_file in enumerate(mask_files):
+            mask_path = os.path.join(sam2_masks_dir, f"{i:04d}.png")
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+
+            if mask is not None:
+                # Check if mask has content
+                white_pixels = np.sum(mask > 127)
+                if white_pixels > 0:
+                    masks_with_content += 1
+                    total_white_pixels += white_pixels
+
+                    # Find bounding box for this frame
+                    coords = cv2.findNonZero(mask)
+                    if coords is not None:
+                        x, y, w, h = cv2.boundingRect(coords)
+                        min_x = min(min_x, x)
+                        min_y = min(min_y, y)
+                        max_x = max(max_x, x + w)
+                        max_y = max(max_y, y + h)
+
+        # Validate mask coverage
+        avg_pixels_per_frame = total_white_pixels / len(mask_files) if len(mask_files) > 0 else 0
+        avg_coverage_pct = (avg_pixels_per_frame / (width * height)) * 100
+
+        print(f"[SAM2 INTERACTIVE] Mask validation:")
+        print(f"   - Frames with masks: {masks_with_content}/{len(mask_files)}")
+        print(f"   - Avg coverage: {avg_coverage_pct:.2f}% per frame")
+
+        if masks_with_content == 0:
+            print(f"[WARNING] No mask content found in any frame! Using full frame.")
+            bbox = [0, 0, width, height]
+        elif masks_with_content < len(mask_files) * 0.5:
+            print(f"[WARNING] Only {masks_with_content}/{len(mask_files)} frames have masks - object may not be tracked properly!")
+            bbox = [min_x, min_y, max_x, max_y]
+        else:
+            # Good mask coverage
+            bbox = [min_x, min_y, max_x, max_y]
+            print(f"[SAM2 INTERACTIVE] Detected union bbox (all frames): {bbox}")
+            print(f"   - Object movement: {max_x - min_x}px width x {max_y - min_y}px height")
+
+        # Calculate crop region with padding
+        from crop_utils import calculate_crop_region
+        crop_x, crop_y, crop_w, crop_h = calculate_crop_region(bbox, width, height, padding_ratio=0.2, min_size=128)
+        print(f"[SAM2 INTERACTIVE] Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h}")
+
+        # Crop frames to watermark region
+        print(f"[SAM2 INTERACTIVE] Cropping {extracted_frames} frames to watermark region...")
+        self.update_state(state='PROCESSING', meta={'progress': 30, 'status': 'Cropping frames'})
+
+        for i in range(extracted_frames):
+            frame_file = f"{i:04d}.png"
+            frame_path = os.path.join(frames_dir, frame_file)
+            frame = cv2.imread(frame_path)
+            if frame is not None:
+                cropped = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                cv2.imwrite(os.path.join(cropped_dir, frame_file), cropped)
+
+        # Crop masks to same region
+        print(f"[SAM2 INTERACTIVE] Cropping {len(mask_files)} masks to watermark region...")
+        for i in range(len(mask_files)):
+            mask_file = f"{i:04d}.png"
+            mask_path = os.path.join(sam2_masks_dir, mask_file)
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            if mask is not None:
+                cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                cv2.imwrite(mask_path, cropped_mask)
+
+        # Run ProPainter with full optimizations
+        print(f"[SAM2 INTERACTIVE] Running ProPainter with full optimizations...")
+        self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Running ProPainter'})
+
+        try:
+            # Get cached ProPainter pipeline (pre-loaded at worker startup)
+            faster_propainter_pipeline = get_propainter_pipeline()
+
+            import torch
+            use_fp16 = torch.cuda.is_available()
+            print(f"[SAM2 INTERACTIVE] GPU available: {use_fp16}, Running ProPainter...")
+
+            faster_propainter_pipeline(
+                video=cropped_dir,
+                mask=sam2_masks_dir,
+                output=output_dir,
+                resize_ratio=1.0,
+                mask_dilation=4,
+                ref_stride=15,
+                neighbor_length=10,
+                subvideo_length=120,
+                raft_iter=10,
+                mode="video_inpainting",
+                save_frames=True,
+                fp16=use_fp16,
+                frames_array=None,  # Use disk-based for simplicity
+                masks_array=None
+            )
+
+            print(f"[SAM2 INTERACTIVE] ProPainter complete!")
+        except Exception as e:
+            print(f"[ERROR] ProPainter failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+        # Merge cleaned regions back into original frames
+        print(f"[SAM2 INTERACTIVE] Merging cleaned regions back into original frames...")
+        self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Merging results'})
+
+        # ProPainter creates subdirectory: {output_dir}/{video_name}/frames/
+        video_name = os.path.basename(cropped_dir)
+        propainter_output = os.path.join(output_dir, video_name, "frames")
+
+        print(f"[SAM2 INTERACTIVE] ProPainter output location: {propainter_output}")
+
+        if not os.path.exists(propainter_output):
+            print(f"[ERROR] ProPainter output directory not found: {propainter_output}")
+            print(f"[ERROR] Checking if files exist directly in output_dir...")
+            # Fallback: check if files are directly in output_dir
+            propainter_output = output_dir
+
+        final_frames_dir = os.path.join(TEMP_DIR, f"{temp_prefix}_final")
+        os.makedirs(final_frames_dir, exist_ok=True)
+
+        frames_merged = 0
+        for i in range(extracted_frames):
+            frame_file = f"{i:04d}.png"  # ProPainter outputs PNG
+
+            # Load original frame (PNG from extraction)
+            orig_frame = cv2.imread(os.path.join(frames_dir, frame_file))
+
+            if orig_frame is None:
+                print(f"[WARNING] Could not load original frame {i}")
+                continue
+
+            # Load cleaned cropped region (PNG from ProPainter)
+            cleaned_path = os.path.join(propainter_output, frame_file)
+            if os.path.exists(cleaned_path):
+                cleaned_crop = cv2.imread(cleaned_path)
+                if cleaned_crop is not None:
+                    # Paste back into original frame
+                    orig_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                    frames_merged += 1
+                else:
+                    print(f"[WARNING] Could not load cleaned frame {i}")
+            else:
+                print(f"[WARNING] Cleaned frame not found: {cleaned_path}")
+
+            # Save final frame
+            cv2.imwrite(os.path.join(final_frames_dir, frame_file), orig_frame)
+
+        print(f"[SAM2 INTERACTIVE] Successfully merged {frames_merged}/{extracted_frames} frames")
+
+        # Encode final video with FFmpeg
+        print(f"[SAM2 INTERACTIVE] Encoding final video...")
+        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Encoding video'})
+
+        output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
+
+        # Use FFmpeg to encode with original audio
+        ffmpeg_cmd = [
+            str(FFMPEG_EXE),
+            '-framerate', str(fps),
+            '-i', os.path.join(final_frames_dir, '%04d.png'),
+            '-i', video_path,  # Original video for audio
+            '-map', '0:v:0',  # Video from frames
+            '-map', '1:a:0?',  # Audio from original (optional)
+            '-c:v', 'libx264',
+            '-preset', 'medium',
+            '-crf', '18',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            '-pix_fmt', 'yuv420p',
+            '-y',
+            output_path
+        ]
+
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            print(f"[ERROR] FFmpeg encoding failed: {result.stderr}")
+            raise RuntimeError(f"Video encoding failed: {result.stderr}")
+
+        print(f"[SAM2 INTERACTIVE] Video encoded successfully: {output_path}")
+
+        # Cleanup temp directories
+        print(f"[SAM2 INTERACTIVE] Cleaning up temporary files...")
+        for temp_path in [frames_dir, cropped_dir, sam2_masks_dir, output_dir, final_frames_dir]:
+            if os.path.exists(temp_path):
+                shutil.rmtree(temp_path)
+
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
+
+        print(f"[SAM2 INTERACTIVE] Processing complete!")
+        print(f"[SAM2 INTERACTIVE] Output: {output_path}")
+
+        return {
+            'status': 'success',
+            'video_id': video_id,
+            'video_path': video_path,
+            'output_path': output_path,
+            'masks_folder': masks_folder,
+            'total_frames': extracted_frames,
+            'width': width,
+            'height': height,
+            'fps': fps,
+            'message': 'SAM2 interactive processing complete with full ProPainter optimizations!'
+        }
+
+    except Exception as e:
+        print(f"[ERROR] SAM2 interactive task failed: {e}")
+        import traceback
+        traceback.print_exc()
+        self.update_state(state='FAILURE', meta={'error': str(e)})
+        raise
+
+
 @celery.task(bind=True, name='watermark.prepare_video')
 def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id=None):
     """
