@@ -62,6 +62,27 @@ ProPainter-main/
 redis_url.txt
 web/tunnel_url.txt
 
+# Railway deployment (sensitive credentials)
+.env
+.env.local
+.railway
+
+# Docker (for local GPU deployment only, not Railway)
+Dockerfile
+Dockerfile.*
+
+# AWS S3 credentials (NEVER commit!)
+aws_credentials.txt
+s3_config.txt
+
+# Large video files (use S3 instead)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.flv
+
 # ============================================
 # Test, Debug, and Build Automation Scripts
 # ============================================
