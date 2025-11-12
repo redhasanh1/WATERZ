@@ -1878,15 +1878,17 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
                             # CRITICAL: Expand to minimum 2 frames for optical flow
                             # Try to include a neighbor frame (prefer next, fallback to previous)
+                            # IMPORTANT: Only expand if neighbor NOT already in a segment (prevents overlap)
                             start_frame = frame_idx
                             end_frame = frame_idx
 
-                            if frame_idx < extracted_frames - 1:
-                                # Add next frame
+                            if frame_idx < extracted_frames - 1 and (frame_idx + 1) not in frames_in_segments:
+                                # Add next frame only if not already covered
                                 end_frame = frame_idx + 1
-                            elif frame_idx > 0:
-                                # Add previous frame
+                            elif frame_idx > 0 and (frame_idx - 1) not in frames_in_segments:
+                                # Add previous frame only if not already covered
                                 start_frame = frame_idx - 1
+                            # else: keep as single-frame segment (ProPainter can handle it)
 
                             segments.append((start_frame, end_frame, bbox))
                             filler_count += 1
