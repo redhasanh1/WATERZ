@@ -1762,11 +1762,53 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                 cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                 cv2.imwrite(mask_path, cropped_mask)
 
+        # Create full video mask overlay debug (before segment detection)
+        print(f"[DEBUG] Creating full video mask overlay...")
+        debug_output_dir = os.path.join("D:\\watermarkz\\results", "debug_segments")
+        os.makedirs(debug_output_dir, exist_ok=True)
+
+        full_video_debug_dir = os.path.join(debug_output_dir, "FULL_VIDEO_DEBUG")
+        os.makedirs(full_video_debug_dir, exist_ok=True)
+
+        for i in range(extracted_frames):
+            frame_file = f"{i:04d}.png"
+            frame_path = os.path.join(cropped_dir, frame_file)
+            mask_path = os.path.join(sam2_masks_dir, frame_file)
+
+            frame = cv2.imread(frame_path)
+            if frame is not None:
+                # Overlay mask in purple if exists
+                if os.path.exists(mask_path):
+                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                    if mask is not None and np.count_nonzero(mask) > 0:
+                        purple_overlay = np.zeros_like(frame)
+                        purple_overlay[:, :] = [255, 0, 255]
+                        mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) / 255.0
+                        frame = (frame * (1 - mask_3ch * 0.5) + purple_overlay * mask_3ch * 0.5).astype(np.uint8)
+
+                cv2.imwrite(os.path.join(full_video_debug_dir, frame_file), frame)
+
+        # Encode full video debug
+        try:
+            import subprocess
+            ffmpeg_exec, _ = get_ffmpeg_executables()
+            full_debug_video = os.path.join(debug_output_dir, "FULL_VIDEO_with_masks.mp4")
+            cmd = [
+                ffmpeg_exec, '-y', '-framerate', '30',
+                '-i', os.path.join(full_video_debug_dir, '%04d.png'),
+                '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
+                '-pix_fmt', 'yuv420p', full_debug_video
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print(f"[DEBUG] Saved full video with masks: {full_debug_video}")
+        except Exception as e:
+            print(f"[DEBUG] Failed to create full video debug: {e}")
+
         # Detect motion-based segments for adaptive optimization (AFTER cropping masks!)
         print(f"[SAM2 INTERACTIVE] Detecting segments from CROPPED masks...")
         from segment_detector import detect_segments_from_masks, merge_adjacent_segments
         position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '50'))  # Looser: allow 50px movement
-        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '10'))  # Shorter: 10 frames minimum
+        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '3'))  # Shorter: 3 frames minimum (was 10 → 5 → 3)
 
         max_segments = int(os.getenv('SAM2_MAX_SEGMENTS', '80'))
         segments = detect_segments_from_masks(
@@ -1777,9 +1819,89 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         )
 
         if len(segments) > 1:
-            # Merge adjacent similar segments
-            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=30)
+            # Merge adjacent similar segments (increased gap from 30 to 60 frames)
+            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=60)
             print(f"[SAM2 ADAPTIVE] After merging: {len(segments)} segments")
+
+        # Analyze segment coverage
+        frames_with_masks = set()
+        for i in range(extracted_frames):
+            mask_path = os.path.join(sam2_masks_dir, f"{i:04d}.png")
+            if os.path.exists(mask_path):
+                mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                if mask is not None and np.count_nonzero(mask) > 0:
+                    frames_with_masks.add(i)
+
+        frames_in_segments = set()
+        for start_f, end_f, _ in segments:
+            frames_in_segments.update(range(start_f, end_f + 1))
+
+        uncovered_frames = sorted(frames_with_masks - frames_in_segments)
+        covered_frames = sorted(frames_with_masks & frames_in_segments)
+
+        print(f"[SAM2 COVERAGE] Frames with masks: {len(frames_with_masks)}")
+        print(f"[SAM2 COVERAGE] Frames in segments: {len(frames_in_segments)}")
+        print(f"[SAM2 COVERAGE] Coverage: {len(covered_frames)}/{len(frames_with_masks)} ({len(covered_frames)/len(frames_with_masks)*100:.1f}%)")
+
+        if uncovered_frames:
+            # Group consecutive uncovered frames
+            gaps = []
+            gap_start = uncovered_frames[0]
+            gap_end = uncovered_frames[0]
+            for frame in uncovered_frames[1:]:
+                if frame == gap_end + 1:
+                    gap_end = frame
+                else:
+                    gaps.append((gap_start, gap_end))
+                    gap_start = frame
+                    gap_end = frame
+            gaps.append((gap_start, gap_end))
+
+            print(f"[SAM2 COVERAGE] WARNING: {len(uncovered_frames)} frames with masks have NO segment coverage!")
+            print(f"[SAM2 COVERAGE] Uncovered ranges:")
+            for start, end in gaps:
+                print(f"[SAM2 COVERAGE]   - Frames {start}-{end} ({end-start+1}f)")
+
+            # CRITICAL FIX: Fill gaps by creating segments for ALL uncovered frames
+            print(f"[SAM2 COVERAGE] Creating filler segments for {len(uncovered_frames)} uncovered frames...")
+            filler_count = 0
+
+            for frame_idx in uncovered_frames:
+                mask_path = os.path.join(sam2_masks_dir, f"{frame_idx:04d}.png")
+                if os.path.exists(mask_path):
+                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                    if mask is not None:
+                        coords = cv2.findNonZero(mask)
+                        if coords is not None:
+                            x, y, w, h = cv2.boundingRect(coords)
+                            bbox = (x, y, x+w, y+h)
+
+                            # CRITICAL: Expand to minimum 2 frames for optical flow
+                            # Try to include a neighbor frame (prefer next, fallback to previous)
+                            start_frame = frame_idx
+                            end_frame = frame_idx
+
+                            if frame_idx < extracted_frames - 1:
+                                # Add next frame
+                                end_frame = frame_idx + 1
+                            elif frame_idx > 0:
+                                # Add previous frame
+                                start_frame = frame_idx - 1
+
+                            segments.append((start_frame, end_frame, bbox))
+                            filler_count += 1
+
+            # Re-sort segments by start frame
+            segments.sort(key=lambda seg: seg[0])
+            print(f"[SAM2 COVERAGE] Created {filler_count} filler segments for uncovered frames")
+            print(f"[SAM2 COVERAGE] Total segments after gap filling: {len(segments)}")
+
+            # Recalculate coverage
+            frames_in_segments = set()
+            for start_f, end_f, _ in segments:
+                frames_in_segments.update(range(start_f, end_f + 1))
+            covered_frames = sorted(frames_with_masks & frames_in_segments)
+            print(f"[SAM2 COVERAGE] Final coverage: {len(covered_frames)}/{len(frames_with_masks)} ({len(covered_frames)/len(frames_with_masks)*100:.1f}%)")
 
         # Run ProPainter with adaptive segment-based optimization
         print(f"[SAM2 ADAPTIVE] Running ProPainter with {len(segments) if segments else 1} segment(s)...")
@@ -1847,6 +1969,21 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                     duration = end_f - start_f + 1
                     movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
                     is_stationary = movement < int(os.getenv('SAM2_STATIONARY_THRESHOLD', '10'))
+
+                    # Check if segment has any mask content (skip empty segments)
+                    segment_has_content = False
+                    for frame_idx in range(start_f, end_f + 1):
+                        mask_path = os.path.join(sam2_masks_dir, f"{frame_idx:04d}.png")
+                        if os.path.exists(mask_path):
+                            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                            if mask is not None and np.count_nonzero(mask) > 0:
+                                segment_has_content = True
+                                break
+
+                    if not segment_has_content:
+                        print(f"\n[SAM2 ADAPTIVE] Segment {seg_idx+1}/{len(segments)}: frames {start_f}-{end_f} ({duration}f)")
+                        print(f"[SAM2 ADAPTIVE] SKIPPING - All masks are EMPTY (no watermark content)")
+                        continue
 
                     # Adaptive parameters
                     if is_stationary:
