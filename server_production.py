@@ -1982,8 +1982,9 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
                     if not segment_has_content:
                         print(f"\n[SAM2 ADAPTIVE] Segment {seg_idx+1}/{len(segments)}: frames {start_f}-{end_f} ({duration}f)")
-                        print(f"[SAM2 ADAPTIVE] SKIPPING - All masks are EMPTY (no watermark content)")
-                        continue
+                        print(f"[SAM2 ADAPTIVE] WARNING: No mask content detected, but processing anyway for consistency")
+                        # Don't skip! ProPainter will handle empty masks gracefully
+                        # This ensures all filler segments are processed (fixes 3-4 frame artifacts)
 
                     # Adaptive parameters
                     if is_stationary:
