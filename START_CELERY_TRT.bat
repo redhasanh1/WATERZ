@@ -116,7 +116,8 @@ set SEGMENT_WORKERS=4
 REM ⚡ SAM2 TRACKING: Use SAM2-Tiny for temporal mask tracking (BEST QUALITY!)
 REM    YOLO detects bbox on first frame → SAM2 tracks with temporal consistency
 REM    44ms/frame, no flickering, perfect for moving watermarks!
-set USE_SAM2_TRACKING=1
+REM TEMPORARILY DISABLED - using YOLO-only for speed testing
+set USE_SAM2_TRACKING=0
 
 echo.
 echo ============================================================
