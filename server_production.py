@@ -1807,8 +1807,8 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         # Detect motion-based segments for adaptive optimization (AFTER cropping masks!)
         print(f"[SAM2 INTERACTIVE] Detecting segments from CROPPED masks...")
         from segment_detector import detect_segments_from_masks, merge_adjacent_segments
-        position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '50'))  # Looser: allow 50px movement
-        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '3'))  # Shorter: 3 frames minimum (was 10 → 5 → 3)
+        position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '100'))  # Very lenient: allow 100px movement
+        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '1'))  # NEVER drop segments, even 1-frame
 
         max_segments = int(os.getenv('SAM2_MAX_SEGMENTS', '80'))
         segments = detect_segments_from_masks(
@@ -1819,9 +1819,19 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         )
 
         if len(segments) > 1:
-            # Merge adjacent similar segments (increased gap from 30 to 60 frames)
-            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=60)
+            # Merge adjacent similar segments (very aggressive: 100 frame gap)
+            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=100)
             print(f"[SAM2 ADAPTIVE] After merging: {len(segments)} segments")
+
+        # Expand segments by 5 frames on each side for temporal context
+        print(f"[SAM2 ADAPTIVE] Expanding segments for temporal context...")
+        expanded_segments = []
+        for start_f, end_f, seg_bbox in segments:
+            new_start = max(0, start_f - 5)
+            new_end = min(extracted_frames - 1, end_f + 5)
+            expanded_segments.append((new_start, new_end, seg_bbox))
+        segments = expanded_segments
+        print(f"[SAM2 ADAPTIVE] After expansion: {len(segments)} segments with extended context")
 
         # Analyze segment coverage
         frames_with_masks = set()
@@ -1876,17 +1886,11 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                             x, y, w, h = cv2.boundingRect(coords)
                             bbox = (x, y, x+w, y+h)
 
-                            # CRITICAL: Expand to minimum 2 frames for optical flow
-                            # Try to include a neighbor frame (prefer next, fallback to previous)
-                            start_frame = frame_idx
-                            end_frame = frame_idx
-
-                            if frame_idx < extracted_frames - 1:
-                                # Add next frame
-                                end_frame = frame_idx + 1
-                            elif frame_idx > 0:
-                                # Add previous frame
-                                start_frame = frame_idx - 1
+                            # CRITICAL: Expand to minimum 10 frames for proper temporal context
+                            # ProPainter needs surrounding frames for quality inpainting
+                            context_frames = 5  # Add 5 frames before and after
+                            start_frame = max(0, frame_idx - context_frames)
+                            end_frame = min(extracted_frames - 1, frame_idx + context_frames)
 
                             segments.append((start_frame, end_frame, bbox))
                             filler_count += 1
