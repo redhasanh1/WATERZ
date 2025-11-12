@@ -1807,8 +1807,8 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         # Detect motion-based segments for adaptive optimization (AFTER cropping masks!)
         print(f"[SAM2 INTERACTIVE] Detecting segments from CROPPED masks...")
         from segment_detector import detect_segments_from_masks, merge_adjacent_segments
-        position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '5'))  # Strict: only 5px movement (YOLO approach)
-        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '10'))  # Minimum 10 frames (YOLO approach)
+        position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '50'))  # 71edd67d: moderate 50px tolerance
+        min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '3'))  # 71edd67d: short 3-frame minimum
 
         max_segments = int(os.getenv('SAM2_MAX_SEGMENTS', '80'))
         segments = detect_segments_from_masks(
@@ -1819,8 +1819,8 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         )
 
         if len(segments) > 1:
-            # Merge adjacent similar segments (YOLO approach: 30 frame gap)
-            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=30)
+            # Merge adjacent similar segments (71edd67d: 60 frame gap)
+            segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=60)
             print(f"[SAM2 ADAPTIVE] After merging: {len(segments)} segments")
 
         # Expand segments by 5 frames on each side for temporal context
@@ -1854,7 +1854,104 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         print(f"[SAM2 COVERAGE] Coverage: {len(covered_frames)}/{len(frames_with_masks)} ({len(covered_frames)/len(frames_with_masks)*100:.1f}%)")
 
         if uncovered_frames:
-            print(f"[SAM2 COVERAGE] Note: {len(uncovered_frames)} frames with masks not in segments (using strict YOLO detection)")
+            print(f"[SAM2 COVERAGE] Creating smart non-overlapping filler segments for {len(uncovered_frames)} uncovered frames...")
+
+            # Helper function to get bbox for a frame
+            def get_bbox_for_frame(frame_idx):
+                mask_path = os.path.join(sam2_masks_dir, f"{frame_idx:04d}.png")
+                if os.path.exists(mask_path):
+                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                    if mask is not None:
+                        coords = cv2.findNonZero(mask)
+                        if coords is not None:
+                            x, y, w, h = cv2.boundingRect(coords)
+                            return (x, y, x+w, y+h)
+                return None
+
+            # Group consecutive uncovered frames
+            current_group = []
+            filler_segments = []
+
+            for frame_idx in sorted(uncovered_frames):
+                if not current_group or frame_idx == current_group[-1] + 1:
+                    current_group.append(frame_idx)
+                else:
+                    # Process current group
+                    if len(current_group) == 1:
+                        # Single isolated frame - try to expand to 2 frames (for optical flow)
+                        solo = current_group[0]
+                        bbox = get_bbox_for_frame(solo)
+                        if bbox:
+                            # Check if we can expand without overlapping
+                            can_expand_next = (solo < extracted_frames - 1 and
+                                             solo + 1 not in frames_in_segments)
+                            can_expand_prev = (solo > 0 and
+                                             solo - 1 not in frames_in_segments)
+
+                            if can_expand_next:
+                                filler_segments.append((solo, solo + 1, bbox))
+                            elif can_expand_prev:
+                                filler_segments.append((solo - 1, solo, bbox))
+                            else:
+                                # Can't expand - use single frame (ProPainter will handle)
+                                filler_segments.append((solo, solo, bbox))
+                    else:
+                        # Multiple consecutive frames - use as group
+                        # Get average bbox
+                        bboxes = [get_bbox_for_frame(f) for f in current_group]
+                        bboxes = [b for b in bboxes if b is not None]
+                        if bboxes:
+                            avg_bbox = (
+                                int(np.mean([b[0] for b in bboxes])),
+                                int(np.mean([b[1] for b in bboxes])),
+                                int(np.mean([b[2] for b in bboxes])),
+                                int(np.mean([b[3] for b in bboxes]))
+                            )
+                            filler_segments.append((current_group[0], current_group[-1], avg_bbox))
+
+                    current_group = [frame_idx]
+
+            # Process last group
+            if current_group:
+                if len(current_group) == 1:
+                    solo = current_group[0]
+                    bbox = get_bbox_for_frame(solo)
+                    if bbox:
+                        can_expand_next = (solo < extracted_frames - 1 and
+                                         solo + 1 not in frames_in_segments)
+                        can_expand_prev = (solo > 0 and
+                                         solo - 1 not in frames_in_segments)
+
+                        if can_expand_next:
+                            filler_segments.append((solo, solo + 1, bbox))
+                        elif can_expand_prev:
+                            filler_segments.append((solo - 1, solo, bbox))
+                        else:
+                            filler_segments.append((solo, solo, bbox))
+                else:
+                    bboxes = [get_bbox_for_frame(f) for f in current_group]
+                    bboxes = [b for b in bboxes if b is not None]
+                    if bboxes:
+                        avg_bbox = (
+                            int(np.mean([b[0] for b in bboxes])),
+                            int(np.mean([b[1] for b in bboxes])),
+                            int(np.mean([b[2] for b in bboxes])),
+                            int(np.mean([b[3] for b in bboxes]))
+                        )
+                        filler_segments.append((current_group[0], current_group[-1], avg_bbox))
+
+            # Add filler segments and re-sort
+            segments.extend(filler_segments)
+            segments.sort(key=lambda seg: seg[0])
+            print(f"[SAM2 COVERAGE] Created {len(filler_segments)} smart filler segments")
+            print(f"[SAM2 COVERAGE] Total segments after filling: {len(segments)}")
+
+            # Recalculate coverage
+            frames_in_segments = set()
+            for start_f, end_f, _ in segments:
+                frames_in_segments.update(range(start_f, end_f + 1))
+            covered_frames = sorted(frames_with_masks & frames_in_segments)
+            print(f"[SAM2 COVERAGE] Final coverage: {len(covered_frames)}/{len(frames_with_masks)} ({len(covered_frames)/len(frames_with_masks)*100:.1f}%)")
 
         # Run ProPainter with adaptive segment-based optimization
         print(f"[SAM2 ADAPTIVE] Running ProPainter with {len(segments) if segments else 1} segment(s)...")
@@ -1935,8 +2032,9 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
                     if not segment_has_content:
                         print(f"\n[SAM2 ADAPTIVE] Segment {seg_idx+1}/{len(segments)}: frames {start_f}-{end_f} ({duration}f)")
-                        print(f"[SAM2 ADAPTIVE] SKIPPING - All masks are EMPTY (no watermark content)")
-                        continue
+                        print(f"[SAM2 ADAPTIVE] WARNING: Segment has no mask content, but processing anyway for consistency")
+                        # FIX Bug #1: Never skip - ProPainter will pass through unchanged frames
+                        # This ensures output directory exists for pasting logic
 
                     # Adaptive parameters
                     if is_stationary:
@@ -1955,13 +2053,15 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                         seg_bbox, crop_w, crop_h, padding_ratio=0.15, min_size=128
                     )
 
-                    # Extract segment frames and masks
+                    # Extract ALL frames and masks (full temporal context for ProPainter)
+                    # ProPainter needs all frames for optical flow, but only inpaints where mask > 0
                     seg_frames_dir = os.path.join(output_dir, f"segment_{seg_idx}_frames")
                     seg_masks_dir = os.path.join(output_dir, f"segment_{seg_idx}_masks")
                     os.makedirs(seg_frames_dir, exist_ok=True)
                     os.makedirs(seg_masks_dir, exist_ok=True)
 
-                    for frame_idx in range(start_f, end_f + 1):
+                    print(f"[SAM2 TEMPORAL] Extracting ALL {extracted_frames} frames for full temporal context...")
+                    for frame_idx in range(extracted_frames):  # ALL frames, not just segment range
                         frame_file = f"{frame_idx:04d}.png"
                         src_frame = os.path.join(cropped_dir, frame_file)
                         src_mask = os.path.join(sam2_masks_dir, frame_file)
@@ -1969,14 +2069,23 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                         if os.path.exists(src_frame):
                             frame = cv2.imread(src_frame)
                             seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                            dst_frame = os.path.join(seg_frames_dir, f"{frame_idx-start_f:04d}.png")
+                            dst_frame = os.path.join(seg_frames_dir, f"{frame_idx:04d}.png")  # Keep original frame numbering
                             cv2.imwrite(dst_frame, seg_frame)
 
-                        if os.path.exists(src_mask):
-                            mask = cv2.imread(src_mask, cv2.IMREAD_GRAYSCALE)
-                            seg_mask = mask[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                            dst_mask = os.path.join(seg_masks_dir, f"{frame_idx-start_f:04d}.png")
-                            cv2.imwrite(dst_mask, seg_mask)
+                        # Create segment-specific masks: only segment frames have masks, rest are black
+                        if frame_idx >= start_f and frame_idx <= end_f:
+                            # Frame is in segment range - use actual mask
+                            if os.path.exists(src_mask):
+                                mask = cv2.imread(src_mask, cv2.IMREAD_GRAYSCALE)
+                                seg_mask = mask[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                            else:
+                                seg_mask = np.zeros((seg_crop_h, seg_crop_w), dtype=np.uint8)
+                        else:
+                            # Frame outside segment range - create black mask (no inpainting)
+                            seg_mask = np.zeros((seg_crop_h, seg_crop_w), dtype=np.uint8)
+
+                        dst_mask = os.path.join(seg_masks_dir, f"{frame_idx:04d}.png")
+                        cv2.imwrite(dst_mask, seg_mask)
 
                     # Generate debug video with mask overlay
                     print(f"[DEBUG] Creating debug video for segment {seg_idx+1}...")
@@ -2003,12 +2112,13 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                     debug_frames_dir = os.path.join(debug_output_dir, f"segment_{seg_idx}_frames{start_f}-{end_f}_DEBUG")
                     os.makedirs(debug_frames_dir, exist_ok=True)
 
-                    # Create frames with purple mask overlay
+                    # Create frames with purple mask overlay (only for segment range)
                     frames_created = 0
                     for frame_idx in range(start_f, end_f + 1):
-                        frame_file = f"{frame_idx-start_f:04d}.png"
+                        frame_file = f"{frame_idx:04d}.png"  # Use original frame numbering
                         src_frame = os.path.join(seg_frames_dir, frame_file)
                         src_mask = os.path.join(seg_masks_dir, frame_file)
+                        debug_frame_file = f"{frame_idx-start_f:04d}.png"  # Debug uses relative numbering for video
 
                         if os.path.exists(src_frame):
                             frame = cv2.imread(src_frame)
@@ -2026,7 +2136,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                                         frame = (frame * (1 - mask_3ch * 0.5) + purple_overlay * mask_3ch * 0.5).astype(np.uint8)
 
                                 # Save debug frame
-                                debug_frame_path = os.path.join(debug_frames_dir, frame_file)
+                                debug_frame_path = os.path.join(debug_frames_dir, debug_frame_file)
                                 cv2.imwrite(debug_frame_path, frame)
                                 frames_created += 1
 
@@ -2123,7 +2233,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                     paste_count = 0
                     error_count = 0
                     for frame_idx in range(start_f, end_f + 1):
-                        src_file = os.path.join(seg_propainter_output, f"{frame_idx-start_f:04d}.png")
+                        src_file = os.path.join(seg_propainter_output, f"{frame_idx:04d}.png")  # Use original frame numbering
 
                         if not os.path.exists(src_file):
                             print(f"[ERROR] Segment {seg_idx} frame {frame_idx}: cleaned frame not found at {src_file}")
@@ -2172,6 +2282,31 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                 # Update propainter_output to point to merged frames
                 print(f"[SAM2 ADAPTIVE] Segment merging complete! All {extracted_frames} frames ready.")
                 propainter_output = merged_output
+
+                # FIX Bug #3: Validate 100% coverage
+                print(f"\n[SAM2 COVERAGE VALIDATION] Verifying coverage...")
+                processed_frames = set()
+                for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                    seg_propainter_output = os.path.join(seg_outputs[seg_idx], f"segment_{seg_idx}_frames", "frames")
+
+                    if not os.path.exists(seg_propainter_output):
+                        print(f"[CRITICAL ERROR] Segment {seg_idx} output missing - frames {start_f}-{end_f} NOT CLEANED!")
+                    else:
+                        # Verify output files exist
+                        for frame_idx in range(start_f, end_f + 1):
+                            output_file = os.path.join(merged_output, f"{frame_idx:04d}.png")
+                            if os.path.exists(output_file):
+                                processed_frames.add(frame_idx)
+
+                # Compare with frames that have masks
+                uncleaned_frames = frames_with_masks - processed_frames
+                if uncleaned_frames:
+                    print(f"[CRITICAL ERROR] {len(uncleaned_frames)} frames with masks were NOT cleaned!")
+                    print(f"[CRITICAL ERROR] Uncleaned frames: {sorted(uncleaned_frames)}")
+                    print(f"[CRITICAL ERROR] Coverage: {len(processed_frames & frames_with_masks)}/{len(frames_with_masks)} ({len(processed_frames & frames_with_masks)/len(frames_with_masks)*100:.1f}%)")
+                else:
+                    print(f"[SUCCESS] 100% coverage achieved! All {len(frames_with_masks)} frames with masks were cleaned.")
+                    print(f"[SUCCESS] Total frames processed: {len(processed_frames)}")
 
             print(f"[SAM2 INTERACTIVE] ProPainter complete!")
         except Exception as e:
