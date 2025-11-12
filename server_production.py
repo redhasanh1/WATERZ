@@ -13,6 +13,10 @@ import importlib
 import shutil
 from pathlib import Path
 
+# Load environment variables from .env file (for Celery Redis configuration)
+from dotenv import load_dotenv
+load_dotenv()
+
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
@@ -273,6 +277,32 @@ def debug_files():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/debug/celery', methods=['GET'])
+def debug_celery():
+    """Debug endpoint to check Celery/Redis configuration"""
+    try:
+        # Mask sensitive passwords in URLs
+        def mask_url(url):
+            if not url:
+                return None
+            import re
+            return re.sub(r'(redis://[^:]+:)([^@]+)(@)', r'\1****\3', url)
+
+        return jsonify({
+            'redis_url_from_file': mask_url(REDIS_URL),
+            'celery_broker_env': mask_url(os.getenv('CELERY_BROKER_URL')),
+            'celery_backend_env': mask_url(os.getenv('CELERY_RESULT_BACKEND')),
+            'celery_broker_config': mask_url(app.config.get('broker_url')),
+            'celery_backend_config': mask_url(app.config.get('result_backend')),
+            'celery_broker_actual': mask_url(celery.conf.broker_url),
+            'celery_backend_actual': mask_url(celery.conf.result_backend),
+            'redis_url_file_exists': os.path.exists(os.path.join(SCRIPT_DIR, 'redis_url.txt')),
+            'env_file_exists': os.path.exists(os.path.join(SCRIPT_DIR, '.env'))
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 # Security headers middleware
 @app.after_request
@@ -734,8 +764,14 @@ def save_detection_debug(image, mask, detections, prefix):
         print(f"[WARNING]  Failed to save detection debug image: {exc}")
         return None
 
-# Initialize Celery
-celery = Celery(app.name, broker=app.config['broker_url'], backend=app.config['result_backend'])
+# Initialize Celery - prioritize environment variables from .env file
+celery_broker = os.getenv('CELERY_BROKER_URL', app.config['broker_url'])
+celery_backend = os.getenv('CELERY_RESULT_BACKEND', app.config['result_backend'])
+
+print(f"[DEBUG] Celery broker URL: {celery_broker}")
+print(f"[DEBUG] Celery result backend: {celery_backend}")
+
+celery = Celery(app.name, broker=celery_broker, backend=celery_backend)
 celery.conf.update(app.config)
 
 # Celery configuration for production
