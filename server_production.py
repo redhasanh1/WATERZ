@@ -2020,11 +2020,16 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                             dst_frame = os.path.join(seg_frames_dir, f"{frame_idx-start_f:04d}.png")
                             cv2.imwrite(dst_frame, seg_frame)
 
+                        # Always create mask file for every frame (ProPainter needs matching frame/mask counts)
                         if os.path.exists(src_mask):
                             mask = cv2.imread(src_mask, cv2.IMREAD_GRAYSCALE)
                             seg_mask = mask[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                            dst_mask = os.path.join(seg_masks_dir, f"{frame_idx-start_f:04d}.png")
-                            cv2.imwrite(dst_mask, seg_mask)
+                        else:
+                            # Create empty mask for neighbor frames (used for optical flow only, no inpainting)
+                            seg_mask = np.zeros((seg_crop_h, seg_crop_w), dtype=np.uint8)
+
+                        dst_mask = os.path.join(seg_masks_dir, f"{frame_idx-start_f:04d}.png")
+                        cv2.imwrite(dst_mask, seg_mask)
 
                     # Generate debug video with mask overlay
                     print(f"[DEBUG] Creating debug video for segment {seg_idx+1}...")
