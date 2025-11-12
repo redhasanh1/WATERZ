@@ -1882,13 +1882,18 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
                             start_frame = frame_idx
                             end_frame = frame_idx
 
-                            if frame_idx < extracted_frames - 1 and (frame_idx + 1) not in frames_in_segments:
-                                # Add next frame only if not already covered
+                            # CRITICAL: ProPainter optical flow REQUIRES minimum 2 frames
+                            # Always expand to 2 frames, allow overlap if necessary (prevents crash)
+                            if frame_idx < extracted_frames - 1:
+                                # Add next frame (overlap allowed - better than crash)
                                 end_frame = frame_idx + 1
-                            elif frame_idx > 0 and (frame_idx - 1) not in frames_in_segments:
-                                # Add previous frame only if not already covered
+                            elif frame_idx > 0:
+                                # Add previous frame (overlap allowed - better than crash)
                                 start_frame = frame_idx - 1
-                            # else: keep as single-frame segment (ProPainter can handle it)
+                            else:
+                                # Edge case: single-frame video, skip this filler
+                                print(f"[WARNING] Cannot create 2-frame segment for frame {frame_idx}, skipping")
+                                continue
 
                             segments.append((start_frame, end_frame, bbox))
                             filler_count += 1
