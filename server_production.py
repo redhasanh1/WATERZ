@@ -257,8 +257,8 @@ def add_security_headers(response):
     response.headers['X-XSS-Protection'] = '1; mode=block'
     # Referrer policy
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    # Content Security Policy (allow Cloudflare, Google Ads, Fonts)
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https:; frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com;"
+    # Content Security Policy (allow Cloudflare, Google Ads, Fonts, data URIs for videos)
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com https://static.cloudflareinsights.com https://ep2.adtrafficquality.google; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; media-src 'self' data:; connect-src 'self' https:; frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com;"
     # Remove server header
     response.headers.pop('Server', None)
     return response
@@ -3763,23 +3763,23 @@ def serve_web(path):
 # Serve static files from root (for Railway deployment)
 @app.route('/config.js')
 def serve_config():
-    return send_file('web/config.js', mimetype='application/javascript')
+    return send_file(os.path.join(app.static_folder, 'config.js'), mimetype='application/javascript')
 
 @app.route('/js/<path:path>')
 def serve_js(path):
-    return send_file(f'web/js/{path}', mimetype='application/javascript')
+    return send_file(os.path.join(app.static_folder, 'js', path), mimetype='application/javascript')
 
 @app.route('/css/<path:path>')
 def serve_css(path):
-    return send_file(f'web/css/{path}', mimetype='text/css')
+    return send_file(os.path.join(app.static_folder, 'css', path), mimetype='text/css')
 
 @app.route('/emblem.png')
 def serve_emblem():
-    return send_file('web/emblem.png', mimetype='image/png')
+    return send_file(os.path.join(app.static_folder, 'emblem.png'), mimetype='image/png')
 
 @app.route('/demos/<path:path>')
 def serve_demos(path):
-    return send_file(f'web/demos/{path}')
+    return send_file(os.path.join(app.static_folder, 'demos', path))
 
 
 @app.route('/api/remove-watermark', methods=['POST'])
