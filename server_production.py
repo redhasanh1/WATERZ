@@ -5741,7 +5741,37 @@ def get_stats():
     })
 
 
+# ============================================================================
+# Serve Static HTML Files
+# ============================================================================
 
+@app.route('/')
+@app.route('/<path:path>')
+def serve_static(path='index.html'):
+    """Serve static HTML files from web/ folder"""
+    try:
+        # Serve HTML files from web/ folder
+        web_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
+
+        # If path doesn't have extension, assume .html
+        if path and '.' not in path:
+            path = f"{path}.html"
+
+        file_path = os.path.join(web_folder, path)
+
+        if os.path.exists(file_path):
+            return send_file(file_path)
+        else:
+            # Try without adding .html
+            file_path = os.path.join(web_folder, path.replace('.html', ''))
+            if os.path.exists(file_path):
+                return send_file(file_path)
+
+            # Default to index.html if file not found
+            return send_file(os.path.join(web_folder, 'index.html'))
+    except Exception as e:
+        print(f"[ERROR] Failed to serve static file: {e}")
+        return f"File not found: {path}", 404
 
 # ============================================================================
 # Run Server
