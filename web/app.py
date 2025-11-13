@@ -6,6 +6,8 @@ Handles file uploads and watermark removal processing
 
 import sys
 import os
+import json
+from threading import Lock
 
 # Add parent directory to path for imports
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,11 +49,174 @@ MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
+# Simple data directory for user/credit persistence
+# Prefer explicit DATA_DIR env; otherwise use a stable folder next to this file
+DATA_DIR = os.environ.get('DATA_DIR') or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+USER_DB_FILE = os.path.join(DATA_DIR, 'users.json')
+EVENT_DB_FILE = os.path.join(DATA_DIR, 'events.json')
+_db_lock = Lock()
+
+def _ensure_data_dir():
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+def _read_json_file(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _write_json_file(path, obj):
+    _ensure_data_dir()
+    with _db_lock:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(obj, f, indent=2, ensure_ascii=False)
+
+def _read_user_db():
+    return _read_json_file(USER_DB_FILE)
+
+def _write_user_db(db):
+    _write_json_file(USER_DB_FILE, db)
+
+def _read_event_db():
+    db = _read_json_file(EVENT_DB_FILE)
+    if isinstance(db, dict) and 'processed' in db and isinstance(db['processed'], list):
+        return db
+    return {'processed': []}
+
+def _mark_event_processed(event_id):
+    edb = _read_event_db()
+    if event_id not in edb['processed']:
+        edb['processed'].append(event_id)
+        _write_json_file(EVENT_DB_FILE, edb)
+
+def _is_event_processed(event_id) -> bool:
+    edb = _read_event_db()
+    return event_id in edb.get('processed', [])
+
+def _reverse_price_lookup():
+    # Build reverse map from price_id -> plan key
+    return {v: k for k, v in STRIPE_PRICE_LOOKUP.items() if v}
+
+# Credit configuration and defaults
+# One-time free credits on signup
+CREDITS_ON_SIGNUP = int(os.environ.get('CREDITS_ON_SIGNUP', '5'))
+
+# Credits per subscription (on first purchase)
+CREDITS_ON_SUB = {
+    'starter': int(os.environ.get('CREDITS_ON_SUB_STARTER', '20')),
+    'pro': int(os.environ.get('CREDITS_ON_SUB_PRO', '50')),
+    'enterprise': int(os.environ.get('CREDITS_ON_SUB_ENTERPRISE', '300')),
+}
+
+# Credits per renewal (defaults to same as on sub)
+CREDITS_ON_RENEW = {
+    'starter': int(os.environ.get('CREDITS_ON_RENEW_STARTER', str(CREDITS_ON_SUB['starter']))),
+    'pro': int(os.environ.get('CREDITS_ON_RENEW_PRO', str(CREDITS_ON_SUB['pro']))),
+    'enterprise': int(os.environ.get('CREDITS_ON_RENEW_ENTERPRISE', str(CREDITS_ON_SUB['enterprise']))),
+}
+
+# Baseline unit: 1 credit = 10s @ 720p30
+BASELINE_WIDTH = int(os.environ.get('CREDIT_BASE_WIDTH', '1280'))
+BASELINE_HEIGHT = int(os.environ.get('CREDIT_BASE_HEIGHT', '720'))
+BASELINE_FPS = float(os.environ.get('CREDIT_BASE_FPS', '30'))
+BASELINE_SECONDS = float(os.environ.get('CREDIT_BASE_SECONDS', '10'))
+
+# Images are free by default
+CREDIT_COST_IMAGE = int(os.environ.get('CREDIT_COST_IMAGE', '0'))
+CREDIT_COST_VIDEO = int(os.environ.get('CREDIT_COST_VIDEO', '1'))  # legacy fallback, not used when dynamic calc is available
+
+def _find_email_by_customer(customer_id: str, db: dict) -> str:
+    for email, rec in db.items():
+        if isinstance(rec, dict) and rec.get('stripe_customer_id') == customer_id:
+            return email
+    return ''
+
+def _award_credits(email: str, amount: int, reason: str, stripe_customer_id: str = None, event_id: str = None):
+    if not email or not amount:
+        return False
+    db = _read_user_db()
+    user = db.get(email) or {
+        'email': email,
+        'name': None,
+        'credits': 0,
+        'credit_history': [],
+        'stripe_customer_id': None,
+        'signup_granted': False,
+        'updated_at': None,
+    }
+    user['credits'] = int(user.get('credits') or 0) + int(amount)
+    if stripe_customer_id:
+        user['stripe_customer_id'] = stripe_customer_id
+    user['credit_history'] = user.get('credit_history') or []
+    user['credit_history'].append({
+        'ts': datetime.utcnow().isoformat() + 'Z',
+        'delta': int(amount),
+        'reason': reason,
+        'event_id': event_id,
+    })
+    user['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    db[email] = user
+    _write_user_db(db)
+    return True
+
+def _ensure_user_and_signup_credits(email: str, name: str = None):
+    """Ensure the user record exists and grant one-time signup credits if configured."""
+    if not email:
+        return
+    db = _read_user_db()
+    rec = db.get(email) or {
+        'email': email,
+        'name': name,
+        'credits': 0,
+        'credit_history': [],
+        'stripe_customer_id': None,
+        'signup_granted': False,
+        'updated_at': None,
+    }
+    if not rec.get('signup_granted') and CREDITS_ON_SIGNUP > 0:
+        rec['credits'] = int(rec.get('credits') or 0) + int(CREDITS_ON_SIGNUP)
+        rec['credit_history'] = rec.get('credit_history') or []
+        rec['credit_history'].append({
+            'ts': datetime.utcnow().isoformat() + 'Z',
+            'delta': int(CREDITS_ON_SIGNUP),
+            'reason': 'signup',
+            'event_id': None,
+        })
+        rec['signup_granted'] = True
+    rec['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    db[email] = rec
+    _write_user_db(db)
+
+def _consume_credits(email: str, amount: int, reason: str) -> bool:
+    if not email or amount <= 0:
+        return False
+    db = _read_user_db()
+    user = db.get(email)
+    if not user:
+        return False
+    current = int(user.get('credits') or 0)
+    if current < amount:
+        return False
+    user['credits'] = current - amount
+    user['credit_history'] = user.get('credit_history') or []
+    user['credit_history'].append({
+        'ts': datetime.utcnow().isoformat() + 'Z',
+        'delta': -int(amount),
+        'reason': reason,
+        'event_id': None,
+    })
+    user['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    db[email] = user
+    _write_user_db(db)
+    return True
+
 # Stripe configuration
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_PRICE_LOOKUP = {
+    'starter': os.environ.get('STRIPE_PRICE_ID_STARTER', ''),
     'pro': os.environ.get('STRIPE_PRICE_ID_PRO', ''),
-    'enterprise': os.environ.get('STRIPE_PRICE_ID_ENTERPRISE', '')
+    'enterprise': os.environ.get('STRIPE_PRICE_ID_ENTERPRISE', ''),
 }
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
@@ -91,6 +256,40 @@ def is_video(filename):
     """Check if file is a video"""
     ext = filename.rsplit('.', 1)[1].lower()
     return ext in {'mp4', 'mov', 'avi'}
+
+
+def estimate_video_credits(video_path: str) -> int:
+    """Estimate required credits for a video based on resolution, fps, and duration.
+
+    Baseline: 1 credit = 10 seconds @ 720p (1280x720) and 30 fps.
+    Credits are computed as ceil( (pixels_ratio) * (fps_ratio) * (time_ratio) ).
+    Always at least 1 credit for any non-empty video.
+    """
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return 1
+        fps = float(cap.get(cv2.CAP_PROP_FPS)) or BASELINE_FPS
+        width = float(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or BASELINE_WIDTH
+        height = float(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or BASELINE_HEIGHT
+        total_frames = float(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        cap.release()
+
+        if fps <= 0:
+            fps = BASELINE_FPS
+        if width <= 0 or height <= 0:
+            width, height = BASELINE_WIDTH, BASELINE_HEIGHT
+
+        duration_sec = (total_frames / fps) if total_frames > 0 else BASELINE_SECONDS
+        pixels_ratio = (width * height) / float(BASELINE_WIDTH * BASELINE_HEIGHT)
+        fps_ratio = fps / BASELINE_FPS
+        time_ratio = duration_sec / BASELINE_SECONDS
+
+        raw = pixels_ratio * fps_ratio * time_ratio
+        credits = int(np.ceil(max(0.01, raw)))
+        return max(1, credits)
+    except Exception:
+        return 1
 
 
 def process_image(image_path):
@@ -218,13 +417,13 @@ def process_video(video_path):
 
 @app.route('/')
 def index():
-    """Serve the main HTML page (now index2.html)."""
-    return send_file('index2.html')
+    """Serve the main HTML page."""
+    return send_file('index.html')
 
 @app.route('/index.html')
 def legacy_index():
-    """Legacy path compatibility: serve the new page as well."""
-    return send_file('index2.html')
+    """Legacy path compatibility: serve the same page."""
+    return send_file('index.html')
 
 
 @app.route('/success.html')
@@ -351,6 +550,13 @@ def google_auth_callback():
     }
     session.pop('google_oauth_flow', None)
 
+    # Ensure user exists and grant one-time signup credits
+    try:
+        if session['google_user'].get('email'):
+            _ensure_user_and_signup_credits(session['google_user'].get('email'), session['google_user'].get('name'))
+    except Exception as exc:
+        print(f"Signup credits ensure failed: {exc}")
+
     next_path = session.pop('google_redirect_after_login', None)
     if next_path and next_path.startswith('/'):
         return redirect(next_path)
@@ -400,16 +606,46 @@ def remove_watermark():
     if not allowed_file(file.filename):
         return jsonify({'error': 'Invalid file type'}), 400
 
+    consumed = False
+    cost = 0
+    user_email = None
     try:
-        # Save uploaded file
+        # Determine costs and enforce credits for videos
         filename = secure_filename(file.filename)
+        is_vid = is_video(filename)
+
+        # Save file early for videos so we can estimate credits from metadata
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+        if is_vid:
+            file.save(filepath)
+            cost = estimate_video_credits(filepath)
+        else:
+            cost = CREDIT_COST_IMAGE
+
+        if 'google_user' in session and isinstance(session.get('google_user'), dict):
+            user_email = session['google_user'].get('email')
+
+        if cost > 0:
+            if not user_email:
+                return jsonify({'error': 'signin_required', 'message': 'Please sign in to use video processing.', 'required_credits': int(cost)}), 401
+            # Check and consume credits up front to avoid heavy compute for unpaid
+            db = _read_user_db()
+            user = db.get(user_email)
+            current = int((user or {}).get('credits') or 0)
+            if current < int(cost):
+                return jsonify({'error': 'insufficient_credits', 'message': 'Not enough credits to process video.', 'required_credits': int(cost), 'credits': current}), 402
+            if not _consume_credits(user_email, int(cost), reason='video_process'):
+                return jsonify({'error': 'consume_failed', 'message': 'Could not reserve credits. Please try again.'}), 409
+            consumed = True
+
+        # Save uploaded file for images (video already saved)
+        if not is_vid:
+            file.save(filepath)
 
         print(f"Processing file: {filename}")
 
         # Process based on file type
-        if is_video(filename):
+        if is_vid:
             result_path = process_video(filepath)
         else:
             result_path = process_image(filepath)
@@ -418,22 +654,34 @@ def remove_watermark():
         content_type = mimetypes.guess_type(result_path)[0] or 'application/octet-stream'
 
         # Send the processed file
-        return send_file(
+        resp = send_file(
             result_path,
             mimetype=content_type,
             as_attachment=True,
             download_name=f"removed_{filename}"
         )
+        try:
+            if consumed and cost:
+                resp.headers['X-Credits-Used'] = str(int(cost))
+        except Exception:
+            pass
+        return resp
 
     except Exception as e:
         print(f"Error processing file: {e}")
         import traceback
         traceback.print_exc()
+        # Refund credits if we reserved them but processing failed
+        try:
+            if consumed and user_email and cost > 0:
+                _award_credits(user_email, cost, reason='refund_video_failed')
+        except Exception:
+            pass
         return jsonify({'error': str(e)}), 500
 
     finally:
         # Cleanup uploaded file (keep processed file for download)
-        if os.path.exists(filepath):
+        if 'filepath' in locals() and os.path.exists(filepath):
             try:
                 os.remove(filepath)
             except:
@@ -539,17 +787,137 @@ def stripe_webhook():
         return 'Invalid signature', 400
 
     event_type = event['type']
-    print(f"Received Stripe event: {event_type}")
+    event_id = event.get('id')
+    print(f"Received Stripe event: {event_type} ({event_id})")
 
-    # Placeholder for future business logic
-    if event_type == 'checkout.session.completed':
-        session = event['data']['object']
-        print(f"Checkout completed for customer {session.get('customer')}")
-    elif event_type == 'customer.subscription.deleted':
-        subscription = event['data']['object']
-        print(f"Subscription canceled: {subscription.get('id')}")
+    # Idempotency: skip if already processed
+    if event_id and _is_event_processed(event_id):
+        return '', 200
+
+    try:
+        if event_type == 'checkout.session.completed':
+            session_obj = event['data']['object']
+            # Plan from metadata set at checkout creation
+            meta = (session_obj.get('metadata') or {})
+            plan = (meta.get('plan') or '').lower()
+            customer_id = session_obj.get('customer')
+            email = (session_obj.get('customer_details') or {}).get('email') or session_obj.get('customer_email')
+
+            # Amount by plan
+            amount = CREDITS_ON_SUB.get(plan, 0)
+            if amount and email:
+                _award_credits(email, amount, reason=f'subscription_checkout_{plan}', stripe_customer_id=customer_id, event_id=event_id)
+
+        elif event_type == 'invoice.payment_succeeded':
+            invoice = event['data']['object']
+            customer_id = invoice.get('customer')
+            # Determine plan from price ID on first line if possible
+            plan = None
+            try:
+                lines = invoice.get('lines', {}).get('data', [])
+                if lines:
+                    price_id = (((lines[0] or {}).get('price') or {}).get('id'))
+                    plan = _reverse_price_lookup().get(price_id)
+            except Exception:
+                plan = None
+
+            # Find email by stored mapping
+            db = _read_user_db()
+            email = _find_email_by_customer(customer_id, db)
+            amount = CREDITS_ON_RENEW.get(plan or 'pro', 0)  # default to 'pro' if unknown
+            if amount and email:
+                _award_credits(email, amount, reason=f'subscription_renew_{plan}', stripe_customer_id=customer_id, event_id=event_id)
+
+        elif event_type == 'customer.subscription.updated':
+            sub = event['data']['object']
+            prev = (event.get('data') or {}).get('previous_attributes') or {}
+            new_status = (sub.get('status') or '').lower()
+            old_status = (prev.get('status') or '').lower()
+            customer_id = sub.get('customer')
+
+            # Track status on the user record
+            db = _read_user_db()
+            email = _find_email_by_customer(customer_id, db)
+            if email:
+                rec = db.get(email, {})
+                rec['subscription_status'] = new_status
+                # Derive plan from first item price if present
+                try:
+                    items = (sub.get('items') or {}).get('data') or []
+                    price_id = (((items[0] or {}).get('price') or {}).get('id')) if items else None
+                except Exception:
+                    price_id = None
+                if price_id:
+                    plan_key = _reverse_price_lookup().get(price_id)
+                    if plan_key:
+                        rec['plan'] = plan_key
+                rec['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+                db[email] = rec
+                _write_user_db(db)
+
+            # Award initial credits if transitioning into active
+            if old_status != 'active' and new_status == 'active':
+                # infer plan to compute credit amount
+                plan_key = None
+                try:
+                    items = (sub.get('items') or {}).get('data') or []
+                    price_id = (((items[0] or {}).get('price') or {}).get('id')) if items else None
+                    if price_id:
+                        plan_key = _reverse_price_lookup().get(price_id)
+                except Exception:
+                    plan_key = None
+
+                amount = CREDITS_ON_SUB.get(plan_key or 'pro', 0)
+                if amount and email:
+                    _award_credits(email, amount, reason=f'subscription_activated_{plan_key}', stripe_customer_id=customer_id, event_id=event_id)
+
+        elif event_type == 'customer.subscription.deleted':
+            subscription = event['data']['object']
+            customer_id = subscription.get('customer')
+            db = _read_user_db()
+            email = _find_email_by_customer(customer_id, db)
+            if email:
+                # Mark status for visibility (no credits change)
+                rec = db.get(email, {})
+                rec['subscription_status'] = 'canceled'
+                rec['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+                db[email] = rec
+                _write_user_db(db)
+
+        elif event_type in ('customer.created', 'customer.updated'):
+            cust = event['data']['object']
+            customer_id = cust.get('id')
+            email = cust.get('email')
+            if customer_id and email:
+                db = _read_user_db()
+                rec = db.get(email, {
+                    'email': email,
+                    'name': None,
+                    'credits': 0,
+                    'credit_history': [],
+                    'stripe_customer_id': None,
+                    'updated_at': None,
+                })
+                rec['stripe_customer_id'] = customer_id
+                rec['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+                db[email] = rec
+                _write_user_db(db)
+
+        # Mark processed if we made it here without error
+        if event_id:
+            _mark_event_processed(event_id)
+    except Exception as exc:
+        print(f"Webhook handler error for {event_type}: {exc}")
+        # Do not mark processed to allow retries
+        return 'handler error', 500
 
     return '', 200
+
+
+# Compatibility alias for existing Stripe endpoint configuration
+@app.route('/api/stripe/webhook', methods=['POST'])
+def stripe_webhook_alias():
+    return stripe_webhook()
 
 
 @app.route('/api/health', methods=['GET'])
@@ -558,7 +926,9 @@ def health():
     return jsonify({
         'status': 'ok',
         'detector_loaded': detector is not None,
-        'inpainter_loaded': inpainter is not None
+        'inpainter_loaded': inpainter is not None,
+        'billing_webhook_enabled': bool(STRIPE_WEBHOOK_SECRET),
+        'stripe_prices_configured': {k: bool(v) for k, v in STRIPE_PRICE_LOOKUP.items()}
     })
 
 

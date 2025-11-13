@@ -288,7 +288,7 @@ def auth_register():
         cursor = conn.cursor()
 
         # Check if user exists
-        cursor.execute('SELECT id, email, name, password_hash, created_at FROM users WHERE email = %s', (email,))
+        cursor.execute('SELECT id, email, name, password_hash, credits, created_at FROM users WHERE email = %s', (email,))
         user = cursor.fetchone()
 
         if user:
@@ -300,7 +300,8 @@ def auth_register():
                     'id': user[0],
                     'email': user[1],
                     'name': user[2],
-                    'created_at': user[4].isoformat() if user[4] else None,
+                    'credits': user[4] or 0,
+                    'created_at': user[5].isoformat() if user[5] else None,
                     'message': 'Logged in successfully'
                 }), 200
             else:
@@ -308,9 +309,9 @@ def auth_register():
                 conn.close()
                 return jsonify({'error': 'Invalid password'}), 401
         else:
-            # Create new user
+            # Create new user with 5 free credits
             cursor.execute(
-                'INSERT INTO users (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id, email, name, created_at',
+                'INSERT INTO users (email, password_hash, name, credits) VALUES (%s, %s, %s, 5) RETURNING id, email, name, credits, created_at',
                 (email, password_hash, name)
             )
             new_user = cursor.fetchone()
@@ -322,12 +323,202 @@ def auth_register():
                 'id': new_user[0],
                 'email': new_user[1],
                 'name': new_user[2],
-                'created_at': new_user[3].isoformat() if new_user[3] else None,
-                'message': 'Account created successfully'
+                'credits': new_user[3],
+                'created_at': new_user[4].isoformat() if new_user[4] else None,
+                'message': 'Account created successfully! You have 5 free video credits.'
             }), 201
 
     except Exception as e:
         print(f"[AUTH ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stripe/create-checkout', methods=['POST', 'OPTIONS'])
+def create_checkout():
+    """Create Stripe checkout session for credit purchase"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        import stripe
+        import psycopg2
+
+        stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+
+        data = request.get_json()
+        user_id = data.get('user_id')
+        plan = data.get('plan')  # 'pro' or 'enterprise'
+
+        if not user_id or not plan:
+            return jsonify({'error': 'User ID and plan required'}), 400
+
+        # Define plans
+        plans = {
+            'starter': {
+                'price_id': 'price_1ST1RDDbvxhrePJFQkFpPFfe',
+                'credits': 20,
+                'name': 'Starter Plan - 20 Videos'
+            },
+            'pro': {
+                'price_id': 'price_1SSuzWDbvxhrePJF0oyHmssJ',
+                'credits': 50,
+                'name': 'Pro Plan - 50 Videos'
+            },
+            'enterprise': {
+                'price_id': 'price_1SSv0EDbvxhrePJFPLxo0QQ2',
+                'credits': 300,
+                'name': 'Enterprise Plan - 300 Videos'
+            }
+        }
+
+        if plan not in plans:
+            return jsonify({'error': 'Invalid plan'}), 400
+
+        plan_info = plans[plan]
+
+        # Create checkout session for subscription
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': plan_info['price_id'],
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=request.host_url + 'index.html?payment=success',
+            cancel_url=request.host_url + 'index.html?payment=cancelled',
+            client_reference_id=str(user_id),
+            metadata={
+                'user_id': user_id,
+                'credits': plan_info['credits'],
+                'plan': plan
+            }
+        )
+
+        return jsonify({'url': session.url}), 200
+
+    except Exception as e:
+        print(f"[STRIPE CHECKOUT ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stripe/webhook', methods=['POST'])
+def stripe_webhook():
+    """Handle Stripe webhook events"""
+    try:
+        import stripe
+        import psycopg2
+        from datetime import datetime
+
+        stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+        webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+
+        payload = request.data
+        sig_header = request.headers.get('Stripe-Signature')
+
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, webhook_secret
+            )
+        except ValueError:
+            return jsonify({'error': 'Invalid payload'}), 400
+        except stripe.error.SignatureVerificationError:
+            return jsonify({'error': 'Invalid signature'}), 400
+
+        database_url = os.getenv('DATABASE_URL')
+        conn = psycopg2.connect(database_url)
+        cursor = conn.cursor()
+
+        # Handle successful subscription checkout
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+
+            if session['mode'] == 'subscription':
+                user_id = session['metadata'].get('user_id')
+                plan = session['metadata'].get('plan')
+                credits_to_add = int(session['metadata'].get('credits', 0))
+                subscription_id = session['subscription']
+                customer_id = session['customer']
+
+                if user_id and credits_to_add:
+                    # Get subscription details
+                    subscription = stripe.Subscription.retrieve(subscription_id)
+
+                    # Add credits to user
+                    cursor.execute(
+                        'UPDATE users SET credits = credits + %s WHERE id = %s',
+                        (credits_to_add, user_id)
+                    )
+
+                    # Store subscription
+                    cursor.execute('''
+                        INSERT INTO subscriptions (user_id, stripe_subscription_id, stripe_customer_id, plan, status, current_period_start, current_period_end)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (stripe_subscription_id) DO UPDATE
+                        SET status = EXCLUDED.status, current_period_end = EXCLUDED.current_period_end, updated_at = CURRENT_TIMESTAMP
+                    ''', (
+                        user_id,
+                        subscription_id,
+                        customer_id,
+                        plan,
+                        subscription['status'],
+                        datetime.fromtimestamp(subscription['current_period_start']),
+                        datetime.fromtimestamp(subscription['current_period_end'])
+                    ))
+
+                    conn.commit()
+                    print(f"[STRIPE] Added {credits_to_add} credits to user {user_id}, subscription {subscription_id}")
+
+        # Handle subscription renewal
+        elif event['type'] == 'invoice.payment_succeeded':
+            invoice = event['data']['object']
+            subscription_id = invoice['subscription']
+
+            if subscription_id:
+                # Get subscription from database
+                cursor.execute(
+                    'SELECT user_id, plan FROM subscriptions WHERE stripe_subscription_id = %s',
+                    (subscription_id,)
+                )
+                result = cursor.fetchone()
+
+                if result:
+                    user_id, plan = result
+
+                    # Define credits per plan
+                    plan_credits = {
+                        'starter': 20,
+                        'pro': 50,
+                        'enterprise': 300
+                    }
+
+                    credits_to_add = plan_credits.get(plan, 0)
+
+                    if credits_to_add:
+                        # Reset credits to plan amount (monthly reset)
+                        cursor.execute(
+                            'UPDATE users SET credits = %s WHERE id = %s',
+                            (credits_to_add, user_id)
+                        )
+                        conn.commit()
+                        print(f"[STRIPE] Monthly renewal: Reset credits to {credits_to_add} for user {user_id}")
+
+        # Handle subscription cancellation
+        elif event['type'] == 'customer.subscription.deleted':
+            subscription = event['data']['object']
+            subscription_id = subscription['id']
+
+            cursor.execute(
+                "UPDATE subscriptions SET status = 'canceled', updated_at = CURRENT_TIMESTAMP WHERE stripe_subscription_id = %s",
+                (subscription_id,)
+            )
+            conn.commit()
+            print(f"[STRIPE] Subscription {subscription_id} canceled")
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({'status': 'success'}), 200
+
+    except Exception as e:
+        print(f"[STRIPE WEBHOOK ERROR] {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/debug/files', methods=['GET'])
