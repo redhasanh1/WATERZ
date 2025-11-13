@@ -2,9 +2,8 @@
 Production Server for Watermark Removal SaaS
 - Async queue processing with Celery + Redis
 - GPU-optimized YOLO detection + ProPainter inpainting
-- Keeps your PC usable while serving customers
 - Designed for $1Mi/month scale
-- ALL FILES STAY ON D DRIVE (inside watermarkz folder)
+- ALL FILES STORED ON RAILWAY VOLUME (/data)
 """
 
 import sys
@@ -17,17 +16,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
-# CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
+# Railway Volume storage paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
-CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
-UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
-RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
-DEBUG_DIR = os.path.join(RESULT_DIR, 'debug_masks')
+TEMP_DIR = '/data/temp'
+CACHE_DIR = '/data/cache'
+UPLOAD_DIR = '/data/uploads'
+RESULT_DIR = '/data/results'
+DEBUG_DIR = '/data/debug'
 PYTHON_PACKAGES_DIR = os.path.join(SCRIPT_DIR, 'python_packages')
 PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter.py')
-PROPAINTER_OUTPUT_ROOT = os.path.join(RESULT_DIR, 'propainter')
-PROPAINTER_MASK_ROOT = os.path.join(TEMP_DIR, 'propainter_masks')
+PROPAINTER_OUTPUT_ROOT = '/data/propainter_output'
+PROPAINTER_MASK_ROOT = '/data/propainter_masks'
 PROPAINTER_FLOW_BACKEND = os.getenv('PROPAINTER_FLOW_BACKEND', 'raft')  # 'raft' or 'fastflownet'
 try:
     _segment_workers_env = int(os.getenv('SEGMENT_WORKERS', '2'))
@@ -43,13 +42,13 @@ os.environ.setdefault('MIN_CHUNK_FRAMES', '60')  # Minimum frames per chunk (fal
 for directory in [TEMP_DIR, CACHE_DIR, UPLOAD_DIR, RESULT_DIR, DEBUG_DIR, PROPAINTER_OUTPUT_ROOT, PROPAINTER_MASK_ROOT]:
     os.makedirs(directory, exist_ok=True)
 
-# Override ALL temp/cache environment variables
+# Override ALL temp/cache environment variables to use Railway Volume
 os.environ['TEMP'] = TEMP_DIR
 os.environ['TMP'] = TEMP_DIR
 os.environ['TMPDIR'] = TEMP_DIR
 os.environ['TORCH_HOME'] = CACHE_DIR
 os.environ['XDG_CACHE_HOME'] = CACHE_DIR
-os.environ['PIP_CACHE_DIR'] = os.path.join(SCRIPT_DIR, 'pip_cache')
+os.environ['PIP_CACHE_DIR'] = '/data/pip_cache'
 os.environ['TRANSFORMERS_CACHE'] = CACHE_DIR
 os.environ['HF_HOME'] = CACHE_DIR
 os.environ['OPENCV_TEMP_PATH'] = TEMP_DIR
@@ -5684,15 +5683,48 @@ def process_video():
     """
     Process video to remove watermarks
 
-    Request: { "task_id": "uuid-from-download" }
+    Request: { "task_id": "uuid-from-download", "user_id": "123" }
     Response: { "status": "success", "task_id": "celery-task-id" }
     """
     try:
+        import psycopg2
+
         data = request.get_json()
         task_id = data.get('task_id')
+        user_id = data.get('user_id')
 
         if not task_id:
             return jsonify({'status': 'error', 'message': 'No task_id provided'}), 400
+
+        # Check and deduct credits
+        if user_id:
+            try:
+                database_url = os.getenv('DATABASE_URL')
+                if database_url:
+                    conn = psycopg2.connect(database_url)
+                    cursor = conn.cursor()
+
+                    # Check if user has credits
+                    cursor.execute('SELECT credits FROM users WHERE id = %s', (user_id,))
+                    result = cursor.fetchone()
+
+                    if result:
+                        credits = result[0] or 0
+                        if credits <= 0:
+                            cursor.close()
+                            conn.close()
+                            return jsonify({'status': 'error', 'message': 'No credits remaining. Please purchase more credits to continue.'}), 402
+
+                        # Deduct 1 credit
+                        cursor.execute('UPDATE users SET credits = credits - 1 WHERE id = %s', (user_id,))
+                        conn.commit()
+                        print(f"[CREDITS] Deducted 1 credit from user {user_id}. Remaining: {credits - 1}")
+
+                    cursor.close()
+                    conn.close()
+            except Exception as e:
+                print(f"[CREDITS ERROR] {e}")
+                # Continue processing even if credit check fails (for backwards compatibility)
 
         # Find uploaded media (video first, then image) with any extension
         video_path = None

@@ -64,7 +64,8 @@
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" verify_schema.py)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" add_password_to_db.py)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" add_name_to_db.py)",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" add_credits_to_db.py)"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" add_credits_to_db.py)",
+      "Bash(node -c:*)"
     ],
     "deny": [],
     "ask": []

@@ -60,26 +60,44 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <script>
-        // API base detection and override support.
-        // - Defaults to same-origin ('').
-        // - Reads a persisted override from localStorage if present.
-        // - Best-effort fetch of /tunnel_url.txt to auto-fill when front and API are split.
+        // API base detection and override (safe)
+        // Defaults to same-origin (''). Only allows overrides for same host or localhost.
         (function () {
-            var url = '';
+            function allow(u) {
+                if (!u) return false;
+                try {
+                    var parsed = new URL(u, window.location.origin);
+                    var host = (parsed.hostname || '').toLowerCase();
+                    var allowed = [window.location.hostname.toLowerCase(), 'localhost', '127.0.0.1'];
+                    return allowed.indexOf(host) !== -1;
+                } catch (e) { return false; }
+            }
+
+            var base = '';
             try {
-                url = window.API_BASE_URL || localStorage.getItem('api_base_url_override') || '';
+                // Optional query override (?api=...)
+                var qp = new URLSearchParams(window.location.search).get('api');
+                if (qp && allow(qp)) base = qp;
+
+                // Stored override (only if allowed)
+                if (!base) {
+                    var stored = '';
+                    try { stored = localStorage.getItem('api_base_url_override') || ''; } catch (e) {}
+                    if (allow(stored)) base = stored; else if (stored) { try { localStorage.removeItem('api_base_url_override'); } catch (e) {} }
+                }
             } catch (e) { /* ignore */ }
 
-            window.API_BASE_URL = url || '';
+            window.API_BASE_URL = base || '';
 
-            if (!url) {
+            // Optional: load /tunnel_url.txt (same-origin only) for dev hints, but ignore cross-origin
+            if (!base) {
                 try {
                     fetch('/tunnel_url.txt', { headers: { 'ngrok-skip-browser-warning': 'true' } })
                         .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
                         .then(function (txt) {
                             if (!txt) return;
-                            txt = txt.trim();
-                            if (/^https?:\/\//i.test(txt)) {
+                            txt = (txt || '').trim();
+                            if (allow(txt)) {
                                 window.API_BASE_URL = txt;
                                 try { localStorage.setItem('api_base_url_override', txt); } catch (e) { }
                             }
@@ -89,8 +107,10 @@
             }
 
             window.setApiBaseUrl = function (newUrl, persist) {
-                window.API_BASE_URL = newUrl || '';
-                try { if (persist) localStorage.setItem('api_base_url_override', window.API_BASE_URL); } catch (e) { }
+                if (allow(newUrl)) {
+                    window.API_BASE_URL = newUrl || '';
+                    try { if (persist) localStorage.setItem('api_base_url_override', window.API_BASE_URL); } catch (e) { }
+                }
             };
         })();
     </script>
@@ -1418,10 +1438,23 @@
         async function updateApiChip() {
             var chip = document.getElementById('apiStatusChip');
             if (!chip) return;
-            chip.textContent = 'API: Checking...<!doctype|^\s*<html/i.test(msg)) {
-                    msg = 'Received HTML instead of JSON (likely wrong API host or tunnel banner).';
-                }
-                return { status: 'error', message: `Non-JSON response (${response.status}): ${msg || 'no body'}` };
+            chip.classList.remove('ok','error');
+            chip.classList.add('checking');
+            chip.textContent = 'API: Checking...';
+            var base = window.API_BASE_URL || '';
+            try {
+                const res = await fetchWithTimeout(`${base}/api/health`, { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                await res.json().catch(function(){ return {}; });
+                chip.classList.remove('checking');
+                chip.classList.add('ok');
+                chip.textContent = 'API: OK';
+                chip.title = base ? `Using ${base}` : 'Using same origin';
+            } catch (e) {
+                chip.classList.remove('checking');
+                chip.classList.add('error');
+                chip.textContent = 'API: Error';
+                chip.title = (e && e.message ? e.message : 'Request failed') + (base ? ` (base ${base})` : '');
             }
         }
 
@@ -1856,10 +1889,17 @@
             progressPercent.textContent = '0%';
 
             try {
+                // Get user info from localStorage
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                const payload = { task_id: taskId };
+                if (user.id) {
+                    payload.user_id = user.id;
+                }
+
                 const response = await apiFetchPath(`/api/process`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ task_id: taskId })
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await parseJsonSafe(response);
@@ -1867,6 +1907,21 @@
                 if (data.status === 'success') {
                     const processTaskId = data.task_id;
                     startStatusPolling(processTaskId);
+
+                    // Update credits display
+                    if (user.id && user.credits !== undefined) {
+                        user.credits = Math.max(0, user.credits - 1);
+                        localStorage.setItem('user', JSON.stringify(user));
+                        const creditsEl = document.getElementById('userCredits');
+                        if (creditsEl) {
+                            creditsEl.textContent = user.credits + ' credit' + (user.credits !== 1 ? 's' : '');
+                            if (user.credits === 0) {
+                                creditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
+                            } else if (user.credits < 3) {
+                                creditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+                            }
+                        }
+                    }
                 } else {
                     statusText.textContent = 'âŒ Error: ' + (data.message || 'Failed to start processing');
                     statusText.style.color = '#ef4444';
@@ -2228,8 +2283,9 @@
   }
 })();
 </script>
-</body>
+<script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script></body>
 </html>
+
 
 
 
