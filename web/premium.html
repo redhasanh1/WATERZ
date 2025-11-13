@@ -726,10 +726,10 @@
                     <div class="pricing-header">
                         <h3>Free</h3>
                         <div class="pricing-price">$0<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Perfect for testing owned or licensed clips before moving into production.</p>
+                        <p style="color: var(--text-secondary);">Try it out with complimentary credits on signup.</p>
                     </div>
                     <ul class="pricing-features">
-                        <li>10 images + 2 short videos each month</li>
+                        <li><strong>5 videos</strong> on signup (no card required)</li>
                         <li>Shared queue with standard turnaround</li>
                         <li>720p output with watermark audit logs</li>
                         <li>Email support within 24 hours</li>
@@ -737,13 +737,28 @@
                     <button class="btn-pricing secondary" onclick="signUp('free')">Start Free</button>
                 </div>
 
+                <!-- Starter Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Starter</h3>
+                        <div class="pricing-price">$4.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">Great for creators refreshing smaller catalogs each month.</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>20 videos</strong> per month</li>
+                        <li>HD output, policy-friendly defaults</li>
+                        <li>Basic email support</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('starter')">Get Starter</button>
+                </div>
+
                 <!-- Professional Plan -->
                 <div class="pricing-card popular" style="transform: translateY(-14px);">
                     <div class="popular-badge">⭐ MOST POPULAR</div>
                     <div class="pricing-header">
-                        <h3>Professional</h3>
-                        <div class="pricing-price">$29<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Built for independent creators, freelancers, and in-house teams refreshing rights-cleared assets every week.</p>
+                        <h3>Pro</h3>
+                        <div class="pricing-price">$9.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">Built for independent creators and teams refreshing rights-cleared assets weekly.</p>
                     </div>
                     <ul class="pricing-features">
                         <li><strong>500 images</strong> + <strong>50 videos</strong> (≤10 min) per month</li>
@@ -752,7 +767,22 @@
                         <li>Priority support, compliance templates, and commercial license</li>
                     </ul>
                     <div style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; color: #6ee7b7; font-weight: 600;">Most creators see payback after the first client delivery.</div>
-                    <button class="btn-pricing primary" onclick="signUp('pro')">Start Free Trial</button>
+                    <button class="btn-pricing primary" onclick="signUp('pro')">Start Pro</button>
+                </div>
+
+                <!-- Enterprise Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Enterprise</h3>
+                        <div class="pricing-price">$49.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">For agencies and teams processing larger libraries every month.</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>300 videos</strong> per month</li>
+                        <li>Team features and audit logging</li>
+                        <li>Dedicated support</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('enterprise')">Go Enterprise</button>
                 </div>
             </div>
 
