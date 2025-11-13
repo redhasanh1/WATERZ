@@ -32,7 +32,32 @@
                 if (!userData.email) {
                     localStorage.removeItem('user');
                     window.location.href = 'login.html';
+                    return;
                 }
+
+                // Update UI to show signed-in state
+                window.addEventListener('DOMContentLoaded', function() {
+                    const userEmailEl = document.getElementById('userEmail');
+                    const userNav = document.getElementById('userNav');
+                    const signInNav = document.getElementById('signInNav');
+                    const signOutBtn = document.getElementById('signOutBtn');
+
+                    if (userEmailEl && userNav && signInNav) {
+                        // Show user's name or email
+                        userEmailEl.textContent = userData.name || userData.email;
+                        userNav.style.display = 'block';
+                        signInNav.style.display = 'none';
+                    }
+
+                    // Sign out handler
+                    if (signOutBtn) {
+                        signOutBtn.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            localStorage.removeItem('user');
+                            window.location.href = 'login.html';
+                        });
+                    }
+                });
             } catch (e) {
                 localStorage.removeItem('user');
                 window.location.href = 'login.html';
@@ -692,7 +717,11 @@
                 <li><a href="#remove-watermark">Restore Content</a></li>
                 <li><a href="#pricing">Plans</a></li>
                 <li><a href="#comparison">Results</a></li>
-                <li><a href="login.html" class="nav-cta">Sign In</a></li>
+                <li id="userNav" style="display: none;">
+                    <span id="userEmail" style="color: #667eea; font-weight: 600; margin-right: 1rem;"></span>
+                    <a href="#" id="signOutBtn" class="nav-cta" style="background: rgba(239, 68, 68, 0.9);">Sign Out</a>
+                </li>
+                <li id="signInNav"><a href="login.html" class="nav-cta">Sign In</a></li>
             </ul>
 
             <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking…</div>

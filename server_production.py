@@ -263,6 +263,7 @@ def auth_register():
         data = request.get_json()
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
+        name = data.get('name', '').strip()
 
         if not email:
             return jsonify({'error': 'Email is required'}), 400
@@ -287,18 +288,19 @@ def auth_register():
         cursor = conn.cursor()
 
         # Check if user exists
-        cursor.execute('SELECT id, email, password_hash, created_at FROM users WHERE email = %s', (email,))
+        cursor.execute('SELECT id, email, name, password_hash, created_at FROM users WHERE email = %s', (email,))
         user = cursor.fetchone()
 
         if user:
             # User exists - verify password
-            if user[2] == password_hash:
+            if user[3] == password_hash:
                 cursor.close()
                 conn.close()
                 return jsonify({
                     'id': user[0],
                     'email': user[1],
-                    'created_at': user[3].isoformat() if user[3] else None,
+                    'name': user[2],
+                    'created_at': user[4].isoformat() if user[4] else None,
                     'message': 'Logged in successfully'
                 }), 200
             else:
@@ -308,8 +310,8 @@ def auth_register():
         else:
             # Create new user
             cursor.execute(
-                'INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id, email, created_at',
-                (email, password_hash)
+                'INSERT INTO users (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id, email, name, created_at',
+                (email, password_hash, name)
             )
             new_user = cursor.fetchone()
             conn.commit()
@@ -319,7 +321,8 @@ def auth_register():
             return jsonify({
                 'id': new_user[0],
                 'email': new_user[1],
-                'created_at': new_user[2].isoformat() if new_user[2] else None,
+                'name': new_user[2],
+                'created_at': new_user[3].isoformat() if new_user[3] else None,
                 'message': 'Account created successfully'
             }), 201
 

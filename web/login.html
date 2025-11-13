@@ -184,6 +184,9 @@
                 Continue with Google
             </button>
             <form id="signupForm">
+                <label for="signupName">Full name</label>
+                <input type="text" id="signupName" name="signupName" placeholder="Alex Morgan" autocomplete="name" required>
+
                 <label for="signupEmail">Work email</label>
                 <input type="email" id="signupEmail" name="signupEmail" placeholder="you@agency.com" autocomplete="email" required>
 
@@ -273,8 +276,14 @@
         // Email + password signup (create account)
         document.getElementById('signupForm').addEventListener('submit', async function (event) {
             event.preventDefault();
+            const name = document.getElementById('signupName').value.trim();
             const email = document.getElementById('signupEmail').value.trim();
             const password = document.getElementById('signupPassword').value;
+
+            if (!name) {
+                showMessage('Please enter your name', 'error');
+                return;
+            }
 
             if (!email) {
                 showMessage('Please enter your email', 'error');
@@ -286,23 +295,28 @@
                 return;
             }
 
-            await emailLogin(email, password);
+            await emailLogin(email, password, name);
         });
 
         // Email + password login function (handles both signin and signup)
-        async function emailLogin(email, password) {
+        async function emailLogin(email, password, name = null) {
             const messageEl = document.getElementById('authMessage');
             showMessage('Processing...', '');
 
             try {
                 const apiUrl = API_BASE ? `${API_BASE}/api/auth/register` : '/api/auth/register';
 
+                const payload = { email, password };
+                if (name) {
+                    payload.name = name;
+                }
+
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ email, password })
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await response.json();
