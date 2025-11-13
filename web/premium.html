@@ -901,7 +901,15 @@
                 return;
             }
             try {
-                await Billing.startCheckout(plan);
+                // Get user from localStorage
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                if (!user.id) {
+                    alert('Please sign in first to purchase a plan');
+                    window.location.href = 'login.html';
+                    return;
+                }
+                // Pass user_id to checkout
+                await Billing.startCheckout(plan, { user_id: user.id });
             } catch (error) {
                 console.error('Stripe checkout error:', error);
                 alert('We were unable to start checkout. Please try again or contact support.');

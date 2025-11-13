@@ -844,7 +844,13 @@
                 <li><a href="#remove-watermark">Remove Objects</a></li>
                 <li><a href="premium.html#pricing">Pricing</a></li>
                 <li><a href="#comparison">Results</a></li>
-                <li><a href="login.html" class="nav-cta">Sign In</a></li>
+                <li><a href="login.html" class="nav-cta" id="signInLink">Sign In</a></li>
+            </ul>
+            <ul class="nav-menu" id="userNav" style="display: none;">
+                <li><span id="userEmail" style="color: #667eea; font-weight: 600;"></span></li>
+                <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.3rem 0.8rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem;">0 credits</span></li>
+                <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">Buy Credits</a></li>
+                <li><a href="#" id="signOutBtn" class="nav-cta" style="background: rgba(239, 68, 68, 0.9);">Sign Out</a></li>
             </ul>
             <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking...</div>
             <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">Dark</button>
@@ -2243,6 +2249,53 @@
   slider.addEventListener('input', () => {
     try { vid.currentTime = parseFloat(slider.value || '0'); } catch(_) {}
   });
+})();
+</script>
+<script>
+// Check for logged-in user and show nav
+(function(){
+  try {
+    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+    if (userData && userData.id) {
+      // Hide sign in link, show user nav
+      const signInLink = document.getElementById('signInLink');
+      const navMenu = document.getElementById('navMenu');
+      const userNav = document.getElementById('userNav');
+
+      if (signInLink) signInLink.style.display = 'none';
+      if (userNav) userNav.style.display = 'flex';
+
+      // Show user email/name
+      const userEmailEl = document.getElementById('userEmail');
+      if (userEmailEl) {
+        userEmailEl.textContent = userData.name || userData.email;
+      }
+
+      // Show credits
+      const userCreditsEl = document.getElementById('userCredits');
+      if (userCreditsEl) {
+        const credits = userData.credits || 0;
+        userCreditsEl.textContent = credits + ' credit' + (credits !== 1 ? 's' : '');
+        if (credits === 0) {
+          userCreditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
+        } else if (credits < 3) {
+          userCreditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+        }
+      }
+
+      // Sign out button
+      const signOutBtn = document.getElementById('signOutBtn');
+      if (signOutBtn) {
+        signOutBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          localStorage.removeItem('user');
+          window.location.href = 'login.html';
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[Auth Check]', e);
+  }
 })();
 </script>
 <script>
