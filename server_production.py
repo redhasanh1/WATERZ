@@ -1616,12 +1616,12 @@ propainter_ready = False
 # Each process gets its own CUDA context and model instances
 from concurrent.futures import ProcessPoolExecutor
 
-# File cleanup - delete files older than 1 hour
+# File cleanup - delete files older than 10 minutes
 def cleanup_old_files():
-    """Delete uploaded and processed files older than 1 hour"""
+    """Delete uploaded and processed files older than 10 minutes"""
     import time
     current_time = time.time()
-    max_age = 3600  # 1 hour
+    max_age = 600  # 10 minutes
 
     for directory in [UPLOAD_DIR, RESULT_DIR]:
         try:
