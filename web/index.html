@@ -802,7 +802,7 @@
             <ul class="nav-menu" id="navMenu">
                 <li><a href="#remove-watermark">Remove Objects</a></li>
                 <li><a href="#training">AI Training</a></li>
-                <li><a href="#pricing">Plans</a></li>
+            <li><a href="premium.html#pricing">Plans</a></li>
                 <li><a href="#comparison">Results</a></li>
                 <li><a href="login.html" class="nav-cta">Sign In</a></li>
             </ul>
@@ -899,8 +899,10 @@
                     <div class="preview-container" id="previewContainer" style="text-align: center;">
                         <img id="previewImage" class="preview-image" style="display: none; max-width: 100%; max-height: 600px;">
                         <div id="videoContainer" style="position: relative; display: inline-block; max-width: 100%;">
+                            <div style="text-align:left; color: var(--text-secondary); font-weight: 600; margin: 0 0 6px 2px;">S2 (Original)</div>
                             <video id="previewVideo" controls style="display: none; max-width: 100%; max-height: 600px; border-radius: 12px; box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);">
 </video>
+                            <input id="timelineSlider" type="range" min="0" value="0" step="0.01" style="display:none; width: 100%; margin-top: 10px;">
                             <!-- Canvas overlay for mask selection -->
                             <canvas id="maskCanvas" style="display: none; position: absolute; top: 0; left: 0; cursor: crosshair; pointer-events: none;"></canvas>
                             <!-- Arrow pointing to download menu -->
@@ -918,7 +920,7 @@
                             </svg>
                             <!-- Text label at top right next to video -->
                             <div id="downloadText" style="display: none; position: absolute; top: 5px; right: -190px; background: rgba(102, 126, 234, 0.95); color: white; padding: 0.7rem 1rem; border-radius: 8px; font-weight: 600; font-size: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); white-space: nowrap; z-index: 10;">
-                                Click â‹® to Download
+                                Download S2 Remove via the player menu
                             </div>
                         </div>
                         <!-- Mask Selection Controls -->
@@ -1093,68 +1095,7 @@
     </section>
 
     <!-- Pricing Section -->
-    <section id="pricing" style="padding: 4rem 2rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%);">
-        <div class="container">
-            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                Simple, Transparent Pricing
-            </h2>
-            <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 3rem;">
-                Start free, upgrade when you need more. No hidden fees.
-            </p>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2.5rem; max-width: 1000px; margin: 0 auto;">
-                <!-- Free Plan -->
-                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.15); border-radius: 16px; padding: 2.5rem; text-align: center;">
-                    <h3 style="font-size: 1.6rem; margin-bottom: 1rem; font-weight: 700;">Free</h3>
-                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$0<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 1.75rem; font-size: 0.95rem;">Perfect for trying out professional object removal on your first projects.</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
-                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">â€¢</span>
-                            <span>10 images & 2 short videos each month</span>
-                        </li>
-                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">â€¢</span>
-                            <span>Shared queue with standard turnaround</span>
-                        </li>
-                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">â€¢</span>
-                            <span>720p output and email support</span>
-                        </li>
-                    </ul>
-                    <a href="#remove-watermark" style="display: block; padding: 1rem 2rem; background: rgba(102, 126, 234, 0.18); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Start for Free</a>
-                </div>
-
-                <!-- Pro Plan -->
-                <div style="background: var(--bg-card); border: 2px solid var(--primary); border-radius: 16px; padding: 2.5rem; text-align: center; position: relative; box-shadow: 0 0 40px rgba(102, 126, 234, 0.3);">
-                    <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gradient-primary); padding: 0.35rem 1.1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">MOST POPULAR</div>
-                    <h3 style="font-size: 1.6rem; margin-bottom: 1rem; font-weight: 700;">Pro</h3>
-                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$29<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 1.75rem; font-size: 0.95rem;">For creators, platforms, and agencies who need professional results at scale.</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
-                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">â€¢</span>
-                            <span>500 images & 50 videos (â‰¤10 min) every month</span>
-                        </li>
-                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">â€¢</span>
-                            <span>Priority cleanup lane with 4K output</span>
-                        </li>
-                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">â€¢</span>
-                            <span>Batch uploads, API (1,000 calls), priority inbox support</span>
-                        </li>
-                    </ul>
-                    <a href="premium.html#pricing" style="display: block; padding: 1rem 2rem; background: var(--gradient-primary); border-radius: 8px; color: white; text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Upgrade to Pro</a>
-                </div>
-
-            </div>
-
-            <p style="text-align: center; color: var(--text-secondary); font-size: 0.95rem; margin-top: 2.5rem;">
-                Need feature-by-feature comparisons, usage calculators, or compliance add-ons? Explore the full <a href="premium.html#pricing" style="color: #667eea; text-decoration: none;">pricing breakdown</a>.
-            </p>
-        </div>
-    </section>
+    
 
     <!-- Before/After Comparison Section -->
     <section id="comparison" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%); padding: 4rem 2rem; margin: 2rem 0;">
@@ -1823,7 +1764,7 @@
                     if (statusData.state === 'SUCCESS') {
                         progressBar.style.width = '100%';
                         progressPercent.textContent = '100%';
-                        statusText.textContent = 'Processing complete Â· Preparing download...';
+                        statusText.textContent = 'S2 Remove ready · Preparing download...';
                         statusText.style.color = '#10b981';
 
                         const resultData = statusData.result || {};
@@ -1842,11 +1783,11 @@
                                 previewSource = prepared.downloadLink.href;
                                 autoDownload = prepared.autoDownload;
 
-                                statusText.textContent = 'Processing complete Â· Download ready';
+                                statusText.textContent = 'S2 Remove ready · Download ready';
                             } catch (downloadError) {
                                 console.error('Error preparing download link:', downloadError);
                                 downloadLinkElement = buildDownloadLinkElement(resultUrl, 'cleaned_video.mp4', false);
-                                statusText.textContent = 'Processing complete Â· Click the download button to save your video';
+                                statusText.textContent = 'S2 Remove ready · Click the menu to download';
                             }
 
                             if (downloadLinkElement) {
@@ -1997,63 +1938,7 @@
             startStatusPolling(savedTaskId);
         }
     </script>
-    <script>
-      // Dual-video training uploader
-      (function() {
-        const origInput = document.getElementById('trainOriginal');
-        const remInput  = document.getElementById('trainRemoved');
-        const btn       = document.getElementById('startTrainingBtn');
-        const statusEl  = document.getElementById('trainStatus');
-
-        function setStatus(msg, tone) {
-          statusEl.textContent = msg || '';
-          statusEl.style.color = tone === 'err' ? '#ef4444' : (tone === 'ok' ? '#22c55e' : 'var(--text-secondary)');
-        }
-
-        function humanSize(bytes) {
-          if (!bytes && bytes !== 0) return '';
-          const units = ['B','KB','MB','GB'];
-          let i = 0, val = bytes;
-          while (val >= 1024 && i < units.length-1) { val /= 1024; i++; }
-          return `${val.toFixed(1)} ${units[i]}`;
-        }
-
-        btn && btn.addEventListener('click', async () => {
-          const f1 = origInput && origInput.files && origInput.files[0];
-          const f2 = remInput && remInput.files && remInput.files[0];
-          if (!f1 || !f2) {
-            setStatus('Please select both videos first.', 'err');
-            return;
-          }
-          const max = 1024*1024*100; // 100 MB per current backend limit
-          if (f1.size > max || f2.size > max) {
-            setStatus('Each file must be â‰¤ 100MB.', 'err');
-            return;
-          }
-
-          const fd = new FormData();
-          fd.append('original', f1);
-          fd.append('removed', f2);
-
-          btn.disabled = true;
-          const origName = f1.name; const remName = f2.name;
-          setStatus(`Uploading (${humanSize(f1.size)} + ${humanSize(f2.size)})...`);
-
-          try {
-            const resp = await fetch(`${API_BASE_URL}/api/train`, { method: 'POST', body: fd });
-            const data = await resp.json().catch(() => ({}));
-            if (!resp.ok || data.status !== 'success') {
-              throw new Error((data && data.message) || `Upload failed (${resp.status})`);
-            }
-            setStatus(`Training registered (job ${data.job_id}).`, 'ok');
-          } catch (err) {
-            setStatus(`Error: ${err.message || err}`, 'err');
-          } finally {
-            btn.disabled = false;
-          }
-        });
-      })();
-    </script>
+    
     <script>
       // Interactive Mask Selection (like local SAM2 test!)
       (function () {
@@ -2313,7 +2198,7 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            statusText.textContent = used ? Done. Credits used:  : 'Done.';
+            statusText.textContent = used ? "S2 Remove ready · Credits used: " +  : 'Done.';
             statusText.style.color = '#22c55e';
             progressBar.style.width = '100%';
             progressPercent.textContent = '100%';
@@ -2328,6 +2213,32 @@
           creditsBtn.addEventListener('click', processWithCredits);
         }
       })();
-    </script></body>
+    </script><script>
+(function(){
+  const vid = document.getElementById('previewVideo');
+  const slider = document.getElementById('timelineSlider');
+  if (!vid || !slider) return;
+  function showSlider(){ slider.style.display = 'block'; }
+  vid.addEventListener('loadedmetadata', () => {
+    try { slider.max = Math.max(1, vid.duration || 1).toString(); showSlider(); } catch(_) { showSlider(); }
+  });
+  vid.addEventListener('timeupdate', () => {
+    if (!isNaN(vid.currentTime)) slider.value = vid.currentTime;
+  });
+  slider.addEventListener('input', () => {
+    try { vid.currentTime = parseFloat(slider.value || '0'); } catch(_) {}
+  });
+})();
+</script></body>
 </html>
+
+
+
+
+
+
+
+
+
+
 
