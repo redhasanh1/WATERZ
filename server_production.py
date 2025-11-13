@@ -398,6 +398,13 @@ def create_checkout():
         print(f"[STRIPE CHECKOUT ERROR] {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/billing/create-checkout-session', methods=['POST', 'OPTIONS'])
+def create_checkout_session():
+    """Alias for Stripe checkout - matches frontend billing.js"""
+    return create_checkout()
+
+
 @app.route('/api/stripe/webhook', methods=['POST'])
 def stripe_webhook():
     """Handle Stripe webhook events"""
