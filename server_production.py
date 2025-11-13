@@ -3262,14 +3262,15 @@ def process_segment_task(self, segment_data):
 
         # Create local temp directories for this segment
         seg_prefix = f"{base_name}_{video_id}_seg{seg_idx}"
-        seg_frames_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_frames")
-        seg_cropped_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cropped")
-        seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
-        seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
+        # Normalize paths to use forward slashes (fixes Windows backslash issue on Linux)
+        seg_frames_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_frames").replace('\\', '/')
+        seg_cropped_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cropped").replace('\\', '/')
+        seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks").replace('\\', '/')
+        seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output").replace('\\', '/')
 
         # 🔥 SHARED FRAME BUFFER FIX: All segments merge onto same directory
         # This allows multiple segments to cooperatively edit the same frames
-        shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned")
+        shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned").replace('\\', '/')
         seg_cleaned_dir = shared_cleaned_dir  # Backwards compatibility alias
 
         for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
