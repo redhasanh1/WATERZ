@@ -184,9 +184,6 @@
                 Continue with Google
             </button>
             <form id="signupForm">
-                <label for="signupName">Full name</label>
-                <input type="text" id="signupName" name="signupName" placeholder="Alex Morgan" autocomplete="name" required>
-
                 <label for="signupEmail">Work email</label>
                 <input type="email" id="signupEmail" name="signupEmail" placeholder="you@agency.com" autocomplete="email" required>
 
@@ -254,34 +251,46 @@
             window.location.href = target;
         });
 
-        // Email-only login (sign in)
+        // Email + password login (sign in)
         document.getElementById('loginForm').addEventListener('submit', async function (event) {
             event.preventDefault();
-            const email = document.getElementById('loginEmail').value.trim();
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
 
             if (!email) {
                 showMessage('Please enter your email', 'error');
                 return;
             }
 
-            await emailLogin(email);
+            if (!password) {
+                showMessage('Please enter your password', 'error');
+                return;
+            }
+
+            await emailLogin(email, password);
         });
 
-        // Email-only signup (create account)
+        // Email + password signup (create account)
         document.getElementById('signupForm').addEventListener('submit', async function (event) {
             event.preventDefault();
             const email = document.getElementById('signupEmail').value.trim();
+            const password = document.getElementById('signupPassword').value;
 
             if (!email) {
                 showMessage('Please enter your email', 'error');
                 return;
             }
 
-            await emailLogin(email);
+            if (!password) {
+                showMessage('Please enter your password', 'error');
+                return;
+            }
+
+            await emailLogin(email, password);
         });
 
-        // Email login function (handles both signin and signup)
-        async function emailLogin(email) {
+        // Email + password login function (handles both signin and signup)
+        async function emailLogin(email, password) {
             const messageEl = document.getElementById('authMessage');
             showMessage('Processing...', '');
 
@@ -293,7 +302,7 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ email })
+                    body: JSON.stringify({ email, password })
                 });
 
                 const data = await response.json();

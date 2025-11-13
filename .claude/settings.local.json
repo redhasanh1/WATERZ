@@ -58,7 +58,11 @@
       "Bash(curl:*)",
       "Bash(cmd /c 'taskkill /F /IM python.exe')",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" setup_database.py)",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m pip install psycopg2-binary)"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m pip install psycopg2-binary)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" verify_schema.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" add_password_to_db.py)"
     ],
     "deny": [],
     "ask": []

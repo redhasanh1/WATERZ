@@ -26,8 +26,9 @@ try:
     conn = psycopg2.connect(DATABASE_URL)
     cursor = conn.cursor()
 
-    print("[INFO] Reading SQL migration file...")
-    with open('create_users_table.sql', 'r') as f:
+    print("[INFO] Reading SQL fix file...")
+    # Use fix file to drop and recreate table with correct schema
+    with open('fix_users_table.sql', 'r') as f:
         sql = f.read()
 
     print("[INFO] Executing SQL migration...")

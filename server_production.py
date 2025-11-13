@@ -251,19 +251,24 @@ def health_check():
 
 @app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
 def auth_register():
-    """Email-only registration/login - no password required"""
+    """Register new user with email and password"""
     if request.method == 'OPTIONS':
         return ('', 204)
 
     try:
         import psycopg2
+        import hashlib
         from datetime import datetime
 
         data = request.get_json()
         email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
 
         if not email:
             return jsonify({'error': 'Email is required'}), 400
+
+        if not password:
+            return jsonify({'error': 'Password is required'}), 400
 
         # Basic email validation
         if '@' not in email or '.' not in email:
@@ -274,29 +279,37 @@ def auth_register():
         if not database_url:
             return jsonify({'error': 'Database not configured'}), 500
 
+        # Hash password
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+
         # Connect to PostgreSQL
         conn = psycopg2.connect(database_url)
         cursor = conn.cursor()
 
         # Check if user exists
-        cursor.execute('SELECT id, email, created_at FROM users WHERE email = %s', (email,))
+        cursor.execute('SELECT id, email, password_hash, created_at FROM users WHERE email = %s', (email,))
         user = cursor.fetchone()
 
         if user:
-            # User exists - return existing user
-            cursor.close()
-            conn.close()
-            return jsonify({
-                'id': user[0],
-                'email': user[1],
-                'created_at': user[2].isoformat() if user[2] else None,
-                'message': 'Logged in successfully'
-            }), 200
+            # User exists - verify password
+            if user[2] == password_hash:
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'id': user[0],
+                    'email': user[1],
+                    'created_at': user[3].isoformat() if user[3] else None,
+                    'message': 'Logged in successfully'
+                }), 200
+            else:
+                cursor.close()
+                conn.close()
+                return jsonify({'error': 'Invalid password'}), 401
         else:
             # Create new user
             cursor.execute(
-                'INSERT INTO users (email) VALUES (%s) RETURNING id, email, created_at',
-                (email,)
+                'INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id, email, created_at',
+                (email, password_hash)
             )
             new_user = cursor.fetchone()
             conn.commit()
