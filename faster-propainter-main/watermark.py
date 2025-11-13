@@ -491,7 +491,9 @@ def pipeline(
             frames[i] = frame.resize((size[0], size[1]))  # Resize to match (W, H) for PIL
 
     fps = save_fps if fps is None else fps
-    save_root = os.path.join(output, video_name)
+    # Output directly to specified directory (no nested subdirectory)
+    # This avoids path resolution overhead and fixes Windows backslash issues on Linux
+    save_root = output
     if not os.path.exists(save_root):
         os.makedirs(save_root, exist_ok=True)
 

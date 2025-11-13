@@ -891,18 +891,10 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
             traceback.print_exc()
             raise RuntimeError(f"faster-propainter failed on segment {seg_idx}: {exc}") from exc
 
-        # ProPainter creates output at: seg_output_dir / basename(video) / frames
-        # But ProPainter may use Windows backslashes internally, breaking on Linux
-        # Use glob to find the frames directory (cross-platform safe)
-        import glob
-        frames_pattern = os.path.join(seg_output_dir, '*', 'frames')
-        frames_matches = glob.glob(frames_pattern)
-        if not frames_matches:
-            # Fallback to expected path for better error message
-            expected_path = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
-            raise RuntimeError(f"ProPainter output not found for segment {seg_idx}. Expected: {expected_path}, Searched: {frames_pattern}")
-        seg_propainter_frames = frames_matches[0]
-        print(f"   [OK] Found ProPainter output: {seg_propainter_frames}")
+        # ProPainter outputs directly to seg_output_dir/frames (watermark.py line 496)
+        seg_propainter_frames = os.path.join(seg_output_dir, 'frames')
+        if not os.path.exists(seg_propainter_frames):
+            raise RuntimeError(f"ProPainter output not found for segment {seg_idx}: {seg_propainter_frames}")
 
         print(f"   🔗 Merging cleaned region back to full frames (GPU-accelerated)...")
 
@@ -3820,18 +3812,10 @@ def process_segment_task(self, segment_data):
             print(f"   🔗 Merging cleaned region (in-memory)...")
             safe_update_state(self, state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
 
-            # ProPainter creates output at: seg_output_dir / basename(video) / frames
-            # But ProPainter may use Windows backslashes internally, breaking on Linux
-            # Use glob to find the frames directory (cross-platform safe)
-            import glob
-            frames_pattern = os.path.join(seg_output_dir, '*', 'frames')
-            frames_matches = glob.glob(frames_pattern)
-            if not frames_matches:
-                # Fallback to expected path for better error message
-                expected_path = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
-                raise RuntimeError(f"ProPainter output not found for segment {seg_idx}. Expected: {expected_path}, Searched: {frames_pattern}")
-            seg_propainter_frames = frames_matches[0]
-            print(f"   [OK] Found ProPainter output: {seg_propainter_frames}")
+            # ProPainter outputs directly to seg_output_dir/frames (watermark.py line 496)
+            seg_propainter_frames = os.path.join(seg_output_dir, 'frames')
+            if not os.path.exists(seg_propainter_frames):
+                raise RuntimeError(f"ProPainter output not found for segment {seg_idx}: {seg_propainter_frames}")
 
             # Load all frames into memory first (faster than disk I/O in loop)
             # [INIT] EXTREME SPEED: Use in-memory frames if available (no disk reads!)
