@@ -482,6 +482,14 @@ def pipeline(
     else:
         out_size = size
 
+    # Validate and fix inconsistent frame sizes (prevents broadcasting errors)
+    expected_size = (size[1], size[0])  # (H, W) for numpy
+    for i, frame in enumerate(frames):
+        frame_array = np.array(frame)
+        if frame_array.shape[:2] != expected_size:
+            print(f"[WARNING] Frame {i} has inconsistent size {frame_array.shape[:2]}, expected {expected_size}. Resizing...")
+            frames[i] = frame.resize((size[0], size[1]))  # Resize to match (W, H) for PIL
+
     fps = save_fps if fps is None else fps
     save_root = os.path.join(output, video_name)
     if not os.path.exists(save_root):
@@ -557,7 +565,9 @@ def pipeline(
     for i in range(len(frames)):
         mask_ = np.expand_dims(np.array(masks_dilated[i]), 2).repeat(3, axis=2) / 255.0
         img = np.array(frames[i])
-        green = np.zeros([h, w, 3])
+        # Create green array matching THIS frame's actual shape (handles inconsistent frame sizes)
+        img_h, img_w = img.shape[:2]
+        green = np.zeros([img_h, img_w, 3])
         green[:, :, 1] = 255
         alpha = 0.6
         # alpha = 1.0
