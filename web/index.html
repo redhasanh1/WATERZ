@@ -1429,6 +1429,14 @@
             return apiFetchUrl(url, options);
         }
 
+        async function parseJsonSafe(response) {
+            try {
+                return await response.json();
+            } catch (e) {
+                return { status: 'error', message: 'Invalid JSON response' };
+            }
+        }
+
         async function uploadFile(file) {
             // Show preview immediately
             const reader = new FileReader();
