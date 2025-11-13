@@ -2165,7 +2165,7 @@
                 if (data && data.error === 'insufficient_credits') {
                   const req = data.required_credits != null ? data.required_credits : '?';
                   const have = data.credits != null ? data.credits : 0;
-                  alert(Not enough credits. Required: . You have: .);
+                  alert(`Not enough credits. Required: ${req}. You have: ${have}.`);
                   return;
                 }
                 throw new Error(data && data.message ? data.message : 'Processing failed');
