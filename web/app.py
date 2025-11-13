@@ -28,6 +28,7 @@ import uuid
 from datetime import datetime
 import secrets
 import requests
+import pathlib
 
 # Import watermark removal modules
 try:
@@ -589,6 +590,22 @@ def serve_css(path):
 def serve_js(path):
     """Serve JavaScript files"""
     return send_file(f'js/{path}')
+
+
+@app.route('/videostotrain/<path:path>')
+def serve_videostotrain(path):
+    """Serve demo videos from the top-level videostotrain directory (read-only)."""
+    # Only allow mp4 files
+    if not path.lower().endswith('.mp4'):
+        return '', 404
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'videostotrain'))
+    abs_path = os.path.abspath(os.path.join(base_dir, path))
+    # Prevent directory traversal
+    if not abs_path.startswith(base_dir):
+        return '', 403
+    if not os.path.exists(abs_path):
+        return '', 404
+    return send_file(abs_path)
 
 
 @app.route('/api/remove-watermark', methods=['POST'])
