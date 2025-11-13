@@ -1777,6 +1777,23 @@ def get_propainter_pipeline():
 # Celery Tasks (Background Processing)
 # ============================================================================
 
+# Helper to safely update Celery task state (only when called via Celery)
+def safe_update_state(self, state, meta):
+    """
+    Safely update Celery task state without breaking direct function calls.
+
+    Args:
+        self: Celery task instance (from @celery.task(bind=True))
+        state: Task state ('STARTED', 'PROCESSING', 'SUCCESS', 'FAILURE')
+        meta: Dict with progress info (e.g., {'progress': 50, 'status': 'Processing...'})
+    """
+    try:
+        if self.request.id:  # Only update if called via Celery
+            self.update_state(state=state, meta=meta)
+    except:
+        pass  # Ignore errors when called directly (non-Celery context)
+
+
 # ============================================================================
 # DISTRIBUTED VIDEO PROCESSING TASKS
 # These tasks enable multiple workers across different machines to collaborate
@@ -1841,15 +1858,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         import json
         import numpy as np
 
-        # Helper to safely update state (only when called via Celery)
-        def safe_update_state(state, meta):
-            try:
-                if self.request.id:  # Only update if called via Celery
-                    safe_update_state(state=state, meta=meta)
-            except:
-                pass  # Ignore errors when called directly
-
-        safe_update_state('STARTED', {'progress': 0, 'status': 'Loading SAM2 masks'})
+        safe_update_state(self, 'STARTED', {'progress': 0, 'status': 'Loading SAM2 masks'})
 
         if not _check_propainter_assets():
             raise RuntimeError("ProPainter assets missing")
@@ -1932,7 +1941,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
             }]
         }
 
-        safe_update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Extracting frames'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 10, 'status': 'Extracting frames'})
 
         # Create temp directories for processing
         base_name = os.path.basename(video_path).rsplit('.', 1)[0]
@@ -1967,7 +1976,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
         # Copy SAM2 masks to working directory
         print(f"[SAM2 INTERACTIVE] Loading {len(mask_files)} SAM2 masks...")
-        safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': 'Loading SAM2 masks'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 20, 'status': 'Loading SAM2 masks'})
 
         for i, mask_file in enumerate(mask_files):
             src = os.path.join(masks_folder, mask_file)
@@ -2028,7 +2037,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
         # Crop frames to watermark region
         print(f"[SAM2 INTERACTIVE] Cropping {extracted_frames} frames to watermark region...")
-        safe_update_state(state='PROCESSING', meta={'progress': 30, 'status': 'Cropping frames'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 30, 'status': 'Cropping frames'})
 
         for i in range(extracted_frames):
             frame_file = f"{i:04d}.png"
@@ -2201,7 +2210,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
         # Run ProPainter with adaptive segment-based optimization
         print(f"[SAM2 ADAPTIVE] Running ProPainter with {len(segments) if segments else 1} segment(s)...")
-        safe_update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Running ProPainter'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 40, 'status': 'Running ProPainter'})
 
         try:
             # Get cached ProPainter pipeline (pre-loaded at worker startup)
@@ -2537,7 +2546,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
         # Merge cleaned regions back into original frames
         print(f"[SAM2 INTERACTIVE] Merging cleaned regions back into original frames...")
-        safe_update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Merging results'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 80, 'status': 'Merging results'})
 
         # propainter_output is already set by the processing logic above
         print(f"[SAM2 INTERACTIVE] ProPainter output location: {propainter_output}")
@@ -2582,7 +2591,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
 
         # Encode final video with FFmpeg
         print(f"[SAM2 INTERACTIVE] Encoding final video...")
-        safe_update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Encoding video'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 90, 'status': 'Encoding video'})
 
         output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
 
@@ -2617,7 +2626,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
             if os.path.exists(temp_path):
                 shutil.rmtree(temp_path)
 
-        safe_update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
+        safe_update_state(self, state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
 
         print(f"[SAM2 INTERACTIVE] Processing complete!")
         print(f"[SAM2 INTERACTIVE] Output: {output_path}")
@@ -2639,7 +2648,7 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         print(f"[ERROR] SAM2 interactive task failed: {e}")
         import traceback
         traceback.print_exc()
-        safe_update_state(state='FAILURE', meta={'error': str(e)})
+        safe_update_state(self, state='FAILURE', meta={'error': str(e)})
         raise
 
 
@@ -2658,7 +2667,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
     try:
         import json
 
-        safe_update_state(state='STARTED', meta={'progress': 0, 'status': 'Preparing video'})
+        safe_update_state(self, state='STARTED', meta={'progress': 0, 'status': 'Preparing video'})
 
         detector = get_detector()
         if not _check_propainter_assets():
@@ -2697,7 +2706,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         print(f"📹 Preparing video: {video_path} ({os.path.getsize(video_path) / (1024 * 1024):.2f} MB)")
 
-        safe_update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
 
         # NVDEC hardware decoder - NO FALLBACKS! (1.16x faster than CPU)
         use_nvdec = os.getenv("ENABLE_NVDEC", "0") == "1"
@@ -2812,7 +2821,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # Run YOLO only if not cached
         if segments is None:
             print(f"[REGEN] Running YOLO detection on {total_frames} frames...")
-            safe_update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
 
             # [INIT] EXTREME SPEED: Load all frames to memory for batch processing
             print(f"📥 Loading {total_frames} frames to memory (batch processing)...")
@@ -2848,7 +2857,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
             # [RUNNING] BATCH DETECTION (EXTREME SPEED - 1-2ms per frame!)
             print(f"[RUNNING] Running BATCH detection on {frames_processed} frames (EXTREME SPEED!)...")
-            safe_update_state(state='PROCESSING', meta={'progress': 15, 'status': f'Batch detection (1-2ms/frame)'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 15, 'status': f'Batch detection (1-2ms/frame)'})
 
             import time
             batch_start = time.time()
@@ -3126,7 +3135,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # ⚡ OPTIMIZATION: Use Celery chord to dispatch segments in parallel
         # Chord automatically waits for ALL segments to complete, then triggers finalize
         print(f"[INIT] Creating chord: {len(segments)} segment tasks → finalize callback")
-        safe_update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
 
         # Add total_segments to each segment data
         for seg in segment_tasks_data:
@@ -3204,7 +3213,7 @@ def process_segment_task(self, segment_data):
         video_path = segment_data['video_path']  # For background encoder audio merge
 
         print(f"\n[SEGMENT] Worker processing segment {seg_idx+1}/{total_segments}: frames {start_frame}-{end_frame}")
-        safe_update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
+        safe_update_state(self, state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
 
         # Import required modules
         import subprocess
@@ -3246,7 +3255,7 @@ def process_segment_task(self, segment_data):
         if is_multi_pc:
             # Multi-PC mode: Each worker downloads video directly (faster, no tunnel congestion)
             print(f"   📦 Multi-PC mode: downloading video directly for frames {start_frame}-{end_frame}...")
-            safe_update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading video'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 10, 'status': f'Downloading video'})
 
             api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
             upload_filename = segment_data.get('upload_filename')
@@ -3296,7 +3305,7 @@ def process_segment_task(self, segment_data):
         else:
             # Single-PC mode: Try frame sharing first
             print(f"   [DOWNLOAD]  Loading frames {start_frame}-{end_frame}...")
-            safe_update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Loading frames'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 10, 'status': f'Loading frames'})
 
             # [INIT] EXTREME SPEED: Try FRAME_CACHE first (pure memory, INSTANT!)
             cache_key = f"video_data:{base_name}"
@@ -3408,7 +3417,7 @@ def process_segment_task(self, segment_data):
 
         # [INIT] EXTREME SPEED: Try FRAME_CACHE first (pure memory, INSTANT!)
         print(f"   [MASKS] Loading masks...")
-        safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Loading masks'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 20, 'status': f'Loading masks'})
 
         # 🔥 TEMPORAL CONTEXT FIX: Load masks WITH PADDING (same range as frames)
         masks_needed = list(range(padded_start, padded_end + 1))
@@ -3466,7 +3475,7 @@ def process_segment_task(self, segment_data):
         # Try local filesystem first (same PC - FAST, direct file copy)
         if not masks_downloaded and shared_mask_dir and os.path.exists(shared_mask_dir):
             print(f"   [MASKS] Fallback: Copying masks from local shared directory...")
-            safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Copying masks'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 20, 'status': f'Copying masks'})
 
             try:
                 masks_needed = list(range(start_frame, end_frame + 1))
@@ -3497,7 +3506,7 @@ def process_segment_task(self, segment_data):
         # Fallback: HTTP download (different PC - SLOW but necessary for distributed workers)
         elif not masks_downloaded and origin_base and shared_mask_dir:
             print(f"   📥 Downloading masks from remote location...")
-            safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
 
             try:
                 import requests
@@ -3538,7 +3547,7 @@ def process_segment_task(self, segment_data):
         detector = None
         if not masks_downloaded:
             print(f"   [REGEN] Regenerating masks with YOLO BATCH detection on {frames_copied} frames...")
-            safe_update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Detecting watermarks'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 25, 'status': f'Detecting watermarks'})
 
             detector = get_detector()
             last_valid_bbox = None
@@ -3663,7 +3672,7 @@ def process_segment_task(self, segment_data):
         # CONDITIONAL: Only run ProPainter if watermark was detected
         if not last_valid_bbox or frames_with_watermark == 0:
             print(f"   [SKIP]  No watermark detected - skipping ProPainter, encoding original frames")
-            safe_update_state(state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
 
             # Copy original frames to cleaned dir (no processing needed)
             # 🔥 SHARED BUFFER: Use global frame indices
@@ -3698,7 +3707,7 @@ def process_segment_task(self, segment_data):
         else:
             # Run ProPainter on this segment - watermark detected!
             print(f"   [PAINT] Running ProPainter on {frames_with_watermark} watermarked frames...")
-            safe_update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
 
             try:
                 # Use cached ProPainter pipeline (pre-loaded at worker startup)
@@ -3765,7 +3774,7 @@ def process_segment_task(self, segment_data):
 
             # Merge cleaned region back to full frames
             print(f"   🔗 Merging cleaned region (in-memory)...")
-            safe_update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
 
             seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
             if not os.path.exists(seg_propainter_frames):
@@ -3856,7 +3865,7 @@ def process_segment_task(self, segment_data):
         print(f"   [OK] Cleaned frames ready in: {seg_cleaned_dir}")
         # ⚡ BACKGROUND ENCODING OPTIMIZATION: Signal encoder thread instead of blocking!
         # Worker returns immediately and starts next segment while encoding happens in background
-        safe_update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
 
         # Count cleaned frames
         cleaned_frame_count = len([f for f in os.listdir(seg_cleaned_dir) if f.endswith('.png')])
@@ -3948,7 +3957,7 @@ def finalize_video_task(self, segment_results, prepare_result):
             'final_path_key': f'video:{video_id}:final_path'
         }
 
-        safe_update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Background encoding in progress'})
+        safe_update_state(self, state='SUCCESS', meta={'progress': 100, 'status': 'Background encoding in progress'})
         print(f"[FINALIZE TASK] Returned immediately - worker free! Check Redis keys for completion.")
         return result
 
@@ -3975,7 +3984,7 @@ def coordinate_segments_task(self, segment_task_ids, prepare_result):
 
         total_segments = len(segment_task_ids)
         print(f"[INFO] Coordinator: Waiting for {total_segments} segment tasks to complete...")
-        safe_update_state(state='STARTED', meta={'progress': 0, 'status': f'Waiting for {total_segments} segments'})
+        safe_update_state(self, state='STARTED', meta={'progress': 0, 'status': f'Waiting for {total_segments} segments'})
 
         # Wait for all segment tasks to complete
         segment_results = []
@@ -3988,11 +3997,11 @@ def coordinate_segments_task(self, segment_task_ids, prepare_result):
             segment_results.append(result)
 
             progress = int((i + 1) / total_segments * 80)
-            safe_update_state(state='PROCESSING', meta={'progress': progress, 'status': f'{i+1}/{total_segments} segments complete'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': progress, 'status': f'{i+1}/{total_segments} segments complete'})
             print(f"   [OK] Segment {i+1}/{total_segments} complete!")
 
         print(f"[OK] All {total_segments} segments complete! Launching finalize task...")
-        safe_update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Finalizing video'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 90, 'status': 'Finalizing video'})
 
         # All segments done - now finalize
         final_result = finalize_video_task.apply_async(args=[segment_results, prepare_result])
@@ -4001,7 +4010,7 @@ def coordinate_segments_task(self, segment_task_ids, prepare_result):
         final_output = final_result.get(timeout=600)  # 10 minute timeout
 
         print(f"[OK] Video processing complete!")
-        safe_update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
+        safe_update_state(self, state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
 
         return final_output
 
@@ -4074,7 +4083,7 @@ def process_video_distributed_task(self, video_path, api_base=None, temp_base=No
         print(f"[RUNNING] Starting DISTRIBUTED video processing: {video_path}")
         print(f"   All available workers will collaborate on this video")
 
-        safe_update_state(state='STARTED', meta={'progress': 0, 'status': 'Initializing distributed processing'})
+        safe_update_state(self, state='STARTED', meta={'progress': 0, 'status': 'Initializing distributed processing'})
 
         # Phase 1: Prepare video (runs on one worker)
         print("📋 Phase 1: Preparing video for distribution...")
@@ -4129,7 +4138,7 @@ def process_video_distributed_task(self, video_path, api_base=None, temp_base=No
         print(f"[OK] DISTRIBUTED processing complete!")
         print(f"   Final video: {final_result.get('path')}")
 
-        safe_update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Distributed processing complete'})
+        safe_update_state(self, state='SUCCESS', meta={'progress': 100, 'status': 'Distributed processing complete'})
 
         return final_result
 
@@ -4156,7 +4165,7 @@ def process_image_task(self, image_path):
     4. Extract the middle frame as result
     """
     try:
-        safe_update_state(state='STARTED', meta={'progress': 0, 'status': 'Loading detector'})
+        safe_update_state(self, state='STARTED', meta={'progress': 0, 'status': 'Loading detector'})
         det = get_detector()
 
         if not _check_propainter_assets():
@@ -4206,7 +4215,7 @@ def process_image_task(self, image_path):
         base_name = Path(image_path).stem
         unique_suffix = self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8]
 
-        safe_update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Detecting watermark'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 15, 'status': 'Detecting watermark'})
         detection_start = performance_checkpoint("YOLO Detection")
         detections = det.detect(img, confidence_threshold=0.20, padding=0)  # Lower threshold for faint watermarks (Sora optimized)
         performance_checkpoint("YOLO Detection", detection_start)
@@ -4224,7 +4233,7 @@ def process_image_task(self, image_path):
         os.makedirs(frame_dir, exist_ok=True)
         os.makedirs(mask_dir, exist_ok=True)
 
-        safe_update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Preparing frames'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 25, 'status': 'Preparing frames'})
 
         # Create 3 identical frames (ProPainter needs temporal context)
         for i in range(3):
@@ -4251,7 +4260,7 @@ def process_image_task(self, image_path):
             mask_path = os.path.join(mask_dir, f"{i:04d}.png")
             cv2.imwrite(mask_path, mask)
 
-        safe_update_state(state='PROCESSING', meta={'progress': 45, 'status': 'Running faster-propainter pipeline'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 45, 'status': 'Running faster-propainter pipeline'})
 
         # Use direct faster-propainter pipeline instead of subprocess for 3x speedup
         pipeline_start = performance_checkpoint("faster-propainter Pipeline")
@@ -4305,7 +4314,7 @@ def process_image_task(self, image_path):
         if not os.path.exists(middle_frame_path):
             raise RuntimeError(f"ProPainter output frame not found: {middle_frame_path}")
 
-        safe_update_state(state='PROCESSING', meta={'progress': 85, 'status': 'Finalizing'})
+        safe_update_state(self, state='PROCESSING', meta={'progress': 85, 'status': 'Finalizing'})
 
         # Copy result to final location
         out_name = base_name + '_clean.png'
@@ -4679,7 +4688,7 @@ def process_video_task(self, video_path):
 
             # Concatenate all segments
             print(f"\n[SEGMENT] Concatenating {len(segment_videos)} segments...")
-            safe_update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Concatenating segments'})
+            safe_update_state(self, state='PROCESSING', meta={'progress': 80, 'status': 'Concatenating segments'})
 
             concat_list_file = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_concat.txt")
             with open(concat_list_file, 'w') as f:
