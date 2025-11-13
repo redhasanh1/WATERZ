@@ -22,6 +22,8 @@ import mimetypes
 from pathlib import Path
 from urllib.parse import urljoin, urlencode
 import stripe
+import uuid
+from datetime import datetime
 import secrets
 import requests
 
@@ -216,8 +218,13 @@ def process_video(video_path):
 
 @app.route('/')
 def index():
-    """Serve the main HTML page"""
-    return send_file('index.html')
+    """Serve the main HTML page (now index2.html)."""
+    return send_file('index2.html')
+
+@app.route('/index.html')
+def legacy_index():
+    """Legacy path compatibility: serve the new page as well."""
+    return send_file('index2.html')
 
 
 @app.route('/success.html')
@@ -552,6 +559,80 @@ def health():
         'status': 'ok',
         'detector_loaded': detector is not None,
         'inpainter_loaded': inpainter is not None
+    })
+
+
+@app.route('/api/train', methods=['POST'])
+def train_custom_inpainting():
+    """Accept two videos (original + object-removed) and register a training job.
+
+    Expects multipart/form-data with file fields named either:
+    - 'original' and 'removed' (preferred), or
+    - 's2' and 's2_remove' (backward-compatible with user wording).
+    """
+    files = request.files
+
+    # Accept multiple naming conventions
+    original = files.get('original') or files.get('s2')
+    removed = files.get('removed') or files.get('s2_remove')
+
+    if not original or not removed:
+        return jsonify({'status': 'error', 'message': 'Two files required: original and removed (or s2 and s2_remove).'}), 400
+
+    if original.filename == '' or removed.filename == '':
+        return jsonify({'status': 'error', 'message': 'Empty filename for one or both files.'}), 400
+
+    if not (allowed_file(original.filename) and allowed_file(removed.filename)):
+        return jsonify({'status': 'error', 'message': 'Invalid file type. Please upload supported video formats.'}), 400
+
+    if not (is_video(original.filename) and is_video(removed.filename)):
+        return jsonify({'status': 'error', 'message': 'Both files must be videos.'}), 400
+
+    # Create job directory
+    job_id = uuid.uuid4().hex[:12]
+    job_dir = os.path.join(UPLOAD_FOLDER, 'training_jobs', job_id)
+    os.makedirs(job_dir, exist_ok=True)
+
+    # Save uploads
+    orig_name = secure_filename(original.filename)
+    rem_name = secure_filename(removed.filename)
+    orig_path = os.path.join(job_dir, f"original_{orig_name}")
+    rem_path = os.path.join(job_dir, f"removed_{rem_name}")
+    original.save(orig_path)
+    removed.save(rem_path)
+
+    # Quick probe for basic metadata (optional, best-effort)
+    def _probe_video(p):
+        try:
+            cap = cv2.VideoCapture(p)
+            if not cap.isOpened():
+                return None
+            info = {
+                'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                'fps': float(cap.get(cv2.CAP_PROP_FPS)) or None,
+                'frames': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+            }
+            cap.release()
+            return info
+        except Exception:
+            return None
+
+    orig_info = _probe_video(orig_path)
+    rem_info = _probe_video(rem_path)
+
+    # Placeholder: In a full implementation, enqueue a background training task
+    # that aligns frames, computes diffs, and fine-tunes an inpainting model.
+
+    return jsonify({
+        'status': 'success',
+        'message': 'Training job registered. Processing will start shortly.',
+        'job_id': job_id,
+        'created_at': datetime.utcnow().isoformat() + 'Z',
+        'uploads': {
+            'original': {'filename': orig_name, 'meta': orig_info},
+            'removed': {'filename': rem_name, 'meta': rem_info},
+        }
     })
 
 

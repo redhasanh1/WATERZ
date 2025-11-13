@@ -249,6 +249,71 @@ def health_check():
         'message': 'Flask API server running - workers handle processing'
     })
 
+@app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+def auth_register():
+    """Email-only registration/login - no password required"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        import psycopg2
+        from datetime import datetime
+
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        # Basic email validation
+        if '@' not in email or '.' not in email:
+            return jsonify({'error': 'Invalid email format'}), 400
+
+        # Get DATABASE_URL from environment
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            return jsonify({'error': 'Database not configured'}), 500
+
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(database_url)
+        cursor = conn.cursor()
+
+        # Check if user exists
+        cursor.execute('SELECT id, email, created_at FROM users WHERE email = %s', (email,))
+        user = cursor.fetchone()
+
+        if user:
+            # User exists - return existing user
+            cursor.close()
+            conn.close()
+            return jsonify({
+                'id': user[0],
+                'email': user[1],
+                'created_at': user[2].isoformat() if user[2] else None,
+                'message': 'Logged in successfully'
+            }), 200
+        else:
+            # Create new user
+            cursor.execute(
+                'INSERT INTO users (email) VALUES (%s) RETURNING id, email, created_at',
+                (email,)
+            )
+            new_user = cursor.fetchone()
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            return jsonify({
+                'id': new_user[0],
+                'email': new_user[1],
+                'created_at': new_user[2].isoformat() if new_user[2] else None,
+                'message': 'Account created successfully'
+            }), 201
+
+    except Exception as e:
+        print(f"[AUTH ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/debug/files', methods=['GET'])
 def debug_files():
     """Debug endpoint to check what files exist in web/ folder"""

@@ -19,6 +19,26 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <script>
+        // Auth check - redirect to login if not authenticated
+        (function() {
+            try {
+                const user = localStorage.getItem('user');
+                if (!user) {
+                    window.location.href = 'login.html';
+                    return;
+                }
+                // Parse and verify user data
+                const userData = JSON.parse(user);
+                if (!userData.email) {
+                    localStorage.removeItem('user');
+                    window.location.href = 'login.html';
+                }
+            } catch (e) {
+                localStorage.removeItem('user');
+                window.location.href = 'login.html';
+            }
+        })();
+
         // API base detection and override support.
         // - Defaults to same-origin ('').
         // - Reads a persisted override from localStorage if present.

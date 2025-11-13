@@ -203,7 +203,8 @@
     </div>
     
     <script>
-        const API_BASE = window.API_BASE_URL || '';
+        // Auto-detect API base URL (works on Railway deployment)
+        const API_BASE = window.API_BASE_URL || window.location.origin;
 
         const tabButtons = document.querySelectorAll('.tab-button');
         const panels = document.querySelectorAll('.tab-panel');
@@ -253,15 +254,80 @@
             window.location.href = target;
         });
 
-        document.getElementById('loginForm').addEventListener('submit', function (event) {
+        // Email-only login (sign in)
+        document.getElementById('loginForm').addEventListener('submit', async function (event) {
             event.preventDefault();
-            alert('Sign-in is handled by the hosted WatermarkAI service. Please connect this form to your authentication backend or contact support for access.');
+            const email = document.getElementById('loginEmail').value.trim();
+
+            if (!email) {
+                showMessage('Please enter your email', 'error');
+                return;
+            }
+
+            await emailLogin(email);
         });
 
-        document.getElementById('signupForm').addEventListener('submit', function (event) {
+        // Email-only signup (create account)
+        document.getElementById('signupForm').addEventListener('submit', async function (event) {
             event.preventDefault();
-            alert('Account creation is handled by the hosted WatermarkAI service. Connect this form to your signup endpoint or reach out to support for onboarding.');
+            const email = document.getElementById('signupEmail').value.trim();
+
+            if (!email) {
+                showMessage('Please enter your email', 'error');
+                return;
+            }
+
+            await emailLogin(email);
         });
+
+        // Email login function (handles both signin and signup)
+        async function emailLogin(email) {
+            const messageEl = document.getElementById('authMessage');
+            showMessage('Processing...', '');
+
+            try {
+                const apiUrl = API_BASE ? `${API_BASE}/api/auth/register` : '/api/auth/register';
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Store user in localStorage
+                    localStorage.setItem('user', JSON.stringify(data));
+
+                    showMessage(data.message || 'Success! Redirecting...', 'success');
+
+                    // Redirect to main app
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 1000);
+                } else {
+                    showMessage(data.error || 'Login failed. Please try again.', 'error');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showMessage('Connection error. Please try again.', 'error');
+            }
+        }
+
+        // Show message helper
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('authMessage');
+            if (!messageEl) return;
+
+            messageEl.classList.remove('success', 'error');
+            if (type) messageEl.classList.add(type);
+            messageEl.textContent = text;
+            messageEl.style.display = 'block';
+            messageEl.removeAttribute('hidden');
+        }
     </script>
 
 </body>

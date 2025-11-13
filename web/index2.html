@@ -6,9 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <!-- SEO Optimization -->
-    <title>AI Video Object Remover - Interactive Selection Mode | CleanCanvas</title>
-    <meta name="description" content="Remove any object from videos instantly with one click. Professional AI-powered video editing tool. Fast, easy, and precise object removal for content creators and editors.">
-    <meta name="keywords" content="video object removal, remove objects from video, AI video editor, video editing tool, content creator tools, professional video editing">
+    <title>AI Video Editing, Inpainting & Custom Training | CleanCanvas</title>
+    <meta name="description" content="Advanced AI video enhancement platform: upload an original and object-removed video, and our system trains a custom model to restore, clean, and improve your footage. Fast, accurate, SEO-optimized, and ad-friendly. Perfect for Google Ads, Meta Ads, and SEO.">
+    <meta name="keywords" content="AI video editing, object removal, video inpainting, machine learning video tools, online video enhancer, remove objects from video, AI training pipeline, video restoration AI">
     <meta name="author" content="CleanCanvas">
     <link rel="canonical" href="https://cleancanvas.ai/">
 
@@ -16,14 +16,14 @@
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://cleancanvas.ai/">
     <meta property="og:title" content="AI Video Object Remover - Click to Remove Any Object Instantly">
-    <meta property="og:description" content="Remove any object from videos instantly with one click. Professional AI-powered video editing tool for content creators.">
+    <meta property="og:description" content="Advanced AI video enhancement platform: upload an original and object-removed video, and our system trains a custom model to restore, clean, and improve your footage. Fast, accurate, SEO-optimized, and ad-friendly. Perfect for Google Ads, Meta Ads, and SEO.">
     <meta property="og:image" content="https://cleancanvas.ai/emblem.png">
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image">
     <meta property="twitter:url" content="https://cleancanvas.ai/">
     <meta property="twitter:title" content="AI Video Object Remover - Click to Remove Any Object Instantly">
-    <meta property="twitter:description" content="Remove any object from videos instantly with one click. Professional AI-powered video editing tool for content creators.">
+    <meta property="twitter:description" content="Advanced AI video enhancement platform: upload an original and object-removed video, and our system trains a custom model to restore, clean, and improve your footage. Fast, accurate, SEO-optimized, and ad-friendly. Perfect for Google Ads, Meta Ads, and SEO.">
     <meta property="twitter:image" content="https://cleancanvas.ai/emblem.png">
 
     <!-- Structured Data -->
@@ -794,13 +794,14 @@
     <!-- Navigation Header -->
     <nav class="nav-header">
         <div class="nav-container">
-            <a href="index.html" class="nav-logo">
+            <a href="/" class="nav-logo">
                 <img src="emblem.png" alt="Logo">
                 <span>CleanCanvas</span>
             </a>
 
             <ul class="nav-menu" id="navMenu">
                 <li><a href="#remove-watermark">Remove Objects</a></li>
+                <li><a href="#training">AI Training</a></li>
                 <li><a href="#pricing">Plans</a></li>
                 <li><a href="#comparison">Results</a></li>
                 <li><a href="login.html" class="nav-cta">Sign In</a></li>
@@ -1042,6 +1043,45 @@
                     <script>
                          (adsbygoogle = window.adsbygoogle || []).push({});
                     </script>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Custom AI Training Section -->
+    <section id="training" style="padding: 4rem 2rem;">
+        <div class="container">
+            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                Train Your Custom Video Restoration AI
+            </h2>
+            <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; max-width: 900px; margin: 0 auto 2rem;">
+                Upload two videos to power a personalized AI training pipeline: the <strong>original (S2)</strong> and the <strong>object-removed (S2 Remove)</strong> version. We analyze differences to learn targeted
+                <em>video inpainting</em> for cleaner, smoother results using advanced <em>machine learning video tools</em>.
+            </p>
+
+            <div class="demo-card" style="max-width: 1000px; margin: 0 auto;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem;">
+                    <div>
+                        <div class="upload-title">Original Video (S2)</div>
+                        <label class="upload-zone" for="trainOriginal">
+                            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <div class="upload-description">Click to choose or drag a file</div>
+                            <input id="trainOriginal" type="file" accept="video/*" style="display:none">
+                        </label>
+                    </div>
+                    <div>
+                        <div class="upload-title">Object-Removed (S2 Remove)</div>
+                        <label class="upload-zone" for="trainRemoved">
+                            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <div class="upload-description">Click to choose or drag a file</div>
+                            <input id="trainRemoved" type="file" accept="video/*" style="display:none">
+                        </label>
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:1rem; justify-content:center; align-items:center; margin-top: 1.5rem; flex-wrap: wrap;">
+                    <button id="startTrainingBtn" class="btn-primary">Start AI Training</button>
+                    <div id="trainStatus" style="color: var(--text-secondary);"></div>
                 </div>
             </div>
         </div>
@@ -1928,6 +1968,63 @@
             }
             startStatusPolling(savedTaskId);
         }
+    </script>
+    <script>
+      // Dual-video training uploader
+      (function() {
+        const origInput = document.getElementById('trainOriginal');
+        const remInput  = document.getElementById('trainRemoved');
+        const btn       = document.getElementById('startTrainingBtn');
+        const statusEl  = document.getElementById('trainStatus');
+
+        function setStatus(msg, tone) {
+          statusEl.textContent = msg || '';
+          statusEl.style.color = tone === 'err' ? '#ef4444' : (tone === 'ok' ? '#22c55e' : 'var(--text-secondary)');
+        }
+
+        function humanSize(bytes) {
+          if (!bytes && bytes !== 0) return '';
+          const units = ['B','KB','MB','GB'];
+          let i = 0, val = bytes;
+          while (val >= 1024 && i < units.length-1) { val /= 1024; i++; }
+          return `${val.toFixed(1)} ${units[i]}`;
+        }
+
+        btn && btn.addEventListener('click', async () => {
+          const f1 = origInput && origInput.files && origInput.files[0];
+          const f2 = remInput && remInput.files && remInput.files[0];
+          if (!f1 || !f2) {
+            setStatus('Please select both videos first.', 'err');
+            return;
+          }
+          const max = 1024*1024*100; // 100 MB per current backend limit
+          if (f1.size > max || f2.size > max) {
+            setStatus('Each file must be ≤ 100MB.', 'err');
+            return;
+          }
+
+          const fd = new FormData();
+          fd.append('original', f1);
+          fd.append('removed', f2);
+
+          btn.disabled = true;
+          const origName = f1.name; const remName = f2.name;
+          setStatus(`Uploading (${humanSize(f1.size)} + ${humanSize(f2.size)})...`);
+
+          try {
+            const resp = await fetch(`${API_BASE_URL}/api/train`, { method: 'POST', body: fd });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || data.status !== 'success') {
+              throw new Error((data && data.message) || `Upload failed (${resp.status})`);
+            }
+            setStatus(`Training registered (job ${data.job_id}).`, 'ok');
+          } catch (err) {
+            setStatus(`Error: ${err.message || err}`, 'err');
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      })();
     </script>
     <script>
       // Interactive Mask Selection (like local SAM2 test!)

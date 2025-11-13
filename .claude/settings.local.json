@@ -56,7 +56,9 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(curl:*)",
-      "Bash(cmd /c 'taskkill /F /IM python.exe')"
+      "Bash(cmd /c 'taskkill /F /IM python.exe')",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" setup_database.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m pip install psycopg2-binary)"
     ],
     "deny": [],
     "ask": []

@@ -66,6 +66,7 @@ web/tunnel_url.txt
 .env
 .env.local
 .railway
+backend/.env
 
 # Docker (for local GPU deployment only, not Railway)
 Dockerfile
