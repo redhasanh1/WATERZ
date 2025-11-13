@@ -1695,9 +1695,10 @@ def pipeline(
             f = comp_frames[idx]
             f = cv2.resize(f, out_size, interpolation=cv2.INTER_CUBIC)
             f = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
+            # Normalize path to use forward slashes (fixes Windows backslash on Linux)
             img_save_root = os.path.join(
                 save_root, "frames", str(idx).zfill(4) + ".png"
-            )
+            ).replace('\\', '/')
             imwrite(f, img_save_root)
 
     # save videos frame
