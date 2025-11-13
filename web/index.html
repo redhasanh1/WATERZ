@@ -1456,25 +1456,11 @@
                     previewImage.style.display = 'none';
                     document.getElementById('downloadHint').style.display = 'block';
                     document.getElementById('downloadText').style.display = 'block';
-                    // Compute estimated credits once metadata is available
+                    // Show credit cost (1 credit per video)
                     videoElem.onloadedmetadata = () => {
-                        try {
-                            const width = videoElem.videoWidth || 1280;
-                            const height = videoElem.videoHeight || 720;
-                            const duration = videoElem.duration || 10; // seconds
-                            const baselinePixels = 1280 * 720;
-                            const pixelRatio = (width * height) / baselinePixels;
-                            const timeRatio = duration / 10; // 10s baseline
-                            const est = Math.max(1, Math.ceil(pixelRatio * timeRatio));
-                            if (creditEstimate) {
-                                creditEstimate.textContent = `Estimated credits: ${est} (1 credit = 10s @ 720p30)`;
-                                creditEstimate.style.display = 'block';
-                            }
-                        } catch (_) {
-                            if (creditEstimate) {
-                                creditEstimate.textContent = 'Estimated credits: 1';
-                                creditEstimate.style.display = 'block';
-                            }
+                        if (creditEstimate) {
+                            creditEstimate.textContent = 'Cost: 1 credit per video';
+                            creditEstimate.style.display = 'block';
                         }
                     };
                 }
