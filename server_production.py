@@ -5702,36 +5702,6 @@ def process_video():
         if not task_id:
             return jsonify({'status': 'error', 'message': 'No task_id provided'}), 400
 
-        # Check and deduct credits
-        if user_id:
-            try:
-                database_url = os.getenv('DATABASE_URL')
-                if database_url:
-                    conn = psycopg2.connect(database_url)
-                    cursor = conn.cursor()
-
-                    # Check if user has credits
-                    cursor.execute('SELECT credits FROM users WHERE id = %s', (user_id,))
-                    result = cursor.fetchone()
-
-                    if result:
-                        credits = result[0] or 0
-                        if credits <= 0:
-                            cursor.close()
-                            conn.close()
-                            return jsonify({'status': 'error', 'message': 'No credits remaining. Please purchase more credits to continue.'}), 402
-
-                        # Deduct 1 credit
-                        cursor.execute('UPDATE users SET credits = credits - 1 WHERE id = %s', (user_id,))
-                        conn.commit()
-                        print(f"[CREDITS] Deducted 1 credit from user {user_id}. Remaining: {credits - 1}")
-
-                    cursor.close()
-                    conn.close()
-            except Exception as e:
-                print(f"[CREDITS ERROR] {e}")
-                # Continue processing even if credit check fails (for backwards compatibility)
-
         # Find uploaded media (video first, then image) with any extension
         video_path = None
         # Try common video extensions
@@ -5750,6 +5720,81 @@ def process_video():
 
         if not video_path:
             return jsonify({'status': 'error', 'message': 'Media not found'}), 404
+
+        # Calculate required credits based on video specs
+        required_credits = 1  # Default for images
+        ext = os.path.splitext(video_path)[1].lower()
+        video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm'}
+
+        if ext in video_exts:
+            try:
+                # Get video metadata using ffprobe
+                probe_cmd = [
+                    FFPROBE_EXE, '-v', 'error',
+                    '-select_streams', 'v:0',
+                    '-show_entries', 'stream=width,height,duration',
+                    '-of', 'json',
+                    video_path
+                ]
+                probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+                probe_data = json.loads(probe_result.stdout)
+
+                if probe_data.get('streams'):
+                    stream = probe_data['streams'][0]
+                    width = int(stream.get('width', 1280))
+                    height = int(stream.get('height', 720))
+                    duration = float(stream.get('duration', 10))
+
+                    # Baseline: 720p (1280x720), 10 seconds = 1 credit
+                    base_pixels = 1280 * 720
+                    base_duration = 10
+
+                    video_pixels = width * height
+                    duration_factor = duration / base_duration
+                    resolution_factor = (video_pixels / base_pixels) ** 0.5  # sqrt for less aggressive
+
+                    # Weighted formula: 70% duration, 30% resolution
+                    required_credits = max(1, int((duration_factor * 0.7) + (resolution_factor * 0.3) + 0.5))
+                    print(f"[CREDITS] Video: {width}x{height}, {duration}s → {required_credits} credits")
+            except Exception as e:
+                print(f"[CREDITS] Could not calculate video credits: {e}, defaulting to 1")
+                required_credits = 1
+
+        # Check and deduct credits
+        if user_id:
+            try:
+                database_url = os.getenv('DATABASE_URL')
+                if database_url:
+                    conn = psycopg2.connect(database_url)
+                    cursor = conn.cursor()
+
+                    # Check if user has enough credits
+                    cursor.execute('SELECT credits FROM users WHERE id = %s', (user_id,))
+                    result = cursor.fetchone()
+
+                    if result:
+                        user_credits = result[0] or 0
+                        if user_credits < required_credits:
+                            cursor.close()
+                            conn.close()
+                            return jsonify({
+                                'status': 'error',
+                                'error': 'insufficient_credits',
+                                'message': f'Not enough credits. Required: {required_credits}, You have: {user_credits}',
+                                'required_credits': required_credits,
+                                'credits': user_credits
+                            }), 402
+
+                        # Deduct required credits
+                        cursor.execute('UPDATE users SET credits = credits - %s WHERE id = %s', (required_credits, user_id))
+                        conn.commit()
+                        print(f"[CREDITS] Deducted {required_credits} credits from user {user_id}. Remaining: {user_credits - required_credits}")
+
+                    cursor.close()
+                    conn.close()
+            except Exception as e:
+                print(f"[CREDITS ERROR] {e}")
+                # Continue processing even if credit check fails (for backwards compatibility)
 
         # Queue processing task via Celery and return the real task id
         print(f"📤 Queuing processing task for: {video_path}")

@@ -1456,11 +1456,37 @@
                     previewImage.style.display = 'none';
                     document.getElementById('downloadHint').style.display = 'block';
                     document.getElementById('downloadText').style.display = 'block';
-                    // Show credit cost (1 credit per video)
+                    // Calculate credit cost based on video specs
                     videoElem.onloadedmetadata = () => {
-                        if (creditEstimate) {
-                            creditEstimate.textContent = 'Cost: 1 credit per video';
-                            creditEstimate.style.display = 'block';
+                        try {
+                            const width = videoElem.videoWidth || 1280;
+                            const height = videoElem.videoHeight || 720;
+                            const duration = videoElem.duration || 10;
+
+                            // Baseline: 720p (1280x720), 10 seconds = 1 credit
+                            const basePixels = 1280 * 720;
+                            const baseDuration = 10;
+
+                            const videoPixels = width * height;
+                            const durationFactor = duration / baseDuration;
+                            const resolutionFactor = Math.sqrt(videoPixels / basePixels);
+
+                            // Weighted formula: 70% duration, 30% resolution (less aggressive)
+                            const estimatedCredits = Math.max(1, Math.ceil((durationFactor * 0.7) + (resolutionFactor * 0.3)));
+
+                            // Store for backend processing
+                            videoElem.dataset.estimatedCredits = estimatedCredits;
+
+                            if (creditEstimate) {
+                                creditEstimate.textContent = `Estimated: ${estimatedCredits} credit${estimatedCredits !== 1 ? 's' : ''} (${Math.round(duration)}s @ ${width}x${height})`;
+                                creditEstimate.style.display = 'block';
+                            }
+                        } catch (err) {
+                            console.error('[Credit Estimation Error]', err);
+                            if (creditEstimate) {
+                                creditEstimate.textContent = 'Estimated: 1 credit';
+                                creditEstimate.style.display = 'block';
+                            }
                         }
                     };
                 }
