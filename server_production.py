@@ -4947,6 +4947,12 @@ def serve_emblem():
 def serve_demos(path):
     return send_file(os.path.join(app.static_folder, 'demos', path))
 
+@app.route('/videostotrain/<path:path>')
+def serve_videostotrain(path):
+    """Serve demo comparison videos"""
+    videostotrain_dir = os.path.join(SCRIPT_DIR, 'videostotrain')
+    return send_file(os.path.join(videostotrain_dir, path), mimetype='video/mp4')
+
 
 @app.route('/api/remove-watermark', methods=['POST'])
 def remove_watermark():
