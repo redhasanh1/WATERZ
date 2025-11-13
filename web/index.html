@@ -104,6 +104,7 @@
             --accent-orange: #f6ad55;   /* Warm Orange */
             --cyan: #0bc5ea;            /* Electric Cyan */
             --bg-light: #ffffff;        /* Pure White */
+            --bg-card: #f8fafc;         /* Light card */
             --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             --bg-gradient-2: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             --bg-gradient-3: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
@@ -112,6 +113,14 @@
             --text-secondary: #718096;  /* Gray */
             --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             --gradient-rainbow: linear-gradient(135deg, #667eea 0%, #f093fb 30%, #f6ad55 60%, #48bb78 100%);
+        }
+
+        /* Dark theme overrides */
+        html[data-theme="dark"] {
+            --bg-light: #0b1020;
+            --bg-card: #121826;
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
         }
 
         * {
@@ -171,6 +180,18 @@
             text-align: center;
             max-width: 900px;
             margin: 0 auto;
+        }
+
+        /* Theme toggle button */
+        .theme-toggle {
+            margin-left: 12px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(102,126,234,0.25);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-weight: 600;
         }
 
         .hero-title {
@@ -801,13 +822,12 @@
 
             <ul class="nav-menu" id="navMenu">
                 <li><a href="#remove-watermark">Remove Objects</a></li>
-                <li><a href="#training">AI Training</a></li>
-            <li><a href="premium.html#pricing">Plans</a></li>
+                <li><a href="premium.html#pricing">Plans</a></li>
                 <li><a href="#comparison">Results</a></li>
                 <li><a href="login.html" class="nav-cta">Sign In</a></li>
             </ul>
-
-            <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checkingâ€¦</div>
+            <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking...</div>
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">Dark</button>
 
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
                 <span></span>
@@ -1388,77 +1408,7 @@
         async function updateApiChip() {
             var chip = document.getElementById('apiStatusChip');
             if (!chip) return;
-            chip.textContent = 'API: Checkingâ€¦';
-            chip.classList.remove('ok','err');
-            chip.classList.add('checking');
-            try {
-                // Use a simple GET without custom headers to avoid CORS preflight on some setups
-                const res = await fetchWithTimeout(`${API_BASE_URL}/api/health`, { timeout: 5000 });
-                const data = await res.json().catch(() => ({}));
-                if (res.ok && data && (data.status === 'ok' || data.detector_loaded !== undefined)) {
-                    chip.textContent = 'API: Online';
-                    chip.classList.remove('checking','err');
-                    chip.classList.add('ok');
-                } else {
-                    chip.textContent = 'API: Offline';
-                    chip.classList.remove('checking','ok');
-                    chip.classList.add('err');
-                }
-            } catch (e) {
-                chip.textContent = 'API: Offline';
-                chip.classList.remove('checking','ok');
-                chip.classList.add('err');
-            }
-        }
-
-        window.addEventListener('load', updateApiChip);
-        window.addEventListener('focus', updateApiChip);
-
-        const fileInput = document.getElementById('fileInput');
-        const uploadZone = document.getElementById('uploadZone');
-        const previewContainer = document.getElementById('previewContainer');
-        const previewImage = document.getElementById('previewImage');
-        const creditEstimate = document.getElementById('creditEstimate');
-
-        // Drag and drop
-        uploadZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadZone.style.borderColor = 'var(--accent)';
-            uploadZone.style.background = 'rgba(167, 139, 250, 0.1)';
-        });
-
-        uploadZone.addEventListener('dragleave', () => {
-            uploadZone.style.borderColor = 'rgba(102, 126, 234, 0.3)';
-            uploadZone.style.background = 'transparent';
-        });
-
-        uploadZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadZone.style.borderColor = 'rgba(102, 126, 234, 0.3)';
-            uploadZone.style.background = 'transparent';
-
-            const file = e.dataTransfer.files[0];
-            if (file && (file.type.startsWith('image/') || file.type.startsWith('video/'))) {
-                uploadFile(file);
-            }
-        });
-
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                uploadFile(file);
-            }
-        });
-
-        async function parseJsonSafe(response) {
-            try {
-                // Try JSON first
-                return await response.clone().json();
-            } catch (e) {
-                // Fallback to text for clearer diagnostics
-                const text = await response.text();
-                let msg = text && text.trim().slice(0, 300);
-                if (msg && /^\s*<!doctype|^\s*<html/i.test(msg)) {
+            chip.textContent = 'API: Checking...<!doctype|^\s*<html/i.test(msg)) {
                     msg = 'Received HTML instead of JSON (likely wrong API host or tunnel banner).';
                 }
                 return { status: 'error', message: `Non-JSON response (${response.status}): ${msg || 'no body'}` };
@@ -2229,8 +2179,34 @@
     try { vid.currentTime = parseFloat(slider.value || '0'); } catch(_) {}
   });
 })();
-</script></body>
+</script>
+<script>
+// Dark mode toggle
+(function(){
+  const root = document.documentElement;
+  const btn = document.getElementById('themeToggle');
+  function applyTheme(theme){
+    if (theme === 'dark') { root.setAttribute('data-theme','dark'); if (btn) btn.textContent='Light'; }
+    else { root.removeAttribute('data-theme'); if (btn) btn.textContent='Dark'; }
+  }
+  try {
+    const stored = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(stored || (prefersDark ? 'dark' : 'light'));
+  } catch (e) { /* ignore */ }
+  if (btn) {
+    btn.addEventListener('click', function(){
+      const isDark = root.getAttribute('data-theme') === 'dark';
+      const next = isDark ? 'light' : 'dark';
+      applyTheme(next);
+      try { localStorage.setItem('theme', next); } catch(e){}
+    });
+  }
+})();
+</script>
+</body>
 </html>
+
 
 
 
