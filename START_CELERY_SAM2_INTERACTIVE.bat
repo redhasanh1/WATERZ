@@ -106,5 +106,11 @@ set TORCHINDUCTOR_FX_GRAPH_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
-REM Use thread pool for TRUE PARALLEL execution!
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+REM Purge old tasks from Redis queue before starting
+echo.
+echo [CLEANUP] Purging old tasks from Redis queue...
+"%PYTHON_PATH%" -c "from server_production import celery; celery.control.purge(); print('[OK] Redis queue cleared')"
+echo.
+
+REM Use thread pool with 1 worker (sequential to prevent temp folder collisions)
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1

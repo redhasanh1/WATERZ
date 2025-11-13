@@ -178,7 +178,7 @@ def detect_segments_from_masks(
 
     print(f"[SEGMENT] Detected {len(segments)} motion-based segments:")
     for idx, (start, end, bbox) in enumerate(segments):
-        duration = end - start + 1
+        duration = end - start  # Exclusive end, so no +1 needed
         movement = bbox[2] - bbox[0], bbox[3] - bbox[1]
         print(f"[SEGMENT]   Segment {idx+1}: frames {start}-{end} ({duration}f) at bbox={bbox}, size={movement}")
 
@@ -214,7 +214,8 @@ def detect_segments(
             # No detection - end current segment if exists
             if current_segment_start is not None and len(current_segment_bboxes) >= min_segment_length:
                 avg_bbox = average_bbox(current_segment_bboxes)
-                segments.append((current_segment_start, frame_idx - 1, avg_bbox))
+                # +1 to make end_frame exclusive for range(start_f, end_f)
+                segments.append((current_segment_start, frame_idx, avg_bbox))
             current_segment_start = None
             current_segment_bboxes = []
             continue
@@ -234,7 +235,8 @@ def detect_segments(
                 # Position changed - end current segment and start new one
                 if len(current_segment_bboxes) >= min_segment_length:
                     avg_bbox = average_bbox(current_segment_bboxes)
-                    segments.append((current_segment_start, frame_idx - 1, avg_bbox))
+                    # +1 to make end_frame exclusive for range(start_f, end_f)
+                    segments.append((current_segment_start, frame_idx, avg_bbox))
 
                 current_segment_start = frame_idx
                 current_segment_bboxes = [bbox]
@@ -242,7 +244,8 @@ def detect_segments(
     # Handle final segment
     if current_segment_start is not None and len(current_segment_bboxes) >= min_segment_length:
         avg_bbox = average_bbox(current_segment_bboxes)
-        segments.append((current_segment_start, len(detections_per_frame) - 1, avg_bbox))
+        # +1 to make end_frame exclusive for range(start_f, end_f)
+        segments.append((current_segment_start, len(detections_per_frame), avg_bbox))
 
     return segments
 

@@ -55,7 +55,8 @@
       "Bash(celery_output.log)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(cmd /c 'taskkill /F /IM python.exe')"
     ],
     "deny": [],
     "ask": []
