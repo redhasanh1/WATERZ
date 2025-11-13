@@ -250,7 +250,8 @@ pretrain_model_url = "https://github.com/sczhou/ProPainter/releases/download/v0.
 
 def imwrite(img, file_path, params=None, auto_mkdir=True):
     if auto_mkdir:
-        dir_name = os.path.abspath(os.path.dirname(file_path))
+        # Normalize to forward slashes (fixes Windows backslash on Linux paths)
+        dir_name = os.path.abspath(os.path.dirname(file_path)).replace('\\', '/')
         os.makedirs(dir_name, exist_ok=True)
     return cv2.imwrite(file_path, img, params)
 
