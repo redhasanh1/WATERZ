@@ -1266,6 +1266,7 @@ def encode_segment_background(redis_client, data):
     # 🔥 SHARED BUFFER: Create file list for this segment's frames only
     # (frames are named by global index in shared buffer)
     file_list_path = os.path.join(TEMP_DIR, f"encode_seg{seg_idx}_{video_id}.txt")
+    frames_found = 0
     with open(file_list_path, 'w') as f:
         for global_idx in range(start_frame, end_frame + 1):
             frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
@@ -1275,11 +1276,24 @@ def encode_segment_background(redis_client, data):
                 # Use duration 1/fps for each frame
                 f.write(f"file '{abs_path}'\n")
                 f.write(f"duration {1/fps}\n")
+                frames_found += 1
         # Last frame needs to be repeated for proper duration
         last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
         if os.path.exists(last_frame_path):
             abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
             f.write(f"file '{abs_path}'\n")
+
+    # Validate frames were found
+    if frames_found == 0:
+        error_msg = f"No frames found for segment {seg_idx} in range {start_frame}-{end_frame}. Expected frames in: {cleaned_dir}"
+        print(f"[ENCODER ERROR] {error_msg}")
+        # Check what files actually exist in cleaned_dir
+        if os.path.exists(cleaned_dir):
+            existing_files = os.listdir(cleaned_dir)
+            print(f"[ENCODER ERROR] Files in cleaned_dir: {len(existing_files)} files")
+            if existing_files:
+                print(f"[ENCODER ERROR] Sample files: {existing_files[:5]}")
+        raise RuntimeError(error_msg)
 
     # Encode with NVENC using file list (concat demuxer)
     encode_cmd = [
@@ -1342,8 +1356,22 @@ def trigger_finalization(redis_client, video_id, total_segments):
         # Decode bytes to string
         encoded_path = encoded_path_raw.decode() if isinstance(encoded_path_raw, bytes) else encoded_path_raw
 
-        if not encoded_path or not os.path.exists(encoded_path):
-            raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
+        if not encoded_path:
+            error_msg = f"Segment {seg_idx} never set encoded_path in Redis (encoding may have failed)"
+            print(f"[FINALIZE ERROR] {error_msg}")
+            # Check segment status
+            status_raw = redis_client.hget(segment_key, 'status')
+            status = status_raw.decode() if isinstance(status_raw, bytes) else status_raw
+            print(f"[FINALIZE ERROR] Segment {seg_idx} status: {status}")
+            raise RuntimeError(error_msg)
+
+        if not os.path.exists(encoded_path):
+            error_msg = f"Segment {seg_idx} encoded file missing: {encoded_path} (may have been deleted or encoding failed)"
+            print(f"[FINALIZE ERROR] {error_msg}")
+            # Check if file exists in RESULT_DIR
+            result_dir_files = os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else []
+            print(f"[FINALIZE ERROR] Files in RESULT_DIR: {len(result_dir_files)} files")
+            raise RuntimeError(error_msg)
 
         segment_paths.append(encoded_path)
 
@@ -1383,14 +1411,18 @@ def trigger_finalization(redis_client, video_id, total_segments):
 
     if video_path and os.path.exists(video_path):
         # Check if original has audio
-        check_audio_cmd = [
-            FFPROBE_EXE, '-v', 'error', '-select_streams', 'a:0',
-            '-show_entries', 'stream=codec_type',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            video_path
-        ]
-        has_audio_check = subprocess.run(check_audio_cmd, capture_output=True, text=True, timeout=10)
-        has_audio = 'audio' in has_audio_check.stdout
+        try:
+            check_audio_cmd = [
+                FFPROBE_EXE, '-v', 'error', '-select_streams', 'a:0',
+                '-show_entries', 'stream=codec_type',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
+            ]
+            has_audio_check = subprocess.run(check_audio_cmd, capture_output=True, text=True, timeout=10)
+            has_audio = 'audio' in has_audio_check.stdout
+        except Exception as e:
+            print(f"[FINALIZE WARNING] Failed to check audio in original video: {e}")
+            has_audio = False
 
         if has_audio:
             print(f"[FINALIZE] Merging audio from original...")
@@ -1414,7 +1446,10 @@ def trigger_finalization(redis_client, video_id, total_segments):
             print(f"[FINALIZE] No audio in original")
     else:
         os.rename(temp_processed, final_output)
-        print(f"[FINALIZE] Using processed video only")
+        if not video_path:
+            print(f"[FINALIZE WARNING] Original video_path not found in Redis - skipping audio merge")
+        else:
+            print(f"[FINALIZE WARNING] Original video file not found: {video_path} - skipping audio merge")
 
     # Cleanup
     if os.path.exists(concat_list_path):
