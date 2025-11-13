@@ -842,7 +842,7 @@
 
             <ul class="nav-menu" id="navMenu">
                 <li><a href="#remove-watermark">Remove Objects</a></li>
-                <li><a href="premium.html#pricing">Plans</a></li>
+                <li><a href="premium.html#pricing">Pricing</a></li>
                 <li><a href="#comparison">Results</a></li>
                 <li><a href="login.html" class="nav-cta">Sign In</a></li>
             </ul>
@@ -922,7 +922,7 @@
                     </div>
 
                     <div style="text-align: center; margin: 2rem 0; color: var(--text-secondary);">
-                        <p style="margin-bottom: 1rem;">â€” OR â€”</p>
+                        <p style="margin-bottom: 1rem;">— OR —</p>
                     </div>
 
                     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
@@ -1032,8 +1032,8 @@
                     <div class="info-box">
                         <h3>Why Choose CleanCanvas?</h3>
                         <p><strong>Professional Results:</strong> Studio-quality object removal in seconds</p>
-                        <p style="margin-top: 0.5rem;"><strong>Easy to Use:</strong> No technical skills required â€¢ Click and it's gone</p>
-                        <p style="margin-top: 0.5rem;"><strong>Fast Processing:</strong> Real-time progress updates â€¢ High-quality output</p>
+                        <p style="margin-top: 0.5rem;"><strong>Easy to Use:</strong> No technical skills required • Click and it's gone</p>
+                        <p style="margin-top: 0.5rem;"><strong>Fast Processing:</strong> Real-time progress updates • High-quality output</p>
                     </div>
                 </div>
 
@@ -1094,48 +1094,6 @@
             </div>
         </div>
     </section>
-
-    <!-- Custom AI Training Section -->
-    <section id="training" style="padding: 4rem 2rem;">
-        <div class="container">
-            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                Train Your Custom Video Restoration AI
-            </h2>
-            <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; max-width: 900px; margin: 0 auto 2rem;">
-                Upload two videos to power a personalized AI training pipeline: the <strong>original (S2)</strong> and the <strong>object-removed (S2 Remove)</strong> version. We analyze differences to learn targeted
-                <em>video inpainting</em> for cleaner, smoother results using advanced <em>machine learning video tools</em>.
-            </p>
-
-            <div class="demo-card" style="max-width: 1000px; margin: 0 auto;">
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem;">
-                    <div>
-                        <div class="upload-title">Original Video (S2)</div>
-                        <label class="upload-zone" for="trainOriginal">
-                            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            <div class="upload-description">Click to choose or drag a file</div>
-                            <input id="trainOriginal" type="file" accept="video/*" style="display:none">
-                        </label>
-                    </div>
-                    <div>
-                        <div class="upload-title">Object-Removed (S2 Remove)</div>
-                        <label class="upload-zone" for="trainRemoved">
-                            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            <div class="upload-description">Click to choose or drag a file</div>
-                            <input id="trainRemoved" type="file" accept="video/*" style="display:none">
-                        </label>
-                    </div>
-                </div>
-
-                <div style="display:flex; gap:1rem; justify-content:center; align-items:center; margin-top: 1.5rem; flex-wrap: wrap;">
-                    <button id="startTrainingBtn" class="btn-primary">Start AI Training</button>
-                    <div id="trainStatus" style="color: var(--text-secondary);"></div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Pricing Section -->
-    
 
     <!-- Before/After Comparison Section -->
 <section id="comparison" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%); padding: 4rem 2rem; margin: 2rem 0;">
@@ -1216,8 +1174,8 @@
             CleanCanvas - Professional Video Object Removal
         </p>
         <p style="color: var(--text-secondary); font-size: 0.75rem;">
-            <a href="terms.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Terms</a> â€¢
-            <a href="privacy.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Privacy</a> â€¢
+            <a href="terms.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Terms</a> •
+            <a href="privacy.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Privacy</a> •
             <a href="premium.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Pricing</a>
         </p>
     </footer>
@@ -1448,7 +1406,7 @@
                 await res.json().catch(function(){ return {}; });
                 chip.classList.remove('checking');
                 chip.classList.add('ok');
-                chip.textContent = 'API: OK';
+                chip.textContent = 'online';
                 chip.title = base ? `Using ${base}` : 'Using same origin';
             } catch (e) {
                 chip.classList.remove('checking');
@@ -1554,6 +1512,14 @@
                 alert('Upload error: ' + error.message);
             }
         }
+
+        // File input change handler
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                uploadFile(file);
+            }
+        });
 
         // URL loading functionality
         document.getElementById('loadUrlBtn').addEventListener('click', async () => {
