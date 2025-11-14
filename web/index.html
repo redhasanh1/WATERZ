@@ -528,11 +528,11 @@
         .nav-logo {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
+            gap: 1rem;
             text-decoration: none;
             color: var(--text-primary);
             font-weight: 700;
-            font-size: 1.25rem;
+            font-size: 1.35rem;
         }
 
         .nav-logo img {
@@ -1751,7 +1751,7 @@
                     if (statusData.state === 'SUCCESS') {
                         progressBar.style.width = '100%';
                         progressPercent.textContent = '100%';
-                        statusText.textContent = 'S2 Remove ready · Preparing download...';
+                        statusText.textContent = 'Preparing download...';
                         statusText.style.color = '#10b981';
 
                         const resultData = statusData.result || {};
@@ -1770,11 +1770,11 @@
                                 previewSource = prepared.downloadLink.href;
                                 autoDownload = prepared.autoDownload;
 
-                                statusText.textContent = 'S2 Remove ready · Download ready';
+                                statusText.textContent = 'Download ready';
                             } catch (downloadError) {
                                 console.error('Error preparing download link:', downloadError);
                                 downloadLinkElement = buildDownloadLinkElement(resultUrl, 'cleaned_video.mp4', false);
-                                statusText.textContent = 'S2 Remove ready · Click the menu to download';
+                                statusText.textContent = 'Click the menu to download';
                             }
 
                             if (downloadLinkElement) {
@@ -2227,7 +2227,7 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            statusText.textContent = used ? "S2 Remove ready · Credits used: " +  : 'Done.';
+            statusText.textContent = used ? "Credits used: " + used : 'Done.';
             statusText.style.color = '#22c55e';
             progressBar.style.width = '100%';
             progressPercent.textContent = '100%';
