@@ -36,8 +36,17 @@
         window.location.href = portalUrl;
     }
 
+    async function startOneTimeCheckout(package, options) {
+        const payload = Object.assign({ package, mode: 'payment' }, options || {});
+        const url = `${API_BASE}/api/billing/create-checkout-session`;
+        const { url: checkoutUrl, error } = await postJSON(url, payload);
+        if (error) throw new Error(error);
+        window.location.href = checkoutUrl;
+    }
+
     window.Billing = {
         startCheckout,
+        startOneTimeCheckout,
         openPortal
     };
 })();

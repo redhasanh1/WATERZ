@@ -143,6 +143,15 @@ import hmac
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import subprocess
 
+# Stripe for billing (optional - gracefully handle if not installed)
+try:
+    import stripe
+    STRIPE_ENABLED = True
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY', '')
+except ImportError:
+    STRIPE_ENABLED = False
+    print("[WARNING] Stripe not installed - billing endpoints disabled")
+
 # [INIT] FFmpeg/FFprobe path detection with fallback
 def get_ffmpeg_executables():
     """Get FFmpeg and FFprobe paths with fallback to static-ffmpeg."""
@@ -5007,6 +5016,187 @@ if __name__ == '__main__':
         debug=False,  # Set to False for production
         threaded=True
     )
+
+# ===================================
+# BILLING ENDPOINTS (Stripe)
+# ===================================
+
+# Stripe Price IDs for credit packages (set in environment)
+STRIPE_PRICE_IDS = {
+    'credits_10': os.getenv('STRIPE_PRICE_ID_CREDITS_10', ''),
+    'credits_25': os.getenv('STRIPE_PRICE_ID_CREDITS_25', ''),
+    'credits_100': os.getenv('STRIPE_PRICE_ID_CREDITS_100', ''),
+    'credits_250': os.getenv('STRIPE_PRICE_ID_CREDITS_250', ''),
+    'credits_500': os.getenv('STRIPE_PRICE_ID_CREDITS_500', ''),
+    'starter': os.getenv('STRIPE_PRICE_ID_STARTER', ''),
+    'pro': os.getenv('STRIPE_PRICE_ID_PRO', ''),
+    'enterprise': os.getenv('STRIPE_PRICE_ID_ENTERPRISE', '')
+}
+
+# Credit amounts for each package
+CREDIT_AMOUNTS = {
+    'credits_10': 10,
+    'credits_25': 25,
+    'credits_100': 100,
+    'credits_250': 250,
+    'credits_500': 500,
+    'starter': 20,
+    'pro': 50,
+    'enterprise': 300
+}
+
+@app.route('/api/billing/create-checkout-session', methods=['POST', 'OPTIONS'])
+def create_checkout_session():
+    """Create a Stripe checkout session for subscriptions or one-time credit purchases"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not STRIPE_ENABLED:
+        return jsonify({'error': 'Billing is not enabled on this server'}), 503
+
+    try:
+        data = request.get_json() or {}
+        plan = data.get('plan')
+        package = data.get('package')
+        user_id = data.get('user_id')
+        mode = data.get('mode', 'subscription')  # 'subscription' or 'payment'
+
+        # Determine which price ID to use
+        price_key = package if package else plan
+        price_id = STRIPE_PRICE_IDS.get(price_key)
+
+        if not price_id:
+            return jsonify({'error': f'Invalid plan/package: {price_key}'}), 400
+
+        if not user_id:
+            return jsonify({'error': 'user_id is required'}), 400
+
+        # Get base URL for success/cancel redirects
+        base_url = request.host_url.rstrip('/')
+
+        # Create checkout session
+        checkout_params = {
+            'payment_method_types': ['card'],
+            'line_items': [{
+                'price': price_id,
+                'quantity': 1,
+            }],
+            'mode': mode,
+            'success_url': f'{base_url}/success.html?session_id={{CHECKOUT_SESSION_ID}}',
+            'cancel_url': f'{base_url}/premium.html',
+            'client_reference_id': user_id,
+            'metadata': {
+                'user_id': user_id,
+                'plan': plan if plan else '',
+                'package': package if package else '',
+            }
+        }
+
+        session = stripe.checkout.Session.create(**checkout_params)
+
+        return jsonify({'url': session.url})
+
+    except Exception as e:
+        print(f"[BILLING-ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/billing/webhook', methods=['POST'])
+@app.route('/api/stripe/webhook', methods=['POST'])
+def stripe_webhook():
+    """Handle Stripe webhooks for payment events"""
+    if not STRIPE_ENABLED:
+        return jsonify({'error': 'Billing is not enabled'}), 503
+
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+    webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+
+    try:
+        # Verify webhook signature if secret is configured
+        if webhook_secret:
+            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        else:
+            event = json.loads(payload)
+            print("[WARNING] Stripe webhook signature verification disabled (no STRIPE_WEBHOOK_SECRET)")
+
+        event_type = event['type']
+        data_object = event['data']['object']
+
+        print(f"[STRIPE-WEBHOOK] Received: {event_type}")
+
+        # Handle successful checkout (one-time or subscription)
+        if event_type == 'checkout.session.completed':
+            user_id = data_object.get('client_reference_id')
+            metadata = data_object.get('metadata', {})
+            package = metadata.get('package')
+            plan = metadata.get('plan')
+
+            # Determine credit amount
+            key = package if package else plan
+            credits_to_add = CREDIT_AMOUNTS.get(key, 0)
+
+            if credits_to_add > 0 and user_id:
+                # TODO: Award credits to user (implement your user credit system here)
+                print(f"[BILLING] User {user_id} purchased {key}: +{credits_to_add} credits")
+                # Example: update_user_credits(user_id, credits_to_add, f"purchase_{key}")
+
+        # Handle subscription renewals
+        elif event_type == 'invoice.payment_succeeded':
+            customer_id = data_object.get('customer')
+            subscription_id = data_object.get('subscription')
+
+            if subscription_id:
+                # TODO: Award renewal credits based on subscription plan
+                print(f"[BILLING] Subscription {subscription_id} renewed for customer {customer_id}")
+
+        # Handle subscription updates/cancellations
+        elif event_type in ['customer.subscription.updated', 'customer.subscription.deleted']:
+            subscription = data_object
+            customer_id = subscription.get('customer')
+            status = subscription.get('status')
+
+            print(f"[BILLING] Subscription for customer {customer_id} is now: {status}")
+
+        return jsonify({'status': 'success'})
+
+    except Exception as e:
+        print(f"[WEBHOOK-ERROR] {e}")
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/billing/create-portal-session', methods=['POST', 'OPTIONS'])
+def create_portal_session():
+    """Create a Stripe billing portal session for subscription management"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not STRIPE_ENABLED:
+        return jsonify({'error': 'Billing is not enabled'}), 503
+
+    try:
+        data = request.get_json() or {}
+        customer_id = data.get('customer_id')
+
+        if not customer_id:
+            return jsonify({'error': 'customer_id is required'}), 400
+
+        # Get base URL for return redirect
+        base_url = request.host_url.rstrip('/')
+
+        # Create portal session
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=f'{base_url}/premium.html',
+        )
+
+        return jsonify({'url': session.url})
+
+    except Exception as e:
+        print(f"[BILLING-PORTAL-ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # Explicit CORS preflight catch-all for /api/* (helps when proxies strip headers)
 @app.route('/api/<path:subpath>', methods=['OPTIONS'])
 def cors_preflight(subpath):
