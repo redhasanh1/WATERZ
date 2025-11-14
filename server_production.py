@@ -1161,7 +1161,17 @@ def trigger_finalization(redis_client, video_id, total_segments):
     # 🔥 UPLOAD TO RAILWAY: If running on local worker, upload result to API server
     uploaded_path = None
     tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
-    if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
+    upload_enabled = os.getenv('UPLOAD_RESULT_BACK', '1')
+
+    print(f"[FINALIZE] Upload config - TUNNEL_URL: {'SET' if os.getenv('TUNNEL_URL') else 'NOT SET'}, API_BASE_URL: {'SET' if os.getenv('API_BASE_URL') else 'NOT SET'}, UPLOAD_RESULT_BACK: {upload_enabled}")
+
+    if not tunnel:
+        print(f"[FINALIZE] ⚠️  Skipping Railway upload - TUNNEL_URL/API_BASE_URL not set")
+        print(f"[FINALIZE] 💡 Set TUNNEL_URL=https://your-railway-app.railway.app to enable auto-upload")
+    elif upload_enabled != '1':
+        print(f"[FINALIZE] ⚠️  Skipping Railway upload - UPLOAD_RESULT_BACK={upload_enabled} (set to '1' to enable)")
+
+    if tunnel and upload_enabled == '1':
         try:
             import requests
             upload_url = tunnel.rstrip('/') + '/api/upload-result'

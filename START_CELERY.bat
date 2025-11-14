@@ -10,6 +10,16 @@ if exist redis_url.txt (
     echo [REDIS] Using default localhost (redis_url.txt not found)
     set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
 )
+
+REM ✅ AUTO-LOAD TUNNEL_URL from web\tunnel_url.txt for Railway upload
+if exist web\tunnel_url.txt (
+    for /f "usebackq tokens=*" %%A in ("web\tunnel_url.txt") do set TUNNEL_URL=%%A
+    echo [UPLOAD] Loaded TUNNEL_URL from web\tunnel_url.txt: %TUNNEL_URL%
+    echo [UPLOAD] ✅ Auto-upload to Railway ENABLED
+) else (
+    echo [UPLOAD] ⚠️  web\tunnel_url.txt not found - Railway upload disabled
+    echo [UPLOAD] 💡 Create web\tunnel_url.txt with your Railway URL to enable auto-upload
+)
 echo.
 
 REM Minimal environment: only TensorRT-related config
