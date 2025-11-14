@@ -539,13 +539,14 @@
         .nav-right {
             display: flex;
             align-items: center;
-            gap: 1.5rem;
+            gap: 1rem;
             flex-shrink: 0;
         }
 
         .nav-auth {
             display: flex;
             align-items: center;
+            gap: 0.75rem;
         }
 
         .nav-controls {
@@ -580,8 +581,20 @@
         .nav-menu {
             display: flex;
             align-items: center;
-            gap: 2.25rem;
+            gap: 1.5rem;
             list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Navigation links - wide spacing */
+        .nav-left .nav-menu {
+            gap: 2.25rem;
+        }
+
+        /* User menu - tight spacing */
+        #userNav {
+            gap: 0.75rem !important;
         }
 
         .nav-menu a {
@@ -994,11 +1007,11 @@
                 <!-- Auth Section -->
                 <div class="nav-auth">
                     <a href="login.html" class="nav-cta" id="signInLink">Sign In</a>
-                    <ul class="nav-menu" id="userNav" style="display: none; gap: 0.75rem; align-items: center; margin: 0;">
+                    <ul class="nav-menu" id="userNav" style="display: none;">
                         <li><span id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem;"></span></li>
                         <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
-                        <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta-small" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 0.5rem 1rem; font-size: 0.85rem;">Buy Credits</a></li>
-                        <li><a href="#" id="signOutBtn" class="nav-cta-small" style="background: rgba(239, 68, 68, 0.9); padding: 0.5rem 1rem; font-size: 0.85rem;">Sign Out</a></li>
+                        <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta-small" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">Buy Credits</a></li>
+                        <li><a href="#" id="signOutBtn" class="nav-cta-small" style="background: rgba(239, 68, 68, 0.9);">Sign Out</a></li>
                     </ul>
                 </div>
 
