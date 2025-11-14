@@ -4081,10 +4081,16 @@ def get_status(task_id):
                             final_path_raw = redis_client.get(f"video:{video_id}:final_path")
                             if final_path_raw:
                                 final_path = final_path_raw.decode()
-                                filename = os.path.basename(final_path)
-                                print(f"[POLL] Background encoding COMPLETE for {video_id}! Returning result_url")
+                                # Check if path is already a web path (from Railway upload)
+                                if final_path.startswith('/results/'):
+                                    result_url = final_path
+                                else:
+                                    # Local path - extract filename
+                                    filename = os.path.basename(final_path)
+                                    result_url = f'/results/{filename}'
+                                print(f"[POLL] Background encoding COMPLETE for {video_id}! Returning result_url: {result_url}")
                                 response['result'] = {
-                                    'result_url': f'/results/{filename}'
+                                    'result_url': result_url
                                 }
                                 if 'metadata' in result_data:
                                     response['metadata'] = result_data['metadata']
