@@ -4671,6 +4671,131 @@ def upload_file():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/extract-frames/<task_id>', methods=['GET', 'OPTIONS'])
+def extract_frames(task_id):
+    """
+    Extract frame thumbnails from uploaded video for timeline UI
+
+    Returns: { "status": "success", "frames": [{frame_number, timestamp, thumbnail_url}], "total_frames", "fps", "duration" }
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        # Find the uploaded video
+        video_path = None
+        for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+            test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+            if os.path.exists(test_path):
+                video_path = test_path
+                break
+
+        if not video_path:
+            return jsonify({'status': 'error', 'message': 'Video not found'}), 404
+
+        # Check if frames are already cached
+        cache_key = f'frames_{task_id}'
+        with FRAME_CACHE_LOCK:
+            if cache_key in FRAME_CACHE:
+                return jsonify(FRAME_CACHE[cache_key])
+
+        # Get video metadata using ffprobe
+        probe_cmd = [
+            FFPROBE_EXE, '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=r_frame_rate,nb_frames,duration',
+            '-of', 'json',
+            video_path
+        ]
+
+        import subprocess
+        import json as json_module
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+        probe_data = json_module.loads(probe_result.stdout)
+
+        # Extract metadata
+        stream = probe_data['streams'][0]
+        fps_str = stream.get('r_frame_rate', '30/1')
+        fps_num, fps_den = map(int, fps_str.split('/'))
+        fps = fps_num / fps_den if fps_den != 0 else 30
+
+        duration = float(stream.get('duration', 0))
+        total_frames = int(stream.get('nb_frames', int(duration * fps)))
+
+        # Extract thumbnails at 1-second intervals (or max 60 thumbnails for long videos)
+        max_thumbnails = 60
+        interval_seconds = max(1, int(duration / max_thumbnails))
+
+        # Create thumbnails directory for this task
+        thumbnails_dir = os.path.join(CACHE_DIR, 'thumbnails', task_id)
+        os.makedirs(thumbnails_dir, exist_ok=True)
+
+        frames_data = []
+
+        # Extract thumbnails using ffmpeg
+        for i in range(0, int(duration), interval_seconds):
+            thumbnail_path = os.path.join(thumbnails_dir, f'frame_{i:04d}.jpg')
+
+            # Skip if already exists
+            if not os.path.exists(thumbnail_path):
+                ffmpeg_cmd = [
+                    FFMPEG_EXE, '-y',
+                    '-ss', str(i),  # Seek to timestamp
+                    '-i', video_path,
+                    '-vframes', '1',  # Extract 1 frame
+                    '-vf', 'scale=120:-1',  # Scale to 120px width (maintain aspect ratio)
+                    '-q:v', '5',  # Quality (lower = better, 2-5 is good)
+                    thumbnail_path
+                ]
+                subprocess.run(ffmpeg_cmd, capture_output=True, timeout=5)
+
+            if os.path.exists(thumbnail_path):
+                frame_number = int(i * fps)
+                frames_data.append({
+                    'frame_number': frame_number,
+                    'timestamp': i,
+                    'thumbnail_url': f'/api/thumbnail/{task_id}/frame_{i:04d}.jpg'
+                })
+
+        result = {
+            'status': 'success',
+            'frames': frames_data,
+            'total_frames': total_frames,
+            'fps': fps,
+            'duration': duration
+        }
+
+        # Cache the result
+        with FRAME_CACHE_LOCK:
+            FRAME_CACHE[cache_key] = result
+
+        return jsonify(result)
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'status': 'error', 'message': 'Frame extraction timeout'}), 500
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/thumbnail/<task_id>/<filename>', methods=['GET'])
+def serve_thumbnail(task_id, filename):
+    """
+    Serve thumbnail images for timeline
+    """
+    try:
+        thumbnails_dir = os.path.join(CACHE_DIR, 'thumbnails', task_id)
+        thumbnail_path = os.path.join(thumbnails_dir, filename)
+
+        if not os.path.exists(thumbnail_path):
+            return jsonify({'status': 'error', 'message': 'Thumbnail not found'}), 404
+
+        from flask import send_file
+        return send_file(thumbnail_path, mimetype='image/jpeg')
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/api/process', methods=['POST', 'OPTIONS'])
 def process_video():
     if request.method == 'OPTIONS':

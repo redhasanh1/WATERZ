@@ -142,6 +142,24 @@
             --text-secondary: #9aa4b2;
         }
 
+        /* Comparison Section Styling */
+        .comparison-section {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%);
+        }
+
+        html[data-theme="dark"] .comparison-section {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%);
+        }
+
+        /* Timeline Scrubber Styling */
+        .timeline-scrubber {
+            background: #ffffff;
+        }
+
+        html[data-theme="dark"] .timeline-scrubber {
+            background: #e5e7eb;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -1119,13 +1137,18 @@
                                     <video id="previewVideo" style="width: 100%; max-height: 600px; display: block; background: #000;">
                                     </video>
 
+                                    <!-- Professional Timeline (Frame Thumbnails) -->
+                                    <div id="professionalTimeline" style="position: absolute; bottom: 90px; left: 1rem; right: 1rem; display: none; z-index: 5;">
+                                        <!-- Timeline will be injected here by VideoTimeline class -->
+                                    </div>
+
                                     <!-- Custom Video Controls Overlay -->
                                     <div id="videoControls" style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%); padding: 1.5rem 1rem 1rem; transition: opacity 0.3s;">
                                         <!-- Timeline Scrubber -->
                                         <div style="margin-bottom: 1rem;">
                                             <div id="timelineTrack" style="position: relative; height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; cursor: pointer;">
                                                 <div id="timelineProgress" style="position: absolute; height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); border-radius: 3px; width: 0%;"></div>
-                                                <div id="timelineScrubber" style="position: absolute; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; background: #fff; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: grab; left: 0%;"></div>
+                                                <div id="timelineScrubber" class="timeline-scrubber" style="position: absolute; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: grab; left: 0%;"></div>
                                             </div>
                                         </div>
 
@@ -1314,7 +1337,7 @@
     </section>
 
     <!-- Before/After Comparison Section -->
-<section id="comparison" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%); padding: 4rem 2rem; margin: 2rem 0;">
+<section id="comparison" class="comparison-section" style="padding: 4rem 2rem; margin: 2rem 0;">
         <div class="container">
             <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
                 See the Difference
@@ -1400,6 +1423,7 @@
 
     <script src="config.js"></script>
     <script src="js/billing.js"></script>
+    <script src="js/timeline.js"></script>
     <script>
         // Mobile Menu Toggle
         const mobileMenuToggle = document.getElementById('mobileMenuToggle');
@@ -1737,6 +1761,11 @@
                     // Store task_id for processing
                     const videoElem = document.getElementById('previewVideo');
                     videoElem.dataset.taskId = data.task_id;
+
+                    // Initialize professional timeline for videos
+                    if (file.type.startsWith('video/')) {
+                        initializeTimeline(data.task_id, videoElem);
+                    }
 
                     // Show process button
                     const processBtn = document.getElementById('processBtn');
@@ -2192,6 +2221,48 @@
         }
 
         // ==================================================
+        // Professional Video Timeline (Frame Thumbnails)
+        // ==================================================
+        let videoTimeline = null;
+
+        async function initializeTimeline(taskId, videoElem) {
+            try {
+                // Wait for video metadata to be loaded
+                if (videoElem.readyState < 1) {
+                    await new Promise(resolve => {
+                        videoElem.addEventListener('loadedmetadata', resolve, { once: true });
+                    });
+                }
+
+                // Create timeline instance
+                videoTimeline = new VideoTimeline(videoElem, {
+                    onFrameChange: (frameNumber) => {
+                        console.log(`[Timeline] Jumped to frame ${frameNumber}`);
+                        // Store current frame for mask tracking
+                        window.currentFrame = frameNumber;
+                    }
+                });
+
+                // Initialize timeline with task ID
+                await videoTimeline.init(taskId);
+
+                // Get timeline container and insert it
+                const timelineContainer = videoTimeline.getContainer();
+                const professionalTimelineDiv = document.getElementById('professionalTimeline');
+
+                if (timelineContainer && professionalTimelineDiv) {
+                    professionalTimelineDiv.innerHTML = '';
+                    professionalTimelineDiv.appendChild(timelineContainer);
+                    professionalTimelineDiv.style.display = 'block';
+
+                    console.log('[Timeline] Professional timeline initialized successfully');
+                }
+            } catch (error) {
+                console.error('[Timeline] Failed to initialize:', error);
+            }
+        }
+
+        // ==================================================
         // Professional Video Player Controls
         // ==================================================
         function initProfessionalPlayer(videoElem) {
@@ -2384,6 +2455,11 @@
             updatePointCount();
             clearBtn.disabled = true;
             scrollHint.style.display = 'none';
+
+            // Clear mask indicators from timeline
+            if (window.videoTimeline) {
+                window.videoTimeline.clearMaskIndicators();
+            }
         });
 
         // Draw a green dot on canvas
@@ -2451,6 +2527,11 @@
             // Update UI
             updatePointCount();
             clearBtn.disabled = false;
+
+            // Mark frame as masked in timeline
+            if (window.videoTimeline && window.currentFrame !== undefined) {
+                window.videoTimeline.markFrameMasked(window.currentFrame);
+            }
 
             // Show scroll hint
             if (points.length >= 1) {
