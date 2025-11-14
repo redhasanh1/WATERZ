@@ -4804,6 +4804,30 @@ def serve_result(filename):
     return response
 
 
+@app.route('/demo_videos/<filename>')
+def serve_demo_video(filename):
+    """Serve demo/example videos from /data/demo_videos/ directory"""
+    print(f"[DEMO-VIDEO] Request for: {filename}")
+
+    # Sanitize filename
+    filename = sanitize_filename(filename)
+    demo_dir = os.path.join(DATA_DIR, 'demo_videos')
+    file_path = os.path.join(demo_dir, filename)
+
+    print(f"[DEMO-VIDEO] Serving from: {file_path}")
+
+    if not os.path.exists(file_path):
+        print(f"[DEMO-VIDEO] File not found: {file_path}")
+        abort(404)
+
+    # Verify file is within demo directory (security)
+    if not os.path.abspath(file_path).startswith(os.path.abspath(demo_dir)):
+        print(f"[DEMO-VIDEO] Path traversal attempt blocked")
+        abort(403)
+
+    return send_file(file_path, mimetype='video/mp4')
+
+
 @app.route('/api/upload-result', methods=['POST', 'OPTIONS'])
 def upload_result():
     if request.method == 'OPTIONS':
