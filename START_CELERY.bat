@@ -13,13 +13,24 @@ if exist redis_url.txt (
 
 REM ✅ AUTO-LOAD TUNNEL_URL from web\tunnel_url.txt for Railway upload
 if exist web\tunnel_url.txt (
-    for /f "usebackq tokens=*" %%A in ("web\tunnel_url.txt") do set TUNNEL_URL=%%A
+    for /f "usebackq delims=" %%A in ("web\tunnel_url.txt") do (
+        if not defined TUNNEL_URL set TUNNEL_URL=%%A
+    )
     echo [UPLOAD] Loaded TUNNEL_URL from web\tunnel_url.txt: %TUNNEL_URL%
     echo [UPLOAD] ✅ Auto-upload to Railway ENABLED
 ) else (
     echo [UPLOAD] ⚠️  web\tunnel_url.txt not found - Railway upload disabled
     echo [UPLOAD] 💡 Create web\tunnel_url.txt with your Railway URL to enable auto-upload
 )
+echo.
+
+REM Enable auto-upload by default (set to 0 to disable)
+if not defined UPLOAD_RESULT_BACK set UPLOAD_RESULT_BACK=1
+
+REM Debug: Show all upload-related environment variables
+echo [DEBUG] TUNNEL_URL = %TUNNEL_URL%
+echo [DEBUG] API_BASE_URL = %API_BASE_URL%
+echo [DEBUG] UPLOAD_RESULT_BACK = %UPLOAD_RESULT_BACK%
 echo.
 
 REM Minimal environment: only TensorRT-related config
