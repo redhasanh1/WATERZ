@@ -3,28 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Privacy Policy - AI Watermark Remover</title>
+    <title>Privacy Policy - MarkRemoverAI</title>
 
     <!-- Google AdSense -->
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5884276468441861"
      crossorigin="anonymous"></script>
     <style>
+        :root {
+            --primary: #667eea;
+            --secondary: #a78bfa;
+            --bg-primary: #ffffff;
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+        }
+
+        html[data-theme="dark"] {
+            --bg-primary: #0b1020;
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             max-width: 900px;
             margin: 0 auto;
             padding: 2rem;
             line-height: 1.6;
-            background: #0f0f1e;
-            color: #e0e0e0;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
-        h1 { color: #667eea; margin-bottom: 0.5rem; }
-        h2 { color: #a78bfa; margin-top: 2rem; }
-        .last-updated { color: #888; font-size: 0.9rem; }
-        a { color: #667eea; }
+        h1 { color: var(--primary); margin-bottom: 0.5rem; }
+        h2 { color: var(--secondary); margin-top: 2rem; }
+        .last-updated { color: var(--text-secondary); font-size: 0.9rem; }
+        a { color: var(--primary); }
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            z-index: 1000;
+        }
     </style>
 </head>
 <body>
+    <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">Dark</button>
     <h1>Privacy Policy</h1>
     <p class="last-updated">Last Updated: March 2025</p>
 
@@ -112,5 +141,8 @@
     <p>For questions, to exercise your rights, or to raise a concern, email <a href="mailto:privacy@watermarkai.com">privacy@watermarkai.com</a>. If we are unable to resolve a concern, you may have the right to contact your local data protection authority.</p>
 
     <p style="margin-top: 3rem;"><a href="index.html">← Back to Home</a></p>
+
+    <!-- Theme Toggle Script -->
+    <script src="js/theme.js"></script>
 </body>
 </html>

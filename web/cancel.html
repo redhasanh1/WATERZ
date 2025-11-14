@@ -3,29 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checkout Canceled - WatermarkAI</title>
-    <link rel="stylesheet" href="css/main.css">
+    <title>Checkout Canceled - MarkRemoverAI</title>
     <style>
+        :root {
+            --bg-primary: #ffffff;
+            --bg-card: rgba(248, 250, 252, 0.9);
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --border-color: rgba(102, 126, 234, 0.25);
+        }
+
+        html[data-theme="dark"] {
+            --bg-primary: #0b1020;
+            --bg-card: rgba(26, 26, 46, 0.9);
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
+        }
+
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #0f0f1e;
-            color: #e0e0e0;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             margin: 0;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 2rem;
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
         .card {
             max-width: 480px;
-            background: rgba(26, 26, 46, 0.9);
-            border: 1px solid rgba(102, 126, 234, 0.25);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
             border-radius: 18px;
             padding: 2.5rem;
             text-align: center;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease;
+        }
+
+        html[data-theme="dark"] .card {
             box-shadow: 0 25px 60px rgba(15, 15, 30, 0.45);
         }
+
         h1 {
             margin: 0 0 1rem 0;
             font-size: 2rem;
@@ -33,7 +54,7 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-        p { color: #a0a0c0; line-height: 1.6; }
+        p { color: var(--text-secondary); line-height: 1.6; }
         .btn {
             margin-top: 1.5rem;
             padding: 0.9rem 2rem;
@@ -65,5 +86,8 @@
         <button class="btn" onclick="window.location.href='premium.html#pricing'">Back to plans</button>
         <a href="mailto:hello@watermarkai.com" class="secondary">Talk to sales</a>
     </div>
+
+    <!-- Theme Toggle Script -->
+    <script src="js/theme.js"></script>
 </body>
 </html>
