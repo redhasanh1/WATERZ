@@ -1830,7 +1830,7 @@
 
                     if (statusData.info) {
                         const info = statusData.info;
-                        const percent = Math.max(0, Math.min(100, info.progress || 0));
+                        let percent = Math.max(0, Math.min(100, info.progress || 0));
                         let status = info.status || 'Processing...';
 
                         // Show better message when encoding is complete/almost done
@@ -1838,6 +1838,7 @@
                             status = 'Finalizing video...';
                         } else if (status.includes('Segment') && status.includes('complete')) {
                             status = 'Processing complete · Finalizing...';
+                            percent = 100;  // Show 100% when segments are done
                         }
 
                         progressBar.style.width = percent + '%';
