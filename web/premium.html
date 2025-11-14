@@ -784,102 +784,110 @@
             <div style="margin-bottom: 5rem;">
                 <div style="text-align: center; margin-bottom: 2.5rem;">
                     <h3 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">
-                        <span style="background: linear-gradient(135deg, #10b981, #059669); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">One-Time Credit Packs</span>
+                        <span style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">One-Time Credit Packs</span>
                     </h3>
                     <p style="color: var(--text-secondary); font-size: 1.1rem;">No monthly commitment • Credits never expire • Perfect for occasional use</p>
                 </div>
 
                 <div class="pricing-grid" style="gap: 2rem;">
-                    <!-- 10 Credits -->
-                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(5, 150, 105, 0.05));">
-                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #10b981;">ONE-TIME</div>
+                    <!-- 10 Credits - Starter -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
+                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
                         <div class="pricing-header">
                             <h3>Starter Pack</h3>
-                            <div class="pricing-price" style="background: linear-gradient(135deg, #10b981, #059669); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$2.99</div>
-                            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Perfect for trying out the service</p>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$2.99</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Perfect for trying out the service</p>
                         </div>
                         <ul class="pricing-features" style="margin: 1.5rem 0;">
-                            <li><strong>10 credits</strong> ($0.30/credit)</li>
-                            <li>Never expires</li>
+                            <li><strong>10 credits</strong></li>
+                            <li style="color: var(--text-secondary); font-size: 0.9rem;">$0.30 per credit</li>
+                            <li>Credits never expire</li>
                             <li>All features included</li>
                             <li>No monthly commitment</li>
                         </ul>
-                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #10b981, #059669);" onclick="buyCredits('credits_10')">Buy 10 Credits</button>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_10')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Starter Pack</button>
                     </div>
 
-                    <!-- 25 Credits -->
-                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(5, 150, 105, 0.05));">
-                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #10b981;">ONE-TIME</div>
+                    <!-- 25 Credits - Basic -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
+                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
                         <div class="pricing-header">
                             <h3>Basic Pack</h3>
-                            <div class="pricing-price" style="background: linear-gradient(135deg, #10b981, #059669); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$6.99</div>
-                            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Great value for small projects</p>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$6.99</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Great value for small projects</p>
                         </div>
                         <ul class="pricing-features" style="margin: 1.5rem 0;">
-                            <li><strong>25 credits</strong> ($0.28/credit)</li>
-                            <li>Never expires</li>
+                            <li><strong>25 credits</strong></li>
+                            <li style="color: var(--text-secondary); font-size: 0.9rem;">$0.28 per credit</li>
+                            <li>Credits never expire</li>
                             <li>All features included</li>
-                            <li>Save 7% vs Starter Pack</li>
+                            <li style="color: #9779d4; font-weight: 600;">Save 7% vs Starter</li>
                         </ul>
-                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #10b981, #059669);" onclick="buyCredits('credits_25')">Buy 25 Credits</button>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_25')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Basic Pack</button>
                     </div>
 
-                    <!-- 100 Credits - BEST VALUE -->
-                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(5, 150, 105, 0.08)); border-color: #10b981; transform: translateY(-10px);">
-                        <div class="popular-badge" style="background: linear-gradient(135deg, #10b981, #059669);">BEST VALUE</div>
-                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #10b981;">ONE-TIME</div>
+                    <!-- 100 Credits - BEST VALUE (Hero) -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.08), rgba(151, 121, 212, 0.08)); border: 2px solid #7352b4; transform: scale(1.05) translateY(-10px); box-shadow: 0 25px 60px rgba(115, 82, 180, 0.25); transition: all 0.3s ease;">
+                        <div class="popular-badge" style="background: linear-gradient(135deg, #7352b4, #9779d4);">BEST VALUE</div>
+                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.2); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
                         <div class="pricing-header">
                             <h3>Pro Pack</h3>
-                            <div class="pricing-price" style="background: linear-gradient(135deg, #10b981, #059669); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$24.99</div>
-                            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Most popular for one-time buyers</p>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$24.99</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Most popular for one-time buyers</p>
                         </div>
                         <ul class="pricing-features" style="margin: 1.5rem 0;">
-                            <li><strong>100 credits</strong> ($0.25/credit)</li>
-                            <li>Never expires</li>
+                            <li><strong>100 credits</strong></li>
+                            <li style="color: var(--text-secondary); font-size: 0.9rem;">$0.25 per credit</li>
+                            <li>Credits never expire</li>
                             <li>All features included</li>
-                            <li>Save 17% vs Starter Pack</li>
+                            <li style="color: #9779d4; font-weight: 600;">Save 17% vs Starter</li>
                         </ul>
-                        <div style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); border-radius: 12px; padding: 0.85rem; margin-bottom: 1.25rem; color: #6ee7b7; font-weight: 600; font-size: 0.9rem;">Best price per credit!</div>
-                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #10b981, #059669);" onclick="buyCredits('credits_100')">Buy 100 Credits</button>
+                        <div style="background: rgba(115, 82, 180, 0.12); border: 1px solid rgba(115, 82, 180, 0.25); border-radius: 12px; padding: 0.85rem; margin-bottom: 1.25rem; color: #9779d4; font-weight: 600; font-size: 0.9rem; text-align: center;">⭐ Best price per credit</div>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease; font-size: 1.05rem;" onclick="buyCredits('credits_100')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.4)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Pro Pack</button>
                     </div>
 
-                    <!-- 250 Credits -->
-                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(5, 150, 105, 0.05));">
-                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #10b981;">ONE-TIME</div>
-                        <div class="pricing-header">
-                            <h3>Business Pack</h3>
-                            <div class="pricing-price" style="background: linear-gradient(135deg, #10b981, #059669); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$54.99</div>
-                            <p style="color: var(--text-secondary); margin-top: 0.5rem;">For bigger projects and teams</p>
-                        </div>
-                        <ul class="pricing-features" style="margin: 1.5rem 0;">
-                            <li><strong>250 credits</strong> ($0.22/credit)</li>
-                            <li>Never expires</li>
-                            <li>All features included</li>
-                            <li>Save 27% vs Starter Pack</li>
-                        </ul>
-                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #10b981, #059669);" onclick="buyCredits('credits_250')">Buy 250 Credits</button>
-                    </div>
-
-                    <!-- 500 Credits -->
-                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(5, 150, 105, 0.05));">
-                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #10b981;">ONE-TIME</div>
+                    <!-- 500 Credits - Enterprise (Anchor) -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
+                        <div style="position: absolute; top: 0.75rem; right: 1rem; background: linear-gradient(135deg, #f59e0b, #ef4444); padding: 0.4rem 0.9rem; border-radius: 999px; font-size: 0.7rem; font-weight: 700; color: white; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">BIGGEST SAVINGS</div>
+                        <div style="position: absolute; top: 3.25rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
                         <div class="pricing-header">
                             <h3>Enterprise Pack</h3>
-                            <div class="pricing-price" style="background: linear-gradient(135deg, #10b981, #059669); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$99.99</div>
-                            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Maximum value for heavy users</p>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$99.99</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Maximum value for heavy users</p>
                         </div>
                         <ul class="pricing-features" style="margin: 1.5rem 0;">
-                            <li><strong>500 credits</strong> ($0.20/credit)</li>
-                            <li>Never expires</li>
+                            <li><strong>500 credits</strong></li>
+                            <li style="color: var(--text-secondary); font-size: 0.9rem;">$0.20 per credit</li>
+                            <li>Credits never expire</li>
                             <li>All features included</li>
-                            <li>Save 33% vs Starter Pack</li>
+                            <li style="color: #9779d4; font-weight: 600;">Save 33% vs Starter</li>
                         </ul>
-                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #10b981, #059669);" onclick="buyCredits('credits_500')">Buy 500 Credits</button>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_500')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Enterprise Pack</button>
                     </div>
                 </div>
 
-                <div style="margin-top: 2.5rem; text-align: center; color: var(--text-secondary); font-size: 0.95rem; max-width: 650px; margin-left: auto; margin-right: auto;">
-                    💡 <strong>One-time credits are perfect if:</strong> You have seasonal needs, want to test before subscribing, or already have a subscription and need extra credits for a big project.
+                <!-- Trust Signals Section -->
+                <div style="margin-top: 3rem; padding: 2rem; background: rgba(115, 82, 180, 0.05); border: 1px solid rgba(115, 82, 180, 0.15); border-radius: 16px; text-align: center;">
+                    <div style="display: grid; gap: 2rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 1.5rem;">
+                        <div>
+                            <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">✓</div>
+                            <h4 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1rem;">30-Day Money-Back Guarantee</h4>
+                            <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0;">Not happy? Full refund, no questions asked.</p>
+                        </div>
+                        <div>
+                            <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">⚡</div>
+                            <h4 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1rem;">Instant Delivery</h4>
+                            <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0;">Credits appear in your account immediately after purchase.</p>
+                        </div>
+                        <div>
+                            <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🔒</div>
+                            <h4 style="margin: 0 0 0.5rem 0; color: var(--text-primary); font-size: 1rem;">Secure Payment</h4>
+                            <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0;">Encrypted checkout powered by Stripe. Your data is safe.</p>
+                        </div>
+                    </div>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 1rem 0 0 0; max-width: 600px; margin-left: auto; margin-right: auto;">
+                        💡 <strong>One-time credits are perfect if:</strong> You have seasonal needs, want to test before subscribing, or already have a subscription and need extra credits for a big project.
+                    </p>
                 </div>
             </div>
 
