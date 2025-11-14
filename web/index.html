@@ -525,6 +525,33 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 2rem;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 3rem;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .nav-auth {
+            display: flex;
+            align-items: center;
+        }
+
+        .nav-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
         }
 
         .nav-logo {
@@ -536,6 +563,7 @@
             font-weight: 700;
             font-size: 1.5rem;
             transition: transform 0.2s ease;
+            flex-shrink: 0;
         }
 
         .nav-logo:hover {
@@ -594,6 +622,8 @@
             font-weight: 600 !important;
             transition: all 0.3s ease !important;
             box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25) !important;
+            text-decoration: none !important;
+            white-space: nowrap;
         }
 
         .nav-cta:hover {
@@ -602,6 +632,30 @@
         }
 
         .nav-cta::after {
+            display: none !important;
+        }
+
+        .nav-cta-small {
+            padding: 0.5rem 1rem !important;
+            background: var(--gradient-primary) !important;
+            border-radius: 8px !important;
+            color: white !important;
+            font-weight: 600 !important;
+            font-size: 0.85rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 2px 6px rgba(102, 126, 234, 0.2) !important;
+            text-decoration: none !important;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .nav-cta-small:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35) !important;
+        }
+
+        .nav-cta-small::after {
             display: none !important;
         }
 
@@ -653,7 +707,8 @@
             border: 1px solid rgba(255,255,255,0.12);
             background: rgba(26,26,46,0.6);
             color: var(--text-secondary);
-            margin-left: 12px;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
         @media (min-width: 769px) {
             .api-chip { display: inline-flex; }
@@ -661,6 +716,12 @@
         .api-chip.ok { color: #22c55e; border-color: rgba(34,197,94,0.35); }
         .api-chip.err { color: #ef4444; border-color: rgba(239,68,68,0.35); }
         .api-chip.checking { color: #f59e0b; border-color: rgba(245,158,11,0.35); }
+
+        /* Theme Toggle */
+        .theme-toggle {
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
 
         @media (max-width: 768px) {
             .hero {
@@ -679,13 +740,23 @@
 
             .nav-container {
                 padding: 0 1.5rem;
+                gap: 1rem;
+            }
+
+            .nav-left {
+                gap: 1.5rem;
+            }
+
+            .nav-right {
+                gap: 0.5rem;
             }
 
             .mobile-menu-toggle {
                 display: flex;
             }
 
-            .nav-menu {
+            /* Hide desktop nav menu items on mobile */
+            .nav-left .nav-menu {
                 position: fixed;
                 top: 75px;
                 left: 0;
@@ -703,7 +774,7 @@
                 transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             }
 
-            .nav-menu.active {
+            .nav-left .nav-menu.active {
                 transform: translateY(0);
                 opacity: 1;
                 pointer-events: auto;
@@ -720,6 +791,26 @@
                 display: block;
                 width: 100%;
                 padding: 0.5rem 0;
+            }
+
+            /* Hide user nav on mobile, show in hamburger menu if needed */
+            .nav-auth #userNav {
+                display: none !important;
+            }
+
+            .nav-auth #signInLink {
+                font-size: 0.85rem;
+                padding: 0.5rem 1rem !important;
+            }
+
+            /* Hide API chip on mobile */
+            .api-chip {
+                display: none !important;
+            }
+
+            .theme-toggle {
+                font-size: 0.85rem;
+                padding: 0.5rem 0.75rem;
             }
 
             .nav-cta {
@@ -871,43 +962,56 @@
     <!-- Navigation Header -->
     <nav class="nav-header">
         <div class="nav-container">
-            <a href="/" class="nav-logo">
-                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                        <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
-                        </linearGradient>
-                    </defs>
-                    <rect width="40" height="40" rx="10" fill="url(#logoGradient)"/>
-                    <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
-                    <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
-                    <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
-                    <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
-                    <circle cx="25" cy="15" r="2" fill="#10b981"/>
-                </svg>
-                <span>WatermarkAI</span>
-            </a>
+            <!-- LEFT: Logo + Main Navigation -->
+            <div class="nav-left">
+                <a href="/" class="nav-logo">
+                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                            </linearGradient>
+                        </defs>
+                        <rect width="40" height="40" rx="10" fill="url(#logoGradient)"/>
+                        <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
+                        <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
+                        <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                        <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                        <circle cx="25" cy="15" r="2" fill="#10b981"/>
+                    </svg>
+                    <span>WatermarkAI</span>
+                </a>
 
-            <ul class="nav-menu" id="navMenu">
-                <li><a href="#remove-watermark">Remove Objects</a></li>
-                <li><a href="premium.html#pricing">Pricing</a></li>
-                <li><a href="#comparison">Results</a></li>
-                <li><a href="login.html" class="nav-cta" id="signInLink">Sign In</a></li>
-            </ul>
-            <ul class="nav-menu" id="userNav" style="display: none; gap: 1rem; align-items: center;">
-                <li><span id="userEmail" style="color: #667eea; font-weight: 600; margin-right: 0.5rem;"></span></li>
-                <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 1rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
-                <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 0.5rem 1rem;">Buy Credits</a></li>
-                <li><a href="#" id="signOutBtn" class="nav-cta" style="background: rgba(239, 68, 68, 0.9); padding: 0.5rem 1rem;">Sign Out</a></li>
-            </ul>
-            <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking...</div>
-            <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">Dark</button>
+                <ul class="nav-menu" id="navMenu">
+                    <li><a href="#remove-watermark">Remove Objects</a></li>
+                    <li><a href="premium.html#pricing">Pricing</a></li>
+                    <li><a href="#comparison">Results</a></li>
+                </ul>
+            </div>
 
-            <div class="mobile-menu-toggle" id="mobileMenuToggle">
-                <span></span>
-                <span></span>
-                <span></span>
+            <!-- RIGHT: User Controls + System Controls -->
+            <div class="nav-right">
+                <!-- Auth Section -->
+                <div class="nav-auth">
+                    <a href="login.html" class="nav-cta" id="signInLink">Sign In</a>
+                    <ul class="nav-menu" id="userNav" style="display: none; gap: 0.75rem; align-items: center; margin: 0;">
+                        <li><span id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem;"></span></li>
+                        <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
+                        <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta-small" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 0.5rem 1rem; font-size: 0.85rem;">Buy Credits</a></li>
+                        <li><a href="#" id="signOutBtn" class="nav-cta-small" style="background: rgba(239, 68, 68, 0.9); padding: 0.5rem 1rem; font-size: 0.85rem;">Sign Out</a></li>
+                    </ul>
+                </div>
+
+                <!-- System Controls -->
+                <div class="nav-controls">
+                    <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking...</div>
+                    <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">Dark</button>
+                    <div class="mobile-menu-toggle" id="mobileMenuToggle">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
             </div>
         </div>
     </nav>
