@@ -4735,15 +4735,24 @@ def serve_upload(filename):
 @app.route('/results/<filename>')
 def serve_result(filename):
     """Serve processed result files and delete after sending"""
+    print(f"[SERVE-RESULT] Request for file: {filename} from {request.remote_addr}")
+
     # Sanitize filename to prevent path traversal
     filename = sanitize_filename(filename)
     file_path = os.path.join(RESULT_DIR, filename)
 
+    print(f"[SERVE-RESULT] Looking for file at: {file_path}")
+    print(f"[SERVE-RESULT] RESULT_DIR: {RESULT_DIR}")
+    print(f"[SERVE-RESULT] File exists: {os.path.exists(file_path)}")
+    print(f"[SERVE-RESULT] RESULT_DIR contents: {os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else 'DIR NOT FOUND'}")
+
     # Verify file exists and is within result directory
     if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(RESULT_DIR)):
+        print(f"[SERVE-RESULT] ❌ File not found: {file_path}")
         return jsonify({'error': 'File not found'}), 404
 
     # Send file with as_attachment to trigger download
+    print(f"[SERVE-RESULT] ✅ Serving file: {filename}")
     response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
 
     # Schedule file deletion after response is sent
@@ -4778,17 +4787,31 @@ def upload_result():
     Response: { "status": "success", "result_url": "/results/<filename>" }
     """
     try:
+        print(f"[UPLOAD-RESULT] Received upload request from {request.remote_addr}")
+
         if 'file' not in request.files:
+            print(f"[UPLOAD-RESULT ERROR] No file in request")
             return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+
         up = request.files['file']
         if up.filename == '':
+            print(f"[UPLOAD-RESULT ERROR] Empty filename")
             return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
 
         req_filename = request.form.get('filename') or up.filename
         safe_name = sanitize_filename(req_filename)
+
+        print(f"[UPLOAD-RESULT] Saving file: {safe_name} to {RESULT_DIR}")
         os.makedirs(RESULT_DIR, exist_ok=True)
         dest = os.path.join(RESULT_DIR, safe_name)
+
         up.save(dest)
+        file_size_mb = os.path.getsize(dest) / (1024 * 1024)
+
+        print(f"[UPLOAD-RESULT] ✅ Saved {safe_name} ({file_size_mb:.2f} MB) to {dest}")
+        print(f"[UPLOAD-RESULT] File exists check: {os.path.exists(dest)}")
+        print(f"[UPLOAD-RESULT] RESULT_DIR contents: {os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else 'DIR NOT FOUND'}")
+
         return jsonify({'status': 'success', 'result_url': f'/results/{safe_name}'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
