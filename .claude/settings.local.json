@@ -65,7 +65,14 @@
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" add_password_to_db.py)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" add_name_to_db.py)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" add_credits_to_db.py)",
-      "Bash(node -c:*)"
+      "Bash(node -c:*)",
+      "Bash(git -C \"D:\\watermarkz\" show 19d34cadaf65739e20bf930f93b0933a52b5fdd4:server_production.py)",
+      "Bash(/tmp/server_prod_old.py)",
+      "Bash(git -C \"D:\\watermarkz\" diff 19d34cadaf65739e20bf930f93b0933a52b5fdd4 HEAD --stat)",
+      "Bash(git -C \"D:\\watermarkz\" diff 19d34cadaf65739e20bf930f93b0933a52b5fdd4 HEAD --name-only)",
+      "Bash(git -C \"D:\\watermarkz\" diff 19d34cadaf65739e20bf930f93b0933a52b5fdd4 HEAD -- segment_detector.py)",
+      "Bash(git -C \"D:\\watermarkz\" diff 19d34cadaf65739e20bf930f93b0933a52b5fdd4 HEAD -- faster-propainter-main/watermark.py)",
+      "Bash(git -C \"D:\\watermarkz\" log --oneline --graph 19d34cadaf65739e20bf930f93b0933a52b5fdd4..HEAD)"
     ],
     "deny": [],
     "ask": []
