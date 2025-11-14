@@ -4960,6 +4960,13 @@ def terms_of_service():
     return send_file(os.path.join(app.static_folder, 'terms.html'))
 
 
+@app.route('/premium')
+@app.route('/premium.html')
+def premium_page():
+    """Serve Premium/Pricing page"""
+    return send_file(os.path.join(app.static_folder, 'premium.html'))
+
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """
