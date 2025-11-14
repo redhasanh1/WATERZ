@@ -1158,8 +1158,43 @@ def trigger_finalization(redis_client, video_id, total_segments):
     final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
     print(f"[FINALIZE] ✓ Final video ready: {final_output} ({final_size_mb:.2f} MB)")
 
-    # Store final result in Redis
-    redis_client.set(f"video:{video_id}:final_path", final_output)
+    # 🔥 UPLOAD TO RAILWAY: If running on local worker, upload result to API server
+    uploaded_path = None
+    tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
+    if tunnel and os.getenv('UPLOAD_RESULT_BACK', '1') == '1':
+        try:
+            import requests
+            upload_url = tunnel.rstrip('/') + '/api/upload-result'
+            print(f"[FINALIZE] 📤 Uploading result to Railway: {upload_url}")
+
+            # Quick connectivity test (15 second timeout) - fail fast if server down
+            requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
+
+            with open(final_output, 'rb') as fp:
+                resp = requests.post(
+                    upload_url,
+                    headers={'ngrok-skip-browser-warning': 'true'},
+                    files={'file': (os.path.basename(final_output), fp, 'video/mp4')},
+                    timeout=300  # 5 minutes for large videos
+                )
+            if resp.ok:
+                j = resp.json()
+                if j.get('status') == 'success' and j.get('result_url'):
+                    uploaded_path = j['result_url']
+                    print(f"[FINALIZE] ✅ Result uploaded to Railway: {uploaded_path}")
+                    # Update Redis with Railway path instead of local path
+                    redis_client.set(f"video:{video_id}:final_path", uploaded_path)
+                    redis_client.set(f"video:{video_id}:uploaded", "true")
+            else:
+                print(f"[FINALIZE WARNING] Upload to Railway failed: HTTP {resp.status_code}")
+        except Exception as up_err:
+            print(f"[FINALIZE WARNING] Upload to Railway error: {up_err}")
+            import traceback
+            traceback.print_exc()
+
+    # Store final result in Redis (local path if upload failed, Railway path if uploaded)
+    if not uploaded_path:
+        redis_client.set(f"video:{video_id}:final_path", final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
 
 # ============================================================================
