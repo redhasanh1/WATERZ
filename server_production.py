@@ -4023,28 +4023,46 @@ def get_status(task_id):
                     'info': {'progress': progress, 'status': f'Segment {completed}/{total} complete'}
                 })
             else:
-                # All segments done, finalize should be complete or completing
-                # Get base_name from prepare_result to construct correct filename
-                import json
-                prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
-                if prepare_result_json:
-                    # Decode bytes to string if needed
-                    if isinstance(prepare_result_json, bytes):
-                        prepare_result_json = prepare_result_json.decode()
-                    prepare_result = json.loads(prepare_result_json)
-                    base_name = prepare_result.get('base_name', video_id)
-                    result_filename = f"{base_name}_propainter.mp4"
-                    print(f"[STATUS] Using base_name from prepare_result: {base_name}")
-                else:
-                    # Fallback if prepare_result not found
-                    result_filename = f"{video_id}_propainter.mp4"
-                    print(f"[STATUS WARNING] prepare_result not found, using video_id fallback: {result_filename}")
+                # All segments done - check if finalization/encoding complete
+                try:
+                    redis_client = celery.backend.client
+                    encoding_status = redis_client.get(f"video:{video_id}:status")
 
-                return jsonify({
-                    'state': 'SUCCESS',
-                    'result': {'result_url': f'/results/{result_filename}'},
-                    'metadata': {'total_segments': total}
-                })
+                    if encoding_status and encoding_status.decode() == "complete":
+                        # Encoding is DONE! Get the final path
+                        final_path_raw = redis_client.get(f"video:{video_id}:final_path")
+                        if final_path_raw:
+                            final_path = final_path_raw.decode()
+                            # Check if path is web path or local path
+                            if final_path.startswith('/results/'):
+                                result_url = final_path
+                            else:
+                                filename = os.path.basename(final_path)
+                                result_url = f'/results/{filename}'
+
+                            print(f"[STATUS] ✅ Encoding complete for {video_id}! Returning: {result_url}")
+                            return jsonify({
+                                'state': 'SUCCESS',
+                                'result': {'result_url': result_url},
+                                'metadata': {'total_segments': total}
+                            })
+
+                    # Encoding still in progress
+                    print(f"[STATUS] Segments complete ({completed}/{total}), encoding in progress for {video_id}")
+                    return jsonify({
+                        'state': 'PROCESSING',
+                        'progress': 'Finalizing video (encoding in progress)...',
+                        'info': {'progress': 95, 'status': 'Video encoding in background (almost done!)'}
+                    })
+
+                except Exception as e:
+                    print(f"[ERROR] Failed to check finalization status: {e}")
+                    # Fallback - keep showing encoding in progress
+                    return jsonify({
+                        'state': 'PROCESSING',
+                        'progress': 'Finalizing video...',
+                        'info': {'progress': 95, 'status': 'Background encoding'}
+                    })
 
         # Regular Celery task handling
         from celery.result import AsyncResult
