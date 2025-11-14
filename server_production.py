@@ -1207,6 +1207,15 @@ def trigger_finalization(redis_client, video_id, total_segments):
         redis_client.set(f"video:{video_id}:final_path", final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
 
+    # 🔥 FIX: Update distributed tracking to mark all segments complete
+    # Status endpoint checks segments:{video_id} to see progress
+    # Without this, frontend shows "Segment 0/X complete" forever
+    tracking_key = f"segments:{video_id}"
+    total_segments_bytes = redis_client.get(f"{tracking_key}:total")
+    if total_segments_bytes:
+        redis_client.set(tracking_key, int(total_segments_bytes))  # Mark all segments complete
+        print(f"[FINALIZE] ✅ Marked all {int(total_segments_bytes)} segments complete in Redis tracking")
+
 # ============================================================================
 # REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
 # ============================================================================
