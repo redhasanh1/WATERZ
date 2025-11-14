@@ -1,5 +1,12 @@
 {
+  "type": "module",
+  "scripts": {
+    "check:db": "node backend/check_db.js",
+    "start:backend": "node backend/server.js"
+  },
   "dependencies": {
-    "localtunnel": "^2.0.2"
+    "localtunnel": "^2.0.2",
+    "pg": "^8.13.1",
+    "dotenv": "^16.4.5"
   }
 }

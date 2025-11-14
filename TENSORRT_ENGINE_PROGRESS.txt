@@ -1,0 +1,55 @@
+# TensorRT Engine Progress
+
+Status legend:
+- Pending — not started.
+- In Progress — work underway.
+- Verify — implementation present; needs a quick sanity check.
+- Complete — confirmed working.
+
+Engines
+- YOLOv8 FP16 engine ....................... Verify
+  - Found: runs/detect/new_sora_watermark/weights/best.engine
+  - Also found: web/best.engine
+  - Note: Recommended name is runs/detect/new_sora_watermark/weights/best_fp16.engine
+
+- YOLOv8 INT8 engine ....................... Pending
+  - Not found (best_int8.engine). Requires Q/DQ ONNX or calibration.
+
+- RAFT (flow) FP16 engine .................. Complete
+  - Found: faster-propainter-main/engines/raft/raft_fp16.engine
+
+- RFCNet FP16 engine ....................... In Progress
+  - Target: faster-propainter-main/engines/rfcnet/rfcnet_fp16.engine
+  - Exporter: faster-propainter-main/tools/export_rfcnet_onnx.py (added)
+  - Note: ONNX export hits torchvision::deform_conv2d. Options:
+    • Build/use DCNv2 TensorRT plugin (preferred for pure engine)
+    • Or use Torch‑TensorRT segmented compile (fallback path added; enable with RFCNET_TORCHTRT=1)
+
+- ProPainter (inpaint) FP16 engine ......... Pending
+  - Target: faster-propainter-main/engines/propainter/propainter_fp16.engine
+
+Plugins & Builder
+- GridSampler plugin availability .......... Verify
+  - Ensure nvinfer_plugin.dll (OSS build with GridSampler) is on PATH.
+
+- DCNv2 TensorRT plugin (deform conv) ...... Pending
+  - Build/ship dcnv2_trt_plugin.dll and register at runtime.
+
+- Timing cache file(s) ..................... Pending
+  - Recommended path (example): runs/detect/new_sora_watermark/weights/trt_timing_cache
+
+- Structured sparsity (2:4) ................ Pending
+  - Enable via trtexec --sparsity=enable when applicable.
+
+Wiring & Env
+- YOLO engine loading in code .............. Complete
+  - yolo_detector.py checks for runs/detect/.../best.engine and env YOLO_TENSORRT_ENGINE.
+
+- Propainter subnets engine wiring .......... Pending
+  - Add engine loading for RAFT/RFCNet/Inpaint where available, with Torch fallback.
+
+Next Actions
+1) Rename YOLO engine to best_fp16.engine (optional; code already finds best.engine).
+2) Export + build RFCNet and ProPainter engines.
+3) Validate plugins (GridSampler) and decide on DCNv2 plugin or Torch fallback.
+4) Populate timing cache and set common shape profiles.

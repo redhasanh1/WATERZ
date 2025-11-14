@@ -37,6 +37,17 @@ class WatermarkRemover {
         this.processAnotherBtn = document.getElementById('processAnotherBtn');
         this.comparisonWrapper = document.getElementById('comparisonWrapper');
         this.comparisonSlider = document.getElementById('comparisonSlider');
+
+        // Inline credit estimate note (created on demand)
+        this.creditNoteEl = document.createElement('div');
+        this.creditNoteEl.style.marginTop = '8px';
+        this.creditNoteEl.style.color = '#a0a0c0';
+        this.creditNoteEl.style.fontSize = '0.9rem';
+        this.creditNoteEl.style.display = 'none';
+        // Place it within the preview block for visibility
+        if (this.uploadPreview) {
+            this.uploadPreview.appendChild(this.creditNoteEl);
+        }
     }
 
     initEventListeners() {
@@ -112,10 +123,31 @@ class WatermarkRemover {
                 this.previewImage.style.display = 'none';
                 this.previewVideo.style.display = 'block';
                 this.previewVideo.src = e.target.result;
+                // Estimate credits based on video metadata (duration, resolution)
+                const tempVideo = document.createElement('video');
+                tempVideo.preload = 'metadata';
+                tempVideo.src = e.target.result;
+                tempVideo.onloadedmetadata = () => {
+                    const width = tempVideo.videoWidth || 1280;
+                    const height = tempVideo.videoHeight || 720;
+                    const duration = tempVideo.duration || 10; // seconds
+                    const baselinePixels = 1280 * 720;
+                    const pixelRatio = (width * height) / baselinePixels;
+                    const timeRatio = duration / 10; // 10s baseline
+                    const est = Math.max(1, Math.ceil(pixelRatio * timeRatio));
+                    this.creditNoteEl.textContent = `Estimated credits: ${est} (1 credit = 10s @ 720p30)`;
+                    this.creditNoteEl.style.display = 'block';
+                };
+                tempVideo.onerror = () => {
+                    this.creditNoteEl.textContent = `Estimated credits: 1 (unable to read video metadata)`;
+                    this.creditNoteEl.style.display = 'block';
+                };
             } else {
                 this.previewVideo.style.display = 'none';
                 this.previewImage.style.display = 'block';
                 this.previewImage.src = e.target.result;
+                // Hide estimate for images
+                this.creditNoteEl.style.display = 'none';
             }
 
             this.previewFilename.textContent = file.name;
@@ -159,7 +191,28 @@ class WatermarkRemover {
             });
 
             if (!response.ok) {
-                throw new Error('Processing failed');
+                try {
+                    const ct = response.headers.get('content-type') || '';
+                    if (ct.includes('application/json')) {
+                        const data = await response.json();
+                        if (data && data.error === 'signin_required') {
+                            alert('Please sign in to process videos. Redirecting to login...');
+                            window.location.href = 'login.html';
+                            return;
+                        }
+                        if (data && data.error === 'insufficient_credits') {
+                            const req = data.required_credits != null ? data.required_credits : '?';
+                            const have = data.credits != null ? data.credits : 0;
+                            alert(`Not enough credits. Required: ${req}. You have: ${have}.`);
+                            return;
+                        }
+                        throw new Error(data && data.message ? data.message : 'Processing failed');
+                    }
+                    const text = await response.text();
+                    throw new Error(text || 'Processing failed');
+                } catch (err) {
+                    throw err;
+                }
             }
 
             this.updateProgress(50);

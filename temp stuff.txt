@@ -18,3 +18,45 @@ celery -A server_production.celery worker \
   curl -L "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/ProPainter.pth" -o ProPainter.pth
 
 ///////
+🧱 BLOCK 1 — System + Python Dependencies
+apt update && apt install -y curl git tmux htop nvtop && \
+pip install torch torchvision torchaudio opencv-python imageio scipy numpy tqdm pillow moviepy flask flask-cors celery redis ultralytics && \
+python3 -c "import torch; print('✅ CUDA available:', torch.cuda.is_available())"
+
+📦 BLOCK 2 — Download Core Worker + Utilities
+mkdir -p /app/faster-propainter-main && \
+curl -L "https://raw.githubusercontent.com/redhasanh1/WATERZ/main/web/CLOUD_WORKER_WITH_IMAGES_2.txt" -o /app/server_production.py && \
+curl -L "https://raw.githubusercontent.com/redhasanh1/WATERZ/main/run_propainter_subprocess.py" -o /app/run_propainter_subprocess.py && \
+curl -L "https://raw.githubusercontent.com/redhasanh1/WATERZ/main/segment_detector.py" -o /app/segment_detector.py && \
+curl -L "https://raw.githubusercontent.com/redhasanh1/WATERZ/main/crop_utils.py" -o /app/crop_utils.py && \
+curl -L "https://raw.githubusercontent.com/redhasanh1/WATERZ/main/faster-propainter-main/watermark.py" -o /app/faster-propainter-main/watermark.py && \
+curl -L "https://raw.githubusercontent.com/redhasanh1/WATERZ/main/faster-propainter-main/mytimer.py" -o /app/faster-propainter-main/mytimer.py && \
+curl -L "https://raw.githubusercontent.com/redhasanh1/WATERZ/main/faster-propainter-main/pre_post_process.py" -o /app/faster-propainter-main/pre_post_process.py && \
+chmod +x /app/run_propainter_subprocess.py
+
+⚙️ BLOCK 3 — Install ProPainter Core + Fix Imports
+cd /app && rm -rf ProPainter && \
+git clone https://github.com/sczhou/ProPainter.git && \
+cp -r ProPainter/model ProPainter/core ProPainter/utils ProPainter/RAFT /app/faster-propainter-main/ && \
+sed -i '1iimport sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "model")); sys.path.insert(0, os.path.dirname(__file__))' /app/faster-propainter-main/watermark.py && \
+python3 -c 'import sys; sys.path.insert(0, "/app/faster-propainter-main"); from watermark import pipeline; print("✅ faster-propainter import successful!")'
+
+🎯 BLOCK 4 — Download All Model Weights
+mkdir -p /app/faster-propainter-main/model && \
+curl -L "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/raft-things.pth" -o /app/faster-propainter-main/model/raft-things.pth && \
+curl -L "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/recurrent_flow_completion.pth" -o /app/faster-propainter-main/model/recurrent_flow_completion.pth && \
+curl -L "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/ProPainter.pth" -o /app/faster-propainter-main/model/ProPainter.pth && \
+curl -L "https://raw.githubusercontent.com/redhasanh1/WATERZ/main/web/yolo_weights/sora_best.pt" -o /app/runs/detect/new_sora_watermark/weights/best.pt
+
+🚀 BLOCK 5 — Start Worker (Linux Cloud or Local GPU)
+export REDIS_URL="redis://:watermarkz_secure_2024@6.tcp.ngrok.io:11553/0"
+export SEGMENT_WORKERS=1
+export CUDA_VISIBLE_DEVICES=0
+export MIN_SEGMENTS=2
+export MIN_CHUNK_FRAMES=60
+
+celery -A server_production.celery worker \
+  --loglevel=info \
+  --pool=threads \
+  --concurrency=1 \
+  -n worker1@%h

@@ -6,6 +6,14 @@ import torchvision
 from model.modules.deformconv import ModulatedDeformConv2d
 from .misc import constant_init
 
+# Use mmcv ops for TensorRT compatibility
+try:
+    from mmcv.ops import modulated_deform_conv2d
+    MMCV_AVAILABLE = True
+except ImportError:
+    MMCV_AVAILABLE = False
+    print("Warning: mmcv not found, falling back to torchvision.ops")
+
 class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
     """Second-order deformable alignment module."""
     def __init__(self, *args, **kwargs):
@@ -39,9 +47,15 @@ class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
         # mask
         mask = torch.sigmoid(mask)
 
-        return torchvision.ops.deform_conv2d(x, offset, self.weight, self.bias, 
-                                             self.stride, self.padding,
-                                             self.dilation, mask)
+        # Use mmcv ops for TensorRT compatibility, fallback to torchvision
+        if MMCV_AVAILABLE:
+            return modulated_deform_conv2d(x, offset, mask, self.weight, self.bias,
+                                          self.stride, self.padding,
+                                          self.dilation, self.deform_groups)
+        else:
+            return torchvision.ops.deform_conv2d(x, offset, self.weight, self.bias,
+                                                self.stride, self.padding,
+                                                self.dilation, mask)
 
 class BidirectionalPropagation(nn.Module):
     def __init__(self, channel):

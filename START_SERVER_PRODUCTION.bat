@@ -15,7 +15,12 @@ set "OPENCV_TEMP_PATH=%~dp0temp"
 
 REM Prefer vendored packages if present
 set "PYTHONPATH=%~dp0python_packages;%~dp0web\python_packages"
-set "PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%~dp0TensorRT-10.7.0.23\lib;%PATH%"
+
+REM Configure TensorRT/CUDA paths centrally
+call "%~dp0SETUP_TRT_ENV.bat" >nul 2>&1
+
+REM Ensure local Python deps first on PATH
+set "PATH=%~dp0python_packages;%~dp0python_packages\torch\lib;%PATH%"
 
 REM Redis URL is now auto-loaded by server_production.py from redis_url.txt
 REM No need to set REDIS_URL environment variable - Python code handles it
@@ -55,8 +60,8 @@ REM Disable Python buffering and mark production
 set "PYTHONUNBUFFERED=1"
 set "FLASK_ENV=production"
 
-REM Run the WEB server module (web\server_production.py) with Waitress
-cd /d "%~dp0web"
+REM Run the WEB server module (ROOT server_production.py) with Waitress
+REM Stay in ROOT directory - server_production.py is there now
 echo Starting production server on http://0.0.0.0:9000 ...
 python -u -m waitress --host=0.0.0.0 --port=9000 --threads=4 server_production:app
 

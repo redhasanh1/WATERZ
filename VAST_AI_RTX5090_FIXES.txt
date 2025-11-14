@@ -1,0 +1,182 @@
+================================================================================
+VAST.AI RTX 5090 DEPLOYMENT - ISSUES & FIXES
+================================================================================
+
+## WHY TENSORRT YOLO ENGINE FAILED
+--------------------------------------------------------------------------------
+PROBLEM: RTX 5070 TensorRT engine segfaults on RTX 5090
+CAUSE:   GPU architecture mismatch
+  - RTX 5070 = Ada Lovelace (SM 8.9)
+  - RTX 5090 = Blackwell (SM 12.0)
+  - TensorRT engines are GPU-architecture-specific
+
+ATTEMPTED FIX: Build RTX 5090 engine on vast.ai
+BLOCKER: Driver/TensorRT version catch-22
+  - vast.ai driver: 570.181
+  - Driver 570.181 supports: TensorRT ≤10.6
+  - TensorRT ≤10.6 supports: Up to SM 8.9 (NO Blackwell SM 12.0)
+  - TensorRT 10.13+ supports: SM 12.0 (Blackwell)
+  - TensorRT 10.13+ requires: Driver 570.195+
+
+SOLUTION: Switch to PyTorch YOLO (best.pt)
+  - Frame-by-frame detection (no batching)
+  - Works on any GPU architecture
+  - 6MB vs 11MB (smaller!)
+
+
+## DOCKER BUILD FIXES REQUIRED
+--------------------------------------------------------------------------------
+
+### 1. RUNTIME PACKAGES (Dockerfile.baseline line 71-84)
+ADD: build-essential
+ADD: python3.11-dev
+WHY: Triton CUDA kernels need GCC + Python headers to compile at runtime
+
+BEFORE:
+  RUN apt-get install -y --no-install-recommends \
+      python3.11 \
+      libgl1-mesa-glx \
+
+AFTER:
+  RUN apt-get install -y --no-install-recommends \
+      python3.11 \
+      python3.11-dev \
+      build-essential \
+      libgl1-mesa-glx \
+
+
+### 2. CUDA LIBRARY SYMLINK (Dockerfile.baseline after line 92)
+ADD: Create libcuda.so symlink for GCC linking
+WHY: GCC -lcuda flag fails without it
+
+ADD AFTER LINE 92:
+  # Create libcuda.so symlink for Triton compilation
+  RUN ln -s /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
+            /usr/lib/x86_64-linux-gnu/libcuda.so
+
+
+### 3. PYTHON FILES (Dockerfile.baseline line 97-102)
+ADD: crop_utils.py
+ADD: segment_detector.py
+WHY: Missing from original Dockerfile, causes ModuleNotFoundError
+
+BEFORE:
+  COPY server_production.py .
+  COPY yolo_detector.py .
+
+AFTER:
+  COPY server_production.py .
+  COPY yolo_detector.py .
+  COPY crop_utils.py .
+  COPY segment_detector.py .
+
+
+### 4. YOLO MODEL (Dockerfile.baseline line 111-116)
+REPLACE: TensorRT engine with PyTorch model
+WHY: Engine incompatible with RTX 5090 Blackwell
+
+BEFORE:
+  # YOLO TensorRT engine (11MB)
+  COPY runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine \
+       ./runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine
+
+AFTER:
+  # YOLO PyTorch model (6MB)
+  COPY runs/detect/new_sora_watermark/weights/best.pt \
+       ./runs/detect/new_sora_watermark/weights/best.pt
+
+
+### 5. ENVIRONMENT VARIABLES (Dockerfile.baseline line 126)
+CHANGE: Disable TensorRT requirement
+WHY: Using PyTorch YOLO now
+
+BEFORE:
+  YOLO_REQUIRE_TENSORRT=1 \
+
+AFTER:
+  YOLO_REQUIRE_TENSORRT=0 \
+
+
+### 6. PYTHON DEPENDENCIES (Dockerfile.baseline line 55)
+DOWNGRADE: imageio to 2.34.2
+WHY: imageio 2.37.0 uses tifffile plugin for MP4 (broken)
+
+BEFORE:
+  imageio==2.37.0 \
+
+AFTER:
+  imageio==2.34.2 \
+
+
+### 7. TRITON KERNELS (Already handled)
+STATUS: Disabled (triton package not installed)
+WHY: Triton kernels segfault on RTX 5090 Blackwell
+NOTE: ProPainter automatically uses PyTorch fallback when triton unavailable
+
+
+## OPTIONAL: REMOVE TENSORRT (Save ~2GB)
+--------------------------------------------------------------------------------
+TensorRT is not needed anymore (using PyTorch-only YOLO)
+
+DELETE from Dockerfile.baseline (lines 37-42):
+  RUN pip install --no-cache-dir \
+      tensorrt==10.13.3.9 \
+      tensorrt-cu13==10.13.3.9 \
+      tensorrt-cu13-bindings==10.13.3.9 \
+      tensorrt-cu13-libs==10.13.3.9
+
+
+## VAST.AI MANUAL FIXES (Until Docker rebuild)
+--------------------------------------------------------------------------------
+After every reboot, run these commands:
+
+1. Install build tools:
+   apt-get update && apt-get install -y build-essential python3.11-dev
+
+2. Create CUDA symlink:
+   ln -s /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
+         /usr/lib/x86_64-linux-gnu/libcuda.so
+
+3. Downgrade imageio:
+   python3.11 -m pip install --force-reinstall --no-cache-dir imageio==2.34.2
+
+4. Download missing files:
+   cd /app
+   curl -L https://raw.githubusercontent.com/redhasanh1/WATERZ/hasan/crop_utils.py -o crop_utils.py
+   curl -L https://raw.githubusercontent.com/redhasanh1/WATERZ/hasan/segment_detector.py -o segment_detector.py
+   curl -L https://raw.githubusercontent.com/redhasanh1/WATERZ/hasan/yolo_detector.py -o yolo_detector.py
+   curl -L https://raw.githubusercontent.com/redhasanh1/WATERZ/hasan/server_production.py -o server_production.py
+   mkdir -p runs/detect/new_sora_watermark/weights
+   curl -L https://github.com/redhasanh1/WATERZ/raw/hasan/runs/detect/new_sora_watermark/weights/best.pt \
+        -o runs/detect/new_sora_watermark/weights/best.pt
+
+5. Start Celery:
+   cd /app
+   export REDIS_URL="redis://:watermarkz_secure_2024@0.tcp.ngrok.io:11917/0"
+   python3.11 -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=2
+
+
+## SUMMARY OF CHANGES
+--------------------------------------------------------------------------------
+✅ Switched from TensorRT to PyTorch YOLO (architecture-independent)
+✅ Added build-essential + python3.11-dev (Triton compilation)
+✅ Created libcuda.so symlink (GCC linking)
+✅ Downgraded imageio 2.37.0 → 2.34.2 (fix MP4 bug)
+✅ Added missing Python files (crop_utils.py, segment_detector.py)
+✅ Disabled Triton kernels (Blackwell segfault workaround)
+
+RESULT: Fully working deployment on RTX 5090 Blackwell with PyTorch baseline
+        No TensorRT dependencies, portable across all GPU architectures
+
+
+## PERFORMANCE NOTES
+--------------------------------------------------------------------------------
+RTX 5090 vs RTX 5070 speedup factors:
+  - 32GB VRAM vs 12GB = can run concurrency=6 vs 2
+  - More CUDA cores = ~1.5-2x faster per segment
+  - Expected total speedup: 3-4x faster (35s → 8-10s for 300-frame video)
+
+PyTorch YOLO frame-by-frame:
+  - Slower than TensorRT batch (if it worked)
+  - BUT: Architecture-independent, no driver issues
+  - Still benefits from RTX 5090's raw compute power

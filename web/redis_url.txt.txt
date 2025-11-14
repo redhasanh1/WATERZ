@@ -1,1 +1,0 @@
-redis://:watermarkz_secure_2024@8.tcp.ngrok.io:17609/0

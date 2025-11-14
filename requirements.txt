@@ -1,3 +1,25 @@
-# Lightweight dependencies for Railway static server
-# Only serves HTML/CSS/JS frontend + tunnel URL endpoint
+# Railway Production Dependencies
+# Flask API server + Celery client + Railway Volumes storage
+
+# Web Framework
 flask==3.0.0
+flask-cors==4.0.0
+gunicorn==21.2.0
+
+# Task Queue (Celery client only, workers run on local PC)
+celery[redis]==5.3.4
+redis==4.6.0
+
+# Utilities
+requests==2.31.0
+Pillow==10.2.0
+numpy==1.24.4
+
+# Security
+python-dotenv==1.0.0
+
+# Database
+psycopg2-binary==2.9.11
+
+# Payments
+stripe==7.0.0

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -394,7 +394,7 @@
         }
 
         .pricing-features li::before {
-            content: "✓";
+            content: "âœ“";
             color: var(--success);
             font-weight: 800;
             font-size: 1.25rem;
@@ -631,7 +631,7 @@
 
                 <div class="hero-cta">
                     <button class="btn-primary" onclick="scrollToPricing()">
-                        Start Free Cleanup Trial →
+                        Start Free Cleanup Trial â†’
                     </button>
                     <button class="btn-secondary" onclick="document.getElementById('demoUpload').click()">
                         Preview Demo
@@ -654,32 +654,32 @@
 
             <div class="features-grid">
                 <div class="feature-card">
-                    <div class="feature-icon">🎯</div>
+                    <div class="feature-icon">ðŸŽ¯</div>
                     <h3>AI-Powered Detection</h3>
                     <p>Advanced detection automatically finds logos, bugs, and timestamps on approved files with audit trails</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🎨</div>
+                    <div class="feature-icon">ðŸŽ¨</div>
                     <h3>Smart Inpainting</h3>
                     <p>State-of-the-art inpainting restores branded backgrounds seamlessly while maintaining original quality</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">⚡</div>
+                    <div class="feature-icon">âš¡</div>
                     <h3>Batch Processing</h3>
                     <p>Process up to 1000 files simultaneously, whether you work solo or invite collaborators with permission controls</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🎬</div>
+                    <div class="feature-icon">ðŸŽ¬</div>
                     <h3>Video Support</h3>
                     <p>Clean overlays on rights-cleared video up to 4K resolution. Supports MP4, MOV, AVI formats</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🔒</div>
+                    <div class="feature-icon">ðŸ”’</div>
                     <h3>Privacy First</h3>
                     <p>Files are encrypted in transit, processed in memory, and deleted automatically after completion</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🚀</div>
+                    <div class="feature-icon">ðŸš€</div>
                     <h3>API Access</h3>
                     <p>Integrate cleanup into your apps with usage quotas, webhooks, and compliance-friendly logging</p>
                 </div>
@@ -717,42 +717,73 @@
                 <span style="display: inline-block; padding: 0.4rem 1rem; border-radius: 999px; border: 1px solid rgba(102,126,234,0.35); background: rgba(102,126,234,0.12); color: #a0a0c0; font-size: 0.85rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;">Transparent Pricing</span>
                 <h2 class="section-title" style="margin-top: 1rem;">Pick a plan that scales with your rights-cleared catalog</h2>
                 <p class="section-subtitle">From testing new cleanup workflows to deploying policy-ready automation, WatermarkAI has a plan that keeps you compliant and on budget.</p>
-                <div style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.95rem;">Monthly billing · Save 20% with annual contracts · Change plans anytime</div>
+                <div style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.95rem;">Monthly billing • Save 20% with annual contracts • Change plans anytime</div>
             </div>
 
             <div class="pricing-grid" style="gap: 2.5rem;">
                 <!-- Starter Plan -->
                 <div class="pricing-card" style="position: relative; overflow: hidden;">
                     <div class="pricing-header">
-                        <h3>Starter</h3>
+                        <h3>Free</h3>
                         <div class="pricing-price">$0<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Perfect for testing owned or licensed clips before moving into production.</p>
+                        <p style="color: var(--text-secondary);">Try it out with complimentary credits on signup.</p>
                     </div>
                     <ul class="pricing-features">
-                        <li>10 images + 2 short videos each month</li>
-                        <li>Shared queue with standard turnaround</li>
-                        <li>720p output with watermark audit logs</li>
-                        <li>Email support within 24 hours</li>
+                        <li><strong>50 videos</strong> per month</li>
+                        <li>Priority cleanup lane</li>
+                        <li>Batch uploads & API access</li>
+                        <li>Priority support</li>
                     </ul>
                     <button class="btn-pricing secondary" onclick="signUp('free')">Start Free</button>
                 </div>
 
-                <!-- Professional Plan -->
-                <div class="pricing-card popular" style="transform: translateY(-14px);">
-                    <div class="popular-badge">⭐ MOST POPULAR</div>
+                <!-- Starter Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
                     <div class="pricing-header">
-                        <h3>Professional</h3>
-                        <div class="pricing-price">$29<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Built for independent creators, freelancers, and in-house teams refreshing rights-cleared assets every week.</p>
+                        <h3>Starter</h3>
+                        <div class="pricing-price">$4.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">Great for creators refreshing smaller catalogs each month.</p>
                     </div>
                     <ul class="pricing-features">
-                        <li><strong>500 images</strong> + <strong>50 videos</strong> (≤10 min) per month</li>
-                        <li>Priority cleanup lane with 4K output</li>
-                        <li>Batch uploads (up to 100 files) & API (1,000 calls)</li>
-                        <li>Priority support, compliance templates, and commercial license</li>
+                        <li><strong>300 videos</strong> per month</li>
+                        <li>Team features and audit logging</li>
+                        <li>Dedicated support</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('starter')">Get Starter</button>
+                </div>
+
+                <!-- Professional Plan -->
+                <div class="pricing-card popular" style="transform: translateY(-14px);">
+                    <div class="popular-badge">MOST POPULAR</div>
+                    <div class="pricing-header">
+                        <h3>Pro</h3>
+                        <div class="pricing-price">$9.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">Built for independent creators and teams refreshing rights-cleared assets weekly.</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>50 videos</strong> per month</li>
+                        <li>Priority cleanup lane</li>
+                        <li>Batch uploads & API access</li>
+                        <li>Priority support</li>
                     </ul>
                     <div style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; color: #6ee7b7; font-weight: 600;">Most creators see payback after the first client delivery.</div>
-                    <button class="btn-pricing primary" onclick="signUp('pro')">Start Free Trial</button>
+                    <button class="btn-pricing primary" onclick="signUp('pro')">Start Pro</button>
+                </div>
+
+                <!-- Enterprise Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Enterprise</h3>
+                        <div class="pricing-price">$49.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">For agencies and teams processing larger libraries every month.</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>50 videos</strong> per month</li>
+                        <li>Priority cleanup lane</li>
+                        <li>Batch uploads & API access</li>
+                        <li>Priority support</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('enterprise')">Go Enterprise</button>
                 </div>
             </div>
 
@@ -807,19 +838,19 @@
                     </p>
                     <ul style="list-style: none; margin: 2rem 0;">
                         <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
-                            <span style="color: var(--success);">✓</span>
+                            <span style="color: var(--success);">âœ“</span>
                             <span>99.9% uptime SLA</span>
                         </li>
                         <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
-                            <span style="color: var(--success);">✓</span>
+                            <span style="color: var(--success);">âœ“</span>
                             <span>Comprehensive documentation</span>
                         </li>
                         <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
-                            <span style="color: var(--success);">✓</span>
+                            <span style="color: var(--success);">âœ“</span>
                             <span>SDKs for Python, Node.js, PHP with usage auditing</span>
                         </li>
                         <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
-                            <span style="color: var(--success);">✓</span>
+                            <span style="color: var(--success);">âœ“</span>
                             <span>Webhook support for completion and compliance events</span>
                         </li>
                     </ul>
@@ -870,12 +901,19 @@
                 return;
             }
             try {
-                await Billing.startCheckout(plan);
+                // Get user from localStorage
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                if (!user.id) {
+                    alert('Please sign in first to purchase a plan');
+                    window.location.href = 'login.html';
+                    return;
+                }
+                // Pass user_id to checkout
+                await Billing.startCheckout(plan, { user_id: user.id });
             } catch (error) {
                 console.error('Stripe checkout error:', error);
                 alert('We were unable to start checkout. Please try again or contact support.');
             }
-        }
         }
 
         function submitEmail(e) {
@@ -895,3 +933,7 @@
     </script>
 </body>
 </html>
+
+
+
+

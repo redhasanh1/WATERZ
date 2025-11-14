@@ -18,6 +18,7 @@ pip_cache/
 *.pth
 *.engine
 *.onnx
+*.trt
 
 # Results and uploads
 uploads/
@@ -25,15 +26,184 @@ results/
 redis_data/
 
 # TensorRT and cuDNN downloads (HUGE - don't commit)
-TensorRT-10.7.0.23/
-cudnn-windows-x86_64-9.13.1.26_cuda12-archive/
+TensorRT-*/
+cudnn-*/
+cuda_*/
+Optical_Flow_SDK_*/
 python_packages/
+*.exe
 
 # OS
 .DS_Store
 Thumbs.db
 node_modules/
 
+# SSH keys (NEVER commit these!)
+*.pem
+*.pub
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+hasancool
+hasancool.pub
+
+# Reserved Windows filenames
+nul
+CON
+PRN
+AUX
+
+# External code
+ProPainter/
+ProPainter-main/
+
 # Auto-generated config files (ngrok URLs)
 redis_url.txt
-web/tunnel_url.txt 
+web/tunnel_url.txt
+
+# Railway deployment (sensitive credentials)
+.env
+.env.local
+.railway
+backend/.env
+
+# Docker (for local GPU deployment only, not Railway)
+Dockerfile
+Dockerfile.*
+
+# AWS S3 credentials (NEVER commit!)
+aws_credentials.txt
+s3_config.txt
+
+# Large video files (use S3 instead)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.flv
+
+# ============================================
+# Test, Debug, and Build Automation Scripts
+# ============================================
+test_*.py
+debug_*.py
+benchmark_*.py
+build_*.py
+export_*.py
+check_*.py
+verify_*.py
+fix_*.py
+isolate_*.py
+find_*.py
+diagnose_*.py
+create_*.py
+apply_*.py
+convert_*.py
+integrate_*.py
+quantize_*.py
+upgrade_*.py
+compare_*.py
+restore_*.py
+phase*.py
+gpu_preprocessing*.py
+inspect_*.py
+nvdec_*.py
+register_*.py
+run_*.py
+simple_*.py
+transformer_int8_calibrator.py
+add_trt_*.py
+extract_*.py
+cache_config.py
+sparse_transformer_*.py
+
+# Build automation batch files
+BUILD_*.bat
+TEST_*.bat
+RUN_*.bat
+CHECK_*.bat
+REBUILD_*.bat
+REBUILD_*.ps1
+build_with_ninja.ps1
+SETUP_BUILD_ENV.bat
+FULL_REBUILD_AND_TEST.bat
+SWAP_TO_V4_ENGINE.bat
+test_*.bat
+benchmark_nvdec.bat
+
+# ============================================
+# Build Artifacts and Intermediates
+# ============================================
+*.obj
+*.lib
+*.exp
+*_build_log.txt
+*_build_output.txt
+*_output.txt
+*.data
+main.obj
+main.lib
+main.exp
+
+# ============================================
+# Build System Directories
+# ============================================
+DCNv4/
+cuda_kernels/
+dcnv4_tensorrt_plugin/
+col2im_tensorrt_plugin/
+sparse_window_attention_plugin/
+*_tensorrt_plugin/
+tensorrt-llm-study/
+backups/
+cudagemini/
+engines/
+mmdeploy/build*/
+mmdeploy/build-trt/
+
+# ============================================
+# Development Documentation (internal only)
+# ============================================
+*_DISCOVERY*.md
+*_PROGRESS*.md
+*_STATUS*.md
+*_COMPLETE*.md
+*_SUCCESS*.md
+*_FAILED*.md
+*_FIX*.md
+*_INVESTIGATION*.md
+PHASE_*.md
+*_GUIDE*.md
+*_TROUBLESHOOTING*.md
+SOLUTION_*.md
+FINAL_*.md
+NEXT_STEPS.md
+SESSION_END_STATUS.md
+RESTORATION_COMPLETE.md
+SETUP_BUILD_ENV.md
+CUDA_KERNELS_*.md
+CUDNN_FIX_DOCUMENTATION.md
+OPTION_*.md
+SPARSE_*.md
+TENSORRT_*.md
+TRANSFORMER_*.md
+ULTRA_FAST_*.md
+
+# ============================================
+# Temporary Data Files
+# ============================================
+missing_files.txt
+optimization_benchmark_results.txt
+RESTART_CELERY_INSTRUCTIONS.txt
+RUN_ME_FROM_CMD.txt
+phase*_*.txt
+*_baseline_results.txt
+untracked_files.txt
+
+# Intermediate/experimental transformer implementations
+faster-propainter-main/custom_kernel_transformer.py
+faster-propainter-main/model/modules/tensorrt_transformer.py
+mmdeploy
+mmdeploy

@@ -174,3 +174,31 @@ For videos longer than a few minutes, processing may take time. The progress is 
 ## License
 
 For educational purposes only. Please respect copyright and use responsibly.
+
+## Plans, Credits, and Webhooks
+
+### Plans and Monthly Credits
+- Free: 5 videos on signup (one-time)
+- Starter: 20 videos/month
+- Pro: 50 videos/month
+- Enterprise: 300 videos/month
+
+Environment variables for Stripe price IDs:
+- `STRIPE_PRICE_ID_STARTER`, `STRIPE_PRICE_ID_PRO`, `STRIPE_PRICE_ID_ENTERPRISE`
+
+Credit tuning variables (defaults):
+- `CREDITS_ON_SIGNUP=5`
+- `CREDITS_ON_SUB_STARTER=20`, `CREDITS_ON_RENEW_STARTER=20`
+- `CREDITS_ON_SUB_PRO=50`, `CREDITS_ON_RENEW_PRO=50`
+- `CREDITS_ON_SUB_ENTERPRISE=300`, `CREDITS_ON_RENEW_ENTERPRISE=300`
+- Baseline per credit: `CREDIT_BASE_WIDTH=1280`, `CREDIT_BASE_HEIGHT=720`, `CREDIT_BASE_FPS=30`, `CREDIT_BASE_SECONDS=10`
+
+### Credit Calculation
+- 1 credit ≈ 10 seconds of 720p video at 30 fps.
+- Backend calculates credits dynamically based on resolution, fps, and duration.
+- Response includes `X-Credits-Used` header on success.
+
+### Stripe Webhook Setup
+Endpoint: `/api/stripe/webhook` (alias of `/api/billing/webhook`)
+- Events: `checkout.session.completed`, `invoice.payment_succeeded`, `customer.subscription.deleted`
+- Set `STRIPE_WEBHOOK_SECRET` in your environment.

@@ -1,0 +1,12 @@
+-:Thumbs.db
+-:desktop.ini
+-:~*
+-:.*
+-:*~.*
+-:*.crdownload
+-:*.sb-????????-??????
+-:*.tmp
+-p:propainter_env/bin/python
+-p:*propainter_env/bin/python3
+-p:propainter_env/bin/python3.11
+-s:**
