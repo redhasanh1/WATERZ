@@ -250,8 +250,7 @@ pretrain_model_url = "https://github.com/sczhou/ProPainter/releases/download/v0.
 
 def imwrite(img, file_path, params=None, auto_mkdir=True):
     if auto_mkdir:
-        # Normalize to forward slashes (fixes Windows backslash on Linux paths)
-        dir_name = os.path.abspath(os.path.dirname(file_path)).replace('\\', '/')
+        dir_name = os.path.abspath(os.path.dirname(file_path))
         os.makedirs(dir_name, exist_ok=True)
     return cv2.imwrite(file_path, img, params)
 
@@ -448,9 +447,6 @@ def pipeline(
     if device == torch.device("cpu"):
         use_half = False
 
-    # [VRAM DEBUG] Log actual parameters being used
-    print(f"[VRAM CONFIG] neighbor_length={neighbor_length}, subvideo_length={subvideo_length}, fp16={fp16}")
-
     # 🔥 EXTREME SPEED: Use numpy arrays directly if provided (skip disk I/O!)
     if frames_array is not None:
         # Convert numpy arrays (BGR) to PIL Images (RGB)
@@ -483,18 +479,8 @@ def pipeline(
     else:
         out_size = size
 
-    # Validate and fix inconsistent frame sizes (prevents broadcasting errors)
-    expected_size = (size[1], size[0])  # (H, W) for numpy
-    for i, frame in enumerate(frames):
-        frame_array = np.array(frame)
-        if frame_array.shape[:2] != expected_size:
-            print(f"[WARNING] Frame {i} has inconsistent size {frame_array.shape[:2]}, expected {expected_size}. Resizing...")
-            frames[i] = frame.resize((size[0], size[1]))  # Resize to match (W, H) for PIL
-
     fps = save_fps if fps is None else fps
-    # Output directly to specified directory (no nested subdirectory)
-    # This avoids path resolution overhead and fixes Windows backslash issues on Linux
-    save_root = output
+    save_root = os.path.join(output, video_name)
     if not os.path.exists(save_root):
         os.makedirs(save_root, exist_ok=True)
 
@@ -568,9 +554,7 @@ def pipeline(
     for i in range(len(frames)):
         mask_ = np.expand_dims(np.array(masks_dilated[i]), 2).repeat(3, axis=2) / 255.0
         img = np.array(frames[i])
-        # Create green array matching THIS frame's actual shape (handles inconsistent frame sizes)
-        img_h, img_w = img.shape[:2]
-        green = np.zeros([img_h, img_w, 3])
+        green = np.zeros([h, w, 3])
         green[:, :, 1] = 255
         alpha = 0.6
         # alpha = 1.0
@@ -1536,21 +1520,18 @@ def pipeline(
         try:
             masked_frames = frames * (1 - masks_dilated)
             subvideo_length_img_prop = min(
-                40, subvideo_length
-            )  # reduced from 150 to 40 for lower VRAM usage during image propagation
-            print(f"[IMG PROP] Using subvideo_length_img_prop={subvideo_length_img_prop} for {video_length} frames")
+                150, subvideo_length
+            )  # ensure a minimum of 150 frames for image propagation
             if video_length > subvideo_length_img_prop:
                 updated_frames, updated_masks = [], []
                 pad_len = 10
-                total_chunks = (video_length + subvideo_length_img_prop - 1) // subvideo_length_img_prop
-                for chunk_idx, f in enumerate(range(0, video_length, subvideo_length_img_prop)):
+                for f in range(0, video_length, subvideo_length_img_prop):
                     s_f = max(0, f - pad_len)
                     e_f = min(video_length, f + subvideo_length_img_prop + pad_len)
                     pad_len_s = max(0, f) - s_f
                     pad_len_e = e_f - min(video_length, f + subvideo_length_img_prop)
 
                     b, t, _, _, _ = masks_dilated[:, s_f:e_f].size()
-                    print(f"[IMG PROP] Chunk {chunk_idx+1}/{total_chunks}: processing frames {s_f}-{e_f} ({t} frames)")
                     pred_flows_bi_sub = (
                         pred_flows_bi[0][:, s_f : e_f - 1],
                         pred_flows_bi[1][:, s_f : e_f - 1],
@@ -1561,7 +1542,6 @@ def pipeline(
                         masks_dilated[:, s_f:e_f],
                         "nearest",
                     )
-                    print(f"[IMG PROP] Chunk {chunk_idx+1}/{total_chunks} complete")
                     updated_frames_sub = (
                         frames[:, s_f:e_f] * (1 - masks_dilated[:, s_f:e_f])
                         + prop_imgs_sub.view(b, t, 3, h, w) * masks_dilated[:, s_f:e_f]
@@ -1608,7 +1588,6 @@ def pipeline(
 
     # ---- feature propagation + transformer ----
     print("[PROP] Starting feature propagation + transformer...")
-    print(f"[PROP CONFIG] neighbor_stride={neighbor_stride}, ref_num={ref_num}, total_iterations={(video_length + neighbor_stride - 1) // neighbor_stride}")
     prop_start_time = time.time()
     for f in tqdm(range(0, video_length, neighbor_stride), desc="feature propagation"):
     # for f in range(0, video_length, neighbor_stride):
@@ -1630,8 +1609,6 @@ def pipeline(
         with torch.inference_mode():
             # 1.0 indicates mask
             l_t = len(neighbor_ids)
-            if f % (neighbor_stride * 10) == 0:  # Log every 10 iterations
-                print(f"[PROP] Frame {f}/{video_length}: processing {l_t} neighbor frames + {len(ref_ids)} ref frames")
 
             # pred_img = selected_imgs # results of image propagation
             pred_img = model(
@@ -1692,68 +1669,14 @@ def pipeline(
 
     # save each frame
     if save_frames:
-        frames_saved = 0
-        frames_failed = []
         for idx in range(video_length):
-            try:
-                f = comp_frames[idx]
-
-                # Validate frame exists and is valid
-                if f is None:
-                    raise ValueError(f"Frame {idx} is None in comp_frames")
-                if not isinstance(f, np.ndarray):
-                    raise ValueError(f"Frame {idx} is not a numpy array: {type(f)}")
-                if f.size == 0:
-                    raise ValueError(f"Frame {idx} has zero size")
-
-                # Resize and convert color
-                f_resized = cv2.resize(f, out_size, interpolation=cv2.INTER_CUBIC)
-                if f_resized is None or f_resized.size == 0:
-                    raise ValueError(f"Frame {idx} resize failed")
-
-                f_rgb = cv2.cvtColor(f_resized, cv2.COLOR_BGR2RGB)
-                if f_rgb is None or f_rgb.size == 0:
-                    raise ValueError(f"Frame {idx} color conversion failed")
-
-                # Normalize path to use forward slashes (fixes Windows backslash on Linux)
-                img_save_root = os.path.join(
-                    save_root, "frames", str(idx).zfill(4) + ".png"
-                ).replace('\\', '/')
-
-                # Write frame with validation
-                success = imwrite(f_rgb, img_save_root)
-                if not success:
-                    raise RuntimeError(f"imwrite() returned False for frame {idx}")
-
-                # Verify file was written
-                if not os.path.exists(img_save_root):
-                    raise RuntimeError(f"Frame {idx} not found after imwrite(): {img_save_root}")
-
-                file_size = os.path.getsize(img_save_root)
-                if file_size == 0:
-                    raise RuntimeError(f"Frame {idx} written but file size is 0 bytes")
-
-                frames_saved += 1
-
-            except Exception as e:
-                print(f"[ERROR] Failed to save frame {idx}/{video_length}: {e}")
-                frames_failed.append((idx, str(e)))
-                # Continue to next frame instead of crashing
-
-        print(f"\n{'='*70}")
-        print(f"Frame Save Summary:")
-        print(f"  Total frames:    {video_length}")
-        print(f"  Frames saved:    {frames_saved}")
-        print(f"  Frames failed:   {len(frames_failed)}")
-        if frames_failed:
-            print(f"\n  Failed frames:")
-            for idx, error in frames_failed:
-                print(f"    Frame {idx:04d}: {error}")
-        print(f"{'='*70}\n")
-
-        # Raise error if any frames failed
-        if frames_failed:
-            raise RuntimeError(f"Failed to save {len(frames_failed)} frames: {frames_failed}")
+            f = comp_frames[idx]
+            f = cv2.resize(f, out_size, interpolation=cv2.INTER_CUBIC)
+            f = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
+            img_save_root = os.path.join(
+                save_root, "frames", str(idx).zfill(4) + ".png"
+            )
+            imwrite(f, img_save_root)
 
     # save videos frame
     masked_frame_for_save = [cv2.resize(f, out_size) for f in masked_frame_for_save]
