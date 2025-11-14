@@ -1692,15 +1692,68 @@ def pipeline(
 
     # save each frame
     if save_frames:
+        frames_saved = 0
+        frames_failed = []
         for idx in range(video_length):
-            f = comp_frames[idx]
-            f = cv2.resize(f, out_size, interpolation=cv2.INTER_CUBIC)
-            f = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
-            # Normalize path to use forward slashes (fixes Windows backslash on Linux)
-            img_save_root = os.path.join(
-                save_root, "frames", str(idx).zfill(4) + ".png"
-            ).replace('\\', '/')
-            imwrite(f, img_save_root)
+            try:
+                f = comp_frames[idx]
+
+                # Validate frame exists and is valid
+                if f is None:
+                    raise ValueError(f"Frame {idx} is None in comp_frames")
+                if not isinstance(f, np.ndarray):
+                    raise ValueError(f"Frame {idx} is not a numpy array: {type(f)}")
+                if f.size == 0:
+                    raise ValueError(f"Frame {idx} has zero size")
+
+                # Resize and convert color
+                f_resized = cv2.resize(f, out_size, interpolation=cv2.INTER_CUBIC)
+                if f_resized is None or f_resized.size == 0:
+                    raise ValueError(f"Frame {idx} resize failed")
+
+                f_rgb = cv2.cvtColor(f_resized, cv2.COLOR_BGR2RGB)
+                if f_rgb is None or f_rgb.size == 0:
+                    raise ValueError(f"Frame {idx} color conversion failed")
+
+                # Normalize path to use forward slashes (fixes Windows backslash on Linux)
+                img_save_root = os.path.join(
+                    save_root, "frames", str(idx).zfill(4) + ".png"
+                ).replace('\\', '/')
+
+                # Write frame with validation
+                success = imwrite(f_rgb, img_save_root)
+                if not success:
+                    raise RuntimeError(f"imwrite() returned False for frame {idx}")
+
+                # Verify file was written
+                if not os.path.exists(img_save_root):
+                    raise RuntimeError(f"Frame {idx} not found after imwrite(): {img_save_root}")
+
+                file_size = os.path.getsize(img_save_root)
+                if file_size == 0:
+                    raise RuntimeError(f"Frame {idx} written but file size is 0 bytes")
+
+                frames_saved += 1
+
+            except Exception as e:
+                print(f"[ERROR] Failed to save frame {idx}/{video_length}: {e}")
+                frames_failed.append((idx, str(e)))
+                # Continue to next frame instead of crashing
+
+        print(f"\n{'='*70}")
+        print(f"Frame Save Summary:")
+        print(f"  Total frames:    {video_length}")
+        print(f"  Frames saved:    {frames_saved}")
+        print(f"  Frames failed:   {len(frames_failed)}")
+        if frames_failed:
+            print(f"\n  Failed frames:")
+            for idx, error in frames_failed:
+                print(f"    Frame {idx:04d}: {error}")
+        print(f"{'='*70}\n")
+
+        # Raise error if any frames failed
+        if frames_failed:
+            raise RuntimeError(f"Failed to save {len(frames_failed)} frames: {frames_failed}")
 
     # save videos frame
     masked_frame_for_save = [cv2.resize(f, out_size) for f in masked_frame_for_save]

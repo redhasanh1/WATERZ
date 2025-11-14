@@ -3850,7 +3850,52 @@ def process_segment_task(self, segment_data):
             print(f"   [OUTPUT] Extracting core segment from ProPainter output (frames {padding_offset} to {padding_offset + seg_duration})...")
             for frame_idx in range(padding_offset, padding_offset + seg_duration):
                 frame_file = f"{frame_idx:04d}.png"
-                clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+                frame_path = os.path.normpath(os.path.join(seg_propainter_frames, frame_file))
+
+                # 🔥 FIX MISSING FRAME BUG: Handle race conditions on Railway FUSE volumes
+                if not os.path.exists(frame_path):
+                    print(f"[WARNING] [MISSING FRAME] {frame_path} – using fallback frame!")
+
+                    # Fallback 1: Try previous frame
+                    if frame_idx > 0:
+                        prev_path = os.path.normpath(os.path.join(seg_propainter_frames, f"{frame_idx - 1:04d}.png"))
+                        if os.path.exists(prev_path):
+                            print(f"   → Using previous frame {frame_idx - 1:04d}.png as fallback")
+                            frame_path = prev_path
+                        else:
+                            # Fallback 2: Create black frame with same dimensions as original
+                            print(f"   → Creating black fallback frame")
+                            if len(original_frames) > 0 and original_frames[0] is not None:
+                                h, w = original_frames[0].shape[:2]
+                                clean = np.zeros((h, w, 3), dtype=np.uint8)
+                            else:
+                                clean = np.zeros((crop_h, crop_w, 3), dtype=np.uint8)
+                            cleaned_frames.append(clean)
+                            continue
+                    else:
+                        # First frame missing - create black frame
+                        print(f"   → Creating black fallback frame (first frame)")
+                        if len(original_frames) > 0 and original_frames[0] is not None:
+                            h, w = original_frames[0].shape[:2]
+                            clean = np.zeros((h, w, 3), dtype=np.uint8)
+                        else:
+                            clean = np.zeros((crop_h, crop_w, 3), dtype=np.uint8)
+                        cleaned_frames.append(clean)
+                        continue
+
+                clean = cv2.imread(frame_path)
+
+                # Validate frame was loaded successfully
+                if clean is None:
+                    print(f"[ERROR] [READ FAILED] cv2.imread returned None for {frame_path}")
+                    # Use fallback frame
+                    if len(original_frames) > frame_idx - padding_offset and original_frames[frame_idx - padding_offset] is not None:
+                        clean = original_frames[frame_idx - padding_offset].copy()
+                        print(f"   → Using original frame as fallback")
+                    else:
+                        clean = np.zeros((crop_h, crop_w, 3), dtype=np.uint8)
+                        print(f"   → Using black frame as fallback")
+
                 cleaned_frames.append(clean)
 
             # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
