@@ -27,19 +27,37 @@
 
     <style>
         :root {
+            /* Primary Colors */
             --primary: #667eea;
             --primary-dark: #5568d3;
             --secondary: #764ba2;
             --accent: #a78bfa;
             --success: #10b981;
             --warning: #f59e0b;
-            --bg-dark: #0a0a14;
-            --bg-card: #1a1a2e;
-            --bg-glass: rgba(26, 26, 46, 0.8);
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0c0;
+
+            /* Light Mode (Default) */
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-card: #f8fafc;
+            --bg-glass: rgba(248, 250, 252, 0.8);
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --border-color: rgba(102, 126, 234, 0.12);
+
+            /* Gradients */
             --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        /* Dark Mode Override */
+        html[data-theme="dark"] {
+            --bg-primary: #0b1020;
+            --bg-secondary: #121826;
+            --bg-card: #1a1a2e;
+            --bg-glass: rgba(26, 26, 46, 0.8);
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
+            --border-color: rgba(102, 126, 234, 0.12);
         }
 
         * {
@@ -50,10 +68,11 @@
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg-dark);
+            background: var(--bg-primary);
             color: var(--text-primary);
             line-height: 1.6;
             overflow-x: hidden;
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
 
         .container {
@@ -68,12 +87,18 @@
             top: 0;
             left: 0;
             right: 0;
-            background: rgba(10, 10, 20, 0.98);
+            background: rgba(255, 255, 255, 0.98);
             backdrop-filter: blur(20px);
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
             z-index: 1000;
-            border-bottom: 1px solid rgba(102, 126, 234, 0.12);
+            border-bottom: 1px solid var(--border-color);
             padding: 1.25rem 0;
+            transition: background-color 0.3s ease;
+        }
+
+        html[data-theme="dark"] .nav {
+            background: rgba(11, 16, 32, 0.98);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
         }
 
         .nav-container {
@@ -730,12 +755,13 @@
                     <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
                     <circle cx="25" cy="15" r="2" fill="#10b981"/>
                 </svg>
-                <span>WatermarkAI</span>
+                <span>MarkRemoverAI</span>
             </a>
             <div class="nav-links" id="navLinks">
                 <a href="/">Home</a>
                 <a href="#pricing">Pricing</a>
                 <button class="btn-nav" onclick="scrollToPricing()">Get Started</button>
+                <button id="themeToggle" class="btn-nav" style="margin-left: 1rem;" aria-label="Toggle theme">Dark</button>
             </div>
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
                 <span></span>
@@ -1041,6 +1067,9 @@
             }
         });
     </script>
+
+    <!-- Theme Toggle Script -->
+    <script src="js/theme.js"></script>
 </body>
 </html>
 
