@@ -92,7 +92,14 @@
       "Bash(%PATH%)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" \"D:\\watermarkz\\sam2_trt_predictor.py\")",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/sam2_trt_predictor.py)",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" sam2_trt_predictor.py)"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" sam2_trt_predictor.py)",
+      "Bash(git log:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git rev-list:*)",
+      "Bash(while read commit)",
+      "Bash(do git ls-tree -r --name-only $commit)",
+      "Bash(done)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []
