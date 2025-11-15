@@ -91,7 +91,8 @@
       "Bash(\"D:\\watermarkz\\TensorRT-10.13.3.9\\bin\\trtexec.exe\" --onnx=\"sam2_pytorch2onnx/output/sam2.1_hiera_tiny_decoder.onnx\" --saveEngine=\"engines/sam2_decoder_fp16.engine\" --fp16 --memPoolSize=workspace:4096 --builderOptimizationLevel=5)",
       "Bash(%PATH%)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" \"D:\\watermarkz\\sam2_trt_predictor.py\")",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/sam2_trt_predictor.py)"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/sam2_trt_predictor.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" sam2_trt_predictor.py)"
     ],
     "deny": [],
     "ask": []

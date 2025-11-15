@@ -1,5 +1,6 @@
 """
-SAM2 TensorRT Python Implementation
+SAM2 TensorRT Python Implementation - FIXED
+Properly handles all encoder/decoder tensor bindings
 Fast, stable, Windows-compatible predictor for RTX 4090
 """
 import os
@@ -22,11 +23,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class SAM2TensorRTPredictor:
-    """Pure Python TensorRT SAM2 predictor - no C++ needed"""
+    """Pure Python TensorRT SAM2 predictor with proper tensor binding"""
 
     def __init__(self, encoder_engine_path, decoder_engine_path):
         self.encoder_engine_path = Path(encoder_engine_path)
         self.decoder_engine_path = Path(decoder_engine_path)
+
+        # Use dynamic decoder engine
+        if "dynamic" not in str(decoder_engine_path):
+            logger.warning("[WARN] Using non-dynamic decoder engine - may have binding issues")
+            logger.warning("[WARN] Recommended: use sam2_decoder_fp16_dynamic.engine")
 
         # TensorRT logger
         self.trt_logger = trt.Logger(trt.Logger.WARNING)
@@ -39,13 +45,31 @@ class SAM2TensorRTPredictor:
         self.encoder_context = self.encoder_engine.create_execution_context()
         self.decoder_context = self.decoder_engine.create_execution_context()
 
-        # Get tensor names (TensorRT 10+ API)
-        self.encoder_input_name = self.encoder_engine.get_tensor_name(0)
-        self.encoder_output_name = self.encoder_engine.get_tensor_name(1)
+        # Enumerate encoder tensors
+        self.encoder_tensors = self._enumerate_tensors(self.encoder_engine)
+        self.encoder_inputs = [t for t in self.encoder_tensors if t['mode'] == 'INPUT']
+        self.encoder_outputs = [t for t in self.encoder_tensors if t['mode'] == 'OUTPUT']
 
-        # Image embeddings cache
-        self.image_embeddings = None
+        logger.info(f"[ENCODER] Inputs: {[t['name'] for t in self.encoder_inputs]}")
+        logger.info(f"[ENCODER] Outputs: {[t['name'] for t in self.encoder_outputs]}")
+
+        # Enumerate decoder tensors
+        self.decoder_tensors = self._enumerate_tensors(self.decoder_engine)
+        self.decoder_inputs = [t for t in self.decoder_tensors if t['mode'] == 'INPUT']
+        self.decoder_outputs = [t for t in self.decoder_tensors if t['mode'] == 'OUTPUT']
+
+        logger.info(f"[DECODER] Inputs: {[t['name'] for t in self.decoder_inputs]}")
+        logger.info(f"[DECODER] Outputs: {[t['name'] for t in self.decoder_outputs]}")
+
+        # Image embeddings cache (all 3 encoder outputs)
+        self.image_embed = None
+        self.high_res_feats_0 = None
+        self.high_res_feats_1 = None
         self.current_image_hash = None
+
+        # Original image dimensions for coordinate normalization
+        self.orig_w = None
+        self.orig_h = None
 
         logger.info(f"[OK] Loaded encoder: {self.encoder_engine_path.name}")
         logger.info(f"[OK] Loaded decoder: {self.decoder_engine_path.name}")
@@ -57,9 +81,29 @@ class SAM2TensorRTPredictor:
             engine = runtime.deserialize_cuda_engine(f.read())
         return engine
 
+    def _enumerate_tensors(self, engine):
+        """Enumerate all input/output tensors in engine"""
+        tensors = []
+        for i in range(engine.num_io_tensors):
+            name = engine.get_tensor_name(i)
+            shape = engine.get_tensor_shape(name)
+            dtype = engine.get_tensor_dtype(name)
+            mode = engine.get_tensor_mode(name)
+
+            tensors.append({
+                'index': i,
+                'name': name,
+                'shape': shape,
+                'dtype': dtype,
+                'mode': 'INPUT' if mode == trt.TensorIOMode.INPUT else 'OUTPUT',
+                'size': int(np.prod(shape)) * trt.volume(trt.Dims([4]))  # FP32 = 4 bytes
+            })
+
+        return tensors
+
     def set_image(self, image):
         """
-        Encode image and cache embeddings
+        Encode image and cache ALL embeddings (3 outputs)
 
         Args:
             image: numpy array (H, W, 3) RGB uint8
@@ -68,6 +112,9 @@ class SAM2TensorRTPredictor:
         image_hash = hash(image.tobytes())
         if image_hash == self.current_image_hash:
             return  # Already encoded
+
+        # Store original image size for coordinate normalization
+        self.orig_h, self.orig_w = image.shape[:2]
 
         # Preprocess image to 1024x1024
         img_resized = cv2.resize(image, (1024, 1024), interpolation=cv2.INTER_LINEAR)
@@ -78,33 +125,60 @@ class SAM2TensorRTPredictor:
         img_batch = np.expand_dims(img_chw, axis=0)  # Add batch dim -> (1, 3, 1024, 1024)
         img_batch = np.ascontiguousarray(img_batch)  # Ensure contiguous array for CUDA
 
-        # Allocate GPU memory
+        # Allocate GPU memory for input
         d_input = cuda.mem_alloc(img_batch.nbytes)
-
-        # Get output shape from engine
-        output_shape = self.encoder_context.get_tensor_shape(self.encoder_output_name)
-        output_size = int(np.prod(output_shape)) * np.dtype(np.float32).itemsize
-        d_output = cuda.mem_alloc(output_size)
-
-        # Copy input to GPU
         cuda.memcpy_htod(d_input, img_batch)
 
-        # Set tensor addresses
-        self.encoder_context.set_tensor_address(self.encoder_input_name, int(d_input))
-        self.encoder_context.set_tensor_address(self.encoder_output_name, int(d_output))
+        # Allocate GPU memory for ALL 3 encoder outputs
+        encoder_outputs_gpu = {}
+        encoder_outputs_host = {}
 
-        # Run inference
-        self.encoder_context.execute_async_v3(cuda.Stream().handle)
+        for output_tensor in self.encoder_outputs:
+            name = output_tensor['name']
+            shape = output_tensor['shape']
+            size = int(np.prod(shape)) * np.dtype(np.float32).itemsize
 
-        # Copy output back to host
-        embeddings = np.empty(output_shape, dtype=np.float32)
-        cuda.memcpy_dtoh(embeddings, d_output)
+            # Allocate GPU buffer
+            encoder_outputs_gpu[name] = cuda.mem_alloc(size)
 
-        # Cache embeddings
-        self.image_embeddings = embeddings
+            # Allocate host buffer
+            encoder_outputs_host[name] = np.empty(shape, dtype=np.float32)
+
+        # Bind input tensor
+        input_name = self.encoder_inputs[0]['name']
+        self.encoder_context.set_tensor_address(input_name, int(d_input))
+
+        # Bind ALL output tensors
+        for name, d_output in encoder_outputs_gpu.items():
+            self.encoder_context.set_tensor_address(name, int(d_output))
+
+        # Run inference with proper stream synchronization
+        stream = cuda.Stream()
+        self.encoder_context.execute_async_v3(stream.handle)
+        stream.synchronize()  # Wait for execution to complete
+
+        # Copy ALL outputs back to host
+        for name, d_output in encoder_outputs_gpu.items():
+            cuda.memcpy_dtoh(encoder_outputs_host[name], d_output)
+
+        # Cache all embeddings (handle different possible names)
+        self.image_embed = encoder_outputs_host.get('image_embed')
+        if self.image_embed is None:
+            self.image_embed = encoder_outputs_host.get('image_embeddings')
+
+        self.high_res_feats_0 = encoder_outputs_host.get('high_res_feats_0')
+        if self.high_res_feats_0 is None:
+            self.high_res_feats_0 = encoder_outputs_host.get('high_res_feat_0')
+
+        self.high_res_feats_1 = encoder_outputs_host.get('high_res_feats_1')
+        if self.high_res_feats_1 is None:
+            self.high_res_feats_1 = encoder_outputs_host.get('high_res_feat_1')
+
         self.current_image_hash = image_hash
 
-        logger.info(f"[OK] Encoded image: {embeddings.shape}")
+        logger.info(f"[OK] Encoded image - image_embed: {self.image_embed.shape if self.image_embed is not None else 'None'}")
+        logger.info(f"[OK] high_res_feats_0: {self.high_res_feats_0.shape if self.high_res_feats_0 is not None else 'None'}")
+        logger.info(f"[OK] high_res_feats_1: {self.high_res_feats_1.shape if self.high_res_feats_1 is not None else 'None'}")
 
     def predict(self, point_coords, point_labels):
         """
@@ -118,85 +192,162 @@ class SAM2TensorRTPredictor:
             masks: numpy array (H, W) with predicted mask
             scores: confidence scores
         """
-        if self.image_embeddings is None:
+        if self.image_embed is None:
             raise ValueError("Call set_image() first to encode an image")
 
-        # Prepare point prompts (scale to 1024x1024 space)
+        # Normalize coordinates to 1024x1024 space (SAM2 expects this)
         points = np.array(point_coords, dtype=np.float32)
         labels = np.array(point_labels, dtype=np.float32)
 
-        # Allocate decoder inputs/outputs
-        # Input: image_embeddings, point_coords, point_labels
-        # Output: masks, iou_predictions
+        # Scale coordinates from original image size to 1024x1024
+        scale_x = 1024.0 / self.orig_w
+        scale_y = 1024.0 / self.orig_h
+        points[:, 0] *= scale_x  # Scale x coordinates
+        points[:, 1] *= scale_y  # Scale y coordinates
 
-        # Get decoder tensor names
-        decoder_input_names = []
-        decoder_output_names = []
-        for i in range(self.decoder_engine.num_io_tensors):
-            name = self.decoder_engine.get_tensor_name(i)
-            if self.decoder_engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
-                decoder_input_names.append(name)
+        logger.info(f"[TRT] Normalized {len(points)} points to 1024x1024 space (orig: {self.orig_w}x{self.orig_h})")
+
+        # Reshape to (N, 2, 2) format - each prompt has 2 point slots
+        num_prompts = len(points)
+        points_reshaped = np.zeros((num_prompts, 2, 2), dtype=np.float32)
+        points_reshaped[:, 0, :] = points  # First point (actual point)
+        points_reshaped[:, 1, :] = points  # Second point (padding/duplicate)
+
+        labels_reshaped = np.zeros((num_prompts, 2), dtype=np.float32)
+        labels_reshaped[:, 0] = labels  # First label (actual label)
+        labels_reshaped[:, 1] = 0  # Second label (padding)
+
+        # Create mask_input (zeros for first prediction) and has_mask_input flag
+        mask_input = np.zeros((1, 1, 256, 256), dtype=np.float32)
+        has_mask_input = np.array([0.0], dtype=np.float32)  # 0 = no previous mask
+
+        # Allocate GPU memory for ALL decoder inputs
+        decoder_inputs_gpu = {}
+
+        # Input 1: image_embed (from encoder)
+        if self.image_embed is not None:
+            d_image_embed = cuda.mem_alloc(self.image_embed.nbytes)
+            cuda.memcpy_htod(d_image_embed, np.ascontiguousarray(self.image_embed))
+            decoder_inputs_gpu['image_embed'] = d_image_embed
+            decoder_inputs_gpu['image_embeddings'] = d_image_embed  # Try both names
+
+        # Input 2: high_res_feats_0 (from encoder)
+        if self.high_res_feats_0 is not None:
+            d_high_res_0 = cuda.mem_alloc(self.high_res_feats_0.nbytes)
+            cuda.memcpy_htod(d_high_res_0, np.ascontiguousarray(self.high_res_feats_0))
+            decoder_inputs_gpu['high_res_feats_0'] = d_high_res_0
+            decoder_inputs_gpu['high_res_feat_0'] = d_high_res_0  # Try both names
+
+        # Input 3: high_res_feats_1 (from encoder)
+        if self.high_res_feats_1 is not None:
+            d_high_res_1 = cuda.mem_alloc(self.high_res_feats_1.nbytes)
+            cuda.memcpy_htod(d_high_res_1, np.ascontiguousarray(self.high_res_feats_1))
+            decoder_inputs_gpu['high_res_feats_1'] = d_high_res_1
+            decoder_inputs_gpu['high_res_feat_1'] = d_high_res_1  # Try both names
+
+        # Input 4: point_coords (reshaped to TIER IV format)
+        points_contig = np.ascontiguousarray(points_reshaped)
+        d_points = cuda.mem_alloc(points_contig.nbytes)
+        cuda.memcpy_htod(d_points, points_contig)
+        decoder_inputs_gpu['point_coords'] = d_points
+
+        # Input 5: point_labels (reshaped to TIER IV format)
+        labels_contig = np.ascontiguousarray(labels_reshaped)
+        d_labels = cuda.mem_alloc(labels_contig.nbytes)
+        cuda.memcpy_htod(d_labels, labels_contig)
+        decoder_inputs_gpu['point_labels'] = d_labels
+
+        # Input 6: mask_input (expand batch dimension to match num_prompts)
+        mask_input_batch = np.tile(mask_input, (num_prompts, 1, 1, 1))
+        d_mask_input = cuda.mem_alloc(mask_input_batch.nbytes)
+        cuda.memcpy_htod(d_mask_input, mask_input_batch)
+        decoder_inputs_gpu['mask_input'] = d_mask_input
+
+        # Input 7: has_mask_input (scalar, always shape (1,))
+        d_has_mask = cuda.mem_alloc(has_mask_input.nbytes)
+        cuda.memcpy_htod(d_has_mask, has_mask_input)
+        decoder_inputs_gpu['has_mask_input'] = d_has_mask
+
+        # IMPORTANT: Set dynamic input shapes before inference
+        logger.info(f"[TRT] Setting dynamic shapes for batch size: {num_prompts}")
+        self.decoder_context.set_input_shape('point_coords', (num_prompts, 2, 2))
+        self.decoder_context.set_input_shape('point_labels', (num_prompts, 2))
+        self.decoder_context.set_input_shape('mask_input', (num_prompts, 1, 256, 256))
+
+        # Allocate GPU memory for outputs - MUST query shapes AFTER setting input shapes
+        # because outputs have dynamic dimensions tied to the batch size
+        decoder_outputs_gpu = {}
+        decoder_outputs_host = {}
+
+        for output_tensor in self.decoder_outputs:
+            name = output_tensor['name']
+            # Query actual shape after input shapes are set (critical for dynamic outputs!)
+            actual_shape = self.decoder_context.get_tensor_shape(name)
+            size = int(np.prod(actual_shape)) * np.dtype(np.float32).itemsize
+
+            decoder_outputs_gpu[name] = cuda.mem_alloc(size)
+            decoder_outputs_host[name] = np.empty(actual_shape, dtype=np.float32)
+
+        # Bind ALL decoder inputs
+        for input_tensor in self.decoder_inputs:
+            name = input_tensor['name']
+            if name in decoder_inputs_gpu:
+                self.decoder_context.set_tensor_address(name, int(decoder_inputs_gpu[name]))
             else:
-                decoder_output_names.append(name)
+                logger.warning(f"[WARN] Decoder input '{name}' not found in prepared inputs")
 
-        # Allocate GPU memory for decoder
-        d_embeddings = cuda.mem_alloc(self.image_embeddings.nbytes)
-        cuda.memcpy_htod(d_embeddings, self.image_embeddings)
+        # Bind ALL decoder outputs
+        for name, d_output in decoder_outputs_gpu.items():
+            self.decoder_context.set_tensor_address(name, int(d_output))
 
-        # Prepare point coordinates and labels
-        point_coords_batch = np.expand_dims(points, axis=0)  # (1, N, 2)
-        point_labels_batch = np.expand_dims(labels, axis=0)  # (1, N)
+        # Run decoder with proper stream synchronization
+        stream = cuda.Stream()
+        self.decoder_context.execute_async_v3(stream.handle)
+        stream.synchronize()  # Wait for execution to complete
 
-        d_points = cuda.mem_alloc(point_coords_batch.nbytes)
-        d_labels = cuda.mem_alloc(point_labels_batch.nbytes)
+        # Copy outputs back
+        for name, d_output in decoder_outputs_gpu.items():
+            cuda.memcpy_dtoh(decoder_outputs_host[name], d_output)
 
-        cuda.memcpy_htod(d_points, point_coords_batch)
-        cuda.memcpy_htod(d_labels, point_labels_batch)
+        # Extract mask and IoU from outputs (try different possible names)
+        mask_logits = decoder_outputs_host.get('masks')
+        if mask_logits is None:
+            mask_logits = decoder_outputs_host.get('output_mask')
+        if mask_logits is None:
+            mask_logits = decoder_outputs_host.get('low_res_masks')
 
-        # Get output shapes
-        mask_shape = self.decoder_context.get_tensor_shape(decoder_output_names[0])
-        iou_shape = self.decoder_context.get_tensor_shape(decoder_output_names[1])
+        iou_predictions = decoder_outputs_host.get('iou_predictions')
+        if iou_predictions is None:
+            iou_predictions = decoder_outputs_host.get('output_confidence')
+        if iou_predictions is None:
+            iou_predictions = decoder_outputs_host.get('iou_scores')
 
-        mask_size = int(np.prod(mask_shape)) * np.dtype(np.float32).itemsize
-        iou_size = int(np.prod(iou_shape)) * np.dtype(np.float32).itemsize
-
-        d_masks = cuda.mem_alloc(mask_size)
-        d_iou = cuda.mem_alloc(iou_size)
-
-        # Set tensor addresses
-        self.decoder_context.set_tensor_address(decoder_input_names[0], int(d_embeddings))
-        self.decoder_context.set_tensor_address(decoder_input_names[1], int(d_points))
-        self.decoder_context.set_tensor_address(decoder_input_names[2], int(d_labels))
-        self.decoder_context.set_tensor_address(decoder_output_names[0], int(d_masks))
-        self.decoder_context.set_tensor_address(decoder_output_names[1], int(d_iou))
-
-        # Run decoder
-        self.decoder_context.execute_async_v3(cuda.Stream().handle)
-
-        # Copy outputs
-        masks_output = np.empty(mask_shape, dtype=np.float32)
-        iou_output = np.empty(iou_shape, dtype=np.float32)
-
-        cuda.memcpy_dtoh(masks_output, d_masks)
-        cuda.memcpy_dtoh(iou_output, d_iou)
+        if mask_logits is None:
+            raise RuntimeError(f"Could not find mask output. Available: {list(decoder_outputs_host.keys())}")
 
         # Post-process mask (sigmoid + threshold)
-        mask_logits = masks_output[0, 0]  # Get first mask
-        mask_probs = 1 / (1 + np.exp(-mask_logits))  # Sigmoid
+        mask_logits_2d = mask_logits[0, 0]  # Get first mask from batch
+        mask_probs = 1 / (1 + np.exp(-mask_logits_2d))  # Sigmoid
         mask_binary = (mask_probs > 0.5).astype(np.uint8)
 
-        logger.info(f"[OK] Predicted mask: {mask_binary.shape}, IoU: {iou_output[0, 0]:.3f}")
+        # Extract IoU score (ensure it's a scalar)
+        if iou_predictions is not None:
+            iou_score = float(iou_predictions.flatten()[0])
+        else:
+            iou_score = 0.0
 
-        return mask_binary, iou_output[0, 0]
+        logger.info(f"[OK] Predicted mask: {mask_binary.shape}, IoU: {iou_score:.3f}")
+
+        return mask_binary, iou_score
 
 
 def test_sam2_trt():
     """Test the TensorRT SAM2 predictor"""
     import time
 
-    # Paths to TensorRT engines
+    # Paths to TensorRT engines (use dynamic decoder)
     encoder_engine = r"D:\watermarkz\sam2_trt_inference\engines\sam2_encoder_fp16.engine"
-    decoder_engine = r"D:\watermarkz\sam2_trt_inference\engines\sam2_decoder_fp16.engine"
+    decoder_engine = r"D:\watermarkz\sam2_trt_inference\engines\sam2_decoder_fp16_dynamic.engine"
 
     # Initialize predictor
     print("[*] Initializing SAM2 TensorRT predictor...")

@@ -7,17 +7,45 @@ Creates a visual debug video showing:
 - Overlay (mask on frame with transparency)
 
 Helps diagnose SAM2 tracking quality issues.
+
+Uses EXISTING masks from temp_sam2_masks folder.
 """
 
 import os
+import sys
 import cv2
 import numpy as np
 from pathlib import Path
+from tkinter import Tk, filedialog
 
 # Configuration
 MASKS_FOLDER = "temp_sam2_masks"
-VIDEO_PATH = "test_3sec_16fps.mp4"
 OUTPUT_VIDEO = "results/sam2_mask_visualization.mp4"
+
+def select_video_file():
+    """Open file dialog to select video file."""
+    print("\n[*] Please select the video file you want to visualize...")
+
+    root = Tk()
+    root.withdraw()  # Hide the main window
+    root.attributes('-topmost', True)  # Bring dialog to front
+
+    file_path = filedialog.askopenfilename(
+        title="Select Video File",
+        filetypes=[
+            ("Video files", "*.mp4 *.avi *.mov *.mkv"),
+            ("All files", "*.*")
+        ]
+    )
+
+    root.destroy()
+
+    if not file_path:
+        print("[ERROR] No file selected")
+        return None
+
+    print(f"[OK] Selected: {file_path}\n")
+    return file_path
 
 def visualize_masks():
     """Create visualization video showing masks overlaid on frames."""
@@ -26,15 +54,31 @@ def visualize_masks():
     print("SAM2 MASK VISUALIZATION")
     print("="*70 + "\n")
 
+    # Check if masks exist
     if not os.path.exists(MASKS_FOLDER):
-        print(f"❌ ERROR: Masks folder not found: {MASKS_FOLDER}")
-        print("   Run the SAM2 interactive tool first to generate masks.")
+        print(f"[ERROR] Masks folder not found: {MASKS_FOLDER}")
+        print("   Please run the SAM2 interactive tool first to generate masks.")
+        print("   The tool should create masks in the temp_sam2_masks folder.")
+        return
+
+    mask_files = sorted([f for f in os.listdir(MASKS_FOLDER) if f.endswith('.png')])
+    if len(mask_files) == 0:
+        print(f"[ERROR] No mask files found in {MASKS_FOLDER}")
+        print("   Please run the SAM2 interactive tool first to generate masks.")
+        return
+
+    print(f"[MASKS] Found {len(mask_files)} mask files in: {MASKS_FOLDER}")
+    print()
+
+    # Interactive video selection
+    VIDEO_PATH = select_video_file()
+    if VIDEO_PATH is None:
         return
 
     # Open video
     cap = cv2.VideoCapture(VIDEO_PATH)
     if not cap.isOpened():
-        print(f"❌ ERROR: Could not open video: {VIDEO_PATH}")
+        print(f"[ERROR] Could not open video: {VIDEO_PATH}")
         return
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -42,20 +86,10 @@ def visualize_masks():
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    print(f"📹 Video: {VIDEO_PATH}")
+    print(f"[VIDEO] Video: {VIDEO_PATH}")
     print(f"   Resolution: {width}x{height}")
     print(f"   FPS: {fps:.2f}")
     print(f"   Total frames: {total_frames}")
-    print()
-
-    # Get mask files
-    mask_files = sorted([f for f in os.listdir(MASKS_FOLDER) if f.endswith('.png')])
-
-    if len(mask_files) == 0:
-        print(f"❌ ERROR: No mask files found in {MASKS_FOLDER}")
-        return
-
-    print(f"🎭 Found {len(mask_files)} mask files")
     print()
 
     # Create output directory
@@ -68,10 +102,10 @@ def visualize_masks():
     out = cv2.VideoWriter(OUTPUT_VIDEO, fourcc, fps, (output_width, output_height))
 
     if not out.isOpened():
-        print(f"❌ ERROR: Could not create output video: {OUTPUT_VIDEO}")
+        print(f"[ERROR] ERROR: Could not create output video: {OUTPUT_VIDEO}")
         return
 
-    print("🎬 Creating visualization video...")
+    print("[PROCESSING] Creating visualization video...")
     print(f"   Output: {OUTPUT_VIDEO}")
     print()
 
@@ -87,11 +121,15 @@ def visualize_masks():
         if frame_idx < len(mask_files):
             mask_path = os.path.join(MASKS_FOLDER, mask_files[frame_idx])
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+
+            # Resize mask to match video dimensions if needed
+            if mask is not None and mask.shape[:2] != (height, width):
+                mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
         else:
             mask = None
 
         # Create visualization
-        if mask is not None and mask.shape[:2] == (height, width):
+        if mask is not None:
             # Convert mask to 3-channel for visualization
             mask_color = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
@@ -149,12 +187,12 @@ def visualize_masks():
         if frames_processed % 10 == 0 or frames_processed == total_frames:
             print(f"   Processed {frames_processed}/{total_frames} frames...", end='\r')
 
-    print(f"\n\n✅ Visualization complete!")
+    print(f"\n\n[OK] Visualization complete!")
     print(f"   Output: {OUTPUT_VIDEO}")
     print(f"   Processed {frames_processed} frames")
     print()
 
-    print("📺 View the output video to see:")
+    print("[INFO] View the output video to see:")
     print("   - Left: Original frame")
     print("   - Middle: SAM2 mask (white = object)")
     print("   - Right: Overlay with red mask + green bounding box")
@@ -165,7 +203,7 @@ def visualize_masks():
 
     # Open the video automatically (Windows)
     try:
-        print("🎥 Opening visualization video...")
+        print("[VIDEO] Opening visualization video...")
         os.startfile(OUTPUT_VIDEO)
     except:
         print(f"   Please open manually: {OUTPUT_VIDEO}")
