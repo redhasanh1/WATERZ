@@ -577,246 +577,255 @@
             });
         }
 
-        // Initialize video editor frame strip timeline
-        async function initTimeline() {
-            console.log('[Timeline] Creating frame strip timeline...');
-            showStatus('Extracting all video frames...', '');
-
-            const timelineWrapper = document.getElementById('timeline-wrapper');
-            if (!timelineWrapper) {
-                console.error('[Timeline] Timeline wrapper not found!');
-                return;
+        // Professional Video Timeline Class
+        class VideoTimeline {
+            constructor(videoElement, options = {}) {
+                this.video = videoElement;
+                this.container = null;
+                this.thumbnails = [];
+                this.currentFrame = 0;
+                this.totalFrames = 0;
+                this.fps = 30;
+                this.onFrameChange = options.onFrameChange || (() => {});
             }
 
-            // Clear old timeline
-            timelineWrapper.innerHTML = '';
-            timelineWrapper.style.display = 'block';
+            async init() {
+                console.log('[Timeline] Initializing professional timeline...');
 
-            // Create timeline strip container
-            const timelineStrip = document.createElement('div');
-            timelineStrip.id = 'timeline-strip';
-            timelineStrip.style.cssText = `
-                position: relative;
-                width: 100%;
-                height: 120px;
-                overflow-x: auto;
-                overflow-y: hidden;
-                white-space: nowrap;
-                background: #222;
-                border: 1px solid #444;
-                border-radius: 6px;
-                padding: 10px;
-                box-sizing: border-box;
-            `;
+                // Wait for video metadata
+                await new Promise((resolve) => {
+                    if (this.video.readyState >= 1) resolve();
+                    else this.video.addEventListener('loadedmetadata', resolve, { once: true });
+                });
 
-            // Create red playhead indicator
-            const playhead = document.createElement('div');
-            playhead.id = 'timeline-playhead';
-            playhead.style.cssText = `
-                position: absolute;
-                top: 0;
-                left: 50%;
-                height: 100%;
-                width: 3px;
-                background: rgba(255, 0, 0, 0.9);
-                pointer-events: none;
-                z-index: 10;
-                box-shadow: 0 0 8px rgba(255, 0, 0, 0.6);
-            `;
+                this.fps = 30;
+                this.totalFrames = Math.floor(this.video.duration * this.fps);
 
-            timelineStrip.appendChild(playhead);
+                console.log(`[Timeline] Video: ${this.video.videoWidth}x${this.video.videoHeight}, ${this.video.duration}s, ${this.totalFrames} frames`);
 
-            // Extract all frames
-            const frames = await extractFrameThumbnails(videoPlayer);
-            console.log(`[Timeline] Extracted ${frames.length} frames`);
+                // Create timeline container
+                this.createTimelineContainer();
 
-            // Create frame thumbnails
-            frames.forEach((frame, index) => {
-                const frameDiv = document.createElement('div');
-                frameDiv.className = 'frame-thumb';
-                frameDiv.dataset.index = index;
-                frameDiv.dataset.time = frame.timestamp;
-                frameDiv.style.cssText = `
-                    display: inline-block;
-                    width: 160px;
-                    height: 90px;
-                    margin-right: 4px;
-                    background-size: cover;
-                    background-position: center;
-                    background-image: url("${frame.thumbnail_url}");
-                    border: 1px solid #333;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    transition: border-color 0.2s ease;
-                    vertical-align: top;
+                // Generate thumbnails
+                await this.generateThumbnails();
+
+                console.log('[Timeline] Timeline initialized successfully');
+            }
+
+            createTimelineContainer() {
+                this.container = document.createElement('div');
+                this.container.className = 'timeline-container';
+                this.container.style.cssText = `
+                    position: relative;
+                    width: 100%;
+                    height: 80px;
+                    background: rgba(0,0,0,0.8);
+                    border-radius: 8px;
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    display: flex;
+                    align-items: center;
+                    padding: 10px;
+                    gap: 4px;
+                    user-select: none;
                 `;
 
-                // Click to jump to frame
-                frameDiv.addEventListener('click', () => {
-                    videoPlayer.currentTime = frame.timestamp;
-                });
+                this.track = document.createElement('div');
+                this.track.style.cssText = `
+                    display: flex;
+                    height: 100%;
+                    min-width: 100%;
+                    position: relative;
+                `;
+                this.container.appendChild(this.track);
 
-                // Hover effect
-                frameDiv.addEventListener('mouseenter', () => {
-                    frameDiv.style.borderColor = '#667eea';
-                });
-                frameDiv.addEventListener('mouseleave', () => {
-                    frameDiv.style.borderColor = '#333';
-                });
+                // Add scrollbar styling
+                const style = document.createElement('style');
+                style.textContent = `
+                    .timeline-container::-webkit-scrollbar {
+                        height: 6px;
+                    }
+                    .timeline-container::-webkit-scrollbar-track {
+                        background: rgba(255,255,255,0.1);
+                        border-radius: 3px;
+                    }
+                    .timeline-container::-webkit-scrollbar-thumb {
+                        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                        border-radius: 3px;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
 
-                timelineStrip.appendChild(frameDiv);
-            });
+            async generateThumbnails() {
+                const thumbnailCount = Math.min(this.totalFrames, 100);
+                const interval = Math.floor(this.totalFrames / thumbnailCount);
 
-            timelineWrapper.appendChild(timelineStrip);
+                console.log(`[Timeline] Generating ${thumbnailCount} thumbnails...`);
+                showStatus(`Generating ${thumbnailCount} timeline thumbnails...`, '');
 
-            // Setup playhead sync
-            setupFrameStripPlayhead(timelineStrip, playhead, frames);
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = 120;
+                canvas.height = 68;
 
-            showStatus('✅ Frame strip timeline ready! Click any frame to jump.', 'success');
-        }
+                for (let i = 0; i < thumbnailCount; i++) {
+                    const frameNumber = i * interval;
+                    const time = frameNumber / this.fps;
 
-        // Setup frame strip playhead syncing
-        function setupFrameStripPlayhead(strip, playhead, frames) {
-            const frameWidth = 164; // 160px + 4px margin
+                    const thumb = document.createElement('div');
+                    thumb.className = 'timeline-thumbnail';
+                    thumb.dataset.frame = frameNumber;
+                    thumb.dataset.time = time;
+                    thumb.style.cssText = `
+                        flex-shrink: 0;
+                        width: 120px;
+                        height: 68px;
+                        background: #000;
+                        border: 2px solid transparent;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        position: relative;
+                        overflow: hidden;
+                        transition: all 0.2s ease;
+                    `;
 
-            // Update playhead position based on video time
-            videoPlayer.addEventListener('timeupdate', () => {
-                const currentTime = videoPlayer.currentTime;
-                const duration = videoPlayer.duration;
+                    const label = document.createElement('div');
+                    label.textContent = frameNumber;
+                    label.style.cssText = `
+                        position: absolute;
+                        bottom: 2px;
+                        right: 4px;
+                        background: rgba(0,0,0,0.7);
+                        color: white;
+                        font-size: 10px;
+                        padding: 2px 4px;
+                        border-radius: 3px;
+                        font-weight: 600;
+                    `;
+                    thumb.appendChild(label);
 
-                // Find which frame we're on
-                let frameIndex = 0;
-                for (let i = 0; i < frames.length; i++) {
-                    if (currentTime >= frames[i].timestamp) {
-                        frameIndex = i;
-                    } else {
-                        break;
+                    try {
+                        await this.captureFrame(thumb, canvas, ctx, time);
+                    } catch (error) {
+                        console.warn(`[Timeline] Failed to capture frame ${frameNumber}:`, error);
+                        thumb.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                    }
+
+                    thumb.addEventListener('click', () => {
+                        this.jumpToFrame(frameNumber);
+                    });
+
+                    thumb.addEventListener('mouseenter', () => {
+                        thumb.style.borderColor = '#667eea';
+                        thumb.style.boxShadow = '0 0 10px rgba(102, 126, 234, 0.8)';
+                    });
+
+                    thumb.addEventListener('mouseleave', () => {
+                        if (parseInt(thumb.dataset.frame) !== this.currentFrame) {
+                            thumb.style.borderColor = 'transparent';
+                            thumb.style.boxShadow = 'none';
+                        }
+                    });
+
+                    this.track.appendChild(thumb);
+                    this.thumbnails.push(thumb);
+
+                    if (i % 10 === 0) {
+                        showStatus(`Generating thumbnails... ${Math.floor((i/thumbnailCount)*100)}%`, '');
                     }
                 }
 
-                // Calculate playhead position
-                const scrollPosition = frameIndex * frameWidth;
-
-                // Auto-scroll to keep playhead in view (centered)
-                const stripWidth = strip.clientWidth;
-                const targetScroll = scrollPosition - (stripWidth / 2) + (frameWidth / 2);
-                strip.scrollLeft = Math.max(0, targetScroll);
-
-                // Playhead stays fixed at center of viewport
-                playhead.style.left = '50%';
-            });
-        }
-
-        // Setup timeline drag and click handlers
-        function setupTimelineDragHandlers(container, playhead, progressFill, timestamp, thumbnailPreview, thumbnailCanvas, thumbnailTime) {
-            let isDragging = false;
-            const trackLeft = 42;
-            const trackRight = 42;
-            const thumbnailCtx = thumbnailCanvas.getContext('2d');
-
-            // Format time as MM:SS.MS
-            function formatTime(seconds) {
-                const mins = Math.floor(seconds / 60);
-                const secs = Math.floor(seconds % 60);
-                const ms = Math.floor((seconds % 1) * 100);
-                return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
+                console.log('[Timeline] Thumbnails generated successfully');
             }
 
-            // Update playhead position and video time
-            function updatePlayhead(clientX) {
-                const rect = container.getBoundingClientRect();
-                const trackWidth = rect.width - trackLeft - trackRight;
-                const x = clientX - rect.left - trackLeft;
-                const percentage = Math.max(0, Math.min(1, x / trackWidth));
+            async captureFrame(thumbElement, canvas, ctx, time) {
+                return new Promise((resolve, reject) => {
+                    const video = this.video;
+                    const currentTime = video.currentTime;
 
-                // Update video time
-                videoPlayer.currentTime = percentage * videoPlayer.duration;
+                    video.currentTime = time;
 
-                // Update UI
-                const leftPos = percentage * 100;
-                playhead.style.left = `calc(${leftPos}% - 6px)`;
-                progressFill.style.width = `${leftPos}%`;
-                timestamp.style.left = `calc(${leftPos}% - 3px)`;
-                timestamp.textContent = formatTime(videoPlayer.currentTime);
+                    video.addEventListener('seeked', function handler() {
+                        video.removeEventListener('seeked', handler);
+
+                        try {
+                            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                            thumbElement.style.backgroundImage = `url(${canvas.toDataURL('image/jpeg', 0.7)})`;
+                            thumbElement.style.backgroundSize = 'cover';
+                            thumbElement.style.backgroundPosition = 'center';
+                            video.currentTime = currentTime;
+                            resolve();
+                        } catch (error) {
+                            video.currentTime = currentTime;
+                            reject(error);
+                        }
+                    }, { once: true });
+                });
             }
 
-            // Mouse down on playhead - start dragging
-            playhead.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                isDragging = true;
-                playhead.style.cursor = 'grabbing';
-                playhead.style.transition = 'none';
-                progressFill.style.transition = 'none';
-                timestamp.style.transition = 'none';
-            });
+            jumpToFrame(frameNumber) {
+                const time = frameNumber / this.fps;
+                this.video.currentTime = time;
+                this.currentFrame = frameNumber;
 
-            // Mouse move - drag playhead
-            document.addEventListener('mousemove', (e) => {
-                if (isDragging) {
-                    updatePlayhead(e.clientX);
-                }
-            });
+                this.thumbnails.forEach(thumb => {
+                    if (parseInt(thumb.dataset.frame) === frameNumber) {
+                        thumb.style.borderColor = '#667eea';
+                        thumb.style.boxShadow = '0 0 10px rgba(102, 126, 234, 0.8)';
+                    } else {
+                        thumb.style.borderColor = 'transparent';
+                        thumb.style.boxShadow = 'none';
+                    }
+                });
 
-            // Mouse up - stop dragging
-            document.addEventListener('mouseup', () => {
-                if (isDragging) {
-                    isDragging = false;
-                    playhead.style.cursor = 'grab';
-                    playhead.style.transition = 'left 0.1s linear';
-                    progressFill.style.transition = 'width 0.1s linear';
-                    timestamp.style.transition = 'left 0.1s linear';
-                }
-            });
+                this.onFrameChange(frameNumber);
+            }
 
-            // Click on timeline to seek
-            container.addEventListener('click', (e) => {
-                if (e.target === playhead || playhead.contains(e.target)) {
-                    return; // Don't seek if clicking playhead itself
-                }
-                updatePlayhead(e.clientX);
-            });
-
-            // Sync playhead with video playback
-            videoPlayer.addEventListener('timeupdate', () => {
-                if (!isDragging) {
-                    const percentage = (videoPlayer.currentTime / videoPlayer.duration) * 100;
-                    playhead.style.left = `calc(${percentage}% - 6px)`;
-                    progressFill.style.width = `${percentage}%`;
-                    timestamp.style.left = `calc(${percentage}% - 3px)`;
-                    timestamp.textContent = formatTime(videoPlayer.currentTime);
-                }
-            });
-
-            // Show thumbnail preview on hover
-            container.addEventListener('mousemove', (e) => {
-                const rect = container.getBoundingClientRect();
-                const trackWidth = rect.width - trackLeft - trackRight;
-                const x = e.clientX - rect.left - trackLeft;
-                const percentage = Math.max(0, Math.min(1, x / trackWidth));
-                const hoverTime = percentage * videoPlayer.duration;
-
-                // Position thumbnail preview
-                const previewLeft = trackLeft + (percentage * trackWidth);
-                thumbnailPreview.style.left = `${previewLeft}px`;
-                thumbnailPreview.style.opacity = '1';
-
-                // Update thumbnail time display
-                thumbnailTime.textContent = formatTime(hoverTime);
-
-                // Draw thumbnail of frame at hover time
-                const tempVideo = document.createElement('video');
-                tempVideo.src = videoPlayer.src;
-                tempVideo.currentTime = hoverTime;
-                tempVideo.addEventListener('seeked', () => {
-                    thumbnailCtx.drawImage(tempVideo, 0, 0, 160, 90);
-                }, { once: true });
-            });
-
-            // Hide thumbnail when mouse leaves
-            container.addEventListener('mouseleave', () => {
-                thumbnailPreview.style.opacity = '0';
-            });
+            getContainer() {
+                return this.container;
+            }
         }
+
+        // Initialize professional timeline
+        async function initTimeline() {
+            try {
+                console.log('[Timeline] Starting initialization...');
+
+                // Wait for video metadata
+                if (videoPlayer.readyState < 1) {
+                    await new Promise(resolve => {
+                        videoPlayer.addEventListener('loadedmetadata', resolve, { once: true });
+                    });
+                }
+
+                // Create timeline instance
+                const timeline = new VideoTimeline(videoPlayer, {
+                    onFrameChange: (frameNumber) => {
+                        console.log(`[Timeline] Jumped to frame ${frameNumber}`);
+                    }
+                });
+
+                // Initialize timeline
+                await timeline.init();
+
+                // Get container and insert it
+                const container = timeline.getContainer();
+                const timelineWrapper = document.getElementById('timeline-wrapper');
+
+                if (container && timelineWrapper) {
+                    timelineWrapper.innerHTML = '';
+                    timelineWrapper.appendChild(container);
+                    timelineWrapper.style.display = 'block';
+                    showStatus('✅ Professional timeline ready! Click frames to jump.', 'success');
+                    console.log('[Timeline] Timeline displayed successfully');
+                }
+            } catch (error) {
+                console.error('[Timeline] Failed to initialize:', error);
+                showStatus('❌ Timeline initialization failed', 'error');
+            }
+        }
+
 
         // Extract frame thumbnails from video (client-side) - ALL FRAMES
         async function extractFrameThumbnails(video) {
