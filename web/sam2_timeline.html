@@ -192,12 +192,10 @@
             position: relative;
             margin-bottom: 1.5rem;
             width: 100%;
-            height: 450px;
+            min-height: 100px;
             background: #1a1a1a;
             border-radius: 8px;
-            overflow: auto;
-            display: flex;
-            flex-direction: column;
+            overflow: hidden;
         }
 
         .timeline-header {
@@ -579,10 +577,10 @@
             });
         }
 
-        // Initialize NLE timeline
+        // Initialize frame thumbnail timeline
         async function initTimeline() {
-            console.log('[Timeline] Starting initialization...');
-            showStatus('Initializing professional timeline...', '');
+            console.log('[Timeline] Starting frame extraction...');
+            showStatus('Extracting video frames for timeline...', '');
 
             const timelineWrapper = document.getElementById('timeline-wrapper');
             if (!timelineWrapper) {
@@ -592,68 +590,92 @@
 
             // Clear old timeline
             timelineWrapper.innerHTML = '';
+            timelineWrapper.style.display = 'block';
 
-            // Make sure wrapper is visible
-            timelineWrapper.style.display = 'flex';
+            // Extract all frames as thumbnails
+            const frames = await extractFrameThumbnails(videoPlayer);
 
-            // Get wrapper dimensions AFTER making it visible
-            const wrapperWidth = timelineWrapper.clientWidth;
-            const wrapperHeight = 450;
+            console.log(`[Timeline] Extracted ${frames.length} frames`);
 
-            console.log(`[Timeline] Wrapper dimensions: ${wrapperWidth}x${wrapperHeight}`);
+            // Create scrollable frame strip
+            const frameStrip = document.createElement('div');
+            frameStrip.style.cssText = `
+                display: flex;
+                overflow-x: auto;
+                gap: 4px;
+                padding: 10px;
+                background: #1a1a1a;
+                border-radius: 8px;
+                scroll-behavior: smooth;
+            `;
 
-            try {
-                // Initialize NLE Timeline
-                timeline = new NLETimeline(videoPlayer, {
-                    width: wrapperWidth > 0 ? wrapperWidth : 1200,
-                    height: wrapperHeight,
-                    fps: 30,
-                    pixelsPerSecond: 100
+            // Add each frame as a clickable thumbnail
+            frames.forEach((frame, index) => {
+                const frameContainer = document.createElement('div');
+                frameContainer.style.cssText = `
+                    flex-shrink: 0;
+                    cursor: pointer;
+                    border: 2px solid transparent;
+                    border-radius: 4px;
+                    transition: all 0.2s ease;
+                    position: relative;
+                `;
+
+                const img = document.createElement('img');
+                img.src = frame.thumbnail_url;
+                img.style.cssText = `
+                    width: 120px;
+                    height: 68px;
+                    display: block;
+                    border-radius: 4px;
+                    object-fit: cover;
+                `;
+
+                const frameLabel = document.createElement('div');
+                frameLabel.textContent = `${index}`;
+                frameLabel.style.cssText = `
+                    position: absolute;
+                    bottom: 2px;
+                    right: 2px;
+                    background: rgba(0,0,0,0.7);
+                    color: white;
+                    font-size: 10px;
+                    padding: 2px 4px;
+                    border-radius: 2px;
+                    font-family: monospace;
+                `;
+
+                // Click handler to seek video to this frame
+                frameContainer.addEventListener('click', () => {
+                    videoPlayer.currentTime = frame.timestamp;
+
+                    // Highlight selected frame
+                    document.querySelectorAll('.frame-thumb').forEach(f => {
+                        f.style.border = '2px solid transparent';
+                    });
+                    frameContainer.style.border = '2px solid #667eea';
                 });
 
-                console.log('[Timeline] NLETimeline object created');
+                // Hover effects
+                frameContainer.addEventListener('mouseenter', () => {
+                    if (frameContainer.style.border !== '2px solid #667eea') {
+                        frameContainer.style.border = '2px solid #999';
+                    }
+                });
+                frameContainer.addEventListener('mouseleave', () => {
+                    if (frameContainer.style.border !== '2px solid #667eea') {
+                        frameContainer.style.border = '2px solid transparent';
+                    }
+                });
 
-                // Initialize timeline
-                timeline.init();
-                console.log('[Timeline] Timeline initialized');
+                frameContainer.className = 'frame-thumb';
+                frameContainer.appendChild(img);
+                frameContainer.appendChild(frameLabel);
+                frameStrip.appendChild(frameContainer);
+            });
 
-                // Get container and append to page
-                const container = timeline.getContainer();
-                console.log('[Timeline] Got container:', container);
-
-                if (container) {
-                    timelineWrapper.appendChild(container);
-                    console.log('[Timeline] Container appended to DOM');
-
-                    // Use requestAnimationFrame for proper render timing
-                    requestAnimationFrame(() => {
-                        requestAnimationFrame(() => {
-                            if (timeline && timeline.render) {
-                                timeline.render();
-                                console.log('[Timeline] Initial render called after layout');
-                            }
-                        });
-                    });
-
-                    // Create sample clip for the uploaded video
-                    timeline.addClip('video1', {
-                        name: 'Main Video',
-                        type: 'video',
-                        startTime: 0,
-                        duration: videoPlayer.duration
-                    });
-
-                    console.log('[Timeline] Sample clip added');
-                    showStatus('✅ Professional NLE timeline ready!', 'success');
-                } else {
-                    console.error('[Timeline] Container is null!');
-                    showStatus('❌ Failed to create timeline container', 'error');
-                }
-
-            } catch (error) {
-                console.error('[Timeline] Initialization error:', error);
-                showStatus('❌ Timeline initialization failed: ' + error.message, 'error');
-            }
+            timelineWrapper.appendChild(frameStrip);
+            showStatus('✅ Frame timeline ready! Click any frame to jump to it.', 'success');
         }
 
         // Extract frame thumbnails from video (client-side) - ALL FRAMES
