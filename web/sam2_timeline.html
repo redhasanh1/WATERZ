@@ -187,6 +187,131 @@
             flex: 1;
         }
 
+        .timeline-wrapper {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+
+        .timeline-header {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 1rem 1.5rem;
+            border-radius: 0;
+            font-weight: 600;
+            font-size: 0.875rem;
+            letter-spacing: 0.025em;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #2d2d2d;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .timeline-header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .timeline-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        .timeline-icon {
+            width: 18px;
+            height: 18px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        .timeline-scroll-hint {
+            font-size: 0.75rem;
+            opacity: 0.6;
+            font-weight: normal;
+            text-transform: none;
+            letter-spacing: normal;
+        }
+
+        .timeline-frame-count {
+            font-size: 0.75rem;
+            color: #999;
+            font-weight: 500;
+            background: #242424;
+            padding: 0.35rem 0.75rem;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .timeline-scroll-buttons {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .timeline-scroll-buttons.left {
+            left: 15px;
+        }
+
+        .timeline-scroll-buttons.right {
+            right: 15px;
+        }
+
+        .timeline-scroll-btn {
+            background: rgba(26, 26, 26, 0.95);
+            color: #ffffff;
+            border: 1px solid #444;
+            width: 36px;
+            height: 60px;
+            border-radius: 6px;
+            font-size: 18px;
+            cursor: pointer;
+            pointer-events: all;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+        }
+
+        .timeline-scroll-btn:hover {
+            background: rgba(102, 126, 234, 0.95);
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .timeline-scroll-btn:active {
+            transform: translateY(0);
+        }
+
+        .timeline-fade {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 120px;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .timeline-fade.left {
+            left: 0;
+            background: linear-gradient(to right, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.4) 50%, transparent 100%);
+        }
+
+        .timeline-fade.right {
+            right: 0;
+            background: linear-gradient(to left, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.4) 50%, transparent 100%);
+        }
+
         .status-bar {
             background: #f0f2ff;
             padding: 1rem;
@@ -337,6 +462,9 @@
                 <p id="status-message">Ready</p>
             </div>
 
+            <!-- Timeline (ABOVE video) -->
+            <div class="timeline-wrapper" id="timeline-wrapper"></div>
+
             <!-- Video Container with Canvas Overlay -->
             <div class="video-container" id="video-container">
                 <video id="video-player" controls></video>
@@ -350,9 +478,6 @@
                     ✨ Process Full Video
                 </button>
             </div>
-
-            <!-- Timeline -->
-            <div class="timeline-wrapper" id="timeline-wrapper"></div>
         </div>
     </div>
 
@@ -367,6 +492,7 @@
 
     <!-- Include Scripts -->
     <script src="js/timeline.js"></script>
+    <script src="js/nle_timeline.js"></script>
     <script src="js/sam2_selector.js"></script>
 
     <script>
@@ -426,7 +552,7 @@
             videoPlayer.src = videoURL;
 
             // Wait for metadata
-            videoPlayer.addEventListener('loadedmetadata', () => {
+            videoPlayer.addEventListener('loadedmetadata', async () => {
                 const width = videoPlayer.videoWidth;
                 const height = videoPlayer.videoHeight;
                 const duration = videoPlayer.duration;
@@ -435,6 +561,9 @@
                 document.getElementById('video-metadata').textContent =
                     `${width}x${height} • ${fps}fps • ${duration.toFixed(1)}s`;
 
+                // Initialize timeline with frame thumbnails
+                await initTimeline();
+
                 // Initialize SAM2 selector
                 initSAM2Selector();
 
@@ -442,8 +571,97 @@
                 uploadZone.style.display = 'none';
                 videoWorkspace.classList.add('active');
 
-                showStatus('Video loaded! Click on objects to select them.', 'success');
+                showStatus('Video loaded! Use timeline to scrub through video. Click on objects to select them.', 'success');
             });
+        }
+
+        // Initialize NLE timeline
+        async function initTimeline() {
+            showStatus('Initializing professional timeline...', '');
+
+            const timelineWrapper = document.getElementById('timeline-wrapper');
+            timelineWrapper.innerHTML = ''; // Clear old timeline
+
+            // Initialize NLE Timeline
+            timeline = new NLETimeline(videoPlayer, {
+                width: timelineWrapper.clientWidth || 1200,
+                height: 400,
+                fps: 30,
+                pixelsPerSecond: 100
+            });
+
+            timeline.init();
+
+            // Add to page
+            timelineWrapper.appendChild(timeline.getContainer());
+
+            // Create sample clip for demo (the uploaded video)
+            timeline.addClip('video1', {
+                name: 'Main Video',
+                type: 'video',
+                startTime: 0,
+                duration: videoPlayer.duration
+            });
+
+            console.log('[Timeline] Professional NLE timeline initialized');
+        }
+
+        // Extract frame thumbnails from video (client-side) - ALL FRAMES
+        async function extractFrameThumbnails(video) {
+            const frames = [];
+            const duration = video.duration;
+            const fps = 30; // Estimate
+
+            // Calculate total frames
+            const totalFrames = Math.ceil(duration * fps);
+            const frameInterval = 1 / fps; // Time between frames
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size for thumbnails (smaller for performance)
+            const thumbHeight = 68;
+            const thumbWidth = Math.floor((video.videoWidth / video.videoHeight) * thumbHeight);
+            canvas.width = thumbWidth;
+            canvas.height = thumbHeight;
+
+            console.log(`[Timeline] Extracting ${totalFrames} frames...`);
+
+            // Extract EVERY frame
+            for (let frameNum = 0; frameNum < totalFrames; frameNum++) {
+                const t = frameNum * frameInterval;
+
+                // Seek to time
+                video.currentTime = t;
+                await new Promise(resolve => {
+                    video.onseeked = resolve;
+                });
+
+                // Draw frame to canvas
+                ctx.drawImage(video, 0, 0, thumbWidth, thumbHeight);
+
+                // Convert to data URL
+                const dataURL = canvas.toDataURL('image/jpeg', 0.7);
+
+                frames.push({
+                    frame_number: frameNum,
+                    timestamp: t,
+                    thumbnail_url: dataURL
+                });
+
+                // Update progress
+                if (frameNum % 30 === 0) {
+                    const progress = ((frameNum / totalFrames) * 100).toFixed(0);
+                    showStatus(`Extracting frames... ${progress}% (${frameNum}/${totalFrames})`, '');
+                }
+            }
+
+            // Reset video to start
+            video.currentTime = 0;
+
+            console.log(`[Timeline] Extracted ${frames.length} frames!`);
+
+            return frames;
         }
 
         // Initialize SAM2 selector
