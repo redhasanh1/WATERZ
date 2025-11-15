@@ -946,7 +946,7 @@
 
             try {
                 loadingOverlay.classList.add('active');
-                showStatus('Processing video...', '');
+                showStatus('Queuing video for processing...', '');
 
                 const response = await fetch('/api/sam2/process-video', {
                     method: 'POST',
@@ -955,24 +955,97 @@
                         task_id: currentTaskId,
                         points: selectionData.points,
                         video_width: selectionData.video_width,
-                        video_height: selectionData.video_height
+                        video_height: selectionData.video_height,
+                        frame_index: selectionData.frame_index
                     })
                 });
 
                 const data = await response.json();
 
                 if (data.status === 'success') {
-                    showStatus('✅ Processing complete! Your video is ready.', 'success');
-                    // TODO: Show download button or preview
+                    const jobId = data.job_id;
+                    showStatus('✅ Queued! Local worker will process your video...', 'success');
+
+                    // Poll job status
+                    pollJobStatus(jobId);
                 } else {
-                    showStatus('❌ Processing failed: ' + data.message, 'error');
+                    showStatus('❌ Failed to queue job: ' + data.message, 'error');
+                    loadingOverlay.classList.remove('active');
                 }
             } catch (error) {
                 console.error('Processing error:', error);
-                showStatus('❌ Processing failed: ' + error.message, 'error');
-            } finally {
+                showStatus('❌ Failed to queue job: ' + error.message, 'error');
                 loadingOverlay.classList.remove('active');
             }
+        }
+
+        // Poll job status until complete
+        async function pollJobStatus(jobId) {
+            const pollInterval = 2000; // 2 seconds
+            const maxAttempts = 300; // 10 minutes max
+            let attempts = 0;
+
+            const poll = async () => {
+                attempts++;
+
+                try {
+                    const response = await fetch(`/api/sam2/status/${jobId}`);
+                    const data = await response.json();
+
+                    console.log(`[POLL] Job ${jobId} status:`, data.status);
+
+                    if (data.status === 'completed') {
+                        loadingOverlay.classList.remove('active');
+                        showStatus('✅ Processing complete!', 'success');
+
+                        // Show download button
+                        const downloadBtn = document.createElement('a');
+                        downloadBtn.href = data.result_url;
+                        downloadBtn.className = 'btn btn-primary';
+                        downloadBtn.textContent = '⬇️ Download Processed Video';
+                        downloadBtn.style.marginTop = '20px';
+                        downloadBtn.download = `sam2_result_${jobId}.mp4`;
+
+                        statusBar.appendChild(downloadBtn);
+
+                    } else if (data.status === 'failed') {
+                        loadingOverlay.classList.remove('active');
+                        showStatus('❌ Processing failed: ' + (data.error || 'Unknown error'), 'error');
+
+                    } else if (data.status === 'processing') {
+                        showStatus('🔄 Your video is being processed by the local worker...', '');
+
+                        if (attempts < maxAttempts) {
+                            setTimeout(poll, pollInterval);
+                        } else {
+                            loadingOverlay.classList.remove('active');
+                            showStatus('❌ Processing timeout - please check local worker', 'error');
+                        }
+
+                    } else if (data.status === 'pending') {
+                        showStatus('⏳ Waiting for local worker...', '');
+
+                        if (attempts < maxAttempts) {
+                            setTimeout(poll, pollInterval);
+                        } else {
+                            loadingOverlay.classList.remove('active');
+                            showStatus('❌ Processing timeout - please check local worker', 'error');
+                        }
+                    }
+
+                } catch (error) {
+                    console.error('Poll error:', error);
+                    if (attempts < maxAttempts) {
+                        setTimeout(poll, pollInterval);
+                    } else {
+                        loadingOverlay.classList.remove('active');
+                        showStatus('❌ Failed to check job status', 'error');
+                    }
+                }
+            };
+
+            // Start polling
+            poll();
         }
 
         // Show status message

@@ -68,23 +68,22 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Calculate scale to fit canvas while maintaining aspect ratio
-        const containerWidth = this.canvas.parentElement.clientWidth;
-        const containerHeight = this.canvas.parentElement.clientHeight || 600;
+        // Get actual video display dimensions
+        const videoRect = this.video.getBoundingClientRect();
+        const displayWidth = videoRect.width;
+        const displayHeight = videoRect.height;
 
-        const scaleX = containerWidth / this.videoWidth;
-        const scaleY = containerHeight / this.videoHeight;
-        this.displayScale = Math.min(scaleX, scaleY, 1.0);
+        // Set canvas to match video's display size exactly
+        this.canvas.width = this.videoWidth;
+        this.canvas.height = this.videoHeight;
+        this.canvas.style.width = displayWidth + 'px';
+        this.canvas.style.height = displayHeight + 'px';
 
-        // Set canvas display size
-        this.canvas.width = Math.floor(this.videoWidth * this.displayScale);
-        this.canvas.height = Math.floor(this.videoHeight * this.displayScale);
+        // Calculate scale for coordinate conversion
+        this.displayScaleX = displayWidth / this.videoWidth;
+        this.displayScaleY = displayHeight / this.videoHeight;
 
-        // Calculate offsets for centering
-        this.offsetX = (containerWidth - this.canvas.width) / 2;
-        this.offsetY = (containerHeight - this.canvas.height) / 2;
-
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Scale: ${this.displayScale.toFixed(2)}x`);
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth}x${displayHeight}`);
 
         // Redraw with current mask
         this.draw();
@@ -118,9 +117,9 @@ class SAM2Selector {
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        // Convert to original video coordinates
-        const videoX = Math.floor(x / this.displayScale);
-        const videoY = Math.floor(y / this.displayScale);
+        // Convert to original video coordinates using separate X/Y scales
+        const videoX = Math.floor(x / this.displayScaleX);
+        const videoY = Math.floor(y / this.displayScaleY);
 
         // Clamp to video bounds
         return {
@@ -317,8 +316,8 @@ class SAM2Selector {
     drawAllPoints() {
         this.selections.forEach(selection => {
             selection.points.forEach(point => {
-                const x = point.x * this.displayScale;
-                const y = point.y * this.displayScale;
+                const x = point.x * this.displayScaleX;
+                const y = point.y * this.displayScaleY;
                 const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
 
                 // Draw circle

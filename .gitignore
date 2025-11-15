@@ -6,6 +6,7 @@ __pycache__/
 # Virtual environments
 propainter_env/
 venv/
+venv_wsl2/
 env/
 
 # Cache and temp
