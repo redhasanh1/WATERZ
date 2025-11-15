@@ -2549,6 +2549,26 @@
                 timelineDiv.appendChild(timelineContainer);
                 timelineDiv.style.display = 'block';
             }
+
+            // Initialize SAM2Selector
+            if (!sam2Selector) {
+                console.log('[SAM2] Initializing SAM2Selector...');
+                sam2Selector = new SAM2Selector(video, canvas, {
+                    onMaskUpdate: (maskData) => {
+                        console.log('[SAM2] Mask received:', maskData);
+                        if (!window.sam2Masks) window.sam2Masks = [];
+                        window.sam2Masks.push(maskData);
+                        if (sam2Selector && sam2Selector.points) {
+                            points = sam2Selector.points;
+                            updatePointCount();
+                        }
+                    },
+                    onError: (error) => {
+                        console.error('[SAM2] Error:', error);
+                        alert('SAM2 Error: ' + error);
+                    }
+                });
+            }
         });
 
         // Resize canvas when window resizes
@@ -2560,7 +2580,7 @@
             }
         });
 
-        // Enable/disable selection mode
+        // Enable/disable selection mode with SAM2
         enableBtn.addEventListener('click', function() {
             selectionMode = !selectionMode;
             if (selectionMode) {
@@ -2570,10 +2590,22 @@
                 clearBtn.disabled = false;
                 video.pause(); // Pause video during selection
                 pointsList.style.display = 'block';
+
+                // Enable SAM2 selector
+                if (sam2Selector) {
+                    sam2Selector.enabled = true;
+                    console.log('[SAM2] Selection mode enabled');
+                }
             } else {
                 enableBtn.textContent = 'Enable Selection Mode';
                 enableBtn.style.background = 'var(--gradient-primary)';
                 canvas.style.pointerEvents = 'none';
+
+                // Disable SAM2 selector
+                if (sam2Selector) {
+                    sam2Selector.enabled = false;
+                    console.log('[SAM2] Selection mode disabled');
+                }
             }
         });
 
@@ -2780,7 +2812,8 @@
             const a = document.createElement('a');
             a.href = url;
             const isVideo = picked.type && picked.type.startsWith('video/');
-            a.download = emoved_.;
+            a.download = 
+emoved_.;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
