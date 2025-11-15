@@ -2385,9 +2385,127 @@
             });
         }
     </script>
-    
+
+    <!-- SAM2 Timeline and Selection Scripts -->
+    <script src="js/timeline.js"></script>
+    <script src="js/sam2_selector.js"></script>
+
     <script>
-      // Interactive Mask Selection (like local SAM2 test!)
+      // Professional Video Timeline Class
+      class VideoTimeline {
+          constructor(videoElement) {
+              this.video = videoElement;
+              this.container = null;
+              this.thumbnails = [];
+              this.fps = 30;
+          }
+
+          async init() {
+              console.log('[Timeline] Initializing...');
+              this.fps = 30;
+              this.totalFrames = Math.floor(this.video.duration * this.fps);
+              this.createTimelineContainer();
+              await this.generateThumbnails();
+              console.log('[Timeline] Ready with', this.thumbnails.length, 'thumbnails');
+              return this.container;
+          }
+
+          createTimelineContainer() {
+              this.container = document.createElement('div');
+              this.container.style.cssText = `
+                  width: 100%;
+                  height: 90px;
+                  background: rgba(0,0,0,0.85);
+                  border-radius: 8px;
+                  overflow-x: auto;
+                  display: flex;
+                  padding: 12px;
+                  gap: 6px;
+              `;
+          }
+
+          async generateThumbnails() {
+              const thumbnailCount = Math.min(this.totalFrames, 100);
+              const interval = Math.floor(this.totalFrames / thumbnailCount);
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              canvas.width = 120;
+              canvas.height = 68;
+
+              for (let i = 0; i < thumbnailCount; i++) {
+                  const frameNumber = i * interval;
+                  const time = frameNumber / this.fps;
+                  const thumb = document.createElement('div');
+                  thumb.dataset.frame = frameNumber;
+                  thumb.style.cssText = `
+                      flex-shrink: 0;
+                      width: 120px;
+                      height: 68px;
+                      background: #000;
+                      border: 2px solid transparent;
+                      border-radius: 4px;
+                      cursor: pointer;
+                      position: relative;
+                      transition: border 0.2s;
+                  `;
+
+                  const label = document.createElement('div');
+                  label.textContent = frameNumber;
+                  label.style.cssText = `
+                      position: absolute;
+                      bottom: 3px;
+                      right: 5px;
+                      background: rgba(0,0,0,0.8);
+                      color: #0f0;
+                      font-size: 11px;
+                      padding: 2px 5px;
+                      border-radius: 3px;
+                      font-weight: bold;
+                  `;
+                  thumb.appendChild(label);
+
+                  try {
+                      await this.captureFrame(thumb, canvas, ctx, time);
+                  } catch (e) {
+                      thumb.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+                  }
+
+                  thumb.onclick = () => {
+                      this.video.currentTime = time;
+                      this.thumbnails.forEach(t => t.style.borderColor = 'transparent');
+                      thumb.style.borderColor = '#0f0';
+                  };
+
+                  thumb.onmouseenter = () => thumb.style.borderColor = '#667eea';
+                  thumb.onmouseleave = () => {
+                      const current = Math.floor(this.video.currentTime * this.fps);
+                      if (frameNumber !== current) thumb.style.borderColor = 'transparent';
+                  };
+
+                  this.container.appendChild(thumb);
+                  this.thumbnails.push(thumb);
+              }
+          }
+
+          async captureFrame(thumbElement, canvas, ctx, time) {
+              return new Promise((resolve) => {
+                  const saved = this.video.currentTime;
+                  this.video.currentTime = time;
+                  this.video.onseeked = () => {
+                      ctx.drawImage(this.video, 0, 0, 120, 68);
+                      thumbElement.style.backgroundImage = `url(${canvas.toDataURL('image/jpeg', 0.7)})`;
+                      thumbElement.style.backgroundSize = 'cover';
+                      this.video.currentTime = saved;
+                      this.video.onseeked = null;
+                      resolve();
+                  };
+              });
+          }
+      }
+    </script>
+
+    <script>
+      // Interactive Mask Selection (SAM2 Integration)
       (function () {
         const videoContainer = document.getElementById('videoContainer');
         const video = document.getElementById('previewVideo');
@@ -2405,9 +2523,11 @@
         let selectionMode = false;
         let points = [];
         let ctx = null;
+        let sam2Selector = null;
+        let videoTimeline = null;
 
-        // Initialize canvas when video loads
-        video.addEventListener('loadedmetadata', function() {
+        // Initialize canvas and timeline when video loads
+        video.addEventListener('loadedmetadata', async function() {
             const rect = video.getBoundingClientRect();
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
@@ -2418,6 +2538,17 @@
 
             // Show mask selection controls
             maskControls.style.display = 'block';
+
+            // Initialize professional timeline
+            const timelineDiv = document.getElementById('professionalTimeline');
+            if (timelineDiv && !videoTimeline) {
+                console.log('[Timeline] Creating timeline...');
+                videoTimeline = new VideoTimeline(video);
+                const timelineContainer = await videoTimeline.init();
+                timelineDiv.innerHTML = '';
+                timelineDiv.appendChild(timelineContainer);
+                timelineDiv.style.display = 'block';
+            }
         });
 
         // Resize canvas when window resizes
