@@ -208,3 +208,16 @@ faster-propainter-main/model/modules/tensorrt_transformer.py
 mmdeploy
 mmdeploy
 sam2_trt_inference/
+pure_trt_masks/frame_00040.jpg
+pure_trt_masks/frame_00000.jpg
+/pure_trt_masks
+/temp_sam2_frames
+*.png
+*.png
+*.png
+*.png
+temp_sam2_masks/00000.png
+/temp_sam2_masks
+/temp_sam2_masks
+*.png
+*.png
