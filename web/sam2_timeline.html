@@ -337,6 +337,9 @@
                 <p id="status-message">Ready</p>
             </div>
 
+            <!-- Timeline (ABOVE video) -->
+            <div class="timeline-wrapper" id="timeline-wrapper"></div>
+
             <!-- Video Container with Canvas Overlay -->
             <div class="video-container" id="video-container">
                 <video id="video-player" controls></video>
@@ -350,9 +353,6 @@
                     ✨ Process Full Video
                 </button>
             </div>
-
-            <!-- Timeline -->
-            <div class="timeline-wrapper" id="timeline-wrapper"></div>
         </div>
     </div>
 
@@ -426,7 +426,7 @@
             videoPlayer.src = videoURL;
 
             // Wait for metadata
-            videoPlayer.addEventListener('loadedmetadata', () => {
+            videoPlayer.addEventListener('loadedmetadata', async () => {
                 const width = videoPlayer.videoWidth;
                 const height = videoPlayer.videoHeight;
                 const duration = videoPlayer.duration;
@@ -435,6 +435,9 @@
                 document.getElementById('video-metadata').textContent =
                     `${width}x${height} • ${fps}fps • ${duration.toFixed(1)}s`;
 
+                // Initialize timeline with frame thumbnails
+                await initTimeline();
+
                 // Initialize SAM2 selector
                 initSAM2Selector();
 
@@ -442,8 +445,86 @@
                 uploadZone.style.display = 'none';
                 videoWorkspace.classList.add('active');
 
-                showStatus('Video loaded! Click on objects to select them.', 'success');
+                showStatus('Video loaded! Use timeline to scrub through video. Click on objects to select them.', 'success');
             });
+        }
+
+        // Initialize timeline with frame thumbnails
+        async function initTimeline() {
+            showStatus('Extracting frame thumbnails...', '');
+
+            // Extract frames from video locally (client-side)
+            const frames = await extractFrameThumbnails(videoPlayer);
+
+            // Initialize VideoTimeline
+            timeline = new VideoTimeline(videoPlayer, {
+                thumbnailHeight: 68,
+                thumbnailWidth: 120,
+                onFrameChange: (frameNumber) => {
+                    console.log('Timeline jumped to frame:', frameNumber);
+                    if (sam2Selector) {
+                        sam2Selector.onVideoTimeUpdate();
+                    }
+                }
+            });
+
+            // Manually set frame data (client-side extraction)
+            timeline.frames = frames;
+            timeline.totalFrames = frames.length;
+            timeline.fps = 30; // Estimate
+            timeline.duration = videoPlayer.duration;
+
+            // Render timeline
+            const timelineContainer = timeline.render();
+            document.getElementById('timeline-wrapper').appendChild(timelineContainer);
+
+            timeline.attachEventListeners();
+            timeline.isInitialized = true;
+
+            console.log(`[Timeline] Initialized with ${frames.length} thumbnails`);
+        }
+
+        // Extract frame thumbnails from video (client-side)
+        async function extractFrameThumbnails(video) {
+            const frames = [];
+            const duration = video.duration;
+            const fps = 30; // Estimate
+            const interval = 1; // Extract 1 frame per second
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size for thumbnails
+            const thumbHeight = 68;
+            const thumbWidth = Math.floor((video.videoWidth / video.videoHeight) * thumbHeight);
+            canvas.width = thumbWidth;
+            canvas.height = thumbHeight;
+
+            // Extract frames
+            for (let t = 0; t < duration; t += interval) {
+                // Seek to time
+                video.currentTime = t;
+                await new Promise(resolve => {
+                    video.onseeked = resolve;
+                });
+
+                // Draw frame to canvas
+                ctx.drawImage(video, 0, 0, thumbWidth, thumbHeight);
+
+                // Convert to data URL
+                const dataURL = canvas.toDataURL('image/jpeg', 0.8);
+
+                frames.push({
+                    frame_number: Math.floor(t * fps),
+                    timestamp: t,
+                    thumbnail_url: dataURL
+                });
+            }
+
+            // Reset video to start
+            video.currentTime = 0;
+
+            return frames;
         }
 
         // Initialize SAM2 selector
