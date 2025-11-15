@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM2 Interactive Watermark Removal - Professional Timeline</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            color: #333;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            font-size: 1.75rem;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 0.95rem;
+        }
+
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+            gap: 1.5rem;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .upload-zone {
+            background: white;
+            border-radius: 12px;
+            padding: 3rem;
+            text-align: center;
+            border: 3px dashed #ddd;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .upload-zone:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .upload-zone.dragover {
+            border-color: #667eea;
+            background: #f0f2ff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .upload-zone h2 {
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+
+        .upload-zone p {
+            color: #666;
+            margin-bottom: 1.5rem;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .btn-success {
+            background: #10b981;
+        }
+
+        .video-workspace {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
+        .video-workspace.active {
+            display: block;
+        }
+
+        .video-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .video-info h3 {
+            color: #333;
+            font-size: 1.25rem;
+        }
+
+        .video-info .metadata {
+            color: #666;
+            font-size: 0.9rem;
+            font-family: monospace;
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+        }
+
+        #video-player {
+            width: 100%;
+            display: block;
+        }
+
+        #sam2-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+            pointer-events: all;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .controls button {
+            flex: 1;
+        }
+
+        .status-bar {
+            background: #f0f2ff;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            border-left: 4px solid #667eea;
+        }
+
+        .status-bar p {
+            margin: 0;
+            color: #333;
+            font-size: 0.95rem;
+        }
+
+        .status-bar.success {
+            background: #d1fae5;
+            border-left-color: #10b981;
+        }
+
+        .status-bar.error {
+            background: #fee2e2;
+            border-left-color: #ef4444;
+        }
+
+        .timeline-wrapper {
+            margin-top: 1rem;
+        }
+
+        .instructions {
+            background: #fffbeb;
+            border: 1px solid #fbbf24;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .instructions h4 {
+            color: #92400e;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .instructions ul {
+            margin-left: 1.5rem;
+            color: #78350f;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .loading-content {
+            background: white;
+            padding: 2rem 3rem;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 1rem;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <h1>🎯 SAM2 Interactive Watermark Removal</h1>
+        <p>Professional video timeline with click-to-select object removal</p>
+    </div>
+
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Upload Zone -->
+        <div class="upload-zone" id="upload-zone">
+            <div class="upload-icon">📹</div>
+            <h2>Upload Your Video</h2>
+            <p>Drag & drop a video file or click to browse</p>
+            <button class="btn" onclick="document.getElementById('file-input').click()">Choose Video</button>
+            <input type="file" id="file-input" accept="video/*">
+        </div>
+
+        <!-- Video Workspace -->
+        <div class="video-workspace" id="video-workspace">
+            <!-- Video Info -->
+            <div class="video-info">
+                <div>
+                    <h3 id="video-filename">video.mp4</h3>
+                    <span class="metadata" id="video-metadata">1920x1080 • 30fps • 10s</span>
+                </div>
+                <button class="btn btn-secondary" onclick="resetWorkspace()">Upload New Video</button>
+            </div>
+
+            <!-- Instructions -->
+            <div class="instructions">
+                <h4>📖 How to Use:</h4>
+                <ul>
+                    <li><strong>Left Click:</strong> Select object to remove (green overlay)</li>
+                    <li><strong>Right Click:</strong> Mark background to keep (red point)</li>
+                    <li><strong>Reset:</strong> Clear all points and start over</li>
+                    <li><strong>Process Video:</strong> Generate masks for entire video</li>
+                </ul>
+            </div>
+
+            <!-- Status Bar -->
+            <div class="status-bar" id="status-bar" style="display: none;">
+                <p id="status-message">Ready</p>
+            </div>
+
+            <!-- Video Container with Canvas Overlay -->
+            <div class="video-container" id="video-container">
+                <video id="video-player" controls></video>
+                <canvas id="sam2-canvas"></canvas>
+            </div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <button class="btn" id="reset-btn" onclick="resetSelection()">🔄 Reset Points</button>
+                <button class="btn btn-success" id="process-btn" onclick="processVideo()" disabled>
+                    ✨ Process Full Video
+                </button>
+            </div>
+
+            <!-- Timeline -->
+            <div class="timeline-wrapper" id="timeline-wrapper"></div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <h3>Loading SAM2 Model...</h3>
+            <p>This may take a moment...</p>
+        </div>
+    </div>
+
+    <!-- Include Scripts -->
+    <script src="js/timeline.js"></script>
+    <script src="js/sam2_selector.js"></script>
+
+    <script>
+        // Global state
+        let currentVideo = null;
+        let currentTaskId = null;
+        let timeline = null;
+        let sam2Selector = null;
+
+        // DOM elements
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput = document.getElementById('file-input');
+        const videoWorkspace = document.getElementById('video-workspace');
+        const videoPlayer = document.getElementById('video-player');
+        const sam2Canvas = document.getElementById('sam2-canvas');
+        const statusBar = document.getElementById('status-bar');
+        const statusMessage = document.getElementById('status-message');
+        const processBtn = document.getElementById('process-btn');
+        const loadingOverlay = document.getElementById('loading-overlay');
+
+        // Upload zone drag & drop
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('video/')) {
+                handleVideoUpload(file);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleVideoUpload(file);
+            }
+        });
+
+        // Handle video upload
+        async function handleVideoUpload(file) {
+            currentVideo = file;
+            currentTaskId = generateTaskId();
+
+            // Update UI
+            document.getElementById('video-filename').textContent = file.name;
+
+            // Load video
+            const videoURL = URL.createObjectURL(file);
+            videoPlayer.src = videoURL;
+
+            // Wait for metadata
+            videoPlayer.addEventListener('loadedmetadata', () => {
+                const width = videoPlayer.videoWidth;
+                const height = videoPlayer.videoHeight;
+                const duration = videoPlayer.duration;
+                const fps = 30; // Estimate, will be corrected by backend
+
+                document.getElementById('video-metadata').textContent =
+                    `${width}x${height} • ${fps}fps • ${duration.toFixed(1)}s`;
+
+                // Initialize SAM2 selector
+                initSAM2Selector();
+
+                // Show workspace
+                uploadZone.style.display = 'none';
+                videoWorkspace.classList.add('active');
+
+                showStatus('Video loaded! Click on objects to select them.', 'success');
+            });
+        }
+
+        // Initialize SAM2 selector
+        function initSAM2Selector() {
+            sam2Selector = new SAM2Selector(videoPlayer, sam2Canvas, {
+                onMaskUpdate: (mask, points) => {
+                    console.log('Mask updated:', points.length, 'points');
+                    processBtn.disabled = points.length === 0;
+
+                    if (points.length > 0) {
+                        showStatus(`Object selected with ${points.length} points. Click "Process Video" to continue.`, 'success');
+                    }
+                },
+                onPointsChange: (points) => {
+                    console.log('Points changed:', points);
+                }
+            });
+
+            // Update canvas on video resize
+            videoPlayer.addEventListener('loadedmetadata', () => {
+                sam2Selector.updateCanvasSize();
+            });
+
+            // Redraw on video time update
+            videoPlayer.addEventListener('timeupdate', () => {
+                sam2Selector.onVideoTimeUpdate();
+            });
+        }
+
+        // Reset selection
+        function resetSelection() {
+            if (sam2Selector) {
+                sam2Selector.reset();
+                processBtn.disabled = true;
+                showStatus('Points cleared. Click on objects to select them.', '');
+            }
+        }
+
+        // Reset workspace
+        function resetWorkspace() {
+            videoWorkspace.classList.remove('active');
+            uploadZone.style.display = 'block';
+            videoPlayer.src = '';
+            currentVideo = null;
+            currentTaskId = null;
+            sam2Selector = null;
+            fileInput.value = '';
+            statusBar.style.display = 'none';
+        }
+
+        // Process video
+        async function processVideo() {
+            if (!sam2Selector) return;
+
+            const selectionData = sam2Selector.getSelectionData();
+
+            if (!selectionData.has_mask) {
+                showStatus('Please select an object first!', 'error');
+                return;
+            }
+
+            try {
+                loadingOverlay.classList.add('active');
+                showStatus('Processing video...', '');
+
+                const response = await fetch('/api/sam2/process-video', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        task_id: currentTaskId,
+                        points: selectionData.points,
+                        video_width: selectionData.video_width,
+                        video_height: selectionData.video_height
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showStatus('✅ Processing complete! Your video is ready.', 'success');
+                    // TODO: Show download button or preview
+                } else {
+                    showStatus('❌ Processing failed: ' + data.message, 'error');
+                }
+            } catch (error) {
+                console.error('Processing error:', error);
+                showStatus('❌ Processing failed: ' + error.message, 'error');
+            } finally {
+                loadingOverlay.classList.remove('active');
+            }
+        }
+
+        // Show status message
+        function showStatus(message, type = '') {
+            statusBar.style.display = 'block';
+            statusMessage.textContent = message;
+            statusBar.className = 'status-bar';
+            if (type) {
+                statusBar.classList.add(type);
+            }
+        }
+
+        // Generate task ID
+        function generateTaskId() {
+            return 'task_' + Math.random().toString(36).substring(2, 15);
+        }
+    </script>
+</body>
+</html>

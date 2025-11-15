@@ -949,6 +949,165 @@ def health():
     })
 
 
+@app.route('/api/extract-frames/<task_id>', methods=['GET'])
+def extract_frames(task_id):
+    """Extract frame thumbnails for timeline"""
+    try:
+        # Find video file for task
+        task_dir = os.path.join(UPLOAD_FOLDER, f'task_{task_id}')
+
+        if not os.path.exists(task_dir):
+            return jsonify({'status': 'error', 'message': 'Task not found'}), 404
+
+        # Find video file in task directory
+        video_files = [f for f in os.listdir(task_dir) if f.endswith(('.mp4', '.avi', '.mov', '.mkv'))]
+
+        if not video_files:
+            return jsonify({'status': 'error', 'message': 'No video found for task'}), 404
+
+        video_path = os.path.join(task_dir, video_files[0])
+
+        # Extract frames
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+
+        # Extract thumbnails (every 30 frames or 1 second intervals)
+        thumbnail_interval = max(1, int(fps)) if fps > 0 else 30
+        frames = []
+        frame_idx = 0
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_idx % thumbnail_interval == 0:
+                # Resize to thumbnail
+                thumb_height = 68
+                thumb_width = int(frame.shape[1] * (thumb_height / frame.shape[0]))
+                thumb = cv2.resize(frame, (thumb_width, thumb_height))
+
+                # Save thumbnail
+                thumb_filename = f'thumb_{frame_idx:05d}.jpg'
+                thumb_path = os.path.join(task_dir, thumb_filename)
+                cv2.imwrite(thumb_path, thumb, [cv2.IMWRITE_JPEG_QUALITY, 80])
+
+                frames.append({
+                    'frame_number': frame_idx,
+                    'timestamp': frame_idx / fps if fps > 0 else 0,
+                    'thumbnail_url': f'/uploads/task_{task_id}/{thumb_filename}'
+                })
+
+            frame_idx += 1
+
+        cap.release()
+
+        return jsonify({
+            'status': 'success',
+            'frames': frames,
+            'total_frames': total_frames,
+            'fps': fps,
+            'duration': duration
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/sam2/select-object', methods=['POST'])
+def sam2_select_object():
+    """Interactive SAM2 object selection - returns mask preview"""
+    try:
+        data = request.json
+
+        # Get frame data and points
+        frame_base64 = data.get('frame_data')
+        points = data.get('points', [])
+        video_width = data.get('video_width')
+        video_height = data.get('video_height')
+
+        if not frame_base64 or not points:
+            return jsonify({'status': 'error', 'message': 'Missing frame data or points'}), 400
+
+        # Decode frame from base64
+        import base64
+        import io
+        from PIL import Image as PILImage
+
+        frame_bytes = base64.b64decode(frame_base64)
+        frame_img = PILImage.open(io.BytesIO(frame_bytes))
+        frame_array = np.array(frame_img.convert('RGB'))
+
+        # Import SAM2 TensorRT predictor
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from sam2_trt_predictor import SAM2TensorRTPredictor
+
+        # Load SAM2 model (cache this in production!)
+        encoder_engine = r"D:\watermarkz\sam2_trt_inference\engines\sam2_encoder_fp16.engine"
+        decoder_engine = r"D:\watermarkz\sam2_trt_inference\engines\sam2_decoder_fp16_dynamic.engine"
+
+        predictor = SAM2TensorRTPredictor(encoder_engine, decoder_engine)
+
+        # Set image
+        predictor.set_image(frame_array)
+
+        # Prepare points and labels
+        points_array = np.array([[p['x'], p['y']] for p in points], dtype=np.float32)
+        labels_array = np.array([p['label'] for p in points], dtype=np.int32)
+
+        # Get mask
+        mask, score = predictor.predict(points_array, labels_array)
+
+        # Encode mask as PNG base64
+        mask_uint8 = (mask * 255).astype(np.uint8)
+        mask_img = PILImage.fromarray(mask_uint8, mode='L')
+
+        buffer = io.BytesIO()
+        mask_img.save(buffer, format='PNG')
+        mask_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+        return jsonify({
+            'status': 'success',
+            'mask': mask_base64,
+            'score': float(score) if score is not None else None
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/sam2/process-video', methods=['POST'])
+def sam2_process_video():
+    """Queue SAM2 full video processing task"""
+    try:
+        data = request.json
+
+        task_id = data.get('task_id')
+        points = data.get('points', [])
+
+        if not task_id or not points:
+            return jsonify({'status': 'error', 'message': 'Missing task_id or points'}), 400
+
+        # In production, queue this to Celery (server_production2.py)
+        # For now, return a placeholder
+
+        processing_task_id = uuid.uuid4().hex[:12]
+
+        return jsonify({
+            'status': 'success',
+            'message': 'SAM2 processing queued',
+            'processing_task_id': processing_task_id,
+            'queue_position': 0
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/api/train', methods=['POST'])
 def train_custom_inpainting():
     """Accept two videos (original + object-removed) and register a training job.
