@@ -1423,7 +1423,7 @@
 
     <script src="config.js"></script>
     <script src="js/billing.js"></script>
-    <script src="js/timeline.js"></script>
+    
     <script>
         // Mobile Menu Toggle
         const mobileMenuToggle = document.getElementById('mobileMenuToggle');
@@ -2387,7 +2387,7 @@
     </script>
 
     <!-- SAM2 Timeline and Selection Scripts -->
-    <script src="js/timeline.js"></script>
+    
     <script src="js/sam2_selector.js"></script>
 
     <script>
@@ -2784,7 +2784,7 @@
 
             const fd = new FormData();
             fd.append('file', picked);
-            const resp = await fetch(${API}/api/remove-watermark, { method: 'POST', body: fd });
+            const resp = await fetch(`${API}/api/remove-watermark`, { method: 'POST', body: fd });
             if (!resp.ok) {
               try {
                 const data = await resp.clone().json();
