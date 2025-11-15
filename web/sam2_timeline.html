@@ -577,10 +577,9 @@
             });
         }
 
-        // Initialize frame thumbnail timeline
-        async function initTimeline() {
-            console.log('[Timeline] Starting frame extraction...');
-            showStatus('Extracting video frames for timeline...', '');
+        // Initialize video scrubber timeline (like Fotor)
+        function initTimeline() {
+            console.log('[Timeline] Creating scrubber timeline...');
 
             const timelineWrapper = document.getElementById('timeline-wrapper');
             if (!timelineWrapper) {
@@ -592,90 +591,184 @@
             timelineWrapper.innerHTML = '';
             timelineWrapper.style.display = 'block';
 
-            // Extract all frames as thumbnails
-            const frames = await extractFrameThumbnails(videoPlayer);
-
-            console.log(`[Timeline] Extracted ${frames.length} frames`);
-
-            // Create scrollable frame strip
-            const frameStrip = document.createElement('div');
-            frameStrip.style.cssText = `
-                display: flex;
-                overflow-x: auto;
-                gap: 4px;
-                padding: 10px;
-                background: #1a1a1a;
+            // Create timeline container
+            const timelineContainer = document.createElement('div');
+            timelineContainer.id = 'video-timeline-container';
+            timelineContainer.style.cssText = `
+                position: relative;
+                width: 100%;
+                height: 60px;
+                background: #2a2a2a;
                 border-radius: 8px;
-                scroll-behavior: smooth;
+                padding: 20px 42px;
+                box-sizing: border-box;
+                cursor: pointer;
             `;
 
-            // Add each frame as a clickable thumbnail
-            frames.forEach((frame, index) => {
-                const frameContainer = document.createElement('div');
-                frameContainer.style.cssText = `
-                    flex-shrink: 0;
-                    cursor: pointer;
-                    border: 2px solid transparent;
-                    border-radius: 4px;
-                    transition: all 0.2s ease;
-                    position: relative;
-                `;
+            // Create progress bar track (background)
+            const progressTrack = document.createElement('div');
+            progressTrack.style.cssText = `
+                position: absolute;
+                left: 42px;
+                right: 42px;
+                top: 50%;
+                transform: translateY(-50%);
+                height: 4px;
+                background: #4a4a4a;
+                border-radius: 2px;
+            `;
 
-                const img = document.createElement('img');
-                img.src = frame.thumbnail_url;
-                img.style.cssText = `
-                    width: 120px;
-                    height: 68px;
-                    display: block;
-                    border-radius: 4px;
-                    object-fit: cover;
-                `;
+            // Create progress bar fill (elapsed time)
+            const progressFill = document.createElement('div');
+            progressFill.id = 'timeline-progress-fill';
+            progressFill.style.cssText = `
+                position: absolute;
+                left: 0;
+                top: 0;
+                height: 100%;
+                width: 0%;
+                background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                border-radius: 2px;
+                transition: width 0.1s linear;
+            `;
 
-                const frameLabel = document.createElement('div');
-                frameLabel.textContent = `${index}`;
-                frameLabel.style.cssText = `
-                    position: absolute;
-                    bottom: 2px;
-                    right: 2px;
-                    background: rgba(0,0,0,0.7);
-                    color: white;
-                    font-size: 10px;
-                    padding: 2px 4px;
-                    border-radius: 2px;
-                    font-family: monospace;
-                `;
+            progressTrack.appendChild(progressFill);
 
-                // Click handler to seek video to this frame
-                frameContainer.addEventListener('click', () => {
-                    videoPlayer.currentTime = frame.timestamp;
+            // Create playhead marker
+            const playhead = document.createElement('div');
+            playhead.id = 'timeline-playhead';
+            playhead.style.cssText = `
+                position: absolute;
+                left: calc(0% - 6px);
+                top: 50%;
+                transform: translateY(-50%);
+                width: 12px;
+                height: 18px;
+                cursor: grab;
+                z-index: 10;
+                transition: left 0.1s linear;
+            `;
 
-                    // Highlight selected frame
-                    document.querySelectorAll('.frame-thumb').forEach(f => {
-                        f.style.border = '2px solid transparent';
-                    });
-                    frameContainer.style.border = '2px solid #667eea';
-                });
+            // SVG playhead marker (similar to Fotor)
+            playhead.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" width="12" height="18">
+                    <g fill="#FFF">
+                        <path d="M0 2v10.971a2 2 0 00.9 1.67L6 18l5.1-3.358a2 2 0 00.9-1.67V2a2 2 0 00-2-2H2a2 2 0 00-2 2z" fill-opacity="0.4"></path>
+                        <path d="M0 2v10.971a2 2 0 00.9 1.67L6 18l5.1-3.358a2 2 0 00.9-1.67V2a2 2 0 00-2-2H2a2 2 0 00-2 2zm10.55 11.806L6 16.803l-4.55-2.997Q1 13.51 1 12.971V2q0-.414.293-.707T2 1h8q.414 0 .707.293T11 2v10.971q0 .539-.45.835z" fill-rule="evenodd"></path>
+                    </g>
+                </svg>
+            `;
 
-                // Hover effects
-                frameContainer.addEventListener('mouseenter', () => {
-                    if (frameContainer.style.border !== '2px solid #667eea') {
-                        frameContainer.style.border = '2px solid #999';
-                    }
-                });
-                frameContainer.addEventListener('mouseleave', () => {
-                    if (frameContainer.style.border !== '2px solid #667eea') {
-                        frameContainer.style.border = '2px solid transparent';
-                    }
-                });
+            // Create timestamp display
+            const timestamp = document.createElement('div');
+            timestamp.id = 'timeline-timestamp';
+            timestamp.textContent = '00:00.00';
+            timestamp.style.cssText = `
+                position: absolute;
+                left: calc(0% - 3px);
+                bottom: -22px;
+                font-size: 11px;
+                color: #fff;
+                font-family: monospace;
+                background: rgba(0,0,0,0.7);
+                padding: 2px 6px;
+                border-radius: 4px;
+                pointer-events: none;
+                transition: left 0.1s linear;
+            `;
 
-                frameContainer.className = 'frame-thumb';
-                frameContainer.appendChild(img);
-                frameContainer.appendChild(frameLabel);
-                frameStrip.appendChild(frameContainer);
+            playhead.appendChild(timestamp);
+
+            // Assemble timeline
+            timelineContainer.appendChild(progressTrack);
+            timelineContainer.appendChild(playhead);
+            timelineWrapper.appendChild(timelineContainer);
+
+            // Setup drag and click handlers
+            setupTimelineDragHandlers(timelineContainer, playhead, progressFill, timestamp);
+
+            console.log('[Timeline] Scrubber timeline initialized');
+            showStatus('✅ Timeline ready! Drag the playhead or click to scrub.', 'success');
+        }
+
+        // Setup timeline drag and click handlers
+        function setupTimelineDragHandlers(container, playhead, progressFill, timestamp) {
+            let isDragging = false;
+            const trackLeft = 42;
+            const trackRight = 42;
+
+            // Format time as MM:SS.MS
+            function formatTime(seconds) {
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                const ms = Math.floor((seconds % 1) * 100);
+                return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
+            }
+
+            // Update playhead position and video time
+            function updatePlayhead(clientX) {
+                const rect = container.getBoundingClientRect();
+                const trackWidth = rect.width - trackLeft - trackRight;
+                const x = clientX - rect.left - trackLeft;
+                const percentage = Math.max(0, Math.min(1, x / trackWidth));
+
+                // Update video time
+                videoPlayer.currentTime = percentage * videoPlayer.duration;
+
+                // Update UI
+                const leftPos = percentage * 100;
+                playhead.style.left = `calc(${leftPos}% - 6px)`;
+                progressFill.style.width = `${leftPos}%`;
+                timestamp.style.left = `calc(${leftPos}% - 3px)`;
+                timestamp.textContent = formatTime(videoPlayer.currentTime);
+            }
+
+            // Mouse down on playhead - start dragging
+            playhead.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                isDragging = true;
+                playhead.style.cursor = 'grabbing';
+                playhead.style.transition = 'none';
+                progressFill.style.transition = 'none';
+                timestamp.style.transition = 'none';
             });
 
-            timelineWrapper.appendChild(frameStrip);
-            showStatus('✅ Frame timeline ready! Click any frame to jump to it.', 'success');
+            // Mouse move - drag playhead
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    updatePlayhead(e.clientX);
+                }
+            });
+
+            // Mouse up - stop dragging
+            document.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    playhead.style.cursor = 'grab';
+                    playhead.style.transition = 'left 0.1s linear';
+                    progressFill.style.transition = 'width 0.1s linear';
+                    timestamp.style.transition = 'left 0.1s linear';
+                }
+            });
+
+            // Click on timeline to seek
+            container.addEventListener('click', (e) => {
+                if (e.target === playhead || playhead.contains(e.target)) {
+                    return; // Don't seek if clicking playhead itself
+                }
+                updatePlayhead(e.clientX);
+            });
+
+            // Sync playhead with video playback
+            videoPlayer.addEventListener('timeupdate', () => {
+                if (!isDragging) {
+                    const percentage = (videoPlayer.currentTime / videoPlayer.duration) * 100;
+                    playhead.style.left = `calc(${percentage}% - 6px)`;
+                    progressFill.style.width = `${percentage}%`;
+                    timestamp.style.left = `calc(${percentage}% - 3px)`;
+                    timestamp.textContent = formatTime(videoPlayer.currentTime);
+                }
+            });
         }
 
         // Extract frame thumbnails from video (client-side) - ALL FRAMES
