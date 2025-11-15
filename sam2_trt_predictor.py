@@ -18,6 +18,7 @@ import pycuda.autoinit
 import cv2
 from pathlib import Path
 import logging
+import torch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -73,6 +74,11 @@ class SAM2TensorRTPredictor:
 
         logger.info(f"[OK] Loaded encoder: {self.encoder_engine_path.name}")
         logger.info(f"[OK] Loaded decoder: {self.decoder_engine_path.name}")
+
+        # Create separate CUDA streams for encoder and decoder to avoid race conditions
+        # Using the same stream for both can cause interference between operations
+        self.encoder_stream = cuda.Stream()
+        self.decoder_stream = cuda.Stream()
 
     def _load_engine(self, engine_path):
         """Load TensorRT engine from file"""
@@ -152,10 +158,9 @@ class SAM2TensorRTPredictor:
         for name, d_output in encoder_outputs_gpu.items():
             self.encoder_context.set_tensor_address(name, int(d_output))
 
-        # Run inference with proper stream synchronization
-        stream = cuda.Stream()
-        self.encoder_context.execute_async_v3(stream.handle)
-        stream.synchronize()  # Wait for execution to complete
+        # Run inference with encoder stream
+        self.encoder_context.execute_async_v3(self.encoder_stream.handle)
+        self.encoder_stream.synchronize()  # Wait for execution to complete
 
         # Copy ALL outputs back to host
         for name, d_output in encoder_outputs_gpu.items():
@@ -180,13 +185,36 @@ class SAM2TensorRTPredictor:
         logger.info(f"[OK] high_res_feats_0: {self.high_res_feats_0.shape if self.high_res_feats_0 is not None else 'None'}")
         logger.info(f"[OK] high_res_feats_1: {self.high_res_feats_1.shape if self.high_res_feats_1 is not None else 'None'}")
 
-    def predict(self, point_coords, point_labels):
+        # Synchronize both PyCUDA and PyTorch CUDA before freeing memory
+        # This ensures all async operations are complete before cleanup
+        self.encoder_stream.synchronize()  # PyCUDA encoder stream
+        torch.cuda.synchronize()   # PyTorch CUDA context
+
+        # Free GPU memory to prevent memory leak
+        d_input.free()
+        for d_output in encoder_outputs_gpu.values():
+            d_output.free()
+
+    def get_image_embeddings(self):
+        """
+        Get cached TensorRT encoder outputs for hybrid PyTorch/TensorRT pipeline
+
+        Returns:
+            tuple: (image_embed, high_res_feats_0, high_res_feats_1) as numpy arrays
+        """
+        if self.image_embed is None:
+            raise ValueError("Call set_image() first to encode an image")
+
+        return self.image_embed, self.high_res_feats_0, self.high_res_feats_1
+
+    def predict(self, point_coords, point_labels, mask_input=None):
         """
         Predict mask from point prompts
 
         Args:
             point_coords: numpy array of shape (N, 2) with (x, y) coordinates
             point_labels: numpy array of shape (N,) with 1 for positive, 0 for negative
+            mask_input: optional numpy array [1, 1, 256, 256] - previous mask for tracking
 
         Returns:
             masks: numpy array (H, W) with predicted mask
@@ -217,9 +245,18 @@ class SAM2TensorRTPredictor:
         labels_reshaped[:, 0] = labels  # First label (actual label)
         labels_reshaped[:, 1] = 0  # Second label (padding)
 
-        # Create mask_input (zeros for first prediction) and has_mask_input flag
-        mask_input = np.zeros((1, 1, 256, 256), dtype=np.float32)
-        has_mask_input = np.array([0.0], dtype=np.float32)  # 0 = no previous mask
+        # Create mask_input and has_mask_input flag
+        if mask_input is None:
+            # No previous mask - use zeros
+            mask_input = np.zeros((1, 1, 256, 256), dtype=np.float32)
+            has_mask_input = np.array([0.0], dtype=np.float32)  # 0 = no previous mask
+        else:
+            # Use provided mask for tracking
+            # Ensure correct shape [1, 1, 256, 256]
+            if mask_input.shape != (1, 1, 256, 256):
+                raise ValueError(f"mask_input must be shape (1, 1, 256, 256), got {mask_input.shape}")
+            mask_input = np.ascontiguousarray(mask_input, dtype=np.float32)
+            has_mask_input = np.array([1.0], dtype=np.float32)  # 1 = using previous mask
 
         # Allocate GPU memory for ALL decoder inputs
         decoder_inputs_gpu = {}
@@ -300,10 +337,9 @@ class SAM2TensorRTPredictor:
         for name, d_output in decoder_outputs_gpu.items():
             self.decoder_context.set_tensor_address(name, int(d_output))
 
-        # Run decoder with proper stream synchronization
-        stream = cuda.Stream()
-        self.decoder_context.execute_async_v3(stream.handle)
-        stream.synchronize()  # Wait for execution to complete
+        # Run decoder with decoder stream
+        self.decoder_context.execute_async_v3(self.decoder_stream.handle)
+        self.decoder_stream.synchronize()  # Wait for execution to complete
 
         # Copy outputs back
         for name, d_output in decoder_outputs_gpu.items():
@@ -333,12 +369,57 @@ class SAM2TensorRTPredictor:
         # Extract IoU score (ensure it's a scalar)
         if iou_predictions is not None:
             iou_score = float(iou_predictions.flatten()[0])
+            # Validate IoU range - negative values indicate memory corruption
+            if iou_score < 0.0 or iou_score > 1.0:
+                logger.warning(f"[WARN] Invalid IoU: {iou_score:.3f} - likely GPU memory corruption, resetting to 0.0")
+                iou_score = 0.0
         else:
             iou_score = 0.0
 
         logger.info(f"[OK] Predicted mask: {mask_binary.shape}, IoU: {iou_score:.3f}")
 
+        # Synchronize both PyCUDA and PyTorch CUDA before freeing memory
+        self.decoder_stream.synchronize()  # PyCUDA decoder stream
+        torch.cuda.synchronize()   # PyTorch CUDA context
+
+        # Free GPU memory to prevent memory leak
+        for d_buf in set(decoder_inputs_gpu.values()):
+            d_buf.free()
+        for d_buf in decoder_outputs_gpu.values():
+            d_buf.free()
+
         return mask_binary, iou_score
+
+    def predict_with_embeddings(self, custom_image_embed, point_coords, point_labels):
+        """
+        Predict mask using CUSTOM image embeddings (for memory-fused features)
+
+        This method allows using memory-fused embeddings from PyTorch SAM2 memory attention
+        instead of the original cached embeddings from set_image().
+
+        Args:
+            custom_image_embed: numpy array [1, 256, 64, 64] - memory-fused features
+            point_coords: numpy array of shape (N, 2) with (x, y) coordinates
+            point_labels: numpy array of shape (N,) with 1 for positive, 0 for negative
+
+        Returns:
+            masks: numpy array (H, W) with predicted mask
+            scores: confidence scores
+        """
+        if self.high_res_feats_0 is None or self.high_res_feats_1 is None:
+            raise ValueError("Call set_image() first to encode high-res features")
+
+        # Temporarily replace cached embeddings with memory-fused version
+        original_embed = self.image_embed
+        self.image_embed = custom_image_embed
+
+        # Run prediction using the standard predict() method
+        mask, score = self.predict(point_coords, point_labels)
+
+        # Restore original embeddings
+        self.image_embed = original_embed
+
+        return mask, score
 
 
 def test_sam2_trt():

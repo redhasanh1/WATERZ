@@ -99,7 +99,14 @@
       "Bash(while read commit)",
       "Bash(do git ls-tree -r --name-only $commit)",
       "Bash(done)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" test_sam2_interactive_local.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" export_sam2_memory_encoder.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" sam2_memory_encoder_trt.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz''); import test_sam2_interactive_local; print(''[SUCCESS] Full pipeline imports without errors!'')\")",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz''); import test_sam2_interactive_local; print(''[SUCCESS] Pipeline imports without errors!'')\")",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz''); import test_sam2_interactive_local; print(''[SUCCESS] Pipeline imports correctly with all fixes!'')\")"
     ],
     "deny": [],
     "ask": []
