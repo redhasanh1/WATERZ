@@ -187,6 +187,93 @@
             flex: 1;
         }
 
+        .timeline-wrapper {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+
+        .timeline-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px 8px 0 0;
+            font-weight: 700;
+            font-size: 0.95rem;
+            letter-spacing: 0.5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .timeline-header-left {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .timeline-scroll-hint {
+            font-size: 0.85rem;
+            opacity: 0.9;
+            font-weight: normal;
+        }
+
+        .timeline-scroll-buttons {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .timeline-scroll-buttons.left {
+            left: 10px;
+        }
+
+        .timeline-scroll-buttons.right {
+            right: 10px;
+        }
+
+        .timeline-scroll-btn {
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-size: 24px;
+            cursor: pointer;
+            pointer-events: all;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .timeline-scroll-btn:hover {
+            background: rgba(102, 126, 234, 1);
+            transform: scale(1.1);
+        }
+
+        .timeline-fade {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100px;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .timeline-fade.left {
+            left: 0;
+            background: linear-gradient(to right, rgba(0, 0, 0, 0.3), transparent);
+        }
+
+        .timeline-fade.right {
+            right: 0;
+            background: linear-gradient(to left, rgba(0, 0, 0, 0.3), transparent);
+        }
+
         .status-bar {
             background: #f0f2ff;
             padding: 1rem;
@@ -474,14 +561,72 @@
             timeline.fps = 30; // Estimate
             timeline.duration = videoPlayer.duration;
 
+            // Create timeline header
+            const timelineWrapper = document.getElementById('timeline-wrapper');
+
+            const header = document.createElement('div');
+            header.className = 'timeline-header';
+            header.innerHTML = `
+                <div class="timeline-header-left">
+                    <span>🎬 FRAME-BY-FRAME TIMELINE</span>
+                    <span class="timeline-scroll-hint">← Scroll to see all ${frames.length} frames →</span>
+                </div>
+                <div>${frames.length} frames loaded</div>
+            `;
+            timelineWrapper.appendChild(header);
+
             // Render timeline
             const timelineContainer = timeline.render();
-            document.getElementById('timeline-wrapper').appendChild(timelineContainer);
+
+            // Add scroll buttons and fade overlays
+            const scrollWrapper = document.createElement('div');
+            scrollWrapper.style.position = 'relative';
+
+            // Left scroll button
+            const leftScrollBtn = document.createElement('div');
+            leftScrollBtn.className = 'timeline-scroll-buttons left';
+            leftScrollBtn.innerHTML = '<button class="timeline-scroll-btn" onclick="scrollTimelineLeft()">◀</button>';
+            scrollWrapper.appendChild(leftScrollBtn);
+
+            // Right scroll button
+            const rightScrollBtn = document.createElement('div');
+            rightScrollBtn.className = 'timeline-scroll-buttons right';
+            rightScrollBtn.innerHTML = '<button class="timeline-scroll-btn" onclick="scrollTimelineRight()">▶</button>';
+            scrollWrapper.appendChild(rightScrollBtn);
+
+            // Left fade
+            const leftFade = document.createElement('div');
+            leftFade.className = 'timeline-fade left';
+            scrollWrapper.appendChild(leftFade);
+
+            // Right fade
+            const rightFade = document.createElement('div');
+            rightFade.className = 'timeline-fade right';
+            scrollWrapper.appendChild(rightFade);
+
+            scrollWrapper.appendChild(timelineContainer);
+            timelineWrapper.appendChild(scrollWrapper);
 
             timeline.attachEventListeners();
             timeline.isInitialized = true;
 
             console.log(`[Timeline] Initialized with ${frames.length} thumbnails`);
+        }
+
+        // Scroll timeline left
+        function scrollTimelineLeft() {
+            const container = document.querySelector('.video-timeline');
+            if (container) {
+                container.scrollLeft -= 300;
+            }
+        }
+
+        // Scroll timeline right
+        function scrollTimelineRight() {
+            const container = document.querySelector('.video-timeline');
+            if (container) {
+                container.scrollLeft += 300;
+            }
         }
 
         // Extract frame thumbnails from video (client-side) - ALL FRAMES
