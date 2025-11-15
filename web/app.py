@@ -1048,6 +1048,7 @@ def sam2_select_object():
         if not REDIS_URL:
             return jsonify({'status': 'error', 'message': 'Redis not configured'}), 500
 
+        print(f"[SAM2] Using Redis: {REDIS_URL[:50]}...")
         redis_client = redis.from_url(REDIS_URL, decode_responses=False)
 
         # Subscribe to response channel BEFORE publishing request
@@ -1064,12 +1065,15 @@ def sam2_select_object():
             'video_height': video_height
         }
 
+        print(f"[SAM2] Publishing request {request_id} to channel: sam2:selection:request")
+        print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
         redis_client.publish('sam2:selection:request', json.dumps(request_data))
 
         # Wait for response (timeout: 5 seconds)
         timeout = 5.0
         start_time = time.time()
 
+        print(f"[SAM2] Waiting for response on: {response_channel}")
         while time.time() - start_time < timeout:
             message = pubsub.get_message(timeout=0.1)
 

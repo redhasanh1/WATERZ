@@ -62,6 +62,9 @@ echo [INFO] Dashboard will be available at http://localhost:5555
 echo [INFO] Press Ctrl+C to stop
 echo.
 
+REM Set Railway Redis URL explicitly (so worker connects to same Redis as Railway backend)
+set REDIS_URL=redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930
+
 REM Start worker
 python start_object_server.py
 
