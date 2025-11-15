@@ -447,6 +447,11 @@ def login_page():
     return send_file('login.html')
 
 
+@app.route('/sam2_timeline.html')
+def sam2_timeline_page():
+    return send_file('sam2_timeline.html')
+
+
 @app.route('/auth/google')
 def google_auth_start():
     """Kick off Google OAuth flow by redirecting to consent screen."""
