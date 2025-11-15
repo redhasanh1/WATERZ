@@ -679,23 +679,72 @@
 
             playhead.appendChild(timestamp);
 
+            // Create thumbnail preview popup (appears on hover)
+            const thumbnailPreview = document.createElement('div');
+            thumbnailPreview.id = 'timeline-thumbnail-preview';
+            thumbnailPreview.style.cssText = `
+                position: absolute;
+                bottom: 70px;
+                left: 0;
+                width: 160px;
+                height: 90px;
+                background: #000;
+                border: 2px solid #667eea;
+                border-radius: 8px;
+                overflow: hidden;
+                pointer-events: none;
+                opacity: 0;
+                transform: translateX(-50%);
+                transition: opacity 0.2s ease;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+                z-index: 100;
+            `;
+
+            const thumbnailCanvas = document.createElement('canvas');
+            thumbnailCanvas.width = 160;
+            thumbnailCanvas.height = 90;
+            thumbnailCanvas.style.cssText = `
+                width: 100%;
+                height: 100%;
+                display: block;
+            `;
+
+            const thumbnailTime = document.createElement('div');
+            thumbnailTime.style.cssText = `
+                position: absolute;
+                bottom: 4px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(0,0,0,0.8);
+                color: #fff;
+                font-size: 10px;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-family: monospace;
+            `;
+
+            thumbnailPreview.appendChild(thumbnailCanvas);
+            thumbnailPreview.appendChild(thumbnailTime);
+            timelineContainer.appendChild(thumbnailPreview);
+
             // Assemble timeline
             timelineContainer.appendChild(progressTrack);
             timelineContainer.appendChild(playhead);
             timelineWrapper.appendChild(timelineContainer);
 
             // Setup drag and click handlers
-            setupTimelineDragHandlers(timelineContainer, playhead, progressFill, timestamp);
+            setupTimelineDragHandlers(timelineContainer, playhead, progressFill, timestamp, thumbnailPreview, thumbnailCanvas, thumbnailTime);
 
             console.log('[Timeline] Scrubber timeline initialized');
             showStatus('✅ Timeline ready! Drag the playhead or click to scrub.', 'success');
         }
 
         // Setup timeline drag and click handlers
-        function setupTimelineDragHandlers(container, playhead, progressFill, timestamp) {
+        function setupTimelineDragHandlers(container, playhead, progressFill, timestamp, thumbnailPreview, thumbnailCanvas, thumbnailTime) {
             let isDragging = false;
             const trackLeft = 42;
             const trackRight = 42;
+            const thumbnailCtx = thumbnailCanvas.getContext('2d');
 
             // Format time as MM:SS.MS
             function formatTime(seconds) {
@@ -768,6 +817,36 @@
                     timestamp.style.left = `calc(${percentage}% - 3px)`;
                     timestamp.textContent = formatTime(videoPlayer.currentTime);
                 }
+            });
+
+            // Show thumbnail preview on hover
+            container.addEventListener('mousemove', (e) => {
+                const rect = container.getBoundingClientRect();
+                const trackWidth = rect.width - trackLeft - trackRight;
+                const x = e.clientX - rect.left - trackLeft;
+                const percentage = Math.max(0, Math.min(1, x / trackWidth));
+                const hoverTime = percentage * videoPlayer.duration;
+
+                // Position thumbnail preview
+                const previewLeft = trackLeft + (percentage * trackWidth);
+                thumbnailPreview.style.left = `${previewLeft}px`;
+                thumbnailPreview.style.opacity = '1';
+
+                // Update thumbnail time display
+                thumbnailTime.textContent = formatTime(hoverTime);
+
+                // Draw thumbnail of frame at hover time
+                const tempVideo = document.createElement('video');
+                tempVideo.src = videoPlayer.src;
+                tempVideo.currentTime = hoverTime;
+                tempVideo.addEventListener('seeked', () => {
+                    thumbnailCtx.drawImage(tempVideo, 0, 0, 160, 90);
+                }, { once: true });
+            });
+
+            // Hide thumbnail when mouse leaves
+            container.addEventListener('mouseleave', () => {
+                thumbnailPreview.style.opacity = '0';
             });
         }
 
