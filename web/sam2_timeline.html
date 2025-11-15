@@ -191,6 +191,10 @@
         .timeline-wrapper {
             position: relative;
             margin-bottom: 1.5rem;
+            min-height: 450px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            overflow: hidden;
         }
 
         .timeline-header {
@@ -578,33 +582,77 @@
 
         // Initialize NLE timeline
         async function initTimeline() {
+            console.log('[Timeline] Starting initialization...');
             showStatus('Initializing professional timeline...', '');
 
             const timelineWrapper = document.getElementById('timeline-wrapper');
-            timelineWrapper.innerHTML = ''; // Clear old timeline
+            if (!timelineWrapper) {
+                console.error('[Timeline] Timeline wrapper not found!');
+                return;
+            }
 
-            // Initialize NLE Timeline
-            timeline = new NLETimeline(videoPlayer, {
-                width: timelineWrapper.clientWidth || 1200,
-                height: 400,
-                fps: 30,
-                pixelsPerSecond: 100
-            });
+            // Clear old timeline
+            timelineWrapper.innerHTML = '';
 
-            timeline.init();
+            // Make sure wrapper is visible
+            timelineWrapper.style.display = 'block';
 
-            // Add to page
-            timelineWrapper.appendChild(timeline.getContainer());
+            // Get wrapper dimensions
+            const wrapperWidth = timelineWrapper.clientWidth;
+            const wrapperHeight = 450;
 
-            // Create sample clip for demo (the uploaded video)
-            timeline.addClip('video1', {
-                name: 'Main Video',
-                type: 'video',
-                startTime: 0,
-                duration: videoPlayer.duration
-            });
+            console.log(`[Timeline] Wrapper dimensions: ${wrapperWidth}x${wrapperHeight}`);
 
-            console.log('[Timeline] Professional NLE timeline initialized');
+            try {
+                // Initialize NLE Timeline
+                timeline = new NLETimeline(videoPlayer, {
+                    width: wrapperWidth > 0 ? wrapperWidth : 1200,
+                    height: wrapperHeight,
+                    fps: 30,
+                    pixelsPerSecond: 100
+                });
+
+                console.log('[Timeline] NLETimeline object created');
+
+                // Initialize timeline
+                timeline.init();
+                console.log('[Timeline] Timeline initialized');
+
+                // Get container and append to page
+                const container = timeline.getContainer();
+                console.log('[Timeline] Got container:', container);
+
+                if (container) {
+                    timelineWrapper.appendChild(container);
+                    console.log('[Timeline] Container appended to DOM');
+
+                    // Force a render
+                    setTimeout(() => {
+                        if (timeline && timeline.render) {
+                            timeline.render();
+                            console.log('[Timeline] Initial render called');
+                        }
+                    }, 100);
+
+                    // Create sample clip for the uploaded video
+                    timeline.addClip('video1', {
+                        name: 'Main Video',
+                        type: 'video',
+                        startTime: 0,
+                        duration: videoPlayer.duration
+                    });
+
+                    console.log('[Timeline] Sample clip added');
+                    showStatus('✅ Professional NLE timeline ready!', 'success');
+                } else {
+                    console.error('[Timeline] Container is null!');
+                    showStatus('❌ Failed to create timeline container', 'error');
+                }
+
+            } catch (error) {
+                console.error('[Timeline] Initialization error:', error);
+                showStatus('❌ Timeline initialization failed: ' + error.message, 'error');
+            }
         }
 
         // Extract frame thumbnails from video (client-side) - ALL FRAMES
