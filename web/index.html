@@ -1767,7 +1767,7 @@
 
                     // Initialize professional timeline for videos
                     if (file.type.startsWith('video/')) {
-                        initializeTimeline(data.task_id, videoElem);
+// initializeTimeline(data.task_id, videoElem); // Removed - using inline VideoTimeline in loadedmetadata
                     }
 
                     // Show process button
@@ -2228,42 +2228,42 @@
         // ==================================================
         let videoTimeline = null;
 
-        async function initializeTimeline(taskId, videoElem) {
-            try {
-                // Wait for video metadata to be loaded
-                if (videoElem.readyState < 1) {
-                    await new Promise(resolve => {
-                        videoElem.addEventListener('loadedmetadata', resolve, { once: true });
-                    });
-                }
-
-                // Create timeline instance
-                videoTimeline = new VideoTimeline(videoElem, {
-                    onFrameChange: (frameNumber) => {
-                        console.log(`[Timeline] Jumped to frame ${frameNumber}`);
-                        // Store current frame for mask tracking
-                        window.currentFrame = frameNumber;
-                    }
-                });
-
-                // Initialize timeline with task ID
-                await videoTimeline.init(taskId);
-
-                // Get timeline container and insert it
-                const timelineContainer = videoTimeline.getContainer();
-                const professionalTimelineDiv = document.getElementById('professionalTimeline');
-
-                if (timelineContainer && professionalTimelineDiv) {
-                    professionalTimelineDiv.innerHTML = '';
-                    professionalTimelineDiv.appendChild(timelineContainer);
-                    professionalTimelineDiv.style.display = 'block';
-
-                    console.log('[Timeline] Professional timeline initialized successfully');
-                }
-            } catch (error) {
-                console.error('[Timeline] Failed to initialize:', error);
-            }
-        }
+//         async function initializeTimeline(taskId, videoElem) {
+//             try {
+//                 // Wait for video metadata to be loaded
+//                 if (videoElem.readyState < 1) {
+//                     await new Promise(resolve => {
+//                         videoElem.addEventListener('loadedmetadata', resolve, { once: true });
+//                     });
+//                 }
+// 
+//                 // Create timeline instance
+//                 videoTimeline = new VideoTimeline(videoElem, {
+//                     onFrameChange: (frameNumber) => {
+//                         console.log(`[Timeline] Jumped to frame ${frameNumber}`);
+//                         // Store current frame for mask tracking
+//                         window.currentFrame = frameNumber;
+//                     }
+//                 });
+// 
+//                 // Initialize timeline with task ID
+//                 await videoTimeline.init(taskId);
+// 
+//                 // Get timeline container and insert it
+//                 const timelineContainer = videoTimeline.getContainer();
+//                 const professionalTimelineDiv = document.getElementById('professionalTimeline');
+// 
+//                 if (timelineContainer && professionalTimelineDiv) {
+//                     professionalTimelineDiv.innerHTML = '';
+//                     professionalTimelineDiv.appendChild(timelineContainer);
+//                     professionalTimelineDiv.style.display = 'block';
+// 
+//                     console.log('[Timeline] Professional timeline initialized successfully');
+//                 }
+//             } catch (error) {
+//                 console.error('[Timeline] Failed to initialize:', error);
+//             }
+//         }
 
         // ==================================================
         // Professional Video Player Controls
