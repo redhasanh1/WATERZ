@@ -422,6 +422,12 @@ def index():
     """Serve the main HTML page."""
     return send_file('index.html')
 
+@app.route('/sam2')
+@app.route('/sam2_timeline.html')
+def sam2_timeline():
+    """Serve the SAM2 timeline page."""
+    return send_file('sam2_timeline.html')
+
 @app.route('/index.html')
 def legacy_index():
     """Legacy path compatibility: serve the same page."""
