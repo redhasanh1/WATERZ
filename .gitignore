@@ -207,3 +207,4 @@ faster-propainter-main/custom_kernel_transformer.py
 faster-propainter-main/model/modules/tensorrt_transformer.py
 mmdeploy
 mmdeploy
+sam2_trt_inference/
