@@ -71,6 +71,9 @@ class NLETimeline {
         this.container.className = 'nle-timeline-container';
         this.container.style.cssText = `
             width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
             background: #1a1a1a;
             border-radius: 8px;
             overflow: hidden;
@@ -87,6 +90,10 @@ class NLETimeline {
         this.canvas.height = this.options.height;
         this.canvas.style.cssText = `
             display: block;
+            width: 100%;
+            height: auto;
+            max-width: 100%;
+            max-height: 100%;
             cursor: crosshair;
             background: #242424;
         `;
