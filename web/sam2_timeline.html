@@ -484,24 +484,31 @@
             console.log(`[Timeline] Initialized with ${frames.length} thumbnails`);
         }
 
-        // Extract frame thumbnails from video (client-side)
+        // Extract frame thumbnails from video (client-side) - ALL FRAMES
         async function extractFrameThumbnails(video) {
             const frames = [];
             const duration = video.duration;
             const fps = 30; // Estimate
-            const interval = 1; // Extract 1 frame per second
+
+            // Calculate total frames
+            const totalFrames = Math.ceil(duration * fps);
+            const frameInterval = 1 / fps; // Time between frames
 
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
 
-            // Set canvas size for thumbnails
+            // Set canvas size for thumbnails (smaller for performance)
             const thumbHeight = 68;
             const thumbWidth = Math.floor((video.videoWidth / video.videoHeight) * thumbHeight);
             canvas.width = thumbWidth;
             canvas.height = thumbHeight;
 
-            // Extract frames
-            for (let t = 0; t < duration; t += interval) {
+            console.log(`[Timeline] Extracting ${totalFrames} frames...`);
+
+            // Extract EVERY frame
+            for (let frameNum = 0; frameNum < totalFrames; frameNum++) {
+                const t = frameNum * frameInterval;
+
                 // Seek to time
                 video.currentTime = t;
                 await new Promise(resolve => {
@@ -512,17 +519,25 @@
                 ctx.drawImage(video, 0, 0, thumbWidth, thumbHeight);
 
                 // Convert to data URL
-                const dataURL = canvas.toDataURL('image/jpeg', 0.8);
+                const dataURL = canvas.toDataURL('image/jpeg', 0.7);
 
                 frames.push({
-                    frame_number: Math.floor(t * fps),
+                    frame_number: frameNum,
                     timestamp: t,
                     thumbnail_url: dataURL
                 });
+
+                // Update progress
+                if (frameNum % 30 === 0) {
+                    const progress = ((frameNum / totalFrames) * 100).toFixed(0);
+                    showStatus(`Extracting frames... ${progress}% (${frameNum}/${totalFrames})`, '');
+                }
             }
 
             // Reset video to start
             video.currentTime = 0;
+
+            console.log(`[Timeline] Extracted ${frames.length} frames!`);
 
             return frames;
         }
