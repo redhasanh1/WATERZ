@@ -60,6 +60,45 @@ class SAM2Selector {
     }
 
     /**
+     * Calculate actual video render bounds accounting for object-fit: contain
+     */
+    calculateVideoRenderBounds() {
+        if (!this.video.videoWidth) return;
+
+        const canvasRect = this.canvas.getBoundingClientRect();
+        const containerWidth = canvasRect.width;
+        const containerHeight = canvasRect.height;
+
+        // Calculate video's aspect ratio
+        const videoAspect = this.video.videoWidth / this.video.videoHeight;
+        const containerAspect = containerWidth / containerHeight;
+
+        let renderWidth, renderHeight, offsetX, offsetY;
+
+        if (videoAspect > containerAspect) {
+            // Video is wider - letterbox top/bottom
+            renderWidth = containerWidth;
+            renderHeight = containerWidth / videoAspect;
+            offsetX = 0;
+            offsetY = (containerHeight - renderHeight) / 2;
+        } else {
+            // Video is taller - pillarbox left/right
+            renderHeight = containerHeight;
+            renderWidth = containerHeight * videoAspect;
+            offsetX = (containerWidth - renderWidth) / 2;
+            offsetY = 0;
+        }
+
+        // Store render bounds for coordinate conversion
+        this.renderWidth = renderWidth;
+        this.renderHeight = renderHeight;
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+
+        console.log(`[SAM2Selector] Video render: ${renderWidth.toFixed(1)}x${renderHeight.toFixed(1)}, Offset: (${offsetX.toFixed(1)}, ${offsetY.toFixed(1)})`);
+    }
+
+    /**
      * Update canvas size to match video element
      */
     updateCanvasSize() {
@@ -86,6 +125,9 @@ class SAM2Selector {
 
         console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth}x${displayHeight}`);
 
+        // Calculate video render bounds for letterbox compensation
+        this.calculateVideoRenderBounds();
+
         // Redraw with current mask
         this.draw();
     }
@@ -97,6 +139,7 @@ class SAM2Selector {
         if (this.isLoading) return;
 
         const point = this.getCanvasPoint(e);
+        if (!point) return; // Ignore clicks in letterbox area
         this.addPoint(point.x, point.y, 1);
     }
 
@@ -107,6 +150,7 @@ class SAM2Selector {
         if (this.isLoading) return;
 
         const point = this.getCanvasPoint(e);
+        if (!point) return; // Ignore clicks in letterbox area
         this.addPoint(point.x, point.y, 0);
     }
 
@@ -115,19 +159,29 @@ class SAM2Selector {
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
 
-        // Convert to canvas coordinates using live rect dimensions (handles object-fit: contain)
-        const videoX = Math.floor((x / (rect.right - rect.left)) * this.canvas.width);
-        const videoY = Math.floor((y / (rect.bottom - rect.top)) * this.canvas.height);
+        // Subtract letterbox offset to get position relative to rendered video
+        const relativeX = clickX - this.offsetX;
+        const relativeY = clickY - this.offsetY;
+
+        // Check if click is outside the rendered video area (in letterbox)
+        if (relativeX < 0 || relativeY < 0 || relativeX > this.renderWidth || relativeY > this.renderHeight) {
+            console.log('[SAM2Selector] Click outside video area (in letterbox), ignoring');
+            return null;
+        }
+
+        // Convert to canvas coordinates using actual rendered video dimensions
+        const videoX = Math.floor((relativeX / this.renderWidth) * this.canvas.width);
+        const videoY = Math.floor((relativeY / this.renderHeight) * this.canvas.height);
 
         // Clamp to video bounds
         return {
             x: Math.max(0, Math.min(videoX, this.videoWidth - 1)),
             y: Math.max(0, Math.min(videoY, this.videoHeight - 1)),
-            displayX: x,
-            displayY: y
+            displayX: clickX,
+            displayY: clickY
         };
     }
 
@@ -316,16 +370,15 @@ class SAM2Selector {
      * Draw all selection points
      */
     drawAllPoints() {
-        // Get live rect dimensions for accurate coordinate transformation
-        const rect = this.canvas.getBoundingClientRect();
-        const rectWidth = rect.right - rect.left;
-        const rectHeight = rect.bottom - rect.top;
-
         this.selections.forEach(selection => {
             selection.points.forEach(point => {
-                // Convert from canvas coordinates to display coordinates
-                const x = (point.x / this.canvas.width) * rectWidth;
-                const y = (point.y / this.canvas.height) * rectHeight;
+                // Convert from canvas coordinates to rendered video coordinates
+                const relativeX = (point.x / this.canvas.width) * this.renderWidth;
+                const relativeY = (point.y / this.canvas.height) * this.renderHeight;
+
+                // Add letterbox offset to get display coordinates
+                const x = relativeX + this.offsetX;
+                const y = relativeY + this.offsetY;
                 const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
 
                 // Draw circle

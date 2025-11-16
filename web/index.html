@@ -2480,7 +2480,14 @@
             }
         });
 
-        // Canvas auto-resizes via CSS (100% width/height) - no need for resize handler
+        // Window resize handler to recalculate video render bounds for letterbox compensation
+        window.addEventListener('resize', () => {
+            if (sam2Selector && typeof sam2Selector.calculateVideoRenderBounds === 'function') {
+                sam2Selector.calculateVideoRenderBounds();
+                sam2Selector.draw();
+                console.log('[SAM2] Recalculated render bounds on resize');
+            }
+        });
 
         // Enable/disable selection mode with SAM2
         enableBtn.addEventListener('click', function() {
