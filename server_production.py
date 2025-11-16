@@ -5441,6 +5441,36 @@ def serve_training_video(filename):
     return send_file(video_path, mimetype='video/mp4')
 
 
+@app.route('/admin/list-videos', methods=['GET'])
+def admin_list_videos():
+    """Admin endpoint to list videos in Railway volume"""
+    admin_secret = os.getenv('ADMIN_SECRET', 'dev-secret-123')
+
+    if request.args.get('secret') != admin_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        static_videos = []
+        training_videos = []
+
+        if os.path.exists(STATIC_VIDEOS_DIR):
+            static_videos = os.listdir(STATIC_VIDEOS_DIR)
+
+        if os.path.exists(TRAINING_VIDEOS_DIR):
+            training_videos = os.listdir(TRAINING_VIDEOS_DIR)
+
+        return jsonify({
+            'static_videos_dir': STATIC_VIDEOS_DIR,
+            'static_videos': static_videos,
+            'training_videos_dir': TRAINING_VIDEOS_DIR,
+            'training_videos': training_videos,
+            'is_railway': IS_RAILWAY,
+            'data_dir': DATA_DIR if IS_RAILWAY else 'N/A'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/upload-video', methods=['POST'])
 def admin_upload_video():
     """Admin endpoint to upload videos to Railway volume"""
