@@ -5400,6 +5400,28 @@ def serve_cool_video():
     return send_file(video_path, mimetype='video/mp4')
 
 
+@app.route('/s2.mp4')
+def serve_s2_video():
+    """Serve s2 before video"""
+    video_path = os.path.join(STATIC_VIDEOS_DIR, 's2.mp4')
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': 's2 video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
+@app.route('/s2removed.mp4')
+def serve_s2removed_video():
+    """Serve s2removed after video"""
+    video_path = os.path.join(STATIC_VIDEOS_DIR, 's2removed.mp4')
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': 's2removed video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
 @app.route('/training/<filename>')
 def serve_training_video(filename):
     """Serve training videos from volume"""
