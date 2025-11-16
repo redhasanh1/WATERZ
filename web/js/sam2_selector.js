@@ -76,9 +76,9 @@ class SAM2Selector {
         // No need to set style.width/height - it auto-resizes responsively
 
         // Get current display dimensions for scale calculation
-        const videoRect = this.video.getBoundingClientRect();
-        const displayWidth = videoRect.width;
-        const displayHeight = videoRect.height;
+        const canvasRect = this.canvas.getBoundingClientRect();
+        const displayWidth = canvasRect.width;
+        const displayHeight = canvasRect.height;
 
         // Calculate scale for coordinate conversion
         this.displayScaleX = displayWidth / this.videoWidth;
