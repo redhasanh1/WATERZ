@@ -573,7 +573,9 @@
             showMessage('Processing...', '');
 
             try {
-                const apiUrl = API_BASE ? `${API_BASE}/api/auth/register` : '/api/auth/register';
+                // Use /login endpoint if no name (sign in), /register if name provided (sign up)
+                const endpoint = name ? '/api/auth/register' : '/api/auth/login';
+                const apiUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
 
                 const payload = { email, password };
                 if (name) {
