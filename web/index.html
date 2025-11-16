@@ -2465,7 +2465,7 @@
                     },
                     onPointsChange: () => {
                         // Re-enable reset button when points are added
-                        if (resetBtn && sam2Selector.points.length > 0) {
+                        if (resetBtn && sam2Selector && sam2Selector.selections && sam2Selector.selections.length > 0) {
                             resetBtn.disabled = false;
                         }
                     },
