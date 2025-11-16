@@ -206,7 +206,6 @@
             color: var(--text-primary);
             line-height: 1.6;
             overflow-x: hidden;
-            overflow-y: hidden;
         }
 
         .container {
@@ -1163,11 +1162,11 @@
 
                     <div class="preview-container" id="previewContainer" style="text-align: center;">
                         <img id="previewImage" class="preview-image" alt="Video preview showing selected objects to remove" style="display: none; max-width: 100%; max-height: 600px;">
-                        <div id="videoContainer" style="position: relative; display: inline-block; max-width: 100%;">
+                        <div id="videoContainer" style="position: relative; display: inline-block; max-width: 100%; overflow: hidden;">
                             <div style="text-align:left; color: var(--text-secondary); font-weight: 600; margin: 0 0 6px 2px;">Preview</div>
 
                             <!-- Professional Video Player Container -->
-                            <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+                            <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5); max-height: 600px;">
                                 <div style="position: relative;">
                                     <video id="previewVideo" style="width: 100%; max-height: 600px; display: block; background: #000; object-fit: contain;">
                                     </video>
