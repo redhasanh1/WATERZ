@@ -19,10 +19,28 @@ load_dotenv()
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
-CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
-UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
-RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
+
+# Detect Railway environment
+IS_RAILWAY = os.getenv('RAILWAY_ENVIRONMENT_NAME') is not None
+
+# Use Railway volume (/data) for persistent storage in production
+if IS_RAILWAY:
+    DATA_DIR = '/data'
+    TEMP_DIR = os.path.join(DATA_DIR, 'temp')
+    CACHE_DIR = os.path.join(DATA_DIR, 'cache')
+    UPLOAD_DIR = os.path.join(DATA_DIR, 'uploads')
+    RESULT_DIR = os.path.join(DATA_DIR, 'results')
+    STATIC_VIDEOS_DIR = os.path.join(DATA_DIR, 'static_videos')
+    TRAINING_VIDEOS_DIR = os.path.join(DATA_DIR, 'training_videos')
+else:
+    DATA_DIR = SCRIPT_DIR
+    TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
+    CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
+    UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
+    RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
+    STATIC_VIDEOS_DIR = os.path.join(SCRIPT_DIR, 'web')
+    TRAINING_VIDEOS_DIR = os.path.join(SCRIPT_DIR, 'videostotrain')
+
 DEBUG_DIR = os.path.join(RESULT_DIR, 'debug_masks')
 PYTHON_PACKAGES_DIR = os.path.join(SCRIPT_DIR, 'python_packages')
 PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter.py')
@@ -5363,6 +5381,36 @@ def serve_upload(filename):
         return jsonify({'error': 'File not found'}), 404
 
     return send_file(file_path)
+
+
+@app.route('/cool.mp4')
+def serve_cool_video():
+    """Serve showcase video (cool.mp4)"""
+    video_path = os.path.join(STATIC_VIDEOS_DIR, 'cool.mp4')
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': 'Showcase video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
+@app.route('/training/<filename>')
+def serve_training_video(filename):
+    """Serve training videos from volume"""
+    # Sanitize filename to prevent path traversal
+    filename = sanitize_filename(filename)
+
+    # Only allow .mp4 files
+    if not filename.endswith('.mp4'):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    video_path = os.path.join(TRAINING_VIDEOS_DIR, filename)
+
+    # Verify file exists and is within training directory
+    if not os.path.exists(video_path) or not os.path.abspath(video_path).startswith(os.path.abspath(TRAINING_VIDEOS_DIR)):
+        return jsonify({'error': 'Training video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
 
 
 @app.route('/results/<filename>')

@@ -77,13 +77,15 @@ Dockerfile.*
 aws_credentials.txt
 s3_config.txt
 
-# Large video files (use S3 instead)
+# Large video files (stored in Railway volume /data)
 *.mp4
 *.avi
 *.mov
 *.mkv
 *.webm
 *.flv
+videostotrain/
+temp_sam2_frames/
 
 # ============================================
 # Test, Debug, and Build Automation Scripts
