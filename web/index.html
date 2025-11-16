@@ -1695,8 +1695,6 @@
                     previewImage.src = e.target.result;
                     previewImage.style.display = 'block';
                     document.getElementById('previewVideo').style.display = 'none';
-                    document.getElementById('downloadHint').style.display = 'none';
-                    document.getElementById('downloadText').style.display = 'none';
                     if (creditEstimate) { creditEstimate.style.display = 'none'; }
                 } else if (file.type.startsWith('video/')) {
                     const videoElem = document.getElementById('previewVideo');
@@ -1706,8 +1704,6 @@
                     // Show professional player
                     document.getElementById('professionalPlayer').style.display = 'block';
                     previewImage.style.display = 'none';
-                    document.getElementById('downloadHint').style.display = 'block';
-                    document.getElementById('downloadText').style.display = 'block';
 
                     // Initialize professional video controls
                     initProfessionalPlayer(videoElem);
@@ -1869,9 +1865,6 @@
                     document.getElementById('removeWatermarkBtn').style.display = 'block';
 
                     // Show download hint
-                    document.getElementById('downloadHint').style.display = 'block';
-                    document.getElementById('downloadText').style.display = 'block';
-
                     // Auto-scroll to button after a brief delay
                     setTimeout(() => {
                         processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2048,8 +2041,6 @@
                             } else if (videoElem) {
                                 // Video was uploaded - show cleaned video
                                 videoElem.src = previewSource;
-                                document.getElementById('downloadHint').style.display = 'block';
-                                document.getElementById('downloadText').style.display = 'block';
                                 // Also wire the comparison demo to use the new videos
                                 try {
                                     const beforeV = document.getElementById('before-video');
@@ -2696,8 +2687,7 @@
             const a = document.createElement('a');
             a.href = url;
             const isVideo = picked.type && picked.type.startsWith('video/');
-            a.download = 
-emoved_.;
+            a.download = isVideo ? 'video_removed.mp4' : 'image_removed.png';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
