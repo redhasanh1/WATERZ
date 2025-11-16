@@ -152,6 +152,23 @@ except ImportError:
     STRIPE_ENABLED = False
     print("[WARNING] Stripe not installed - billing endpoints disabled")
 
+# Authentication and session management
+from flask import session, redirect, url_for
+try:
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
+    from google_auth_oauthlib.flow import Flow
+    import bcrypt
+    import psycopg2
+    from psycopg2.pool import SimpleConnectionPool
+    from contextlib import contextmanager
+    AUTH_ENABLED = True
+    print("[OK] Authentication modules loaded")
+except ImportError as e:
+    AUTH_ENABLED = False
+    print(f"[WARNING] Authentication disabled - missing dependencies: {e}")
+    print("[INFO] Install with: pip install google-auth google-auth-oauthlib bcrypt psycopg2-binary")
+
 # [INIT] FFmpeg/FFprobe path detection with fallback
 def get_ffmpeg_executables():
     """Get FFmpeg and FFprobe paths with fallback to static-ffmpeg."""
@@ -210,6 +227,63 @@ CORS(
 )
 
 # ----------------------------------------------------------------------------
+# Database Connection Pool (for user authentication)
+# ----------------------------------------------------------------------------
+db_pool = None
+if AUTH_ENABLED:
+    try:
+        DATABASE_URL = os.getenv('DATABASE_URL')
+        if DATABASE_URL:
+            # Railway provides postgres:// but psycopg2 needs postgresql://
+            if DATABASE_URL.startswith('postgres://'):
+                DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+            db_pool = SimpleConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=DATABASE_URL
+            )
+            print("[OK] Database connection pool initialized")
+        else:
+            print("[WARNING] DATABASE_URL not set - authentication will not work")
+            AUTH_ENABLED = False
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize database pool: {e}")
+        AUTH_ENABLED = False
+
+@contextmanager
+def get_db():
+    """Get database connection from pool."""
+    if not db_pool:
+        raise RuntimeError("Database pool not initialized")
+
+    conn = db_pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_pool.putconn(conn)
+
+# ----------------------------------------------------------------------------
+# Flask Session Configuration (for authentication)
+# ----------------------------------------------------------------------------
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_PERMANENT'] = True
+app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # No JavaScript access
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 30  # 30 days
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
+
+# ----------------------------------------------------------------------------
 # Simple access logging (Waitress doesn't emit per‑request access logs by default)
 # ----------------------------------------------------------------------------
 import sys
@@ -257,6 +331,307 @@ def health_check():
         'status': 'ok',
         'message': 'Flask API server running - workers handle processing'
     })
+
+# ----------------------------------------------------------------------------
+# Authentication Routes (Google OAuth + Email/Password)
+# ----------------------------------------------------------------------------
+
+@app.route('/auth/google')
+def auth_google():
+    """Initiate Google OAuth flow."""
+    if not AUTH_ENABLED or not GOOGLE_CLIENT_ID:
+        return jsonify({'error': 'Google OAuth not configured'}), 503
+
+    try:
+        # Create flow instance
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [f"{request.host_url}auth/google/callback"]
+                }
+            },
+            scopes=['openid', 'email', 'profile']
+        )
+
+        # Use the actual callback URL from request
+        flow.redirect_uri = f"{request.host_url}auth/google/callback"
+
+        # Generate authorization URL with state token (CSRF protection)
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='select_account'
+        )
+
+        # Store state in session for verification
+        session['oauth_state'] = state
+
+        return redirect(authorization_url)
+
+    except Exception as e:
+        print(f"[ERROR] Google OAuth initiation failed: {e}")
+        return jsonify({'error': 'Failed to initiate Google login'}), 500
+
+
+@app.route('/auth/google/callback')
+def auth_google_callback():
+    """Handle Google OAuth callback."""
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        # Verify state token (CSRF protection)
+        state = session.get('oauth_state')
+        if not state or state != request.args.get('state'):
+            return jsonify({'error': 'Invalid state parameter'}), 400
+
+        # Create flow instance with same config
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [f"{request.host_url}auth/google/callback"]
+                }
+            },
+            scopes=['openid', 'email', 'profile'],
+            state=state
+        )
+
+        flow.redirect_uri = f"{request.host_url}auth/google/callback"
+
+        # Exchange authorization code for tokens
+        flow.fetch_token(authorization_response=request.url)
+
+        # Get user info from ID token
+        credentials = flow.credentials
+        id_info = id_token.verify_oauth2_token(
+            credentials.id_token,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+
+        # Extract user information
+        google_id = id_info['sub']
+        email = id_info['email']
+        name = id_info.get('name', email.split('@')[0])
+
+        # Store or update user in database
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Check if user exists
+            cur.execute('SELECT id, credits FROM users WHERE google_id = %s', (google_id,))
+            user = cur.fetchone()
+
+            if user:
+                user_id, credits = user
+                print(f"[AUTH] Existing user logged in: {email}")
+            else:
+                # New user - give 5 free credits
+                cur.execute(
+                    'INSERT INTO users (google_id, email, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
+                    (google_id, email, name, 5)
+                )
+                user_id = cur.fetchone()[0]
+                credits = 5
+                print(f"[AUTH] New user registered via Google: {email} (5 free credits)")
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name
+            session.permanent = True
+
+        # Redirect to main page
+        return redirect('/')
+
+    except Exception as e:
+        print(f"[ERROR] Google OAuth callback failed: {e}")
+        return jsonify({'error': 'Authentication failed'}), 500
+
+
+@app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+def auth_register():
+    """Register new user with email/password."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        name = data.get('name', '').strip()
+
+        # Validation
+        if not email or not password:
+            return jsonify({'error': 'Email and password required'}), 400
+
+        if len(password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+        # Basic email validation
+        if '@' not in email or '.' not in email.split('@')[1]:
+            return jsonify({'error': 'Invalid email address'}), 400
+
+        # Hash password
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+        # Store user in database
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Check if email already exists
+            cur.execute('SELECT id FROM users WHERE email = %s', (email,))
+            if cur.fetchone():
+                return jsonify({'error': 'Email already registered'}), 409
+
+            # Create user with 5 free credits
+            cur.execute(
+                'INSERT INTO users (email, password_hash, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
+                (email, password_hash, name or email.split('@')[0], 5)
+            )
+            user_id = cur.fetchone()[0]
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name or email.split('@')[0]
+            session.permanent = True
+
+            print(f"[AUTH] New user registered: {email} (5 free credits)")
+
+            return jsonify({
+                'status': 'success',
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': session['name'],
+                    'credits': 5
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Registration failed: {e}")
+        return jsonify({'error': 'Registration failed'}), 500
+
+
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+def auth_login():
+    """Login with email/password."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+
+        if not email or not password:
+            return jsonify({'error': 'Email and password required'}), 400
+
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Get user
+            cur.execute('SELECT id, password_hash, name, credits FROM users WHERE email = %s', (email,))
+            user = cur.fetchone()
+
+            if not user:
+                return jsonify({'error': 'Invalid email or password'}), 401
+
+            user_id, password_hash, name, credits = user
+
+            # Verify password
+            if not bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
+                return jsonify({'error': 'Invalid email or password'}), 401
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name
+            session.permanent = True
+
+            print(f"[AUTH] User logged in: {email}")
+
+            return jsonify({
+                'status': 'success',
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': name,
+                    'credits': credits
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Login failed: {e}")
+        return jsonify({'error': 'Login failed'}), 500
+
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status():
+    """Check if user is logged in and get user info."""
+    if not AUTH_ENABLED:
+        return jsonify({'authenticated': False})
+
+    try:
+        user_id = session.get('user_id')
+
+        if not user_id:
+            return jsonify({'authenticated': False})
+
+        # Get current user data from database
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT email, name, credits FROM users WHERE id = %s', (user_id,))
+            user = cur.fetchone()
+
+            if not user:
+                session.clear()
+                return jsonify({'authenticated': False})
+
+            email, name, credits = user
+
+            return jsonify({
+                'authenticated': True,
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': name,
+                    'credits': credits
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Auth status check failed: {e}")
+        return jsonify({'authenticated': False})
+
+
+@app.route('/api/auth/logout', methods=['POST', 'OPTIONS'])
+def auth_logout():
+    """Logout user."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    session.clear()
+    return jsonify({'status': 'success'})
+
+# ----------------------------------------------------------------------------
+# End Authentication Routes
+# ----------------------------------------------------------------------------
 
 @app.route('/api/debug/files', methods=['GET'])
 def debug_files():
