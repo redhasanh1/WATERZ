@@ -156,28 +156,20 @@ class SAM2Selector {
 
     /**
      * Convert mouse event to canvas coordinates
-     * Uses offsetX/offsetY with letterbox compensation
+     * Uses offsetX/offsetY for pixel-perfect accuracy
      */
     getCanvasPoint(e) {
-        // Use offsetX/offsetY - relative to canvas element
+        // Use offsetX/offsetY - automatically accounts for canvas position and CSS
         const clickX = e.offsetX;
         const clickY = e.offsetY;
 
-        // Subtract letterbox offset to get position relative to rendered video
-        const relativeX = clickX - this.offsetX;
-        const relativeY = clickY - this.offsetY;
+        // Convert to canvas internal coordinates
+        // offsetWidth/offsetHeight = CSS display size
+        // canvas.width/height = internal resolution
+        const videoX = Math.floor((clickX / this.canvas.offsetWidth) * this.canvas.width);
+        const videoY = Math.floor((clickY / this.canvas.offsetHeight) * this.canvas.height);
 
-        // Check if click is outside the rendered video area (in letterbox)
-        if (relativeX < 0 || relativeY < 0 || relativeX > this.renderWidth || relativeY > this.renderHeight) {
-            console.log('[SAM2Selector] Click outside video area (in letterbox), ignoring');
-            return null;
-        }
-
-        // Convert to canvas coordinates using actual rendered video dimensions
-        const videoX = Math.floor((relativeX / this.renderWidth) * this.canvas.width);
-        const videoY = Math.floor((relativeY / this.renderHeight) * this.canvas.height);
-
-        console.log(`[SAM2Selector] Click: (${clickX.toFixed(1)}, ${clickY.toFixed(1)}) → Relative: (${relativeX.toFixed(1)}, ${relativeY.toFixed(1)}) → Canvas: (${videoX}, ${videoY})`);
+        console.log(`[SAM2Selector] Click: (${clickX.toFixed(1)}, ${clickY.toFixed(1)}) → Canvas: (${videoX}, ${videoY})`);
 
         // Clamp to video bounds
         return {
@@ -369,18 +361,21 @@ class SAM2Selector {
     drawAllPoints() {
         this.selections.forEach(selection => {
             selection.points.forEach(point => {
-                // Convert from canvas coordinates to rendered video coordinates
-                const relativeX = (point.x / this.canvas.width) * this.renderWidth;
-                const relativeY = (point.y / this.canvas.height) * this.renderHeight;
-
-                // Add letterbox offset to get display coordinates
-                const x = relativeX + this.offsetX;
-                const y = relativeY + this.offsetY;
+                // Convert from canvas internal coordinates back to display coordinates
+                // This is the inverse of getCanvasPoint transformation
+                const displayX = (point.x / this.canvas.width) * this.canvas.offsetWidth;
+                const displayY = (point.y / this.canvas.height) * this.canvas.offsetHeight;
                 const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
 
-                // Draw circle
+                // Save context and scale to display coordinates for drawing
+                this.ctx.save();
+                const scaleX = this.canvas.width / this.canvas.offsetWidth;
+                const scaleY = this.canvas.height / this.canvas.offsetHeight;
+                this.ctx.scale(scaleX, scaleY);
+
+                // Draw circle (in display coordinate space)
                 this.ctx.beginPath();
-                this.ctx.arc(x, y, 6, 0, Math.PI * 2);
+                this.ctx.arc(displayX, displayY, 6, 0, Math.PI * 2);
                 this.ctx.fillStyle = color;
                 this.ctx.fill();
                 this.ctx.strokeStyle = '#FFFFFF';
@@ -391,11 +386,13 @@ class SAM2Selector {
                 this.ctx.strokeStyle = color;
                 this.ctx.lineWidth = 2;
                 this.ctx.beginPath();
-                this.ctx.moveTo(x - 12, y);
-                this.ctx.lineTo(x + 12, y);
-                this.ctx.moveTo(x, y - 12);
-                this.ctx.lineTo(x, y + 12);
+                this.ctx.moveTo(displayX - 12, displayY);
+                this.ctx.lineTo(displayX + 12, displayY);
+                this.ctx.moveTo(displayX, displayY - 12);
+                this.ctx.lineTo(displayX, displayY + 12);
                 this.ctx.stroke();
+
+                this.ctx.restore();
             });
         });
     }
