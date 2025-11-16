@@ -611,8 +611,11 @@ def auth_register():
             })
 
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         print(f"[ERROR] Registration failed: {e}")
-        return jsonify({'error': 'Registration failed'}), 500
+        print(f"[ERROR] Full traceback:\n{error_details}")
+        return jsonify({'error': f'Registration failed: {str(e)}'}), 500
 
 
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
