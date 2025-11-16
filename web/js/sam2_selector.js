@@ -221,7 +221,8 @@ class SAM2Selector {
 
         tempCtx.drawImage(this.video, 0, 0, this.videoWidth, this.videoHeight);
 
-        return tempCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+        // Use PNG for lossless quality (no JPEG compression artifacts)
+        return tempCanvas.toDataURL('image/png').split(',')[1];
     }
 
     /**

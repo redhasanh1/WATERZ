@@ -206,6 +206,7 @@
             color: var(--text-primary);
             line-height: 1.6;
             overflow-x: hidden;
+            overflow-y: hidden;
         }
 
         .container {
@@ -1168,7 +1169,7 @@
                             <!-- Professional Video Player Container -->
                             <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
                                 <div style="position: relative;">
-                                    <video id="previewVideo" style="width: 100%; height: auto; display: block; background: #000; object-fit: contain;">
+                                    <video id="previewVideo" style="width: 100%; max-height: 600px; display: block; background: #000; object-fit: contain;">
                                     </video>
 
                                     <!-- Canvas overlay for mask selection - MUST be inside position:relative container -->
@@ -1207,11 +1208,6 @@
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-
-                            <!-- Professional Timeline (Frame Thumbnails) - Below Video -->
-                            <div id="professionalTimeline" style="display: none; margin-top: 1.5rem; padding: 1rem; background: rgba(26, 26, 46, 0.6); border-radius: 12px; border: 1px solid rgba(102, 126, 234, 0.2);">
-                                <!-- Timeline will be injected here by VideoTimeline class -->
                             </div>
 
                             <!-- Arrow pointing to download menu -->
@@ -2428,118 +2424,7 @@
     <script src="js/sam2_selector.js"></script>
 
     <script>
-      // Professional Video Timeline Class
-      class VideoTimeline {
-          constructor(videoElement) {
-              this.video = videoElement;
-              this.container = null;
-              this.thumbnails = [];
-              this.fps = 30;
-          }
-
-          async init() {
-              console.log('[Timeline] Initializing...');
-              this.fps = 30;
-              this.totalFrames = Math.floor(this.video.duration * this.fps);
-              this.createTimelineContainer();
-              await this.generateThumbnails();
-              console.log('[Timeline] Ready with', this.thumbnails.length, 'thumbnails');
-              return this.container;
-          }
-
-          createTimelineContainer() {
-              this.container = document.createElement('div');
-              this.container.style.cssText = `
-                  width: 100%;
-                  height: 90px;
-                  background: rgba(0,0,0,0.85);
-                  border-radius: 8px;
-                  overflow-x: auto;
-                  display: flex;
-                  padding: 12px;
-                  gap: 6px;
-              `;
-          }
-
-          async generateThumbnails() {
-              // Show max 25 thumbnails for clean, manageable timeline
-              const thumbnailCount = Math.min(this.totalFrames, 25);
-              const interval = Math.max(1, Math.floor(this.totalFrames / thumbnailCount));
-              const canvas = document.createElement('canvas');
-              const ctx = canvas.getContext('2d');
-              canvas.width = 120;
-              canvas.height = 68;
-
-              for (let i = 0; i < thumbnailCount; i++) {
-                  const frameNumber = i * interval;
-                  const time = frameNumber / this.fps;
-                  const thumb = document.createElement('div');
-                  thumb.dataset.frame = frameNumber;
-                  thumb.style.cssText = `
-                      flex-shrink: 0;
-                      width: 120px;
-                      height: 68px;
-                      background: #000;
-                      border: 2px solid transparent;
-                      border-radius: 4px;
-                      cursor: pointer;
-                      position: relative;
-                      transition: border 0.2s;
-                  `;
-
-                  const label = document.createElement('div');
-                  label.textContent = frameNumber;
-                  label.style.cssText = `
-                      position: absolute;
-                      bottom: 3px;
-                      right: 5px;
-                      background: rgba(0,0,0,0.8);
-                      color: #0f0;
-                      font-size: 11px;
-                      padding: 2px 5px;
-                      border-radius: 3px;
-                      font-weight: bold;
-                  `;
-                  thumb.appendChild(label);
-
-                  try {
-                      await this.captureFrame(thumb, canvas, ctx, time);
-                  } catch (e) {
-                      thumb.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
-                  }
-
-                  thumb.onclick = () => {
-                      this.video.currentTime = time;
-                      this.thumbnails.forEach(t => t.style.borderColor = 'transparent');
-                      thumb.style.borderColor = '#0f0';
-                  };
-
-                  thumb.onmouseenter = () => thumb.style.borderColor = '#667eea';
-                  thumb.onmouseleave = () => {
-                      const current = Math.floor(this.video.currentTime * this.fps);
-                      if (frameNumber !== current) thumb.style.borderColor = 'transparent';
-                  };
-
-                  this.container.appendChild(thumb);
-                  this.thumbnails.push(thumb);
-              }
-          }
-
-          async captureFrame(thumbElement, canvas, ctx, time) {
-              return new Promise((resolve) => {
-                  const saved = this.video.currentTime;
-                  this.video.currentTime = time;
-                  this.video.onseeked = () => {
-                      ctx.drawImage(this.video, 0, 0, 120, 68);
-                      thumbElement.style.backgroundImage = `url(${canvas.toDataURL('image/jpeg', 0.7)})`;
-                      thumbElement.style.backgroundSize = 'cover';
-                      this.video.currentTime = saved;
-                      this.video.onseeked = null;
-                      resolve();
-                  };
-              });
-          }
-      }
+      // Video Timeline - Using built-in scrubber in video controls (no frame thumbnails)
     </script>
 
     <script>
@@ -2576,16 +2461,7 @@
             // Show mask selection controls
             maskControls.style.display = 'block';
 
-            // Initialize professional timeline
-            const timelineDiv = document.getElementById('professionalTimeline');
-            if (timelineDiv && !videoTimeline) {
-                console.log('[Timeline] Creating timeline...');
-                videoTimeline = new VideoTimeline(video);
-                const timelineContainer = await videoTimeline.init();
-                timelineDiv.innerHTML = '';
-                timelineDiv.appendChild(timelineContainer);
-                timelineDiv.style.display = 'block';
-            }
+            // Video already has professional scrubber in controls (no thumbnail timeline needed)
 
             // Initialize SAM2Selector
             if (!sam2Selector) {
@@ -2598,6 +2474,12 @@
                         if (sam2Selector && sam2Selector.points) {
                             points = sam2Selector.points;
                             updatePointCount();
+                        }
+                    },
+                    onPointsChange: () => {
+                        // Re-enable reset button when points are added
+                        if (resetBtn && sam2Selector.points.length > 0) {
+                            resetBtn.disabled = false;
                         }
                     },
                     onError: (error) => {
