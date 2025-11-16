@@ -1,0 +1,9 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "waitress-serve --port=$PORT server_production:app"
+
+[[deploy.volumes]]
+mountPath = "/data"
+name = "watermarkz-storage"

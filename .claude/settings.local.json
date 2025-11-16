@@ -113,7 +113,8 @@
       "Bash(chcp 65001:*)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/patch_enable_btn.py)",
       "Bash(python3:*)",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/fix_download.py)"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/fix_download.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" upload_videos_to_railway.py)"
     ],
     "deny": [],
     "ask": []
