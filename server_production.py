@@ -268,6 +268,78 @@ def get_db():
         db_pool.putconn(conn)
 
 # ----------------------------------------------------------------------------
+# Authentication Decorators
+# ----------------------------------------------------------------------------
+from functools import wraps
+
+def require_auth(f):
+    """Decorator to require authentication for endpoint."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not AUTH_ENABLED:
+            # If auth is disabled, allow access (for development)
+            return f(*args, **kwargs)
+
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'error': 'Authentication required. Please sign in.',
+                'signin_required': True
+            }), 401
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_credits(min_credits=1):
+    """Decorator to check if user has sufficient credits."""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not AUTH_ENABLED:
+                # If auth is disabled, allow access (for development)
+                return f(*args, **kwargs)
+
+            user_id = session.get('user_id')
+            if not user_id:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'Authentication required',
+                    'signin_required': True
+                }), 401
+
+            # Check credit balance
+            try:
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    cur.execute('SELECT credits FROM users WHERE id = %s', (user_id,))
+                    result = cur.fetchone()
+
+                    if not result:
+                        return jsonify({
+                            'status': 'error',
+                            'error': 'User not found'
+                        }), 404
+
+                    credits = result[0]
+                    if credits < min_credits:
+                        return jsonify({
+                            'status': 'error',
+                            'error': 'Insufficient credits',
+                            'required': min_credits,
+                            'available': credits,
+                            'message': f'You need {min_credits} credit(s) but only have {credits}. Please purchase more credits.'
+                        }), 402  # Payment Required
+            except Exception as e:
+                print(f"[ERROR] Credit check failed: {e}")
+                # Allow processing to continue if database check fails (graceful degradation)
+                pass
+
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+# ----------------------------------------------------------------------------
 # Flask Session Configuration (for authentication)
 # ----------------------------------------------------------------------------
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
@@ -4617,6 +4689,7 @@ def get_result(task_id):
 
 
 @app.route('/api/download-from-url', methods=['POST', 'OPTIONS'])
+@require_auth
 def download_from_url():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -5000,6 +5073,7 @@ def check_rate_limit(ip):
         return True
 
 @app.route('/api/upload', methods=['POST', 'OPTIONS'])
+@require_auth
 def upload_file():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -5172,6 +5246,8 @@ def serve_thumbnail(task_id, filename):
 
 
 @app.route('/api/process', methods=['POST', 'OPTIONS'])
+@require_auth
+@require_credits(min_credits=1)
 def process_video():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -5242,6 +5318,27 @@ def process_video():
                     kwargs={'api_base': base, 'temp_base': base}
                 )
             print(f"[OK] Task queued with ID: {result.id}")
+
+            # Deduct 1 credit from user's balance after successful task creation
+            user_id = session.get('user_id')
+            if user_id and AUTH_ENABLED:
+                try:
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        cur.execute(
+                            'UPDATE users SET credits = credits - 1 WHERE id = %s AND credits >= 1 RETURNING credits',
+                            (user_id,)
+                        )
+                        deduct_result = cur.fetchone()
+                        if deduct_result:
+                            new_balance = deduct_result[0]
+                            print(f"[CREDITS] User {user_id} processed video. Task: {result.id}, New balance: {new_balance}")
+                        else:
+                            print(f"[WARNING] Credit deduction failed for user {user_id} - insufficient credits")
+                except Exception as e:
+                    print(f"[ERROR] Failed to deduct credit: {e}")
+                    # Don't fail the request if credit deduction fails - task already queued
+
             return jsonify({'status': 'success', 'task_id': result.id})
 
         except Exception as e:
@@ -5497,6 +5594,7 @@ def get_stats():
 
 
 @app.route('/api/sam2/select-object', methods=['POST'])
+@require_auth
 def sam2_select_object():
     """Interactive SAM2 object selection - uses local worker via Redis pub/sub"""
     try:
@@ -5728,9 +5826,25 @@ def stripe_webhook():
             credits_to_add = CREDIT_AMOUNTS.get(key, 0)
 
             if credits_to_add > 0 and user_id:
-                # TODO: Award credits to user (implement your user credit system here)
+                # Award credits to user
                 print(f"[BILLING] User {user_id} purchased {key}: +{credits_to_add} credits")
-                # Example: update_user_credits(user_id, credits_to_add, f"purchase_{key}")
+                if AUTH_ENABLED:
+                    try:
+                        with get_db() as conn:
+                            cur = conn.cursor()
+                            cur.execute(
+                                'UPDATE users SET credits = credits + %s WHERE id = %s RETURNING credits',
+                                (credits_to_add, user_id)
+                            )
+                            result = cur.fetchone()
+                            if result:
+                                new_balance = result[0]
+                                print(f"[BILLING] ✅ Credits added successfully. User {user_id} new balance: {new_balance}")
+                            else:
+                                print(f"[BILLING] ❌ User {user_id} not found in database")
+                    except Exception as e:
+                        print(f"[BILLING] ❌ Failed to add credits for user {user_id}: {e}")
+                        import traceback; traceback.print_exc()
 
         # Handle subscription renewals
         elif event_type == 'invoice.payment_succeeded':
