@@ -19,10 +19,28 @@ load_dotenv()
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
-CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
-UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
-RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
+
+# Detect Railway environment
+IS_RAILWAY = os.getenv('RAILWAY_ENVIRONMENT_NAME') is not None
+
+# Use Railway volume (/data) for persistent storage in production
+if IS_RAILWAY:
+    DATA_DIR = '/data'
+    TEMP_DIR = os.path.join(DATA_DIR, 'temp')
+    CACHE_DIR = os.path.join(DATA_DIR, 'cache')
+    UPLOAD_DIR = os.path.join(DATA_DIR, 'uploads')
+    RESULT_DIR = os.path.join(DATA_DIR, 'results')
+    STATIC_VIDEOS_DIR = os.path.join(DATA_DIR, 'static_videos')
+    TRAINING_VIDEOS_DIR = os.path.join(DATA_DIR, 'training_videos')
+else:
+    DATA_DIR = SCRIPT_DIR
+    TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
+    CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
+    UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
+    RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
+    STATIC_VIDEOS_DIR = os.path.join(SCRIPT_DIR, 'web')
+    TRAINING_VIDEOS_DIR = os.path.join(SCRIPT_DIR, 'videostotrain')
+
 DEBUG_DIR = os.path.join(RESULT_DIR, 'debug_masks')
 PYTHON_PACKAGES_DIR = os.path.join(SCRIPT_DIR, 'python_packages')
 PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter.py')
@@ -152,6 +170,23 @@ except ImportError:
     STRIPE_ENABLED = False
     print("[WARNING] Stripe not installed - billing endpoints disabled")
 
+# Authentication and session management
+from flask import session, redirect, url_for
+try:
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
+    from google_auth_oauthlib.flow import Flow
+    import bcrypt
+    import psycopg2
+    from psycopg2.pool import SimpleConnectionPool
+    from contextlib import contextmanager
+    AUTH_ENABLED = True
+    print("[OK] Authentication modules loaded")
+except ImportError as e:
+    AUTH_ENABLED = False
+    print(f"[WARNING] Authentication disabled - missing dependencies: {e}")
+    print("[INFO] Install with: pip install google-auth google-auth-oauthlib bcrypt psycopg2-binary")
+
 # [INIT] FFmpeg/FFprobe path detection with fallback
 def get_ffmpeg_executables():
     """Get FFmpeg and FFprobe paths with fallback to static-ffmpeg."""
@@ -210,6 +245,135 @@ CORS(
 )
 
 # ----------------------------------------------------------------------------
+# Database Connection Pool (for user authentication)
+# ----------------------------------------------------------------------------
+db_pool = None
+if AUTH_ENABLED:
+    try:
+        DATABASE_URL = os.getenv('DATABASE_URL')
+        if DATABASE_URL:
+            # Railway provides postgres:// but psycopg2 needs postgresql://
+            if DATABASE_URL.startswith('postgres://'):
+                DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+            db_pool = SimpleConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=DATABASE_URL
+            )
+            print("[OK] Database connection pool initialized")
+        else:
+            print("[WARNING] DATABASE_URL not set - authentication will not work")
+            AUTH_ENABLED = False
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize database pool: {e}")
+        AUTH_ENABLED = False
+
+@contextmanager
+def get_db():
+    """Get database connection from pool."""
+    if not db_pool:
+        raise RuntimeError("Database pool not initialized")
+
+    conn = db_pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_pool.putconn(conn)
+
+# ----------------------------------------------------------------------------
+# Authentication Decorators
+# ----------------------------------------------------------------------------
+from functools import wraps
+
+def require_auth(f):
+    """Decorator to require authentication for endpoint."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not AUTH_ENABLED:
+            # If auth is disabled, allow access (for development)
+            return f(*args, **kwargs)
+
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'error': 'Authentication required. Please sign in.',
+                'signin_required': True
+            }), 401
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_credits(min_credits=1):
+    """Decorator to check if user has sufficient credits."""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not AUTH_ENABLED:
+                # If auth is disabled, allow access (for development)
+                return f(*args, **kwargs)
+
+            user_id = session.get('user_id')
+            if not user_id:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'Authentication required',
+                    'signin_required': True
+                }), 401
+
+            # Check credit balance
+            try:
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    cur.execute('SELECT credits FROM users WHERE id = %s', (user_id,))
+                    result = cur.fetchone()
+
+                    if not result:
+                        return jsonify({
+                            'status': 'error',
+                            'error': 'User not found'
+                        }), 404
+
+                    credits = result[0]
+                    if credits < min_credits:
+                        return jsonify({
+                            'status': 'error',
+                            'error': 'Insufficient credits',
+                            'required': min_credits,
+                            'available': credits,
+                            'message': f'You need {min_credits} credit(s) but only have {credits}. Please purchase more credits.'
+                        }), 402  # Payment Required
+            except Exception as e:
+                print(f"[ERROR] Credit check failed: {e}")
+                # Allow processing to continue if database check fails (graceful degradation)
+                pass
+
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+# ----------------------------------------------------------------------------
+# Flask Session Configuration (for authentication)
+# ----------------------------------------------------------------------------
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_PERMANENT'] = True
+app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # No JavaScript access
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 30  # 30 days
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
+
+# ----------------------------------------------------------------------------
 # Simple access logging (Waitress doesn't emit per‑request access logs by default)
 # ----------------------------------------------------------------------------
 import sys
@@ -257,6 +421,307 @@ def health_check():
         'status': 'ok',
         'message': 'Flask API server running - workers handle processing'
     })
+
+# ----------------------------------------------------------------------------
+# Authentication Routes (Google OAuth + Email/Password)
+# ----------------------------------------------------------------------------
+
+@app.route('/auth/google')
+def auth_google():
+    """Initiate Google OAuth flow."""
+    if not AUTH_ENABLED or not GOOGLE_CLIENT_ID:
+        return jsonify({'error': 'Google OAuth not configured'}), 503
+
+    try:
+        # Create flow instance
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [f"{request.host_url}auth/google/callback"]
+                }
+            },
+            scopes=['openid', 'email', 'profile']
+        )
+
+        # Use the actual callback URL from request
+        flow.redirect_uri = f"{request.host_url}auth/google/callback"
+
+        # Generate authorization URL with state token (CSRF protection)
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='select_account'
+        )
+
+        # Store state in session for verification
+        session['oauth_state'] = state
+
+        return redirect(authorization_url)
+
+    except Exception as e:
+        print(f"[ERROR] Google OAuth initiation failed: {e}")
+        return jsonify({'error': 'Failed to initiate Google login'}), 500
+
+
+@app.route('/auth/google/callback')
+def auth_google_callback():
+    """Handle Google OAuth callback."""
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        # Verify state token (CSRF protection)
+        state = session.get('oauth_state')
+        if not state or state != request.args.get('state'):
+            return jsonify({'error': 'Invalid state parameter'}), 400
+
+        # Create flow instance with same config
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [f"{request.host_url}auth/google/callback"]
+                }
+            },
+            scopes=['openid', 'email', 'profile'],
+            state=state
+        )
+
+        flow.redirect_uri = f"{request.host_url}auth/google/callback"
+
+        # Exchange authorization code for tokens
+        flow.fetch_token(authorization_response=request.url)
+
+        # Get user info from ID token
+        credentials = flow.credentials
+        id_info = id_token.verify_oauth2_token(
+            credentials.id_token,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+
+        # Extract user information
+        google_id = id_info['sub']
+        email = id_info['email']
+        name = id_info.get('name', email.split('@')[0])
+
+        # Store or update user in database
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Check if user exists
+            cur.execute('SELECT id, credits FROM users WHERE google_id = %s', (google_id,))
+            user = cur.fetchone()
+
+            if user:
+                user_id, credits = user
+                print(f"[AUTH] Existing user logged in: {email}")
+            else:
+                # New user - give 5 free credits
+                cur.execute(
+                    'INSERT INTO users (google_id, email, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
+                    (google_id, email, name, 5)
+                )
+                user_id = cur.fetchone()[0]
+                credits = 5
+                print(f"[AUTH] New user registered via Google: {email} (5 free credits)")
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name
+            session.permanent = True
+
+        # Redirect to main page
+        return redirect('/')
+
+    except Exception as e:
+        print(f"[ERROR] Google OAuth callback failed: {e}")
+        return jsonify({'error': 'Authentication failed'}), 500
+
+
+@app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+def auth_register():
+    """Register new user with email/password."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        name = data.get('name', '').strip()
+
+        # Validation
+        if not email or not password:
+            return jsonify({'error': 'Email and password required'}), 400
+
+        if len(password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+        # Basic email validation
+        if '@' not in email or '.' not in email.split('@')[1]:
+            return jsonify({'error': 'Invalid email address'}), 400
+
+        # Hash password
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+        # Store user in database
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Check if email already exists
+            cur.execute('SELECT id FROM users WHERE email = %s', (email,))
+            if cur.fetchone():
+                return jsonify({'error': 'Email already registered'}), 409
+
+            # Create user with 5 free credits
+            cur.execute(
+                'INSERT INTO users (email, password_hash, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
+                (email, password_hash, name or email.split('@')[0], 5)
+            )
+            user_id = cur.fetchone()[0]
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name or email.split('@')[0]
+            session.permanent = True
+
+            print(f"[AUTH] New user registered: {email} (5 free credits)")
+
+            return jsonify({
+                'status': 'success',
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': session['name'],
+                    'credits': 5
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Registration failed: {e}")
+        return jsonify({'error': 'Registration failed'}), 500
+
+
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+def auth_login():
+    """Login with email/password."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+
+        if not email or not password:
+            return jsonify({'error': 'Email and password required'}), 400
+
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Get user
+            cur.execute('SELECT id, password_hash, name, credits FROM users WHERE email = %s', (email,))
+            user = cur.fetchone()
+
+            if not user:
+                return jsonify({'error': 'Invalid email or password'}), 401
+
+            user_id, password_hash, name, credits = user
+
+            # Verify password
+            if not bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
+                return jsonify({'error': 'Invalid email or password'}), 401
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name
+            session.permanent = True
+
+            print(f"[AUTH] User logged in: {email}")
+
+            return jsonify({
+                'status': 'success',
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': name,
+                    'credits': credits
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Login failed: {e}")
+        return jsonify({'error': 'Login failed'}), 500
+
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status():
+    """Check if user is logged in and get user info."""
+    if not AUTH_ENABLED:
+        return jsonify({'authenticated': False})
+
+    try:
+        user_id = session.get('user_id')
+
+        if not user_id:
+            return jsonify({'authenticated': False})
+
+        # Get current user data from database
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT email, name, credits FROM users WHERE id = %s', (user_id,))
+            user = cur.fetchone()
+
+            if not user:
+                session.clear()
+                return jsonify({'authenticated': False})
+
+            email, name, credits = user
+
+            return jsonify({
+                'authenticated': True,
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': name,
+                    'credits': credits
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Auth status check failed: {e}")
+        return jsonify({'authenticated': False})
+
+
+@app.route('/api/auth/logout', methods=['POST', 'OPTIONS'])
+def auth_logout():
+    """Logout user."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    session.clear()
+    return jsonify({'status': 'success'})
+
+# ----------------------------------------------------------------------------
+# End Authentication Routes
+# ----------------------------------------------------------------------------
 
 @app.route('/api/debug/files', methods=['GET'])
 def debug_files():
@@ -4242,6 +4707,7 @@ def get_result(task_id):
 
 
 @app.route('/api/download-from-url', methods=['POST', 'OPTIONS'])
+@require_auth
 def download_from_url():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -4625,6 +5091,7 @@ def check_rate_limit(ip):
         return True
 
 @app.route('/api/upload', methods=['POST', 'OPTIONS'])
+@require_auth
 def upload_file():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -4797,6 +5264,8 @@ def serve_thumbnail(task_id, filename):
 
 
 @app.route('/api/process', methods=['POST', 'OPTIONS'])
+@require_auth
+@require_credits(min_credits=1)
 def process_video():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -4867,6 +5336,27 @@ def process_video():
                     kwargs={'api_base': base, 'temp_base': base}
                 )
             print(f"[OK] Task queued with ID: {result.id}")
+
+            # Deduct 1 credit from user's balance after successful task creation
+            user_id = session.get('user_id')
+            if user_id and AUTH_ENABLED:
+                try:
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        cur.execute(
+                            'UPDATE users SET credits = credits - 1 WHERE id = %s AND credits >= 1 RETURNING credits',
+                            (user_id,)
+                        )
+                        deduct_result = cur.fetchone()
+                        if deduct_result:
+                            new_balance = deduct_result[0]
+                            print(f"[CREDITS] User {user_id} processed video. Task: {result.id}, New balance: {new_balance}")
+                        else:
+                            print(f"[WARNING] Credit deduction failed for user {user_id} - insufficient credits")
+                except Exception as e:
+                    print(f"[ERROR] Failed to deduct credit: {e}")
+                    # Don't fail the request if credit deduction fails - task already queued
+
             return jsonify({'status': 'success', 'task_id': result.id})
 
         except Exception as e:
@@ -4891,6 +5381,83 @@ def serve_upload(filename):
         return jsonify({'error': 'File not found'}), 404
 
     return send_file(file_path)
+
+
+@app.route('/cool.mp4')
+def serve_cool_video():
+    """Serve showcase video (cool.mp4)"""
+    video_path = os.path.join(STATIC_VIDEOS_DIR, 'cool.mp4')
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': 'Showcase video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
+@app.route('/training/<filename>')
+def serve_training_video(filename):
+    """Serve training videos from volume"""
+    # Sanitize filename to prevent path traversal
+    filename = sanitize_filename(filename)
+
+    # Only allow .mp4 files
+    if not filename.endswith('.mp4'):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    video_path = os.path.join(TRAINING_VIDEOS_DIR, filename)
+
+    # Verify file exists and is within training directory
+    if not os.path.exists(video_path) or not os.path.abspath(video_path).startswith(os.path.abspath(TRAINING_VIDEOS_DIR)):
+        return jsonify({'error': 'Training video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
+@app.route('/admin/upload-video', methods=['POST'])
+def admin_upload_video():
+    """Admin endpoint to upload videos to Railway volume"""
+    # Simple secret key auth - replace 'your-admin-secret' with a real secret
+    admin_secret = os.getenv('ADMIN_SECRET', 'dev-secret-123')
+
+    if request.headers.get('X-Admin-Secret') != admin_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+    video_type = request.form.get('type', 'static')  # 'static' or 'training'
+
+    if video.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    # Sanitize filename
+    filename = sanitize_filename(video.filename)
+
+    # Only allow .mp4 files
+    if not filename.endswith('.mp4'):
+        return jsonify({'error': 'Only .mp4 files allowed'}), 400
+
+    # Determine destination directory
+    if video_type == 'training':
+        dest_dir = TRAINING_VIDEOS_DIR
+    else:
+        dest_dir = STATIC_VIDEOS_DIR
+
+    # Create directory if it doesn't exist
+    os.makedirs(dest_dir, exist_ok=True)
+
+    # Save file
+    file_path = os.path.join(dest_dir, filename)
+    video.save(file_path)
+
+    return jsonify({
+        'success': True,
+        'filename': filename,
+        'type': video_type,
+        'path': file_path,
+        'url': f'/training/{filename}' if video_type == 'training' else f'/{filename}'
+    })
 
 
 @app.route('/results/<filename>')
@@ -5121,6 +5688,91 @@ def get_stats():
     })
 
 
+@app.route('/api/sam2/select-object', methods=['POST'])
+@require_auth
+def sam2_select_object():
+    """Interactive SAM2 object selection - uses local worker via Redis pub/sub"""
+    try:
+        data = request.json
+
+        # Get frame data and points
+        frame_base64 = data.get('frame_data')
+        points = data.get('points', [])
+        video_width = data.get('video_width')
+        video_height = data.get('video_height')
+
+        if not frame_base64 or not points:
+            return jsonify({'status': 'error', 'message': 'Missing frame data or points'}), 400
+
+        # Generate unique request ID
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
+
+        # Connect to Redis
+        REDIS_URL = os.environ.get('REDIS_URL')
+        if not REDIS_URL:
+            return jsonify({'status': 'error', 'message': 'Redis not configured'}), 500
+
+        print(f"[SAM2] Using Redis: {REDIS_URL[:50]}...")
+        redis_client = redis.from_url(REDIS_URL, decode_responses=False)
+
+        # Subscribe to response channel BEFORE publishing request
+        response_channel = f'sam2:selection:response:{request_id}'
+        pubsub = redis_client.pubsub()
+        pubsub.subscribe(response_channel)
+
+        # Publish request to local worker
+        request_data = {
+            'request_id': request_id,
+            'frame_data': frame_base64,
+            'points': points,
+            'video_width': video_width,
+            'video_height': video_height
+        }
+
+        print(f"[SAM2] Publishing request {request_id} to channel: sam2:selection:request")
+        print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
+        redis_client.publish('sam2:selection:request', json.dumps(request_data))
+
+        # Wait for response (timeout: 5 seconds)
+        timeout = 5.0
+        start_time = time.time()
+
+        print(f"[SAM2] Waiting for response on: {response_channel}")
+        while time.time() - start_time < timeout:
+            message = pubsub.get_message(timeout=0.1)
+
+            if message and message['type'] == 'message':
+                response_data = json.loads(message['data'])
+
+                pubsub.unsubscribe()
+                pubsub.close()
+
+                if response_data.get('status') == 'success':
+                    return jsonify({
+                        'status': 'success',
+                        'mask': response_data['mask'],
+                        'score': response_data.get('score')
+                    })
+                else:
+                    return jsonify({
+                        'status': 'error',
+                        'message': response_data.get('error', 'Unknown error')
+                    }), 500
+
+        # Timeout
+        pubsub.unsubscribe()
+        pubsub.close()
+
+        return jsonify({
+            'status': 'error',
+            'message': 'Local worker timeout - is SAM2 worker running?'
+        }), 504
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 
 # ============================================================================
@@ -5269,9 +5921,25 @@ def stripe_webhook():
             credits_to_add = CREDIT_AMOUNTS.get(key, 0)
 
             if credits_to_add > 0 and user_id:
-                # TODO: Award credits to user (implement your user credit system here)
+                # Award credits to user
                 print(f"[BILLING] User {user_id} purchased {key}: +{credits_to_add} credits")
-                # Example: update_user_credits(user_id, credits_to_add, f"purchase_{key}")
+                if AUTH_ENABLED:
+                    try:
+                        with get_db() as conn:
+                            cur = conn.cursor()
+                            cur.execute(
+                                'UPDATE users SET credits = credits + %s WHERE id = %s RETURNING credits',
+                                (credits_to_add, user_id)
+                            )
+                            result = cur.fetchone()
+                            if result:
+                                new_balance = result[0]
+                                print(f"[BILLING] ✅ Credits added successfully. User {user_id} new balance: {new_balance}")
+                            else:
+                                print(f"[BILLING] ❌ User {user_id} not found in database")
+                    except Exception as e:
+                        print(f"[BILLING] ❌ Failed to add credits for user {user_id}: {e}")
+                        import traceback; traceback.print_exc()
 
         # Handle subscription renewals
         elif event_type == 'invoice.payment_succeeded':

@@ -71,6 +71,9 @@ class NLETimeline {
         this.container.className = 'nle-timeline-container';
         this.container.style.cssText = `
             width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
             background: #1a1a1a;
             border-radius: 8px;
             overflow: hidden;
@@ -87,6 +90,10 @@ class NLETimeline {
         this.canvas.height = this.options.height;
         this.canvas.style.cssText = `
             display: block;
+            width: 100%;
+            height: auto;
+            max-width: 100%;
+            max-height: 100%;
             cursor: crosshair;
             background: #242424;
         `;
@@ -239,6 +246,7 @@ class NLETimeline {
         this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
         this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
         this.canvas.addEventListener('wheel', (e) => this.onWheel(e));
+        this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
         // Video time update
         this.video.addEventListener('timeupdate', () => {
@@ -283,8 +291,25 @@ class NLETimeline {
             return;
         }
 
+        // Check if right-click for context menu
+        if (e.button === 2) {
+            this.showContextMenu(e, x, y);
+            return;
+        }
+
         // Check if clicking on clip
-        // TODO: Implement clip selection and dragging
+        const clipHit = this.getClipAtPosition(x, y);
+        if (clipHit) {
+            const { clip, track, handleType } = clipHit;
+
+            if (handleType === 'left' || handleType === 'right') {
+                // Resizing clip
+                this.isResizingClip = { clip, track, handleType, startX: x, originalStart: clip.startTime, originalDuration: clip.duration };
+            } else {
+                // Dragging clip
+                this.isDraggingClip = { clip, track, startX: x, originalStart: clip.startTime };
+            }
+        }
     }
 
     /**
@@ -293,14 +318,63 @@ class NLETimeline {
     onMouseMove(e) {
         const rect = this.canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
 
         if (this.isDraggingPlayhead) {
             const time = this.xToTime(x);
             this.seekTo(time);
             this.render();
+            return;
         }
 
-        // TODO: Show thumbnail preview on hover
+        if (this.isDraggingClip) {
+            const deltaX = x - this.isDraggingClip.startX;
+            const deltaTime = deltaX / this.pixelsPerSecond;
+            const newStart = this.isDraggingClip.originalStart + deltaTime;
+
+            // Snap to grid (0.5 second intervals)
+            const snappedStart = Math.round(newStart * 2) / 2;
+            this.isDraggingClip.clip.startTime = Math.max(0, snappedStart);
+
+            this.render();
+            return;
+        }
+
+        if (this.isResizingClip) {
+            const deltaX = x - this.isResizingClip.startX;
+            const deltaTime = deltaX / this.pixelsPerSecond;
+
+            if (this.isResizingClip.handleType === 'left') {
+                // Trim from left
+                const newStart = this.isResizingClip.originalStart + deltaTime;
+                const newDuration = this.isResizingClip.originalDuration - deltaTime;
+
+                if (newDuration > 0.1) {
+                    this.isResizingClip.clip.startTime = newStart;
+                    this.isResizingClip.clip.duration = newDuration;
+                }
+            } else {
+                // Trim from right
+                const newDuration = this.isResizingClip.originalDuration + deltaTime;
+                if (newDuration > 0.1) {
+                    this.isResizingClip.clip.duration = newDuration;
+                }
+            }
+
+            this.render();
+            return;
+        }
+
+        // Show thumbnail preview on hover over ruler
+        if (y < this.options.rulerHeight) {
+            const hoverTime = this.xToTime(x);
+            this.showThumbnailPreview(e, hoverTime);
+        } else {
+            this.hideThumbnailPreview();
+        }
+
+        // Update cursor based on what's under mouse
+        this.updateCursor(x, y);
     }
 
     /**
@@ -686,6 +760,213 @@ class NLETimeline {
      */
     getContainer() {
         return this.container;
+    }
+
+    /**
+     * Get clip at mouse position
+     */
+    getClipAtPosition(x, y) {
+        const trackY = this.options.rulerHeight;
+        const trackHeight = this.options.tracksHeight;
+
+        for (let i = 0; i < this.tracks.length; i++) {
+            const track = this.tracks[i];
+            const ty = trackY + (i * trackHeight);
+
+            if (y < ty || y > ty + trackHeight) continue;
+
+            for (const clip of track.clips) {
+                const clipX = this.timeToX(clip.startTime);
+                const clipWidth = clip.duration * this.pixelsPerSecond;
+                const clipY = ty + 5;
+                const clipHeight = trackHeight - 10;
+
+                if (x >= clipX && x <= clipX + clipWidth && y >= clipY && y <= clipY + clipHeight) {
+                    // Check if clicking on handles
+                    if (x < clipX + 5) {
+                        return { clip, track, handleType: 'left' };
+                    } else if (x > clipX + clipWidth - 5) {
+                        return { clip, track, handleType: 'right' };
+                    } else {
+                        return { clip, track, handleType: 'body' };
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Show context menu
+     */
+    showContextMenu(e, x, y) {
+        e.preventDefault();
+
+        // Check if right-clicking on marker
+        for (const marker of this.markers) {
+            const markerX = this.timeToX(marker.time);
+            if (Math.abs(x - markerX) < 15 && y < 20) {
+                const action = prompt(`Marker: "${marker.label}"\n\nEnter new label or leave empty to delete:`);
+                if (action === '') {
+                    // Delete marker
+                    const index = this.markers.indexOf(marker);
+                    this.markers.splice(index, 1);
+                    this.render();
+                } else if (action) {
+                    // Update label
+                    marker.label = action;
+                    this.render();
+                }
+                return;
+            }
+        }
+
+        // Check if right-clicking on clip
+        const clipHit = this.getClipAtPosition(x, y);
+        if (clipHit) {
+            const { clip, track } = clipHit;
+
+            const menu = document.createElement('div');
+            menu.style.cssText = `
+                position: fixed;
+                left: ${e.clientX}px;
+                top: ${e.clientY}px;
+                background: #2a2a2a;
+                border: 1px solid #444;
+                border-radius: 4px;
+                padding: 0.5rem 0;
+                z-index: 10000;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            `;
+
+            const options = [
+                { label: 'Delete Clip', action: () => {
+                    const index = track.clips.indexOf(clip);
+                    track.clips.splice(index, 1);
+                    this.render();
+                }},
+                { label: 'Duplicate Clip', action: () => {
+                    track.clips.push({...clip, startTime: clip.startTime + clip.duration});
+                    this.render();
+                }},
+                { label: 'Clip Properties', action: () => {
+                    alert(`Clip: ${clip.name}\nStart: ${clip.startTime.toFixed(2)}s\nDuration: ${clip.duration.toFixed(2)}s\nType: ${clip.type}`);
+                }}
+            ];
+
+            options.forEach(option => {
+                const item = document.createElement('div');
+                item.textContent = option.label;
+                item.style.cssText = `
+                    padding: 0.5rem 1rem;
+                    color: #fff;
+                    cursor: pointer;
+                    transition: background 0.2s;
+                `;
+                item.onmouseenter = () => item.style.background = '#667eea';
+                item.onmouseleave = () => item.style.background = 'transparent';
+                item.onclick = () => {
+                    option.action();
+                    document.body.removeChild(menu);
+                };
+                menu.appendChild(item);
+            });
+
+            document.body.appendChild(menu);
+
+            // Close menu on click outside
+            setTimeout(() => {
+                document.addEventListener('click', () => {
+                    if (menu.parentNode) document.body.removeChild(menu);
+                }, { once: true });
+            }, 0);
+        }
+    }
+
+    /**
+     * Show thumbnail preview
+     */
+    showThumbnailPreview(e, time) {
+        if (!this.thumbnailPreview) {
+            this.thumbnailPreview = document.createElement('div');
+            this.thumbnailPreview.style.cssText = `
+                position: fixed;
+                background: #1a1a1a;
+                border: 2px solid #667eea;
+                border-radius: 4px;
+                padding: 4px;
+                pointer-events: none;
+                z-index: 10000;
+                display: none;
+            `;
+
+            this.thumbnailCanvas = document.createElement('canvas');
+            this.thumbnailCanvas.width = 160;
+            this.thumbnailCanvas.height = 90;
+            this.thumbnailPreview.appendChild(this.thumbnailCanvas);
+
+            this.thumbnailTimecode = document.createElement('div');
+            this.thumbnailTimecode.style.cssText = `
+                color: #fff;
+                font-size: 10px;
+                font-family: 'Courier New', monospace;
+                text-align: center;
+                padding: 2px;
+            `;
+            this.thumbnailPreview.appendChild(this.thumbnailTimecode);
+
+            document.body.appendChild(this.thumbnailPreview);
+        }
+
+        // Update thumbnail
+        const tempTime = this.video.currentTime;
+        this.video.currentTime = time;
+
+        const ctx = this.thumbnailCanvas.getContext('2d');
+        ctx.drawImage(this.video, 0, 0, 160, 90);
+
+        this.video.currentTime = tempTime;
+
+        // Update timecode
+        const totalFrames = Math.floor(time * this.options.fps);
+        const frames = totalFrames % this.options.fps;
+        const totalSeconds = Math.floor(time);
+        const seconds = totalSeconds % 60;
+        const minutes = Math.floor(totalSeconds / 60);
+
+        this.thumbnailTimecode.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+
+        // Position preview
+        this.thumbnailPreview.style.display = 'block';
+        this.thumbnailPreview.style.left = `${e.clientX - 80}px`;
+        this.thumbnailPreview.style.top = `${e.clientY - 120}px`;
+    }
+
+    /**
+     * Hide thumbnail preview
+     */
+    hideThumbnailPreview() {
+        if (this.thumbnailPreview) {
+            this.thumbnailPreview.style.display = 'none';
+        }
+    }
+
+    /**
+     * Update cursor based on position
+     */
+    updateCursor(x, y) {
+        const clipHit = this.getClipAtPosition(x, y);
+
+        if (clipHit) {
+            if (clipHit.handleType === 'left' || clipHit.handleType === 'right') {
+                this.canvas.style.cursor = 'ew-resize';
+            } else {
+                this.canvas.style.cursor = 'move';
+            }
+        } else {
+            this.canvas.style.cursor = 'crosshair';
+        }
     }
 }
 

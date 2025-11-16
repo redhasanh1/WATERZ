@@ -7,6 +7,7 @@ Handles file uploads and watermark removal processing
 import sys
 import os
 import json
+import time
 from threading import Lock
 
 # Add parent directory to path for imports
@@ -420,6 +421,12 @@ def process_video(video_path):
 def index():
     """Serve the main HTML page."""
     return send_file('index.html')
+
+@app.route('/sam2')
+@app.route('/sam2_timeline.html')
+def sam2_timeline():
+    """Serve the SAM2 timeline page."""
+    return send_file('sam2_timeline.html')
 
 @app.route('/index.html')
 def legacy_index():
@@ -1023,7 +1030,9 @@ def extract_frames(task_id):
 
 @app.route('/api/sam2/select-object', methods=['POST'])
 def sam2_select_object():
-    """Interactive SAM2 object selection - returns mask preview"""
+    """Interactive SAM2 object selection - uses local worker via Redis pub/sub"""
+    import redis
+
     try:
         data = request.json
 
@@ -1036,48 +1045,69 @@ def sam2_select_object():
         if not frame_base64 or not points:
             return jsonify({'status': 'error', 'message': 'Missing frame data or points'}), 400
 
-        # Decode frame from base64
-        import base64
-        import io
-        from PIL import Image as PILImage
+        # Generate unique request ID
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
 
-        frame_bytes = base64.b64decode(frame_base64)
-        frame_img = PILImage.open(io.BytesIO(frame_bytes))
-        frame_array = np.array(frame_img.convert('RGB'))
+        # Connect to Redis
+        REDIS_URL = os.environ.get('REDIS_URL')
+        if not REDIS_URL:
+            return jsonify({'status': 'error', 'message': 'Redis not configured'}), 500
 
-        # Import SAM2 TensorRT predictor
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from sam2_trt_predictor import SAM2TensorRTPredictor
+        print(f"[SAM2] Using Redis: {REDIS_URL[:50]}...")
+        redis_client = redis.from_url(REDIS_URL, decode_responses=False)
 
-        # Load SAM2 model (cache this in production!)
-        encoder_engine = r"D:\watermarkz\sam2_trt_inference\engines\sam2_encoder_fp16.engine"
-        decoder_engine = r"D:\watermarkz\sam2_trt_inference\engines\sam2_decoder_fp16_dynamic.engine"
+        # Subscribe to response channel BEFORE publishing request
+        response_channel = f'sam2:selection:response:{request_id}'
+        pubsub = redis_client.pubsub()
+        pubsub.subscribe(response_channel)
 
-        predictor = SAM2TensorRTPredictor(encoder_engine, decoder_engine)
+        # Publish request to local worker
+        request_data = {
+            'request_id': request_id,
+            'frame_data': frame_base64,
+            'points': points,
+            'video_width': video_width,
+            'video_height': video_height
+        }
 
-        # Set image
-        predictor.set_image(frame_array)
+        print(f"[SAM2] Publishing request {request_id} to channel: sam2:selection:request")
+        print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
+        redis_client.publish('sam2:selection:request', json.dumps(request_data))
 
-        # Prepare points and labels
-        points_array = np.array([[p['x'], p['y']] for p in points], dtype=np.float32)
-        labels_array = np.array([p['label'] for p in points], dtype=np.int32)
+        # Wait for response (timeout: 5 seconds)
+        timeout = 5.0
+        start_time = time.time()
 
-        # Get mask
-        mask, score = predictor.predict(points_array, labels_array)
+        print(f"[SAM2] Waiting for response on: {response_channel}")
+        while time.time() - start_time < timeout:
+            message = pubsub.get_message(timeout=0.1)
 
-        # Encode mask as PNG base64
-        mask_uint8 = (mask * 255).astype(np.uint8)
-        mask_img = PILImage.fromarray(mask_uint8, mode='L')
+            if message and message['type'] == 'message':
+                response_data = json.loads(message['data'])
 
-        buffer = io.BytesIO()
-        mask_img.save(buffer, format='PNG')
-        mask_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                pubsub.unsubscribe()
+                pubsub.close()
+
+                if response_data.get('status') == 'success':
+                    return jsonify({
+                        'status': 'success',
+                        'mask': response_data['mask'],
+                        'score': response_data.get('score')
+                    })
+                else:
+                    return jsonify({
+                        'status': 'error',
+                        'message': response_data.get('error', 'Unknown error')
+                    }), 500
+
+        # Timeout
+        pubsub.unsubscribe()
+        pubsub.close()
 
         return jsonify({
-            'status': 'success',
-            'mask': mask_base64,
-            'score': float(score) if score is not None else None
-        })
+            'status': 'error',
+            'message': 'Local worker timeout - is SAM2 worker running?'
+        }), 504
 
     except Exception as e:
         import traceback
@@ -1087,29 +1117,121 @@ def sam2_select_object():
 
 @app.route('/api/sam2/process-video', methods=['POST'])
 def sam2_process_video():
-    """Queue SAM2 full video processing task"""
+    """Queue SAM2 full video processing task to local worker"""
+    import psycopg2
+
     try:
         data = request.json
 
         task_id = data.get('task_id')
         points = data.get('points', [])
+        video_width = data.get('video_width')
+        video_height = data.get('video_height')
+        frame_index = data.get('frame_index', 0)
 
         if not task_id or not points:
             return jsonify({'status': 'error', 'message': 'Missing task_id or points'}), 400
 
-        # In production, queue this to Celery (server_production2.py)
-        # For now, return a placeholder
+        # Get user email from session
+        user_email = session.get('user_email', 'anonymous@test.com')
 
-        processing_task_id = uuid.uuid4().hex[:12]
+        # Get video URL from uploads (task_id should be the upload ID)
+        video_url = urljoin(request.url_root, f'/uploads/{task_id}')
+
+        # Generate job ID
+        job_id = f"sam2_{uuid.uuid4().hex[:12]}"
+
+        # Connect to PostgreSQL
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL:
+            return jsonify({'status': 'error', 'message': 'Database not configured'}), 500
+
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+
+        # Insert job into queue
+        cursor.execute("""
+            INSERT INTO sam2_jobs
+            (job_id, user_email, video_url, video_filename, points_data,
+             frame_index, video_width, video_height, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+        """, (
+            job_id,
+            user_email,
+            video_url,
+            f"{task_id}.mp4",
+            json.dumps(points),
+            frame_index,
+            video_width,
+            video_height
+        ))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print(f"[SAM2] Queued job {job_id} for user {user_email}")
 
         return jsonify({
             'status': 'success',
-            'message': 'SAM2 processing queued',
-            'processing_task_id': processing_task_id,
-            'queue_position': 0
+            'message': 'SAM2 processing queued - local worker will process',
+            'job_id': job_id,
+            'queue_position': 0  # TODO: calculate actual queue position
         })
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/sam2/status/<job_id>', methods=['GET'])
+def sam2_job_status(job_id):
+    """Poll SAM2 job status"""
+    import psycopg2
+
+    try:
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL:
+            return jsonify({'status': 'error', 'message': 'Database not configured'}), 500
+
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+
+        # Fetch job status
+        cursor.execute("""
+            SELECT status, result_url, error_message, created_at, started_at, completed_at
+            FROM sam2_jobs
+            WHERE job_id = %s
+        """, (job_id,))
+
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not result:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+        status, result_url, error_message, created_at, started_at, completed_at = result
+
+        response = {
+            'status': status,
+            'job_id': job_id,
+            'created_at': created_at.isoformat() if created_at else None,
+            'started_at': started_at.isoformat() if started_at else None,
+            'completed_at': completed_at.isoformat() if completed_at else None
+        }
+
+        if status == 'completed':
+            response['result_url'] = result_url
+        elif status == 'failed':
+            response['error'] = error_message
+
+        return jsonify(response)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 

@@ -106,7 +106,14 @@
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c:*)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz''); import test_sam2_interactive_local; print(''[SUCCESS] Full pipeline imports without errors!'')\")",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz''); import test_sam2_interactive_local; print(''[SUCCESS] Pipeline imports without errors!'')\")",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz''); import test_sam2_interactive_local; print(''[SUCCESS] Pipeline imports correctly with all fixes!'')\")"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -c \"import sys; sys.path.insert(0, r''D:\\watermarkz''); import test_sam2_interactive_local; print(''[SUCCESS] Pipeline imports correctly with all fixes!'')\")",
+      "Bash(git cherry-pick:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" start_object_server.py)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/patch_index.py)",
+      "Bash(chcp 65001:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/patch_enable_btn.py)",
+      "Bash(python3:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" D:/watermarkz/fix_download.py)"
     ],
     "deny": [],
     "ask": []

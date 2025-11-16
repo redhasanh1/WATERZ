@@ -1,0 +1,101 @@
+def detect_segments_from_masks(
+    mask_files_dir: str,
+    position_tolerance: int = 50,
+    min_segment_length: int = 10,
+    max_segments: int = 80
+) -> List[Tuple[int, int, Tuple[int, int, int, int]]]:
+    """
+    Detect segments where watermark stays in roughly the same position from SAM2 masks.
+
+    Analyzes SAM2 mask files to extract bounding boxes and group into segments.
+    Uses loose position tolerance to allow natural movement while still grouping.
+
+    Args:
+        mask_files_dir: Directory containing SAM2 mask PNG files (e.g., "00000.png")
+        position_tolerance: Max pixel movement to consider "same segment" (default 50px)
+        min_segment_length: Minimum frames for a valid segment (default 10)
+        max_segments: Maximum number of segments to create (default 80)
+
+    Returns:
+        List of (start_frame, end_frame, average_bbox) tuples
+        Example: [(0, 150, (100,50,200,100)), (151, 300, (500,600,600,700))]
+    """
+    if not os.path.exists(mask_files_dir):
+        print(f"[SEGMENT] Warning: mask directory not found: {mask_files_dir}")
+        return []
+
+    mask_files = sorted([f for f in os.listdir(mask_files_dir) if f.endswith('.png')])
+    if not mask_files:
+        print(f"[SEGMENT] Warning: no mask files found in {mask_files_dir}")
+        return []
+
+    print(f"[SEGMENT] Analyzing {len(mask_files)} SAM2 masks for motion-based segmentation...")
+
+    # Extract bboxes from masks
+    bboxes_per_frame = []
+    for mask_file in mask_files:
+        mask_path = os.path.join(mask_files_dir, mask_file)
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+
+        if mask is None:
+            bboxes_per_frame.append(None)
+            continue
+
+        coords = cv2.findNonZero(mask)
+        if coords is not None:
+            x, y, w, h = cv2.boundingRect(coords)
+            bboxes_per_frame.append((x, y, x+w, y+h))
+        else:
+            bboxes_per_frame.append(None)
+
+    # Use existing detection logic
+    segments = detect_segments(bboxes_per_frame, position_tolerance, min_segment_length)
+
+    # Cap at max_segments by merging smallest adjacent segments
+    if len(segments) > max_segments:
+        print(f"[SEGMENT] Too many segments ({len(segments)}), reducing to {max_segments}...")
+
+        # Sort segments by duration, merge shortest ones
+        while len(segments) > max_segments:
+            # Find shortest segment
+            shortest_idx = min(range(len(segments)),
+                             key=lambda i: segments[i][1] - segments[i][0])
+
+            # Merge with adjacent segment (prefer next, fallback to previous)
+            if shortest_idx < len(segments) - 1:
+                # Merge with next
+                curr = segments[shortest_idx]
+                next_seg = segments[shortest_idx + 1]
+                merged = (curr[0], next_seg[1],
+                         average_bbox([curr[2], next_seg[2]]))
+                segments[shortest_idx] = merged
+                segments.pop(shortest_idx + 1)
+            else:
+                # Merge with previous
+                curr = segments[shortest_idx]
+                prev = segments[shortest_idx - 1]
+                merged = (prev[0], curr[1],
+                         average_bbox([prev[2], curr[2]]))
+                segments[shortest_idx - 1] = merged
+                segments.pop(shortest_idx)
+
+    print(f"[SEGMENT] Detected {len(segments)} motion-based segments:")
+    for idx, (start, end, bbox) in enumerate(segments):
+        duration = end - start  # Exclusive end, so no +1 needed
+        movement = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        print(f"[SEGMENT]   Segment {idx+1}: frames {start}-{end} ({duration}f) at bbox={bbox}, size={movement}")
+
+    return segments
+
+
+def detect_segments(
+    detections_per_frame: List[Optional[Tuple[int, int, int, int]]],
+    position_tolerance: int = 5,
+    min_segment_length: int = 10
+) -> List[Tuple[int, int, Tuple[int, int, int, int]]]:
+    """
+    Detect segments where watermark stays in same position.
+
+    Args:
+        detections_per_frame: List of bbox per frame (None if no detection)
+        position_tolerance: Max pixel movement to consider "static" (default 5px)

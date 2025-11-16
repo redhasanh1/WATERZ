@@ -191,6 +191,11 @@
         .timeline-wrapper {
             position: relative;
             margin-bottom: 1.5rem;
+            width: 100%;
+            min-height: 100px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            overflow: hidden;
         }
 
         .timeline-header {
@@ -337,10 +342,6 @@
             border-left-color: #ef4444;
         }
 
-        .timeline-wrapper {
-            margin-top: 1rem;
-        }
-
         .instructions {
             background: #fffbeb;
             border: 1px solid #fbbf24;
@@ -463,14 +464,14 @@
                 <p id="status-message">Ready</p>
             </div>
 
-            <!-- Timeline (ABOVE video) -->
-            <div class="timeline-wrapper" id="timeline-wrapper"></div>
-
             <!-- Video Container with Canvas Overlay -->
             <div class="video-container" id="video-container">
                 <video id="video-player" controls></video>
                 <canvas id="sam2-canvas"></canvas>
             </div>
+
+            <!-- Timeline (BELOW video in preview section) -->
+            <div class="timeline-wrapper" id="timeline-wrapper"></div>
 
             <!-- Controls -->
             <div class="controls">
@@ -576,36 +577,255 @@
             });
         }
 
-        // Initialize NLE timeline
-        async function initTimeline() {
-            showStatus('Initializing professional timeline...', '');
+        // Professional Video Timeline Class
+        class VideoTimeline {
+            constructor(videoElement, options = {}) {
+                this.video = videoElement;
+                this.container = null;
+                this.thumbnails = [];
+                this.currentFrame = 0;
+                this.totalFrames = 0;
+                this.fps = 30;
+                this.onFrameChange = options.onFrameChange || (() => {});
+            }
 
-            const timelineWrapper = document.getElementById('timeline-wrapper');
-            timelineWrapper.innerHTML = ''; // Clear old timeline
+            async init() {
+                console.log('[Timeline] Initializing professional timeline...');
 
-            // Initialize NLE Timeline
-            timeline = new NLETimeline(videoPlayer, {
-                width: timelineWrapper.clientWidth || 1200,
-                height: 400,
-                fps: 30,
-                pixelsPerSecond: 100
-            });
+                // Wait for video metadata
+                await new Promise((resolve) => {
+                    if (this.video.readyState >= 1) resolve();
+                    else this.video.addEventListener('loadedmetadata', resolve, { once: true });
+                });
 
-            timeline.init();
+                this.fps = 30;
+                this.totalFrames = Math.floor(this.video.duration * this.fps);
 
-            // Add to page
-            timelineWrapper.appendChild(timeline.getContainer());
+                console.log(`[Timeline] Video: ${this.video.videoWidth}x${this.video.videoHeight}, ${this.video.duration}s, ${this.totalFrames} frames`);
 
-            // Create sample clip for demo (the uploaded video)
-            timeline.addClip('video1', {
-                name: 'Main Video',
-                type: 'video',
-                startTime: 0,
-                duration: videoPlayer.duration
-            });
+                // Create timeline container
+                this.createTimelineContainer();
 
-            console.log('[Timeline] Professional NLE timeline initialized');
+                // Generate thumbnails
+                await this.generateThumbnails();
+
+                console.log('[Timeline] Timeline initialized successfully');
+            }
+
+            createTimelineContainer() {
+                this.container = document.createElement('div');
+                this.container.className = 'timeline-container';
+                this.container.style.cssText = `
+                    position: relative;
+                    width: 100%;
+                    height: 80px;
+                    background: rgba(0,0,0,0.8);
+                    border-radius: 8px;
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    display: flex;
+                    align-items: center;
+                    padding: 10px;
+                    gap: 4px;
+                    user-select: none;
+                `;
+
+                this.track = document.createElement('div');
+                this.track.style.cssText = `
+                    display: flex;
+                    height: 100%;
+                    min-width: 100%;
+                    position: relative;
+                `;
+                this.container.appendChild(this.track);
+
+                // Add scrollbar styling
+                const style = document.createElement('style');
+                style.textContent = `
+                    .timeline-container::-webkit-scrollbar {
+                        height: 6px;
+                    }
+                    .timeline-container::-webkit-scrollbar-track {
+                        background: rgba(255,255,255,0.1);
+                        border-radius: 3px;
+                    }
+                    .timeline-container::-webkit-scrollbar-thumb {
+                        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                        border-radius: 3px;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            async generateThumbnails() {
+                const thumbnailCount = Math.min(this.totalFrames, 100);
+                const interval = Math.floor(this.totalFrames / thumbnailCount);
+
+                console.log(`[Timeline] Generating ${thumbnailCount} thumbnails...`);
+                showStatus(`Generating ${thumbnailCount} timeline thumbnails...`, '');
+
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = 120;
+                canvas.height = 68;
+
+                for (let i = 0; i < thumbnailCount; i++) {
+                    const frameNumber = i * interval;
+                    const time = frameNumber / this.fps;
+
+                    const thumb = document.createElement('div');
+                    thumb.className = 'timeline-thumbnail';
+                    thumb.dataset.frame = frameNumber;
+                    thumb.dataset.time = time;
+                    thumb.style.cssText = `
+                        flex-shrink: 0;
+                        width: 120px;
+                        height: 68px;
+                        background: #000;
+                        border: 2px solid transparent;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        position: relative;
+                        overflow: hidden;
+                        transition: all 0.2s ease;
+                    `;
+
+                    const label = document.createElement('div');
+                    label.textContent = frameNumber;
+                    label.style.cssText = `
+                        position: absolute;
+                        bottom: 2px;
+                        right: 4px;
+                        background: rgba(0,0,0,0.7);
+                        color: white;
+                        font-size: 10px;
+                        padding: 2px 4px;
+                        border-radius: 3px;
+                        font-weight: 600;
+                    `;
+                    thumb.appendChild(label);
+
+                    try {
+                        await this.captureFrame(thumb, canvas, ctx, time);
+                    } catch (error) {
+                        console.warn(`[Timeline] Failed to capture frame ${frameNumber}:`, error);
+                        thumb.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                    }
+
+                    thumb.addEventListener('click', () => {
+                        this.jumpToFrame(frameNumber);
+                    });
+
+                    thumb.addEventListener('mouseenter', () => {
+                        thumb.style.borderColor = '#667eea';
+                        thumb.style.boxShadow = '0 0 10px rgba(102, 126, 234, 0.8)';
+                    });
+
+                    thumb.addEventListener('mouseleave', () => {
+                        if (parseInt(thumb.dataset.frame) !== this.currentFrame) {
+                            thumb.style.borderColor = 'transparent';
+                            thumb.style.boxShadow = 'none';
+                        }
+                    });
+
+                    this.track.appendChild(thumb);
+                    this.thumbnails.push(thumb);
+
+                    if (i % 10 === 0) {
+                        showStatus(`Generating thumbnails... ${Math.floor((i/thumbnailCount)*100)}%`, '');
+                    }
+                }
+
+                console.log('[Timeline] Thumbnails generated successfully');
+            }
+
+            async captureFrame(thumbElement, canvas, ctx, time) {
+                return new Promise((resolve, reject) => {
+                    const video = this.video;
+                    const currentTime = video.currentTime;
+
+                    video.currentTime = time;
+
+                    video.addEventListener('seeked', function handler() {
+                        video.removeEventListener('seeked', handler);
+
+                        try {
+                            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                            thumbElement.style.backgroundImage = `url(${canvas.toDataURL('image/jpeg', 0.7)})`;
+                            thumbElement.style.backgroundSize = 'cover';
+                            thumbElement.style.backgroundPosition = 'center';
+                            video.currentTime = currentTime;
+                            resolve();
+                        } catch (error) {
+                            video.currentTime = currentTime;
+                            reject(error);
+                        }
+                    }, { once: true });
+                });
+            }
+
+            jumpToFrame(frameNumber) {
+                const time = frameNumber / this.fps;
+                this.video.currentTime = time;
+                this.currentFrame = frameNumber;
+
+                this.thumbnails.forEach(thumb => {
+                    if (parseInt(thumb.dataset.frame) === frameNumber) {
+                        thumb.style.borderColor = '#667eea';
+                        thumb.style.boxShadow = '0 0 10px rgba(102, 126, 234, 0.8)';
+                    } else {
+                        thumb.style.borderColor = 'transparent';
+                        thumb.style.boxShadow = 'none';
+                    }
+                });
+
+                this.onFrameChange(frameNumber);
+            }
+
+            getContainer() {
+                return this.container;
+            }
         }
+
+        // Initialize professional timeline
+        async function initTimeline() {
+            try {
+                console.log('[Timeline] Starting initialization...');
+
+                // Wait for video metadata
+                if (videoPlayer.readyState < 1) {
+                    await new Promise(resolve => {
+                        videoPlayer.addEventListener('loadedmetadata', resolve, { once: true });
+                    });
+                }
+
+                // Create timeline instance
+                const timeline = new VideoTimeline(videoPlayer, {
+                    onFrameChange: (frameNumber) => {
+                        console.log(`[Timeline] Jumped to frame ${frameNumber}`);
+                    }
+                });
+
+                // Initialize timeline
+                await timeline.init();
+
+                // Get container and insert it
+                const container = timeline.getContainer();
+                const timelineWrapper = document.getElementById('timeline-wrapper');
+
+                if (container && timelineWrapper) {
+                    timelineWrapper.innerHTML = '';
+                    timelineWrapper.appendChild(container);
+                    timelineWrapper.style.display = 'block';
+                    showStatus('✅ Professional timeline ready! Click frames to jump.', 'success');
+                    console.log('[Timeline] Timeline displayed successfully');
+                }
+            } catch (error) {
+                console.error('[Timeline] Failed to initialize:', error);
+                showStatus('❌ Timeline initialization failed', 'error');
+            }
+        }
+
 
         // Extract frame thumbnails from video (client-side) - ALL FRAMES
         async function extractFrameThumbnails(video) {
@@ -726,7 +946,7 @@
 
             try {
                 loadingOverlay.classList.add('active');
-                showStatus('Processing video...', '');
+                showStatus('Queuing video for processing...', '');
 
                 const response = await fetch('/api/sam2/process-video', {
                     method: 'POST',
@@ -735,24 +955,97 @@
                         task_id: currentTaskId,
                         points: selectionData.points,
                         video_width: selectionData.video_width,
-                        video_height: selectionData.video_height
+                        video_height: selectionData.video_height,
+                        frame_index: selectionData.frame_index
                     })
                 });
 
                 const data = await response.json();
 
                 if (data.status === 'success') {
-                    showStatus('✅ Processing complete! Your video is ready.', 'success');
-                    // TODO: Show download button or preview
+                    const jobId = data.job_id;
+                    showStatus('✅ Queued! Local worker will process your video...', 'success');
+
+                    // Poll job status
+                    pollJobStatus(jobId);
                 } else {
-                    showStatus('❌ Processing failed: ' + data.message, 'error');
+                    showStatus('❌ Failed to queue job: ' + data.message, 'error');
+                    loadingOverlay.classList.remove('active');
                 }
             } catch (error) {
                 console.error('Processing error:', error);
-                showStatus('❌ Processing failed: ' + error.message, 'error');
-            } finally {
+                showStatus('❌ Failed to queue job: ' + error.message, 'error');
                 loadingOverlay.classList.remove('active');
             }
+        }
+
+        // Poll job status until complete
+        async function pollJobStatus(jobId) {
+            const pollInterval = 2000; // 2 seconds
+            const maxAttempts = 300; // 10 minutes max
+            let attempts = 0;
+
+            const poll = async () => {
+                attempts++;
+
+                try {
+                    const response = await fetch(`/api/sam2/status/${jobId}`);
+                    const data = await response.json();
+
+                    console.log(`[POLL] Job ${jobId} status:`, data.status);
+
+                    if (data.status === 'completed') {
+                        loadingOverlay.classList.remove('active');
+                        showStatus('✅ Processing complete!', 'success');
+
+                        // Show download button
+                        const downloadBtn = document.createElement('a');
+                        downloadBtn.href = data.result_url;
+                        downloadBtn.className = 'btn btn-primary';
+                        downloadBtn.textContent = '⬇️ Download Processed Video';
+                        downloadBtn.style.marginTop = '20px';
+                        downloadBtn.download = `sam2_result_${jobId}.mp4`;
+
+                        statusBar.appendChild(downloadBtn);
+
+                    } else if (data.status === 'failed') {
+                        loadingOverlay.classList.remove('active');
+                        showStatus('❌ Processing failed: ' + (data.error || 'Unknown error'), 'error');
+
+                    } else if (data.status === 'processing') {
+                        showStatus('🔄 Your video is being processed by the local worker...', '');
+
+                        if (attempts < maxAttempts) {
+                            setTimeout(poll, pollInterval);
+                        } else {
+                            loadingOverlay.classList.remove('active');
+                            showStatus('❌ Processing timeout - please check local worker', 'error');
+                        }
+
+                    } else if (data.status === 'pending') {
+                        showStatus('⏳ Waiting for local worker...', '');
+
+                        if (attempts < maxAttempts) {
+                            setTimeout(poll, pollInterval);
+                        } else {
+                            loadingOverlay.classList.remove('active');
+                            showStatus('❌ Processing timeout - please check local worker', 'error');
+                        }
+                    }
+
+                } catch (error) {
+                    console.error('Poll error:', error);
+                    if (attempts < maxAttempts) {
+                        setTimeout(poll, pollInterval);
+                    } else {
+                        loadingOverlay.classList.remove('active');
+                        showStatus('❌ Failed to check job status', 'error');
+                    }
+                }
+            };
+
+            // Start polling
+            poll();
         }
 
         // Show status message

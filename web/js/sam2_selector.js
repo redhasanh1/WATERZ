@@ -18,10 +18,13 @@ class SAM2Selector {
             ...options
         };
 
-        // Selection state
-        this.points = []; // Array of {x, y, label} where label: 1=positive, 0=negative
-        this.currentMask = null;
+        // Multi-object selection state
+        this.selections = []; // Array of {id, points, mask}
+        this.currentSelectionId = 0;
         this.isLoading = false;
+
+        // All objects use green color
+        this.maskColor = [0, 255, 0]; // Green for all selections
 
         // Video metadata
         this.videoWidth = 0;
@@ -57,6 +60,45 @@ class SAM2Selector {
     }
 
     /**
+     * Calculate actual video render bounds accounting for object-fit: contain
+     */
+    calculateVideoRenderBounds() {
+        if (!this.video.videoWidth) return;
+
+        const canvasRect = this.canvas.getBoundingClientRect();
+        const containerWidth = canvasRect.width;
+        const containerHeight = canvasRect.height;
+
+        // Calculate video's aspect ratio
+        const videoAspect = this.video.videoWidth / this.video.videoHeight;
+        const containerAspect = containerWidth / containerHeight;
+
+        let renderWidth, renderHeight, offsetX, offsetY;
+
+        if (videoAspect > containerAspect) {
+            // Video is wider - letterbox top/bottom
+            renderWidth = containerWidth;
+            renderHeight = containerWidth / videoAspect;
+            offsetX = 0;
+            offsetY = (containerHeight - renderHeight) / 2;
+        } else {
+            // Video is taller - pillarbox left/right
+            renderHeight = containerHeight;
+            renderWidth = containerHeight * videoAspect;
+            offsetX = (containerWidth - renderWidth) / 2;
+            offsetY = 0;
+        }
+
+        // Store render bounds for coordinate conversion
+        this.renderWidth = renderWidth;
+        this.renderHeight = renderHeight;
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+
+        console.log(`[SAM2Selector] Video render: ${renderWidth.toFixed(1)}x${renderHeight.toFixed(1)}, Offset: (${offsetX.toFixed(1)}, ${offsetY.toFixed(1)})`);
+    }
+
+    /**
      * Update canvas size to match video element
      */
     updateCanvasSize() {
@@ -65,23 +107,26 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Calculate scale to fit canvas while maintaining aspect ratio
-        const containerWidth = this.canvas.parentElement.clientWidth;
-        const containerHeight = this.canvas.parentElement.clientHeight || 600;
+        // Set canvas internal resolution to native video resolution
+        this.canvas.width = this.videoWidth;
+        this.canvas.height = this.videoHeight;
 
-        const scaleX = containerWidth / this.videoWidth;
-        const scaleY = containerHeight / this.videoHeight;
-        this.displayScale = Math.min(scaleX, scaleY, 1.0);
+        // Canvas display size is handled by CSS (100% width/height of parent)
+        // No need to set style.width/height - it auto-resizes responsively
 
-        // Set canvas display size
-        this.canvas.width = Math.floor(this.videoWidth * this.displayScale);
-        this.canvas.height = Math.floor(this.videoHeight * this.displayScale);
+        // Get current display dimensions for scale calculation
+        const canvasRect = this.canvas.getBoundingClientRect();
+        const displayWidth = canvasRect.width;
+        const displayHeight = canvasRect.height;
 
-        // Calculate offsets for centering
-        this.offsetX = (containerWidth - this.canvas.width) / 2;
-        this.offsetY = (containerHeight - this.canvas.height) / 2;
+        // Calculate scale for coordinate conversion
+        this.displayScaleX = displayWidth / this.videoWidth;
+        this.displayScaleY = displayHeight / this.videoHeight;
 
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Scale: ${this.displayScale.toFixed(2)}x`);
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth}x${displayHeight}`);
+
+        // Calculate video render bounds for letterbox compensation
+        this.calculateVideoRenderBounds();
 
         // Redraw with current mask
         this.draw();
@@ -94,6 +139,7 @@ class SAM2Selector {
         if (this.isLoading) return;
 
         const point = this.getCanvasPoint(e);
+        if (!point) return; // Ignore clicks in letterbox area
         this.addPoint(point.x, point.y, 1);
     }
 
@@ -104,57 +150,83 @@ class SAM2Selector {
         if (this.isLoading) return;
 
         const point = this.getCanvasPoint(e);
+        if (!point) return; // Ignore clicks in letterbox area
         this.addPoint(point.x, point.y, 0);
     }
 
     /**
      * Convert mouse event to canvas coordinates
+     * Uses offsetX/offsetY with letterbox compensation
      */
     getCanvasPoint(e) {
-        const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        // Use offsetX/offsetY - relative to canvas element
+        const clickX = e.offsetX;
+        const clickY = e.offsetY;
 
-        // Convert to original video coordinates
-        const videoX = Math.floor(x / this.displayScale);
-        const videoY = Math.floor(y / this.displayScale);
+        // Subtract letterbox offset to get position relative to rendered video
+        const relativeX = clickX - this.offsetX;
+        const relativeY = clickY - this.offsetY;
+
+        // Check if click is outside the rendered video area (in letterbox)
+        if (relativeX < 0 || relativeY < 0 || relativeX > this.renderWidth || relativeY > this.renderHeight) {
+            console.log('[SAM2Selector] Click outside video area (in letterbox), ignoring');
+            return null;
+        }
+
+        // Convert to canvas coordinates using actual rendered video dimensions
+        const videoX = Math.floor((relativeX / this.renderWidth) * this.canvas.width);
+        const videoY = Math.floor((relativeY / this.renderHeight) * this.canvas.height);
+
+        console.log(`[SAM2Selector] Click: (${clickX.toFixed(1)}, ${clickY.toFixed(1)}) → Relative: (${relativeX.toFixed(1)}, ${relativeY.toFixed(1)}) → Canvas: (${videoX}, ${videoY})`);
 
         // Clamp to video bounds
         return {
             x: Math.max(0, Math.min(videoX, this.videoWidth - 1)),
             y: Math.max(0, Math.min(videoY, this.videoHeight - 1)),
-            displayX: x,
-            displayY: y
+            displayX: clickX,
+            displayY: clickY
         };
     }
 
     /**
-     * Add point and request mask update
+     * Add point and create new selection
      */
     async addPoint(x, y, label) {
-        this.points.push({x, y, label});
+        // Create new selection for this click
+        const selectionId = this.currentSelectionId++;
+        const points = [{x, y, label}];
 
-        console.log(`[SAM2Selector] Added ${label ? 'positive' : 'negative'} point at (${x}, ${y})`);
+        console.log(`[SAM2Selector] Creating selection #${selectionId} at (${x}, ${y})`);
 
-        // Callback for point changes
-        if (this.options.onPointsChange) {
-            this.options.onPointsChange(this.points);
+        // Request mask from server for this single point
+        const mask = await this.requestMask(points);
+
+        if (mask) {
+            // Add to selections array
+            this.selections.push({
+                id: selectionId,
+                points: points,
+                mask: mask
+            });
+
+            console.log(`[SAM2Selector] Added selection #${selectionId}, total: ${this.selections.length}`);
+
+            // Callback for selection changes
+            if (this.options.onPointsChange) {
+                this.options.onPointsChange(this.getAllPoints());
+            }
         }
 
-        // Request mask from server
-        await this.updateMask();
-
-        // Redraw
+        // Redraw all masks
         this.draw();
     }
 
     /**
-     * Request mask update from server
+     * Request mask from server for given points
      */
-    async updateMask() {
-        if (this.points.length === 0) {
-            this.currentMask = null;
-            return;
+    async requestMask(points) {
+        if (points.length === 0) {
+            return null;
         }
 
         this.isLoading = true;
@@ -170,7 +242,7 @@ class SAM2Selector {
                 body: JSON.stringify({
                     frame_data: frameData,
                     frame_index: this.currentFrameIndex,
-                    points: this.points,
+                    points: points,
                     video_width: this.videoWidth,
                     video_height: this.videoHeight
                 })
@@ -180,19 +252,16 @@ class SAM2Selector {
 
             if (data.status === 'success' && data.mask) {
                 // Decode mask from base64
-                this.currentMask = await this.decodeMask(data.mask);
-
-                console.log(`[SAM2Selector] Mask updated (${this.currentMask.width}x${this.currentMask.height})`);
-
-                // Callback for mask updates
-                if (this.options.onMaskUpdate) {
-                    this.options.onMaskUpdate(this.currentMask, this.points);
-                }
+                const mask = await this.decodeMask(data.mask);
+                console.log(`[SAM2Selector] Mask received (${mask.width}x${mask.height})`);
+                return mask;
             } else {
                 console.error('[SAM2Selector] Failed to get mask:', data.message);
+                return null;
             }
         } catch (error) {
-            console.error('[SAM2Selector] Mask update failed:', error);
+            console.error('[SAM2Selector] Mask request failed:', error);
+            return null;
         } finally {
             this.isLoading = false;
         }
@@ -209,7 +278,8 @@ class SAM2Selector {
 
         tempCtx.drawImage(this.video, 0, 0, this.videoWidth, this.videoHeight);
 
-        return tempCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+        // Use PNG for lossless quality (no JPEG compression artifacts)
+        return tempCanvas.toDataURL('image/png').split(',')[1];
     }
 
     /**
@@ -234,28 +304,20 @@ class SAM2Selector {
     }
 
     /**
-     * Draw current state (video frame + mask overlay + points)
+     * Draw current state (mask overlay + points only)
+     * Video is visible through transparent canvas - no need to draw it
      */
     draw() {
         if (!this.videoWidth) return;
 
-        // Clear canvas
+        // Clear canvas (keeps it transparent, video shows through)
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw video frame (scaled)
-        this.ctx.drawImage(
-            this.video,
-            0, 0, this.videoWidth, this.videoHeight,
-            0, 0, this.canvas.width, this.canvas.height
-        );
+        // Draw all mask overlays
+        this.drawAllMasks();
 
-        // Draw mask overlay
-        if (this.currentMask) {
-            this.drawMaskOverlay();
-        }
-
-        // Draw points
-        this.drawPoints();
+        // Draw all points
+        this.drawAllPoints();
 
         // Draw loading indicator
         if (this.isLoading) {
@@ -264,72 +326,77 @@ class SAM2Selector {
     }
 
     /**
-     * Draw mask overlay with transparency
+     * Draw all mask overlays with transparency
      */
-    drawMaskOverlay() {
-        // Create temporary canvas for mask at display size
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = this.canvas.width;
-        tempCanvas.height = this.canvas.height;
-        const tempCtx = tempCanvas.getContext('2d');
+    drawAllMasks() {
+        if (this.selections.length === 0) return;
 
-        // Scale mask to display size
-        tempCtx.putImageData(this.currentMask, 0, 0);
-        const scaledMask = tempCtx.getImageData(0, 0, this.currentMask.width, this.currentMask.height);
-
-        // Create overlay with green color
+        // Create overlay for all masks
         const overlay = this.ctx.createImageData(this.canvas.width, this.canvas.height);
 
-        // Resize mask data to match canvas
-        for (let y = 0; y < this.canvas.height; y++) {
-            for (let x = 0; x < this.canvas.width; x++) {
-                // Map to mask coordinates
-                const maskX = Math.floor(x / this.canvas.width * scaledMask.width);
-                const maskY = Math.floor(y / this.canvas.height * scaledMask.height);
-                const maskIdx = (maskY * scaledMask.width + maskX) * 4;
+        // Loop through all selections and composite their masks
+        this.selections.forEach(selection => {
+            const mask = selection.mask;
+            if (!mask) return;
 
-                // If mask pixel is white (255), apply green overlay
-                if (scaledMask.data[maskIdx] > 127) {
-                    const idx = (y * this.canvas.width + x) * 4;
-                    overlay.data[idx] = this.options.maskColor[0];     // R
-                    overlay.data[idx + 1] = this.options.maskColor[1]; // G
-                    overlay.data[idx + 2] = this.options.maskColor[2]; // B
-                    overlay.data[idx + 3] = 255 * this.options.maskAlpha; // A
+            // Resize mask data to match canvas
+            for (let y = 0; y < this.canvas.height; y++) {
+                for (let x = 0; x < this.canvas.width; x++) {
+                    // Map to mask coordinates
+                    const maskX = Math.floor(x / this.canvas.width * mask.width);
+                    const maskY = Math.floor(y / this.canvas.height * mask.height);
+                    const maskIdx = (maskY * mask.width + maskX) * 4;
+
+                    // If mask pixel is white (255), apply green overlay
+                    if (mask.data[maskIdx] > 127) {
+                        const idx = (y * this.canvas.width + x) * 4;
+                        overlay.data[idx] = this.maskColor[0];     // R (Green)
+                        overlay.data[idx + 1] = this.maskColor[1]; // G (Green)
+                        overlay.data[idx + 2] = this.maskColor[2]; // B (Green)
+                        overlay.data[idx + 3] = 255 * this.options.maskAlpha; // A
+                    }
                 }
             }
-        }
+        });
 
-        // Draw overlay
+        // Draw composite overlay
         this.ctx.putImageData(overlay, 0, 0);
     }
 
     /**
-     * Draw selection points
+     * Draw all selection points
      */
-    drawPoints() {
-        this.points.forEach(point => {
-            const x = point.x * this.displayScale;
-            const y = point.y * this.displayScale;
-            const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
+    drawAllPoints() {
+        this.selections.forEach(selection => {
+            selection.points.forEach(point => {
+                // Convert from canvas coordinates to rendered video coordinates
+                const relativeX = (point.x / this.canvas.width) * this.renderWidth;
+                const relativeY = (point.y / this.canvas.height) * this.renderHeight;
 
-            // Draw circle
-            this.ctx.beginPath();
-            this.ctx.arc(x, y, 6, 0, Math.PI * 2);
-            this.ctx.fillStyle = color;
-            this.ctx.fill();
-            this.ctx.strokeStyle = '#FFFFFF';
-            this.ctx.lineWidth = 2;
-            this.ctx.stroke();
+                // Add letterbox offset to get display coordinates
+                const x = relativeX + this.offsetX;
+                const y = relativeY + this.offsetY;
+                const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
 
-            // Draw crosshair
-            this.ctx.strokeStyle = color;
-            this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-            this.ctx.moveTo(x - 12, y);
-            this.ctx.lineTo(x + 12, y);
-            this.ctx.moveTo(x, y - 12);
-            this.ctx.lineTo(x, y + 12);
-            this.ctx.stroke();
+                // Draw circle
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, 6, 0, Math.PI * 2);
+                this.ctx.fillStyle = color;
+                this.ctx.fill();
+                this.ctx.strokeStyle = '#FFFFFF';
+                this.ctx.lineWidth = 2;
+                this.ctx.stroke();
+
+                // Draw crosshair
+                this.ctx.strokeStyle = color;
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(x - 12, y);
+                this.ctx.lineTo(x + 12, y);
+                this.ctx.moveTo(x, y - 12);
+                this.ctx.lineTo(x, y + 12);
+                this.ctx.stroke();
+            });
         });
     }
 
@@ -347,18 +414,29 @@ class SAM2Selector {
     }
 
     /**
-     * Reset selection
+     * Reset all selections
      */
     reset() {
-        this.points = [];
-        this.currentMask = null;
+        this.selections = [];
+        this.currentSelectionId = 0;
         this.draw();
 
-        console.log('[SAM2Selector] Reset');
+        console.log('[SAM2Selector] Reset all selections');
 
         if (this.options.onPointsChange) {
-            this.options.onPointsChange(this.points);
+            this.options.onPointsChange([]);
         }
+    }
+
+    /**
+     * Get all points from all selections
+     */
+    getAllPoints() {
+        const allPoints = [];
+        this.selections.forEach(selection => {
+            allPoints.push(...selection.points);
+        });
+        return allPoints;
     }
 
     /**
@@ -378,11 +456,12 @@ class SAM2Selector {
      */
     getSelectionData() {
         return {
-            points: this.points,
+            points: this.getAllPoints(),
+            selections: this.selections,
             frame_index: this.currentFrameIndex,
             video_width: this.videoWidth,
             video_height: this.videoHeight,
-            has_mask: this.currentMask !== null
+            has_mask: this.selections.length > 0
         };
     }
 }
