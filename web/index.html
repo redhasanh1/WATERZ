@@ -1158,7 +1158,7 @@
                         <p class="upload-description">or click to browse</p>
                     </div>
 
-                    <div id="creditEstimate" style="display:none; text-align:center; margin: 10px 0 0; color: var(--text-secondary); font-weight: 600;"></div>
+                    <div id="creditEstimate" style="display:none; text-align:center; margin: 10px 0 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 700; padding: 0.75rem 1.5rem; border-radius: 12px; font-size: 1.1rem; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);"></div>
 
                     <div class="preview-container" id="previewContainer" style="text-align: center;">
                         <img id="previewImage" class="preview-image" alt="Video preview showing selected objects to remove" style="display: none; max-width: 100%; max-height: 900px;">
@@ -1207,24 +1207,6 @@
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-
-                            <!-- Arrow pointing to download menu -->
-                            <svg id="downloadHint" style="display: none; position: absolute; top: 0; right: -240px; width: 250px; height: 100%; pointer-events: none; z-index: 10;" viewBox="0 0 250 400" preserveAspectRatio="none">
-                                <defs>
-                                    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
-                                        <polygon points="0 0, 10 5, 0 10" fill="#667eea" />
-                                    </marker>
-                                    <linearGradient id="arrowGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                                        <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-                                        <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
-                                    </linearGradient>
-                                </defs>
-                                <path d="M 60 20 Q 140 150, 60 340" stroke="url(#arrowGradient)" stroke-width="4" fill="none" marker-end="url(#arrowhead)" stroke-linecap="round"></path>
-                            </svg>
-                            <!-- Text label at top right next to video -->
-                            <div id="downloadText" style="display: none; position: absolute; top: 5px; right: -190px; background: rgba(102, 126, 234, 0.95); color: white; padding: 0.7rem 1rem; border-radius: 8px; font-weight: 600; font-size: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); white-space: nowrap; z-index: 10;">
-                                Download S2 Remove via the player menu
                             </div>
                         </div>
                         <!-- Mask Selection Controls -->
@@ -2484,6 +2466,10 @@
                         if (sam2Selector && sam2Selector.points) {
                             points = sam2Selector.points;
                             updatePointCount();
+                        }
+                        // Force redraw to ensure mask is visible immediately
+                        if (sam2Selector && typeof sam2Selector.draw === 'function') {
+                            setTimeout(() => sam2Selector.draw(), 50);
                         }
                     },
                     onPointsChange: () => {
