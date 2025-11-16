@@ -5413,6 +5413,53 @@ def serve_training_video(filename):
     return send_file(video_path, mimetype='video/mp4')
 
 
+@app.route('/admin/upload-video', methods=['POST'])
+def admin_upload_video():
+    """Admin endpoint to upload videos to Railway volume"""
+    # Simple secret key auth - replace 'your-admin-secret' with a real secret
+    admin_secret = os.getenv('ADMIN_SECRET', 'dev-secret-123')
+
+    if request.headers.get('X-Admin-Secret') != admin_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+    video_type = request.form.get('type', 'static')  # 'static' or 'training'
+
+    if video.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    # Sanitize filename
+    filename = sanitize_filename(video.filename)
+
+    # Only allow .mp4 files
+    if not filename.endswith('.mp4'):
+        return jsonify({'error': 'Only .mp4 files allowed'}), 400
+
+    # Determine destination directory
+    if video_type == 'training':
+        dest_dir = TRAINING_VIDEOS_DIR
+    else:
+        dest_dir = STATIC_VIDEOS_DIR
+
+    # Create directory if it doesn't exist
+    os.makedirs(dest_dir, exist_ok=True)
+
+    # Save file
+    file_path = os.path.join(dest_dir, filename)
+    video.save(file_path)
+
+    return jsonify({
+        'success': True,
+        'filename': filename,
+        'type': video_type,
+        'path': file_path,
+        'url': f'/training/{filename}' if video_type == 'training' else f'/{filename}'
+    })
+
+
 @app.route('/results/<filename>')
 def serve_result(filename):
     """Serve processed result files and delete after sending"""
