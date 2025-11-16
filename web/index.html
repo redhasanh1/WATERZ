@@ -1161,14 +1161,14 @@
                     <div id="creditEstimate" style="display:none; text-align:center; margin: 10px 0 0; color: var(--text-secondary); font-weight: 600;"></div>
 
                     <div class="preview-container" id="previewContainer" style="text-align: center;">
-                        <img id="previewImage" class="preview-image" alt="Video preview showing selected objects to remove" style="display: none; max-width: 100%; max-height: 600px;">
+                        <img id="previewImage" class="preview-image" alt="Video preview showing selected objects to remove" style="display: none; max-width: 100%; max-height: 900px;">
                         <div id="videoContainer" style="position: relative; display: inline-block; max-width: 100%; overflow: hidden;">
                             <div style="text-align:left; color: var(--text-secondary); font-weight: 600; margin: 0 0 6px 2px;">Preview</div>
 
                             <!-- Professional Video Player Container -->
-                            <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5); max-height: 600px;">
+                            <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5); max-height: 900px;">
                                 <div style="position: relative;">
-                                    <video id="previewVideo" style="width: 100%; max-height: 600px; display: block; background: #000; object-fit: contain;">
+                                    <video id="previewVideo" style="width: 100%; max-height: 900px; display: block; background: #000; object-fit: contain;">
                                     </video>
 
                                     <!-- Canvas overlay for mask selection - MUST be inside position:relative container -->
@@ -2365,6 +2365,17 @@
                 }
             });
 
+            // Update SAM2 canvas when exiting fullscreen (fixes mask visibility bug)
+            document.addEventListener('fullscreenchange', () => {
+                // Wait for transition to complete, then update canvas
+                setTimeout(() => {
+                    const sam2Selector = window.sam2Selector;
+                    if (sam2Selector && typeof sam2Selector.updateCanvasSize === 'function') {
+                        sam2Selector.updateCanvasSize();
+                    }
+                }, 100);
+            });
+
             // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -2465,7 +2476,7 @@
             // Initialize SAM2Selector
             if (!sam2Selector) {
                 console.log('[SAM2] Initializing SAM2Selector...');
-                sam2Selector = new SAM2Selector(video, canvas, {
+                sam2Selector = window.sam2Selector = new SAM2Selector(video, canvas, {
                     onMaskUpdate: (maskData) => {
                         console.log('[SAM2] Mask received:', maskData);
                         if (!window.sam2Masks) window.sam2Masks = [];
@@ -2590,84 +2601,7 @@
         });
 
         // Draw a green dot on canvas
-        function drawPoint(x, y) {
-            if (!ctx) return;
-
-            // Convert video coordinates to canvas display coordinates
-            const rect = video.getBoundingClientRect();
-            const scaleX = rect.width / video.videoWidth;
-            const scaleY = rect.height / video.videoHeight;
-
-            const displayX = x * scaleX;
-            const displayY = (y * scaleY) - 8; // Offset 8px higher for better visibility
-
-            // Draw green circle with glow
-            ctx.shadowColor = 'rgba(72, 187, 120, 0.8)';
-            ctx.shadowBlur = 15;
-            ctx.fillStyle = '#48bb78';
-            ctx.beginPath();
-            ctx.arc(displayX, displayY, 8, 0, 2 * Math.PI);
-            ctx.fill();
-
-            // Draw white border
-            ctx.shadowBlur = 0;
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(displayX, displayY, 8, 0, 2 * Math.PI);
-            ctx.stroke();
-        }
-
-        // Redraw all points (for resize)
-        function redrawAllPoints() {
-            if (!ctx) return;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            points.forEach(point => drawPoint(point.x, point.y));
-        }
-
-        // Handle canvas click
-        canvas.addEventListener('click', function(e) {
-            if (!selectionMode) return;
-
-            const rect = canvas.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const clickY = e.clientY - rect.top;
-
-            // Convert display coordinates to video coordinates
-            const scaleX = video.videoWidth / rect.width;
-            const scaleY = video.videoHeight / rect.height;
-
-            const videoX = Math.round(clickX * scaleX);
-            const videoY = Math.round(clickY * scaleY);
-
-            // Store point with video coordinates
-            points.push({
-                x: videoX,
-                y: videoY,
-                t: video.currentTime,
-                media: 'video'
-            });
-
-            // Draw point
-            drawPoint(videoX, videoY);
-
-            // Update UI
-            updatePointCount();
-            clearBtn.disabled = false;
-
-            // Mark frame as masked in timeline
-            if (window.videoTimeline && window.currentFrame !== undefined) {
-                window.videoTimeline.markFrameMasked(window.currentFrame);
-            }
-
-            // Show scroll hint
-            if (points.length >= 1) {
-                scrollHint.style.display = 'block';
-                if (processBtn) {
-                    processBtn.style.display = 'block';
-                }
-            }
-        });
+        // Point and mask rendering handled by SAM2Selector class (no duplicate system needed)
 
         function updatePointCount() {
             pointCount.textContent = points.length;
