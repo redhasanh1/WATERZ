@@ -1132,6 +1132,18 @@
                     <br>No video editing skills required - just click and it's gone. 100% free to try.
                 </p>
 
+                <!-- Free Credits Incentive -->
+                <div style="text-align: center; margin: 2rem auto; max-width: 600px;">
+                    <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%); border: 2px solid rgba(102, 126, 234, 0.3); border-radius: 16px; padding: 1.5rem; box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2);">
+                        <p style="font-size: 1.2rem; font-weight: 700; margin: 0; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                            🎁 Sign up now and get 5 FREE credits!
+                        </p>
+                        <p style="font-size: 0.95rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                            Start removing watermarks instantly • No credit card required
+                        </p>
+                    </div>
+                </div>
+
                 <div class="demo-card">
                     <div id="uploadSection">
                         <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Upload Your Video or Paste URL</h3>
@@ -1725,6 +1737,14 @@
         }
 
         async function uploadFile(file) {
+            // Check if user is logged in
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            if (!user.id || !user.email) {
+                alert('Please sign in to use the watermark remover. Sign up now and get 5 FREE credits!');
+                window.location.href = 'login.html';
+                return;
+            }
+
             // Show preview immediately
             const reader = new FileReader();
             reader.onload = (e) => {
