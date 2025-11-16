@@ -893,6 +893,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            width: 100%;
         }
 
         .ad-sidebar {
@@ -927,6 +928,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            width: 100%;
         }
 
         .ad-banner-bottom {
@@ -939,6 +941,7 @@
             align-items: center;
             justify-content: center;
             margin-top: 2rem;
+            width: 100%;
         }
 
         .ad-placeholder {
@@ -2497,7 +2500,8 @@
                 }
 
                 // Show test button
-                document.getElementById('testSAM2Btn').style.display = 'inline-block';
+                const testBtn = document.getElementById('testSAM2Btn');
+                if (testBtn) testBtn.style.display = 'inline-block';
             } else {
                 enableBtn.textContent = 'Enable Selection Mode';
                 enableBtn.style.background = 'var(--gradient-primary)';
@@ -2510,7 +2514,8 @@
                 }
 
                 // Hide test button
-                document.getElementById('testSAM2Btn').style.display = 'none';
+                const testBtn2 = document.getElementById('testSAM2Btn');
+                if (testBtn2) testBtn2.style.display = 'none';
             }
         });
 
