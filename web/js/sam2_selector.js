@@ -118,9 +118,9 @@ class SAM2Selector {
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        // Convert to original video coordinates using separate X/Y scales
-        const videoX = Math.floor(x / this.displayScaleX);
-        const videoY = Math.floor(y / this.displayScaleY);
+        // Convert to canvas coordinates using live rect dimensions (handles object-fit: contain)
+        const videoX = Math.floor((x / (rect.right - rect.left)) * this.canvas.width);
+        const videoY = Math.floor((y / (rect.bottom - rect.top)) * this.canvas.height);
 
         // Clamp to video bounds
         return {
@@ -316,10 +316,16 @@ class SAM2Selector {
      * Draw all selection points
      */
     drawAllPoints() {
+        // Get live rect dimensions for accurate coordinate transformation
+        const rect = this.canvas.getBoundingClientRect();
+        const rectWidth = rect.right - rect.left;
+        const rectHeight = rect.bottom - rect.top;
+
         this.selections.forEach(selection => {
             selection.points.forEach(point => {
-                const x = point.x * this.displayScaleX;
-                const y = point.y * this.displayScaleY;
+                // Convert from canvas coordinates to display coordinates
+                const x = (point.x / this.canvas.width) * rectWidth;
+                const y = (point.y / this.canvas.height) * rectHeight;
                 const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
 
                 // Draw circle
