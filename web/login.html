@@ -594,8 +594,8 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    // Store user in localStorage
-                    localStorage.setItem('user', JSON.stringify(data));
+                    // Store user in localStorage (extract user object from response)
+                    localStorage.setItem('user', JSON.stringify(data.user || data));
 
                     showMessage(data.message || 'Success! Redirecting...', 'success');
 
