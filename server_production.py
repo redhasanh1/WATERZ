@@ -4356,6 +4356,12 @@ def index():
     return send_file('web/index.html')
 
 
+@app.route('/login.html')
+def login_page():
+    """Serve login page"""
+    return send_file('web/login.html')
+
+
 @app.route('/web/<path:path>')
 def serve_web(path):
     """Serve static files from /web/ prefix"""
