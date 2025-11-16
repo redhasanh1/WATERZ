@@ -160,6 +160,40 @@
             background: #e5e7eb;
         }
 
+        /* Professional Video Controls */
+        #fullscreenBtn:hover {
+            background: rgba(255, 255, 255, 0.2) !important;
+            transform: scale(1.05);
+        }
+
+        #playPauseBtn:hover {
+            transform: scale(1.1);
+        }
+
+        /* Timeline Thumbnail Styling */
+        #professionalTimeline {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(102, 126, 234, 0.5) rgba(26, 26, 46, 0.3);
+        }
+
+        #professionalTimeline::-webkit-scrollbar {
+            height: 8px;
+        }
+
+        #professionalTimeline::-webkit-scrollbar-track {
+            background: rgba(26, 26, 46, 0.3);
+            border-radius: 4px;
+        }
+
+        #professionalTimeline::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.5);
+            border-radius: 4px;
+        }
+
+        #professionalTimeline::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.7);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -1137,10 +1171,8 @@
                                     <video id="previewVideo" style="width: 100%; max-height: 600px; display: block; background: #000;">
                                     </video>
 
-                                    <!-- Professional Timeline (Frame Thumbnails) -->
-                                    <div id="professionalTimeline" style="position: absolute; bottom: 90px; left: 1rem; right: 1rem; display: none; z-index: 5;">
-                                        <!-- Timeline will be injected here by VideoTimeline class -->
-                                    </div>
+                                    <!-- Canvas overlay for mask selection - MUST be inside position:relative container -->
+                                    <canvas id="maskCanvas" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; pointer-events: none;"></canvas>
 
                                     <!-- Custom Video Controls Overlay -->
                                     <div id="videoControls" style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%); padding: 1.5rem 1rem 1rem; transition: opacity 0.3s;">
@@ -1166,16 +1198,9 @@
                                             </div>
 
                                             <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                                <button id="frameBackBtn" title="Previous Frame (←)" style="background: none; border: none; color: #fff; cursor: pointer; padding: 0.5rem;">
+                                                <button id="fullscreenBtn" title="Fullscreen (F)" style="background: rgba(255, 255, 255, 0.1); border: none; color: #fff; cursor: pointer; padding: 0.5rem; border-radius: 6px; transition: all 0.2s; display: flex; align-items: center; justify-content: center;">
                                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                        <path d="M15 18l-6-6 6-6"/>
-                                                        <path d="M9 18l-6-6 6-6"/>
-                                                    </svg>
-                                                </button>
-                                                <button id="frameForwardBtn" title="Next Frame (→)" style="background: none; border: none; color: #fff; cursor: pointer; padding: 0.5rem;">
-                                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                        <path d="M9 18l6-6-6-6"/>
-                                                        <path d="M15 18l6-6-6-6"/>
+                                                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                                                     </svg>
                                                 </button>
                                             </div>
@@ -1183,8 +1208,12 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- Canvas overlay for mask selection -->
-                            <canvas id="maskCanvas" style="display: none; position: absolute; top: 0; left: 0; cursor: crosshair; pointer-events: none;"></canvas>
+
+                            <!-- Professional Timeline (Frame Thumbnails) - Below Video -->
+                            <div id="professionalTimeline" style="display: none; margin-top: 1.5rem; padding: 1rem; background: rgba(26, 26, 46, 0.6); border-radius: 12px; border: 1px solid rgba(102, 126, 234, 0.2);">
+                                <!-- Timeline will be injected here by VideoTimeline class -->
+                            </div>
+
                             <!-- Arrow pointing to download menu -->
                             <svg id="downloadHint" style="display: none; position: absolute; top: 0; right: -240px; width: 250px; height: 100%; pointer-events: none; z-index: 10;" viewBox="0 0 250 400" preserveAspectRatio="none">
                                 <defs>
@@ -2274,8 +2303,7 @@
             const timelineProgress = document.getElementById('timelineProgress');
             const timelineScrubber = document.getElementById('timelineScrubber');
             const timeDisplay = document.getElementById('timeDisplay');
-            const frameBackBtn = document.getElementById('frameBackBtn');
-            const frameForwardBtn = document.getElementById('frameForwardBtn');
+            const fullscreenBtn = document.getElementById('fullscreenBtn');
             const videoControls = document.getElementById('videoControls');
 
             let isDragging = false;
@@ -2330,31 +2358,33 @@
                 timelineScrubber.style.cursor = 'grab';
             });
 
-            // Frame stepping
-            frameBackBtn.addEventListener('click', () => {
-                videoElem.currentTime = Math.max(0, videoElem.currentTime - (1 / 30)); // 30fps
-            });
+            // Fullscreen toggle
+            fullscreenBtn.addEventListener('click', () => {
+                const playerContainer = document.getElementById('professionalPlayer');
 
-            frameForwardBtn.addEventListener('click', () => {
-                videoElem.currentTime = Math.min(videoElem.duration, videoElem.currentTime + (1 / 30));
+                if (!document.fullscreenElement) {
+                    playerContainer.requestFullscreen().catch(err => {
+                        console.error('Fullscreen error:', err);
+                    });
+                    fullscreenBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>';
+                } else {
+                    document.exitFullscreen();
+                    fullscreenBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+                }
             });
 
             // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-                switch(e.key) {
+                switch(e.key.toLowerCase()) {
                     case ' ':
                         e.preventDefault();
                         playPauseBtn.click();
                         break;
-                    case 'ArrowLeft':
+                    case 'f':
                         e.preventDefault();
-                        frameBackBtn.click();
-                        break;
-                    case 'ArrowRight':
-                        e.preventDefault();
-                        frameForwardBtn.click();
+                        fullscreenBtn.click();
                         break;
                 }
             });
@@ -2428,8 +2458,9 @@
           }
 
           async generateThumbnails() {
-              const thumbnailCount = Math.min(this.totalFrames, 100);
-              const interval = Math.floor(this.totalFrames / thumbnailCount);
+              // Show max 25 thumbnails for clean, manageable timeline
+              const thumbnailCount = Math.min(this.totalFrames, 25);
+              const interval = Math.max(1, Math.floor(this.totalFrames / thumbnailCount));
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
               canvas.width = 120;
