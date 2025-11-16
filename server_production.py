@@ -4356,7 +4356,12 @@ def tunnel_url():
 @app.route('/')
 def index():
     """Serve landing page"""
-    return send_file('web/index.html')
+    return send_file(os.path.join(app.static_folder, 'index.html'))
+
+@app.route('/index.html')
+def index_html():
+    """Serve index.html explicitly"""
+    return send_file(os.path.join(app.static_folder, 'index.html'))
 
 
 @app.route('/login.html')
