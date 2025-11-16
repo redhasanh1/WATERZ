@@ -68,16 +68,17 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Get actual video display dimensions
+        // Set canvas internal resolution to native video resolution
+        this.canvas.width = this.videoWidth;
+        this.canvas.height = this.videoHeight;
+
+        // Canvas display size is handled by CSS (100% width/height of parent)
+        // No need to set style.width/height - it auto-resizes responsively
+
+        // Get current display dimensions for scale calculation
         const videoRect = this.video.getBoundingClientRect();
         const displayWidth = videoRect.width;
         const displayHeight = videoRect.height;
-
-        // Set canvas to match video's display size exactly
-        this.canvas.width = this.videoWidth;
-        this.canvas.height = this.videoHeight;
-        this.canvas.style.width = displayWidth + 'px';
-        this.canvas.style.height = displayHeight + 'px';
 
         // Calculate scale for coordinate conversion
         this.displayScaleX = displayWidth / this.videoWidth;

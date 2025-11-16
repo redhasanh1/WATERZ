@@ -1168,7 +1168,7 @@
                             <!-- Professional Video Player Container -->
                             <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
                                 <div style="position: relative;">
-                                    <video id="previewVideo" style="width: 100%; max-height: 600px; display: block; background: #000;">
+                                    <video id="previewVideo" style="width: 100%; height: auto; display: block; background: #000; object-fit: contain;">
                                     </video>
 
                                     <!-- Canvas overlay for mask selection - MUST be inside position:relative container -->
@@ -1198,7 +1198,7 @@
                                             </div>
 
                                             <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                                <button id="fullscreenBtn" title="Fullscreen (F)" style="background: rgba(255, 255, 255, 0.1); border: none; color: #fff; cursor: pointer; padding: 0.5rem; border-radius: 6px; transition: all 0.2s; display: flex; align-items: center; justify-content: center;">
+                                                <button id="fullscreenBtn" title="Fullscreen" style="background: rgba(255, 255, 255, 0.1); border: none; color: #fff; cursor: pointer; padding: 0.5rem; border-radius: 6px; transition: all 0.2s; display: flex; align-items: center; justify-content: center;">
                                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                         <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                                                     </svg>
@@ -1245,11 +1245,8 @@
                                 <button id="enableSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); transition: all 0.3s ease;">
                                     Enable Selection Mode
                                 </button>
-                                <button id="clearPointsBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--bg-gradient-2); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(240, 147, 251, 0.3); transition: all 0.3s ease;" disabled>
-                                    Clear Points
-                                </button>
-                                <button id="testSAM2Btn" style="display:none; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--bg-gradient-3); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3); transition: all 0.3s ease;">
-                                    🧪 Test SAM2 Connection
+                                <button id="resetSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--bg-gradient-3); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3); transition: all 0.3s ease;" disabled>
+                                    Reset (R)
                                 </button>
                             </div>
 
@@ -2386,6 +2383,13 @@
                         e.preventDefault();
                         fullscreenBtn.click();
                         break;
+                    case 'r':
+                        e.preventDefault();
+                        const resetBtn = document.getElementById('resetSelectionBtn');
+                        if (resetBtn && !resetBtn.disabled) {
+                            resetBtn.click();
+                        }
+                        break;
                 }
             });
 
@@ -2546,7 +2550,7 @@
         const canvas = document.getElementById('maskCanvas');
         const maskControls = document.getElementById('maskSelectionControls');
         const enableBtn = document.getElementById('enableSelectionBtn');
-        const clearBtn = document.getElementById('clearPointsBtn');
+        const resetBtn = document.getElementById('resetSelectionBtn');
         const pointsList = document.getElementById('pointsList');
         const pointCount = document.getElementById('pointCount');
         const scrollHint = document.getElementById('scrollHint');
@@ -2562,11 +2566,10 @@
 
         // Initialize canvas and timeline when video loads
         video.addEventListener('loadedmetadata', async function() {
-            const rect = video.getBoundingClientRect();
+            // Set canvas internal resolution to match video native resolution
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            canvas.style.width = rect.width + 'px';
-            canvas.style.height = rect.height + 'px';
+            // Canvas display size is handled by CSS (100% width/height)
             canvas.style.display = 'block';
             ctx = canvas.getContext('2d');
 
@@ -2605,14 +2608,7 @@
             }
         });
 
-        // Resize canvas when window resizes
-        window.addEventListener('resize', function() {
-            if (video.videoWidth > 0) {
-                const rect = video.getBoundingClientRect();
-                canvas.style.width = rect.width + 'px';
-                canvas.style.height = rect.height + 'px';
-            }
-        });
+        // Canvas auto-resizes via CSS (100% width/height) - no need for resize handler
 
         // Enable/disable selection mode with SAM2
         enableBtn.addEventListener('click', function() {
@@ -2621,7 +2617,7 @@
                 enableBtn.textContent = 'Selection Mode: ON (Click video!)';
                 enableBtn.style.background = 'var(--bg-gradient-4)';
                 canvas.style.pointerEvents = 'auto';
-                clearBtn.disabled = false;
+                resetBtn.disabled = false;
                 video.pause(); // Pause video during selection
                 pointsList.style.display = 'block';
 
@@ -2693,14 +2689,17 @@
             });
         }
 
-        // Clear all points
-        clearBtn.addEventListener('click', function() {
+        // Reset all points and masks
+        resetBtn.addEventListener('click', function() {
             points = [];
             if (ctx) {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
             }
+            if (sam2Selector) {
+                sam2Selector.reset();
+            }
             updatePointCount();
-            clearBtn.disabled = true;
+            resetBtn.disabled = true;
             scrollHint.style.display = 'none';
 
             // Clear mask indicators from timeline
@@ -2719,7 +2718,7 @@
             const scaleY = rect.height / video.videoHeight;
 
             const displayX = x * scaleX;
-            const displayY = y * scaleY;
+            const displayY = (y * scaleY) - 8; // Offset 8px higher for better visibility
 
             // Draw green circle with glow
             ctx.shadowColor = 'rgba(72, 187, 120, 0.8)';
