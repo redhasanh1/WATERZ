@@ -429,9 +429,10 @@ class SAM2TensorRTPredictor:
     def __del__(self):
         """Cleanup CUDA context when predictor is destroyed"""
         try:
+            # Don't pop context - causes issues with PyTorch's CUDA context
+            # Context will be cleaned up automatically when object is destroyed
             if hasattr(self, 'cuda_context'):
-                self.cuda_context.pop()
-                logger.info("[CUDA] Context cleaned up")
+                logger.info("[CUDA] Context will be auto-cleaned")
         except Exception as e:
             logger.warning(f"[CUDA] Cleanup failed: {e}")
 
