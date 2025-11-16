@@ -13,12 +13,11 @@ if tensorrt_bin not in os.environ["PATH"]:
 
 import numpy as np
 import tensorrt as trt
-import pycuda.driver as cuda
-import pycuda.autoinit
 import cv2
 from pathlib import Path
 import logging
 import torch
+import pycuda.driver as cuda
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +26,12 @@ class SAM2TensorRTPredictor:
     """Pure Python TensorRT SAM2 predictor with proper tensor binding"""
 
     def __init__(self, encoder_engine_path, decoder_engine_path):
+        # Initialize CUDA context on THIS thread (critical for multi-threading)
+        cuda.init()
+        self.cuda_device = cuda.Device(0)
+        self.cuda_context = self.cuda_device.make_context()
+        logger.info(f"[CUDA] Initialized device: {self.cuda_device.name()}, compute: {self.cuda_device.compute_capability()}")
+
         self.encoder_engine_path = Path(encoder_engine_path)
         self.decoder_engine_path = Path(decoder_engine_path)
 
@@ -420,6 +425,15 @@ class SAM2TensorRTPredictor:
         self.image_embed = original_embed
 
         return mask, score
+
+    def __del__(self):
+        """Cleanup CUDA context when predictor is destroyed"""
+        try:
+            if hasattr(self, 'cuda_context'):
+                self.cuda_context.pop()
+                logger.info("[CUDA] Context cleaned up")
+        except Exception as e:
+            logger.warning(f"[CUDA] Cleanup failed: {e}")
 
 
 def test_sam2_trt():

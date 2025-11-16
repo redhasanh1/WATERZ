@@ -10,6 +10,9 @@ echo SAM2 SELECTION WORKER
 echo ===================================================================
 echo.
 
+REM Use Python 3.12 (TensorRT requires Python 3.12, not 3.13!)
+set PYTHON=C:\Users\has\AppData\Local\Programs\Python\Python312\python.exe
+
 REM Set environment
 set PYTHONPATH=%CD%
 
@@ -27,33 +30,20 @@ if exist venv\Scripts\activate.bat (
     call venv\Scripts\activate.bat
 )
 
-REM Check if DATABASE_URL is set
-python -c "import os; from dotenv import load_dotenv; load_dotenv(); exit(0 if os.getenv('DATABASE_URL') else 1)" 2>nul
-if errorlevel 1 (
-    echo [ERROR] DATABASE_URL not found in .env file!
-    echo Please add DATABASE_URL to your .env file
-    pause
-    exit /b 1
-)
+REM SAM2 worker doesn't need DATABASE_URL, only REDIS_URL (set below at line 66)
 
 REM Check dependencies
 echo [INFO] Checking dependencies...
-python -c "import psycopg2" 2>nul
-if errorlevel 1 (
-    echo [WARN] psycopg2 not installed, installing...
-    pip install psycopg2-binary
-)
-
-python -c "import flask" 2>nul
+%PYTHON% -c "import flask" 2>nul
 if errorlevel 1 (
     echo [WARN] flask not installed, installing...
-    pip install flask
+    %PYTHON% -m pip install flask
 )
 
-python -c "import dotenv" 2>nul
+%PYTHON% -c "import dotenv" 2>nul
 if errorlevel 1 (
     echo [WARN] python-dotenv not installed, installing...
-    pip install python-dotenv
+    %PYTHON% -m pip install python-dotenv
 )
 
 echo.
@@ -66,6 +56,6 @@ REM Set Railway Redis URL explicitly (so worker connects to same Redis as Railwa
 set REDIS_URL=redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930
 
 REM Start worker
-python start_object_server.py
+%PYTHON% start_object_server.py
 
 pause
