@@ -13,19 +13,19 @@ ADMIN_SECRET = "dev-secret-123"  # Will use Railway env var in production
 # Videos to upload
 VIDEOS = [
     {
-        'path': 'web/cool.mp4',
+        'path': 'web/demos/before.mp4',
         'type': 'static',
-        'description': 'Showcase video'
+        'description': 'Demo video - before watermark removal'
     },
     {
-        'path': 'videostotrain/s2.mp4',
-        'type': 'training',
-        'description': 'Training video 1'
+        'path': 'web/demos/after.mp4',
+        'type': 'static',
+        'description': 'Demo video - after watermark removal'
     },
     {
-        'path': 'videostotrain/s2removed.mp4',
+        'path': 'sora_with_watermark.mp4',
         'type': 'training',
-        'description': 'Training video 2 (removed watermark)'
+        'description': 'Sora video with watermark'
     }
 ]
 
@@ -33,13 +33,13 @@ VIDEOS = [
 def upload_video(video_path, video_type, description):
     """Upload a single video to Railway volume"""
     if not os.path.exists(video_path):
-        print(f"❌ File not found: {video_path}")
+        print(f"[X] File not found: {video_path}")
         return False
 
     filename = os.path.basename(video_path)
     file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
 
-    print(f"\n📤 Uploading: {filename} ({file_size_mb:.1f} MB)")
+    print(f"\n[>>] Uploading: {filename} ({file_size_mb:.1f} MB)")
     print(f"   Type: {video_type}")
     print(f"   Description: {description}")
 
@@ -59,16 +59,16 @@ def upload_video(video_path, video_type, description):
 
         if response.status_code == 200:
             result = response.json()
-            print(f"✅ Success!")
+            print(f"[OK] Success!")
             print(f"   URL: {SITE_URL}{result['url']}")
             return True
         else:
-            print(f"❌ Upload failed: {response.status_code}")
+            print(f"[FAIL] Upload failed: {response.status_code}")
             print(f"   Error: {response.text}")
             return False
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[FAIL] Error: {e}")
         return False
 
 
@@ -81,9 +81,9 @@ def main():
     if len(sys.argv) > 1:
         global SITE_URL
         SITE_URL = sys.argv[1]
-        print(f"\n🎯 Target: {SITE_URL}")
+        print(f"\n[>>] Target: {SITE_URL}")
     else:
-        print(f"\n🎯 Target: {SITE_URL} (production)")
+        print(f"\n[>>] Target: {SITE_URL} (production)")
         print("   Tip: Use 'python upload_videos_to_railway.py http://localhost:5000' for local testing")
 
     # Get admin secret from environment if available
@@ -102,7 +102,7 @@ def main():
 
     # Summary
     print("\n" + "=" * 60)
-    print(f"✅ Uploaded {success_count}/{len(VIDEOS)} videos successfully")
+    print(f"[OK] Uploaded {success_count}/{len(VIDEOS)} videos successfully")
     print("=" * 60)
 
     if success_count < len(VIDEOS):
