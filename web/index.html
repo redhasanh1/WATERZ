@@ -2261,17 +2261,32 @@
 
         const savedTaskId = localStorage.getItem(ACTIVE_TASK_KEY);
         if (savedTaskId) {
-            console.log('Resuming active task:', savedTaskId);
-            statusDiv.style.display = 'block';
-            statusDiv.dataset.completed = '';
-            statusText.textContent = 'Reconnecting to active job...';
-            statusText.style.color = '#a0a0c0';
-            progressBar.style.width = '0%';
-            progressPercent.textContent = '0%';
-            if (videoElem) {
-                videoElem.dataset.taskId = savedTaskId;
-            }
-            startStatusPolling(savedTaskId);
+            console.log('Found saved task:', savedTaskId, '- checking if still active...');
+            // Check if task is still active before resuming
+            fetch(`/api/status/${savedTaskId}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        console.log('Saved task already finished, clearing...');
+                        localStorage.removeItem(ACTIVE_TASK_KEY);
+                    } else if (data.status === 'processing' || data.status === 'pending') {
+                        console.log('Resuming active task:', savedTaskId);
+                        statusDiv.style.display = 'block';
+                        statusDiv.dataset.completed = '';
+                        statusText.textContent = 'Reconnecting to active job...';
+                        statusText.style.color = '#a0a0c0';
+                        progressBar.style.width = '0%';
+                        progressPercent.textContent = '0%';
+                        if (videoElem) {
+                            videoElem.dataset.taskId = savedTaskId;
+                        }
+                        startStatusPolling(savedTaskId);
+                    }
+                })
+                .catch(err => {
+                    console.log('Task not found, clearing saved state');
+                    localStorage.removeItem(ACTIVE_TASK_KEY);
+                });
         }
 
         // ==================================================
