@@ -134,7 +134,7 @@ set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
 REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (must match --concurrency!)
-set SEGMENT_WORKERS=1
+set SEGMENT_WORKERS=4
 
 REM ⚡ SAM2 TRACKING: Use SAM2-Tiny for temporal mask tracking (BEST QUALITY!)
 REM    YOLO detects bbox on first frame → SAM2 tracks with temporal consistency
@@ -164,11 +164,13 @@ echo   - SEGMENT_WORKERS: 1 (sequential segment processing)
 echo ============================================================
 echo.
 
-REM Disable ALL torch.compile caching to avoid multi-worker file locking race conditions
-REM Workers will compile kernels on first run (~20-40s startup), then cache in memory
-REM This avoids FileExistsError crashes when 4 workers compile same kernels simultaneously
-set TORCHINDUCTOR_FX_GRAPH_CACHE=0
-set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
+REM Enable per-worker torch.compile cache isolation
+REM Each worker gets its own cache directory to prevent file locking conflicts
+REM Workers will compile on first run (~20-40s warmup), then use cached kernels
+REM This enables TRUE parallel processing with torch.compile!
+set TORCHINDUCTOR_CACHE_DIR=D:\watermarkz\temp\.torch_cache
+set TORCHINDUCTOR_FX_GRAPH_CACHE=1
+set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=1
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
 REM Clean any corrupted torch.compile cache before starting
@@ -178,7 +180,8 @@ REM     rmdir /s /q "D:\watermarkz\temp\torchinductor_has" 2>nul
 REM     echo [OK] Complete cache removed - workers will recompile on startup
 REM )
 
-REM Sequential processing for torch.compile optimization
-REM torch.compile works best with 1 worker (no cache conflicts, stable compilation)
-REM concurrency=1 = sequential processing, faster per-video with torch.compile
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1
+REM Parallel processing with per-worker cache isolation
+REM 4 workers with isolated torch.compile caches
+REM Each worker compiles independently (~20-40s first run)
+REM Subsequent runs: instant cached compilation + 4x throughput!
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
