@@ -169,13 +169,34 @@
             transform: translateY(-7.5px) rotate(-45deg);
         }
 
+        .mobile-theme-controls {
+            display: none;
+        }
+
+        .desktop-only {
+            display: initial;
+        }
+
         @media (max-width: 768px) {
             .nav-container {
                 padding: 0 1.5rem;
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+            }
+
+            .desktop-only {
+                display: none !important;
+            }
+
+            .mobile-theme-controls {
+                display: flex !important;
+                order: 1;
             }
 
             .mobile-menu-toggle {
                 display: flex;
+                order: 2;
             }
 
             .nav-menu {
@@ -377,8 +398,12 @@
                 <li><a href="index.html#remove-watermark">Remove Objects</a></li>
                 <li><a href="premium.html#pricing">Pricing</a></li>
                 <li><a href="index.html#comparison">Results</a></li>
-                <li><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;" aria-label="Toggle theme">Dark</button></li>
+                <li class="desktop-only"><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;" aria-label="Toggle theme">Dark</button></li>
             </ul>
+
+            <div class="mobile-theme-controls" style="display: none;">
+                <button id="mobileThemeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.45rem 0.85rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" aria-label="Toggle theme">Dark</button>
+            </div>
 
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
                 <span></span>

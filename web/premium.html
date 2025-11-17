@@ -651,14 +651,40 @@
             color: var(--text-secondary);
         }
 
+        .mobile-theme-controls {
+            display: none;
+        }
+
+        .desktop-only {
+            display: initial;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .nav-container {
                 padding: 0 1.5rem;
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+            }
+
+            .desktop-only {
+                display: none !important;
+            }
+
+            .mobile-theme-controls {
+                display: flex !important;
+                order: 1;
             }
 
             .mobile-menu-toggle {
                 display: flex;
+                order: 2;
+            }
+
+            .mobile-theme-btn {
+                padding: 0.5rem 1rem;
+                font-size: 0.85rem;
             }
 
             .nav-links {
@@ -761,7 +787,10 @@
                 <a href="/">Home</a>
                 <a href="#pricing">Pricing</a>
                 <button class="btn-nav" onclick="scrollToPricing()">Get Started</button>
-                <button id="themeToggle" class="btn-nav" style="margin-left: 1rem;" aria-label="Toggle theme">Dark</button>
+                <button id="themeToggle" class="btn-nav desktop-only" style="margin-left: 1rem;" aria-label="Toggle theme">Dark</button>
+            </div>
+            <div class="mobile-theme-controls" style="display: none;">
+                <button id="mobileThemeToggle" class="btn-nav mobile-theme-btn" aria-label="Toggle theme">Dark</button>
             </div>
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
                 <span></span>

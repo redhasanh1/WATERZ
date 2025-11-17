@@ -606,6 +606,10 @@
             gap: 1.5rem;
         }
 
+        .mobile-auth-controls {
+            display: none;  /* Hidden on desktop, shown on mobile */
+        }
+
         .nav-logo {
             display: flex;
             align-items: center;
@@ -812,11 +816,44 @@
             }
 
             .nav-right {
-                gap: 0.5rem;
+                gap: 0.75rem;
+                display: flex;
+                align-items: center;
             }
 
+            /* Mobile auth controls (Sign In + Theme) - LEFT of hamburger */
+            .mobile-auth-controls {
+                display: flex !important;
+                align-items: center;
+                gap: 0.5rem;
+                order: 1;
+            }
+
+            .mobile-signin-btn {
+                font-size: 0.8rem !important;
+                padding: 0.45rem 0.9rem !important;
+                white-space: nowrap;
+            }
+
+            .mobile-theme-btn {
+                font-size: 0.75rem !important;
+                padding: 0.45rem 0.7rem !important;
+            }
+
+            /* Hide desktop-only elements on mobile */
+            .desktop-only {
+                display: none !important;
+            }
+
+            /* Show mobile-only elements */
+            .mobile-only {
+                display: block !important;
+            }
+
+            /* Hamburger menu - on the RIGHT */
             .mobile-menu-toggle {
                 display: flex;
+                order: 2;
             }
 
             /* Hide desktop nav menu items on mobile */
@@ -836,6 +873,8 @@
                 opacity: 0;
                 pointer-events: none;
                 transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                max-height: calc(100vh - 75px);
+                overflow-y: auto;
             }
 
             .nav-left .nav-menu.active {
@@ -857,24 +896,19 @@
                 padding: 0.5rem 0;
             }
 
-            /* Hide user nav on mobile, show in hamburger menu if needed */
-            .nav-auth #userNav {
-                display: none !important;
+            /* Mobile user section styling in hamburger */
+            .mobile-user-section {
+                padding: 0.75rem 1rem !important;
             }
 
-            .nav-auth #signInLink {
-                font-size: 0.85rem;
-                padding: 0.5rem 1rem !important;
+            .mobile-user-section span,
+            .mobile-user-section a {
+                font-size: 0.9rem;
             }
 
             /* Hide API chip on mobile */
             .api-chip {
                 display: none !important;
-            }
-
-            .theme-toggle {
-                font-size: 0.85rem;
-                padding: 0.5rem 0.75rem;
             }
 
             .nav-cta {
@@ -1054,13 +1088,32 @@
                     <li><a href="#how-to">How It Works</a></li>
                     <li><a href="#comparison">Examples</a></li>
                     <li><a href="premium.html#pricing">Pricing</a></li>
+                    <!-- Mobile-only: User Navigation Items -->
+                    <li class="mobile-only mobile-user-section" id="mobileUserSection" style="display: none;">
+                        <span id="mobileUserEmail" style="color: var(--primary); font-weight: 600;"></span>
+                    </li>
+                    <li class="mobile-only mobile-user-section" id="mobileCreditsSection" style="display: none;">
+                        <span id="mobileUserCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.5rem 1rem; border-radius: 20px; font-weight: 600;">0 credits</span>
+                    </li>
+                    <li class="mobile-only mobile-user-section" id="mobileBuySection" style="display: none;">
+                        <a href="premium.html#pricing" id="mobileBuyCreditsBtn" class="nav-cta" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); display: inline-block; margin: 0.5rem 0;">Buy Credits</a>
+                    </li>
+                    <li class="mobile-only mobile-user-section" id="mobileSignOutSection" style="display: none;">
+                        <a href="#" id="mobileSignOutBtn" class="nav-cta" style="background: rgba(239, 68, 68, 0.9); display: inline-block; margin: 0.5rem 0;">Sign Out</a>
+                    </li>
                 </ul>
             </div>
 
             <!-- RIGHT: User Controls + System Controls -->
             <div class="nav-right">
-                <!-- Auth Section -->
-                <div class="nav-auth">
+                <!-- Mobile-only: Sign In + Theme (LEFT of hamburger) -->
+                <div class="mobile-auth-controls">
+                    <a href="login.html" class="nav-cta mobile-signin-btn" id="mobileSignInLink">Sign In</a>
+                    <button id="mobileThemeToggle" class="theme-toggle mobile-theme-btn" aria-label="Toggle dark mode">Dark</button>
+                </div>
+
+                <!-- Desktop Auth Section -->
+                <div class="nav-auth desktop-only">
                     <a href="login.html" class="nav-cta" id="signInLink">Sign In</a>
                     <ul class="nav-menu" id="userNav" style="display: none;">
                         <li><span id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem;"></span></li>
@@ -1073,7 +1126,7 @@
                 <!-- System Controls -->
                 <div class="nav-controls">
                     <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking...</div>
-                    <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">Dark</button>
+                    <button id="themeToggle" class="theme-toggle desktop-only" aria-label="Toggle dark mode">Dark</button>
                     <div class="mobile-menu-toggle" id="mobileMenuToggle">
                         <span></span>
                         <span></span>
@@ -2809,12 +2862,12 @@
 })();
 </script>
 <script>
-// Check for logged-in user and show nav
+// Check for logged-in user and show nav (desktop + mobile)
 (function(){
   try {
     const userData = JSON.parse(localStorage.getItem('user') || '{}');
     if (userData && userData.id) {
-      // Hide sign in link, show user nav
+      // Desktop: Hide sign in link, show user nav
       const signInLink = document.getElementById('signInLink');
       const navMenu = document.getElementById('navMenu');
       const userNav = document.getElementById('userNav');
@@ -2822,13 +2875,13 @@
       if (signInLink) signInLink.style.display = 'none';
       if (userNav) userNav.style.display = 'flex';
 
-      // Show user email/name
+      // Desktop: Show user email/name
       const userEmailEl = document.getElementById('userEmail');
       if (userEmailEl) {
         userEmailEl.textContent = userData.name || userData.email;
       }
 
-      // Show credits
+      // Desktop: Show credits
       const userCreditsEl = document.getElementById('userCredits');
       if (userCreditsEl) {
         const credits = userData.credits || 0;
@@ -2840,10 +2893,51 @@
         }
       }
 
-      // Sign out button
+      // Desktop: Sign out button
       const signOutBtn = document.getElementById('signOutBtn');
       if (signOutBtn) {
         signOutBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          localStorage.removeItem('user');
+          window.location.href = 'login.html';
+        });
+      }
+
+      // Mobile: Hide sign in link, show user sections
+      const mobileSignInLink = document.getElementById('mobileSignInLink');
+      const mobileUserSection = document.getElementById('mobileUserSection');
+      const mobileCreditsSection = document.getElementById('mobileCreditsSection');
+      const mobileBuySection = document.getElementById('mobileBuySection');
+      const mobileSignOutSection = document.getElementById('mobileSignOutSection');
+
+      if (mobileSignInLink) mobileSignInLink.style.display = 'none';
+      if (mobileUserSection) mobileUserSection.style.display = 'block';
+      if (mobileCreditsSection) mobileCreditsSection.style.display = 'block';
+      if (mobileBuySection) mobileBuySection.style.display = 'block';
+      if (mobileSignOutSection) mobileSignOutSection.style.display = 'block';
+
+      // Mobile: Show user email/name
+      const mobileUserEmailEl = document.getElementById('mobileUserEmail');
+      if (mobileUserEmailEl) {
+        mobileUserEmailEl.textContent = userData.name || userData.email;
+      }
+
+      // Mobile: Show credits
+      const mobileUserCreditsEl = document.getElementById('mobileUserCredits');
+      if (mobileUserCreditsEl) {
+        const credits = userData.credits || 0;
+        mobileUserCreditsEl.textContent = credits + ' credit' + (credits !== 1 ? 's' : '');
+        if (credits === 0) {
+          mobileUserCreditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
+        } else if (credits < 3) {
+          mobileUserCreditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+        }
+      }
+
+      // Mobile: Sign out button
+      const mobileSignOutBtn = document.getElementById('mobileSignOutBtn');
+      if (mobileSignOutBtn) {
+        mobileSignOutBtn.addEventListener('click', function(e) {
           e.preventDefault();
           localStorage.removeItem('user');
           window.location.href = 'login.html';
