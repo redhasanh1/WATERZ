@@ -2577,14 +2577,32 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             # Process all segments in parallel using threads + CUDA streams
             segment_results = []
 
+            # Create a mock self object for direct calls (no Celery context)
+            class MockSelf:
+                pass  # process_segment_task will detect missing request.id and skip state updates
+
+            mock_self = MockSelf()
+
             def process_segment_with_stream(seg_data, stream_id):
                 """Process one segment on a dedicated CUDA stream"""
                 try:
                     print(f"[STREAM {stream_id}] Starting segment {seg_data['seg_idx']+1}/{len(segments)}")
 
-                    # Call the existing process_segment logic inline (without Celery task overhead)
-                    # We'll reuse process_segment_task's logic but call it directly
-                    result = process_segment_task(seg_data)
+                    # Create and set CUDA stream for this segment
+                    if torch.cuda.is_available():
+                        stream = torch.cuda.Stream()
+                        with torch.cuda.stream(stream):
+                            print(f"[STREAM {stream_id}] Using dedicated CUDA stream for segment {seg_data['seg_idx']+1}")
+
+                            # Call process_segment_task directly (reuses all logic)
+                            # mock_self has no request.id, so state updates are skipped
+                            result = process_segment_task(mock_self, seg_data)
+
+                            # Synchronize this stream before returning
+                            torch.cuda.current_stream().synchronize()
+                    else:
+                        # No CUDA, run on CPU
+                        result = process_segment_task(mock_self, seg_data)
 
                     print(f"[STREAM {stream_id}] Completed segment {seg_data['seg_idx']+1}/{len(segments)}")
                     return result
