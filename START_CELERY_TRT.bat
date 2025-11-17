@@ -122,13 +122,19 @@ REM    GPU decode is fast, but PCIe copy to CPU numpy arrays kills all gains
 REM    Only beneficial if entire pipeline stays on GPU (not this use case)
 set ENABLE_NVDEC=0
 
-REM ⚡ TORCH COMPILE: Now with WSL2 Linux support + per-worker isolation
-REM    Phase 1: YOLO torch.compile (1.5-2x speedup when TensorRT unavailable)
-REM    Phase 2: RAFT torch.compile (1.5-2x speedup, WSL2 Linux only)
-REM    Phase 4: Triton kernels (1.3-1.5x flow warp speedup, WSL2 Linux only)
-REM    Phase 3: Transformer compile (PENDING - thread-local compilation)
-set USE_TORCH_COMPILE_YOLO=1
-set USE_TORCH_COMPILE_RAFT=1
+REM ⚡ TORCH COMPILE: Auto-detect WSL2/Linux vs Windows
+REM    WSL2/Linux: Enable torch.compile with Triton (1.5-2x speedup!)
+REM    Windows: Disable torch.compile (no Triton = slower than PyTorch)
+wsl uname -r 2>nul | find "microsoft" >nul
+if %ERRORLEVEL% EQU 0 (
+    echo [COMPILE] WSL2 detected - enabling torch.compile
+    set USE_TORCH_COMPILE_RAFT=1
+    set USE_TORCH_COMPILE_YOLO=1
+) else (
+    echo [COMPILE] Windows detected - torch.compile disabled
+    set USE_TORCH_COMPILE_RAFT=0
+    set USE_TORCH_COMPILE_YOLO=0
+)
 set USE_TORCH_COMPILE_TRANSFORMER=0
 set ENABLE_TRITON_KERNELS=1
 set TORCH_CUDAGRAPHS=0
@@ -156,7 +162,7 @@ echo   - SageAttention: DISABLED (incompatible with sparse transformers!)
 echo   - Flash Attention: DISABLED (manual attention is 5x faster!)
 echo   - FP8 Transformer: ENABLED (RTX 4090 Ada: 1.3-1.5x speedup!)
 echo   - Token Merging: ENABLED (50%% merge ratio, 2-2.5x speedup!)
-echo   - torch.compile: ENABLED for RAFT/YOLO (1.5-2x speedup on WSL2/Linux!)
+echo   - torch.compile: Auto-detect (WSL2=ON, Windows=OFF for best performance)
 echo   - FP8 Encoder/Decoder: ENABLED (1.3-1.5x speedup, 11-16%% pipeline gain!)
 echo   - FP8 RFCNet: ENABLED (1.3-1.5x speedup, 4-7%% pipeline gain!)
 echo   - DCNv4: ENABLED (3x faster deformable convolution!)
