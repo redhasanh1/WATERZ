@@ -404,7 +404,7 @@ def process_sam2_local(video_path, masks_folder):
     )
 
     if len(segments) > 1:
-        segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=60)
+        segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=30)
 
     print(f"[OK] Detected {len(segments)} segments")
 
