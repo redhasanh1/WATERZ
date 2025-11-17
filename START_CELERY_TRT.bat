@@ -60,15 +60,19 @@ REM Force TensorRT-only mode for YOLO (no .pt fallback)
 set YOLO_REQUIRE_TENSORRT=1
 
 REM Use NeuFlow v2 ONNX (10-70x faster than RAFT!)
+REM ❌ DISABLE TensorRT (causes GPU context thrashing with parallel segments!)
+REM    TensorRT engines can't handle 4 parallel CUDA streams properly
+REM    Switching to PyTorch RAFT + torch.compile for parallel processing
 set FORCE_TRT_RAFT=0
-set USE_NEUFLOW=1
+set USE_NEUFLOW=0
 
 REM ⚡ RFCNET TENSORRT (DCNv4): 1.6-2.3x speedup on flow completion (saves ~0.8-1.0s per video!)
 REM    Uses pre-built FP16 TensorRT engine with DCNv4 plugin (target: 7-10ms @ 640x480)
 REM    Proven performance: 9.3ms/frame achieved (consistent after ~500ms first-segment warmup)
 REM    NO FALLBACK: TensorRT-only mode (will fail if engine missing)
+REM ❌ DISABLE RFCNet TensorRT (same parallel context thrashing issue!)
 set RFCNET_TORCHTRT=0
-set FORCE_TRT_RFCNET=1
+set FORCE_TRT_RFCNET=0
 
 REM ⚡ TRANSFORMER TENSORRT: 5-10x speedup on feature propagation (2.39s → 0.24-0.48s per segment!)
 REM    Uses pre-built FP16 TensorRT engine for Sparse Temporal Transformer (8 layers, 4 heads)
@@ -151,8 +155,8 @@ echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
 echo   - SAM2-Tiny: ENABLED (temporal mask tracking, 44ms/frame, NO FLICKER!)
 echo   - Video Decode: CPU cv2.VideoCapture (7.4x faster than NVDEC for CPU pipeline!)
-echo   - Optical Flow: NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX, 10-70x faster than RAFT!)
-echo   - RFCNet: TensorRT FP16 + DCNv4 plugin (1.6-2.3x faster flow completion!)
+echo   - Optical Flow: PyTorch RAFT + torch.compile (parallel-safe, 30-40ms/frame!)
+echo   - RFCNet: PyTorch + FP8 + DCNv4 (parallel-safe flow completion!)
 echo   - Transformer: Manual attention (FASTEST! 0.99-1.02s feature propagation!)
 echo   - SageAttention: DISABLED (incompatible with sparse transformers!)
 echo   - Flash Attention: DISABLED (manual attention is 5x faster!)
