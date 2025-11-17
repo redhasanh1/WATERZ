@@ -141,7 +141,7 @@ set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
 REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (must match --concurrency!)
-set SEGMENT_WORKERS=4
+set SEGMENT_WORKERS=1
 
 REM ⚡ SAM2 TRACKING: Use SAM2-Tiny for temporal mask tracking (BEST QUALITY!)
 REM    YOLO detects bbox on first frame → SAM2 tracks with temporal consistency
@@ -166,8 +166,8 @@ echo   - torch.compile: Auto-detect (WSL2=ON, Windows=OFF for best performance)
 echo   - FP8 Encoder/Decoder: ENABLED (1.3-1.5x speedup, 11-16%% pipeline gain!)
 echo   - FP8 RFCNet: ENABLED (1.3-1.5x speedup, 4-7%% pipeline gain!)
 echo   - DCNv4: ENABLED (3x faster deformable convolution!)
-echo   - Concurrency: 4 workers (TRUE 4-way parallel!)
-echo   - SEGMENT_WORKERS: 4 (all segments process simultaneously)
+echo   - Concurrency: 1 worker (sequential for torch.compile stability)
+echo   - SEGMENT_WORKERS: 1 (sequential segment processing)
 echo ============================================================
 echo.
 
@@ -185,7 +185,7 @@ REM     rmdir /s /q "D:\watermarkz\temp\torchinductor_has" 2>nul
 REM     echo [OK] Complete cache removed - workers will recompile on startup
 REM )
 
-REM Use thread pool with THREAD-LOCAL TensorRT contexts for TRUE PARALLEL execution!
-REM Each thread gets its own TensorRT context = NO LOCKS = FULL PARALLEL!
-REM concurrency=4 = 4 threads, each with separate context (minimal VRAM overhead)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+REM Sequential processing for torch.compile optimization
+REM torch.compile works best with 1 worker (no cache conflicts, stable compilation)
+REM concurrency=1 = sequential processing, faster per-video with torch.compile
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1
