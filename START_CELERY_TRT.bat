@@ -122,11 +122,15 @@ REM    GPU decode is fast, but PCIe copy to CPU numpy arrays kills all gains
 REM    Only beneficial if entire pipeline stays on GPU (not this use case)
 set ENABLE_NVDEC=0
 
-REM ⚡ TORCH COMPILE: DISABLED (not thread-safe - causes FileExistsError cache races)
-REM    PyTorch 2.4.1 torch.compile has NO thread-safe caching mechanism
-REM    We get 2.48x speedup from Flash Attention + FP8 (STABLE!)
-REM    Next: Token Merging for 2-3x additional speedup (6x total)
-set USE_TORCH_COMPILE=0
+REM ⚡ TORCH COMPILE: Now with WSL2 Linux support + per-worker isolation
+REM    Phase 1: YOLO torch.compile (1.5-2x speedup when TensorRT unavailable)
+REM    Phase 2: RAFT torch.compile (1.5-2x speedup, WSL2 Linux only)
+REM    Phase 4: Triton kernels (1.3-1.5x flow warp speedup, WSL2 Linux only)
+REM    Phase 3: Transformer compile (PENDING - thread-local compilation)
+set USE_TORCH_COMPILE_YOLO=1
+set USE_TORCH_COMPILE_RAFT=1
+set USE_TORCH_COMPILE_TRANSFORMER=0
+set ENABLE_TRITON_KERNELS=1
 set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
