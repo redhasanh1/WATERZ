@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import json
 import torch
+import platform
 from pathlib import Path
 from tkinter import Tk, filedialog
 
@@ -31,6 +32,25 @@ from watermark import pipeline as faster_propainter_pipeline
 from crop_utils import calculate_crop_region
 from segment_detector import detect_segments, merge_adjacent_segments
 from yolo_detector import YOLOWatermarkDetector
+
+# WSL2/Linux detection for torch.compile optimization
+IS_WSL2 = 'microsoft' in platform.release().lower() if hasattr(platform, 'release') else False
+IS_LINUX = sys.platform.startswith('linux')
+ENABLE_TORCH_COMPILE = IS_WSL2 or IS_LINUX
+
+if ENABLE_TORCH_COMPILE:
+    # WSL2/Linux: Enable torch.compile with Triton kernels
+    print(f"[COMPILE] Detected WSL2/Linux - enabling torch.compile")
+    os.environ['TORCHINDUCTOR_CACHE_DIR'] = str(BASE_DIR / '.torch_compile_cache')
+    os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
+    os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
+    os.environ['USE_TORCH_COMPILE_RAFT'] = '1'
+    os.environ['TORCH_CUDAGRAPHS'] = '0'
+    os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
+else:
+    # Windows: Disable torch.compile (no Triton support)
+    print(f"[COMPILE] Windows detected - torch.compile disabled")
+    os.environ['USE_TORCH_COMPILE_RAFT'] = '0'
 
 # Paths
 TEMP_DIR = BASE_DIR / "temp"
