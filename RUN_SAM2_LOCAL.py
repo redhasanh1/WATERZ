@@ -376,8 +376,8 @@ def process_sam2_local(video_path, masks_folder):
                 cv2.imwrite(str(sam2_masks_dir / mask_file), mask)
 
     print(f"\n[5/7] Detecting motion segments...")
-    position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '50'))
-    min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '3'))
+    position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '5'))
+    min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '10'))
 
     # Build detections list from masks
     detections_per_frame = []
