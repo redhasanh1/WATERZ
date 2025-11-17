@@ -2594,15 +2594,15 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                         with torch.cuda.stream(stream):
                             print(f"[STREAM {stream_id}] Using dedicated CUDA stream for segment {seg_data['seg_idx']+1}")
 
-                            # Call process_segment_task directly (reuses all logic)
-                            # mock_self has no request.id, so state updates are skipped
-                            result = process_segment_task(mock_self, seg_data)
+                            # Call process_segment_task.run() to bypass Celery task machinery
+                            # This calls the underlying function directly
+                            result = process_segment_task.run(seg_data)
 
                             # Synchronize this stream before returning
                             torch.cuda.current_stream().synchronize()
                     else:
                         # No CUDA, run on CPU
-                        result = process_segment_task(mock_self, seg_data)
+                        result = process_segment_task.run(seg_data)
 
                     print(f"[STREAM {stream_id}] Completed segment {seg_data['seg_idx']+1}/{len(segments)}")
                     return result
