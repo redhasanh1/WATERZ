@@ -2632,9 +2632,76 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
             print(f"[OK] All {len(segment_results)} segments processed with CUDA streams!")
 
-            # Now call finalize directly (no chord needed)
-            print(f"[FINALIZE] Calling finalize_video_task directly...")
-            final_result = finalize_video_task.run(segment_results, prepare_result=result)
+            # CUDA Streams mode: segments processed synchronously, now encode final video
+            print(f"[ENCODE] Encoding final video from {len(segment_results)} segments...")
+
+            # Import encoding utilities
+            import subprocess
+            shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned")
+
+            # Check if we have cleaned frames
+            if not os.path.exists(shared_cleaned_dir):
+                raise RuntimeError(f"Cleaned frames directory not found: {shared_cleaned_dir}")
+
+            # Count frames
+            cleaned_frames = sorted([f for f in os.listdir(shared_cleaned_dir) if f.endswith('.png')])
+            print(f"[ENCODE] Found {len(cleaned_frames)} cleaned frames in {shared_cleaned_dir}")
+
+            # Encode video with NVENC
+            output_video = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
+            ffmpeg_path, ffprobe_path = get_ffmpeg_executables()
+
+            encode_cmd = [
+                ffmpeg_path,
+                '-y',
+                '-framerate', str(fps),
+                '-i', os.path.join(shared_cleaned_dir, '%04d.png'),
+                '-c:v', 'h264_nvenc',
+                '-preset', 'p4',
+                '-tune', 'hq',
+                '-b:v', '5M',
+                '-maxrate', '8M',
+                '-pix_fmt', 'yuv420p',
+                output_video
+            ]
+
+            print(f"[ENCODE] Encoding cleaned frames to video...")
+            result_encode = subprocess.run(encode_cmd, capture_output=True, text=True)
+            if result_encode.returncode != 0:
+                raise RuntimeError(f"FFmpeg encoding failed: {result_encode.stderr}")
+
+            print(f"[ENCODE] Video encoded: {output_video}")
+
+            # Merge audio from original
+            if os.path.exists(video_path):
+                print(f"[AUDIO] Merging audio from original video...")
+                temp_video = output_video.replace('.mp4', '_temp.mp4')
+                os.rename(output_video, temp_video)
+
+                audio_cmd = [
+                    ffmpeg_path,
+                    '-y',
+                    '-i', temp_video,
+                    '-i', video_path,
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-map', '0:v:0',
+                    '-map', '1:a:0?',
+                    '-shortest',
+                    output_video
+                ]
+
+                result_audio = subprocess.run(audio_cmd, capture_output=True, text=True)
+                if result_audio.returncode == 0:
+                    os.remove(temp_video)
+                    print(f"[AUDIO] Audio merged successfully")
+                else:
+                    os.rename(temp_video, output_video)
+                    print(f"[AUDIO] No audio track or merge failed, using video-only")
+
+            # Cleanup
+            print(f"[CLEANUP] Removing temp frames...")
+            shutil.rmtree(shared_cleaned_dir, ignore_errors=True)
 
             # Release processing lock
             try:
@@ -2645,11 +2712,14 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             except Exception as e:
                 print(f"[WARNING]  Failed to release lock: {e}")
 
+            print(f"[OK] Video processing complete! Output: {output_video}")
+
             return {
                 'video_id': video_id,
                 'status': 'complete',
                 'message': f'Processed {len(segments)} segments with CUDA streams',
-                'result': final_result
+                'output_path': output_video,
+                'segments_processed': len(segment_results)
             }
 
         # ⚡ FALLBACK: Use Celery chord to dispatch segments in parallel (process-based)
