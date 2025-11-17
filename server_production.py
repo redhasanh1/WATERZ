@@ -231,7 +231,7 @@ FRAME_CACHE_LOCK = threading.Lock()
 # Note: These imports are moved to inside functions to avoid startup errors
 # sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
 # from watermark import pipeline as faster_propainter_pipeline
-# from mytimer import timer_decorator  
+# from mytimer import timer_decorator
 # from pre_post_process import crop_video_mask, merge_videos_with_mask
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web'))
@@ -259,7 +259,8 @@ if AUTH_ENABLED:
             db_pool = SimpleConnectionPool(
                 minconn=1,
                 maxconn=10,
-                dsn=DATABASE_URL
+                dsn=DATABASE_URL,
+                connect_timeout=5  # 5 second timeout to prevent hanging
             )
             print("[OK] Database connection pool initialized")
         else:
