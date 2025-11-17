@@ -165,10 +165,10 @@ echo ============================================================
 echo.
 
 REM Enable per-worker torch.compile cache isolation
-REM Each worker gets its own cache directory to prevent file locking conflicts
+REM Cache directories are set dynamically in cache_config.py based on worker ID:
+REM   Worker 0 → .torch_cache_0, Worker 1 → .torch_cache_1, etc.
 REM Workers will compile on first run (~20-40s warmup), then use cached kernels
 REM This enables TRUE parallel processing with torch.compile!
-set TORCHINDUCTOR_CACHE_DIR=D:\watermarkz\temp\.torch_cache
 set TORCHINDUCTOR_FX_GRAPH_CACHE=1
 set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=1
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
