@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,6 +22,21 @@ def initialize_RAFT(model_path='weights/raft-things.pth', device='cuda'):
     model = model.module
 
     model.to(device)
+
+    # torch.compile for RAFT (1.5-2x speedup, WSL2 Linux only)
+    if os.getenv('USE_TORCH_COMPILE_RAFT', '1') == '1' and sys.platform == 'linux' and device == 'cuda':
+        try:
+            print("[RAFT] Compiling with torch.compile (WSL2 optimization)...")
+            model = torch.compile(
+                model,
+                mode='max-autotune',      # Aggressive optimization for inference
+                fullgraph=False,          # RAFT has dynamic control flow
+                backend='inductor'
+            )
+            print("[RAFT] ✅ torch.compile enabled (1.5-2x speedup expected)")
+        except Exception as e:
+            print(f"[RAFT] ⚠️ torch.compile failed: {e}")
+            print("[RAFT] Continuing with standard PyTorch RAFT")
 
     return model
 

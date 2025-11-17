@@ -1,4 +1,6 @@
 import warnings
+import os
+import sys
 
 import torch
 import torch.nn.functional as F
@@ -7,9 +9,16 @@ try:
     import triton
     import triton.language as tl
 
-    # DISABLED: Triton autotuner is NOT thread-safe and crashes with --concurrency > 1
-    # Multiple threads corrupt cache: TypeError('NoneType' object is not a mapping)
-    _TRITON_AVAILABLE = False  # Force PyTorch fallback for thread safety
+    # Enable Triton with per-worker cache isolation (WSL2 Linux only)
+    # Use separate cache dir per process to avoid thread corruption
+    if os.getenv('ENABLE_TRITON_KERNELS', '1') == '1' and sys.platform == 'linux':
+        os.environ['TRITON_CACHE_DIR'] = f'/tmp/triton_cache_worker_{os.getpid()}'
+        _TRITON_AVAILABLE = True
+        print(f"[Triton] ✅ Enabled with isolated cache: /tmp/triton_cache_worker_{os.getpid()}")
+    else:
+        # DISABLED: Triton autotuner is NOT thread-safe on Windows
+        _TRITON_AVAILABLE = False
+        print("[Triton] ⚠️ Disabled (Windows or ENABLE_TRITON_KERNELS=0)")
 except ImportError:  # pragma: no cover - only executed when Triton is missing.
     triton = None
     tl = None
