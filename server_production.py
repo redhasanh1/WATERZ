@@ -2634,7 +2634,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
             # Now call finalize directly (no chord needed)
             print(f"[FINALIZE] Calling finalize_video_task directly...")
-            final_result = finalize_video_task(segment_results, prepare_result=result)
+            final_result = finalize_video_task.run(segment_results, prepare_result=result)
 
             # Release processing lock
             try:
