@@ -613,11 +613,11 @@
         .nav-logo {
             display: flex;
             align-items: center;
-            gap: 0.85rem;
+            gap: 0;
             text-decoration: none;
             color: var(--text-primary);
             font-weight: 700;
-            font-size: 1.5rem;
+            font-size: 1rem;
             transition: transform 0.2s ease;
             flex-shrink: 0;
         }
@@ -864,7 +864,7 @@
                 right: 0;
                 flex-direction: column;
                 gap: 0;
-                background: rgba(255, 255, 255, 0.98);
+                background: rgba(10, 10, 20, 0.98);
                 backdrop-filter: blur(20px);
                 padding: 1.5rem 0;
                 border-bottom: 1px solid rgba(102, 126, 234, 0.12);
@@ -1066,20 +1066,6 @@
             <!-- LEFT: Logo + Main Navigation -->
             <div class="nav-left">
                 <a href="/" class="nav-logo">
-                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <defs>
-                            <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-                                <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
-                            </linearGradient>
-                        </defs>
-                        <rect width="40" height="40" rx="10" fill="url(#logoGradient)"/>
-                        <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
-                        <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
-                        <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
-                        <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
-                        <circle cx="25" cy="15" r="2" fill="#10b981"/>
-                    </svg>
                     <span>MarkRemoverAI</span>
                 </a>
 
