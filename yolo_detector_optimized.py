@@ -2,12 +2,10 @@
 Optimized YOLO Detector for Production
 - GPU acceleration with CUDA
 - TensorRT support for 3-5x speedup
-- torch.compile support for 1.5-2x speedup (fallback)
 - FP16 precision for 2x speedup
 - Batch processing support
 """
 
-import os
 import torch
 from ultralytics import YOLO
 import cv2
@@ -70,24 +68,6 @@ class OptimizedYOLODetector:
                 print(f"⚠️  CPU mode (SLOW): {model_path}")
                 print(f"   Expected speed: 1-2 images/sec")
                 print(f"   Install CUDA for 10-50x speedup!")
-
-            # torch.compile optimization (1.5-2x speedup when TensorRT unavailable)
-            if os.getenv('USE_TORCH_COMPILE_YOLO', '1') == '1' and self.device == 'cuda':
-                try:
-                    print("   Compiling YOLO model with torch.compile...")
-                    compile_start = time.time()
-                    self.model.model = torch.compile(
-                        self.model.model,
-                        mode='reduce-overhead',  # Optimized for repeated inference
-                        fullgraph=True,          # Compile entire model (YOLO is simple)
-                        backend='inductor'        # PyTorch 2.0+ default backend
-                    )
-                    compile_time = (time.time() - compile_start) * 1000
-                    print(f"✅ torch.compile enabled ({compile_time:.0f}ms compilation)")
-                    print(f"   Expected speedup: 1.5-2x over PyTorch")
-                except Exception as e:
-                    print(f"⚠️  torch.compile failed: {e}")
-                    print(f"   Continuing with standard PyTorch model")
 
         # GPU info
         if self.device == 'cuda':
