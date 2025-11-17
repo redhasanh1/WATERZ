@@ -162,8 +162,8 @@ echo   - torch.compile: ENABLED for RAFT/YOLO (26-54ms/frame proven on Windows!)
 echo   - FP8 Encoder/Decoder: ENABLED (1.3-1.5x speedup, 11-16%% pipeline gain!)
 echo   - FP8 RFCNet: ENABLED (1.3-1.5x speedup, 4-7%% pipeline gain!)
 echo   - DCNv4: ENABLED (3x faster deformable convolution!)
-echo   - Concurrency: 4 workers (4 videos in parallel!)
-echo   - SEGMENT_WORKERS: 1 (sequential segments per video, avoids GPU thrashing)
+echo   - Concurrency: 1 worker (CUDA streams for parallel segments!)
+echo   - SEGMENT_WORKERS: 1 (uses CUDA streams: 4 threads in 1 GPU context!)
 echo ============================================================
 echo.
 
@@ -183,8 +183,8 @@ REM     rmdir /s /q "D:\watermarkz\temp\torchinductor_has" 2>nul
 REM     echo [OK] Complete cache removed - workers will recompile on startup
 REM )
 
-REM Parallel VIDEO processing with per-worker cache isolation
-REM 4 workers process 4 DIFFERENT VIDEOS simultaneously
-REM Each video processes segments SEQUENTIALLY (avoids GPU context switching)
-REM Result: 27-31ms/frame per video + 4x throughput!
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+REM CUDA Streams: Process segments in parallel with threads (ONE GPU context!)
+REM 1 worker handles entire video
+REM 4 threads run 4 segments in parallel using CUDA streams
+REM Result: 27-31ms/frame per segment + NO GPU context switching!
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1

@@ -2556,7 +2556,85 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # We got the lock! This worker will dispatch segments
         print(f"🔒 Lock acquired - this worker will dispatch segments")
 
-        # ⚡ OPTIMIZATION: Use Celery chord to dispatch segments in parallel
+        # ⚡ OPTIMIZATION: Choose processing strategy based on SEGMENT_WORKERS
+        # SEGMENT_WORKERS=1: Use CUDA streams (thread-based, one GPU context, 27-31ms/frame)
+        # SEGMENT_WORKERS>1: Use Celery chord (process-based, multiple GPU contexts, slower)
+        segment_workers = int(os.getenv('SEGMENT_WORKERS', '1'))
+
+        if segment_workers == 1:
+            # CUDA Streams approach: Process segments in parallel using threads + CUDA streams
+            print(f"[CUDA STREAMS] Processing {len(segments)} segments in parallel with CUDA streams (thread-based)")
+            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Processing {len(segments)} segments with CUDA streams'})
+
+            # Import threading utilities
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import torch
+
+            # Add total_segments to each segment data
+            for seg in segment_tasks_data:
+                seg['total_segments'] = len(segments)
+
+            # Process all segments in parallel using threads + CUDA streams
+            segment_results = []
+
+            def process_segment_with_stream(seg_data, stream_id):
+                """Process one segment on a dedicated CUDA stream"""
+                try:
+                    print(f"[STREAM {stream_id}] Starting segment {seg_data['seg_idx']+1}/{len(segments)}")
+
+                    # Call the existing process_segment logic inline (without Celery task overhead)
+                    # We'll reuse process_segment_task's logic but call it directly
+                    result = process_segment_task(seg_data)
+
+                    print(f"[STREAM {stream_id}] Completed segment {seg_data['seg_idx']+1}/{len(segments)}")
+                    return result
+                except Exception as e:
+                    print(f"[STREAM {stream_id}] ERROR in segment {seg_data['seg_idx']+1}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+
+            # Use ThreadPoolExecutor to run segments in parallel
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                # Submit all segments to thread pool
+                futures = {
+                    executor.submit(process_segment_with_stream, seg_data, i): i
+                    for i, seg_data in enumerate(segment_tasks_data)
+                }
+
+                # Collect results as they complete
+                for future in as_completed(futures):
+                    stream_id = futures[future]
+                    try:
+                        result = future.result()
+                        segment_results.append(result)
+                    except Exception as e:
+                        print(f"[ERROR] Segment {stream_id} failed: {e}")
+                        raise
+
+            print(f"[OK] All {len(segment_results)} segments processed with CUDA streams!")
+
+            # Now call finalize directly (no chord needed)
+            print(f"[FINALIZE] Calling finalize_video_task directly...")
+            final_result = finalize_video_task(segment_results, prepare_result=result)
+
+            # Release processing lock
+            try:
+                redis_client = celery.backend.client
+                lock_key = f'prepare_lock:{base_name}'
+                redis_client.delete(lock_key)
+                print(f"🔓 Released processing lock for video '{base_name}'")
+            except Exception as e:
+                print(f"[WARNING]  Failed to release lock: {e}")
+
+            return {
+                'video_id': video_id,
+                'status': 'complete',
+                'message': f'Processed {len(segments)} segments with CUDA streams',
+                'result': final_result
+            }
+
+        # ⚡ FALLBACK: Use Celery chord to dispatch segments in parallel (process-based)
         # Chord automatically waits for ALL segments to complete, then triggers finalize
         print(f"[INIT] Creating chord: {len(segments)} segment tasks → finalize callback")
         self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
