@@ -1811,6 +1811,7 @@
             try {
                 const response = await apiFetchPath(`/api/upload`, {
                     method: 'POST',
+                    credentials: 'include',  // Send session cookies
                     body: formData
                 });
 
@@ -2206,6 +2207,7 @@
                 const response = await apiFetchPath(`/api/process`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',  // Send session cookies
                     body: JSON.stringify(payload)
                 });
 
