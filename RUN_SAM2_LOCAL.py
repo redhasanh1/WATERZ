@@ -408,45 +408,47 @@ def process_sam2_local(video_path, masks_folder):
 
     print(f"[OK] Detected {len(segments)} segments")
 
-    # Fill gaps (uncovered frames)
-    frames_with_masks = set()
-    for i in range(extracted_frames):
-        mask_path = sam2_masks_dir / f"{i:04d}.png"
-        if mask_path.exists():
-            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-            if mask is not None and np.count_nonzero(mask) > 0:
-                frames_with_masks.add(i)
-
-    frames_in_segments = set()
-    for start_f, end_f, _ in segments:
-        frames_in_segments.update(range(start_f, end_f + 1))
-
-    uncovered_frames = sorted(frames_with_masks - frames_in_segments)
-
-    if uncovered_frames:
-        print(f"[OK] Creating filler segments for {len(uncovered_frames)} uncovered frames...")
-        for frame_idx in uncovered_frames:
-            mask_path = sam2_masks_dir / f"{frame_idx:04d}.png"
-            if mask_path.exists():
-                mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-                if mask is not None:
-                    coords = cv2.findNonZero(mask)
-                    if coords is not None:
-                        x, y, w, h = cv2.boundingRect(coords)
-                        bbox = (x, y, x+w, y+h)
-
-                        start_frame = frame_idx
-                        end_frame = frame_idx
-
-                        if frame_idx < extracted_frames - 1 and (frame_idx + 1) not in frames_in_segments:
-                            end_frame = frame_idx + 1
-                        elif frame_idx > 0 and (frame_idx - 1) not in frames_in_segments:
-                            start_frame = frame_idx - 1
-
-                        segments.append((start_frame, end_frame, bbox))
-
-        segments.sort(key=lambda seg: seg[0])
-        print(f"[OK] Total segments after gap filling: {len(segments)}")
+    # Gap-filling disabled - matches server_production.py behavior
+    # Previously created duplicate/tiny segments causing overhead
+    # # Fill gaps (uncovered frames)
+    # frames_with_masks = set()
+    # for i in range(extracted_frames):
+    #     mask_path = sam2_masks_dir / f"{i:04d}.png"
+    #     if mask_path.exists():
+    #         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    #         if mask is not None and np.count_nonzero(mask) > 0:
+    #             frames_with_masks.add(i)
+    #
+    # frames_in_segments = set()
+    # for start_f, end_f, _ in segments:
+    #     frames_in_segments.update(range(start_f, end_f + 1))
+    #
+    # uncovered_frames = sorted(frames_with_masks - frames_in_segments)
+    #
+    # if uncovered_frames:
+    #     print(f"[OK] Creating filler segments for {len(uncovered_frames)} uncovered frames...")
+    #     for frame_idx in uncovered_frames:
+    #         mask_path = sam2_masks_dir / f"{frame_idx:04d}.png"
+    #         if mask_path.exists():
+    #             mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    #             if mask is not None:
+    #                 coords = cv2.findNonZero(mask)
+    #                 if coords is not None:
+    #                     x, y, w, h = cv2.boundingRect(coords)
+    #                     bbox = (x, y, x+w, y+h)
+    #
+    #                     start_frame = frame_idx
+    #                     end_frame = frame_idx
+    #
+    #                     if frame_idx < extracted_frames - 1 and (frame_idx + 1) not in frames_in_segments:
+    #                         end_frame = frame_idx + 1
+    #                     elif frame_idx > 0 and (frame_idx - 1) not in frames_in_segments:
+    #                         start_frame = frame_idx - 1
+    #
+    #                     segments.append((start_frame, end_frame, bbox))
+    #
+    #     segments.sort(key=lambda seg: seg[0])
+    #     print(f"[OK] Total segments after gap filling: {len(segments)}")
 
     print(f"\n[6/7] Running ProPainter on {len(segments) if segments else 1} segment(s)...")
 
