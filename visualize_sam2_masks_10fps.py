@@ -18,11 +18,13 @@ import cv2
 import numpy as np
 from pathlib import Path
 from tkinter import Tk, filedialog
+import subprocess
 
-# Configuration
+# Configuration (can be overridden by command line args)
 MASKS_FOLDER = "temp_sam2_masks"
 OUTPUT_VIDEO = "results/sam2_mask_visualization_10fps.mp4"
 MASK_REPEAT_COUNT = 10  # Each mask is used for 10 frames
+VIDEO_PATH_ARG = None  # Will be set from command line
 
 def select_video_file():
     """Open file dialog to select video file."""
@@ -74,21 +76,64 @@ def visualize_masks():
     print(f"[MASKS] Found {len(mask_files)} mask files in: {MASKS_FOLDER}")
     print()
 
-    # Interactive video selection
-    VIDEO_PATH = select_video_file()
-    if VIDEO_PATH is None:
-        return
+    # PRE-LOAD all masks into RAM for instant access (much faster than reading from disk each frame)
+    print(f"[PRELOAD] Loading {len(mask_files)} masks into RAM from NVME...")
+    import time
+    start_time = time.time()
+    preloaded_masks = []
+    for i, mask_file in enumerate(mask_files):
+        mask_path = os.path.join(MASKS_FOLDER, mask_file)
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        preloaded_masks.append(mask)
+        if (i + 1) % 1000 == 0:
+            print(f"   Loaded {i + 1}/{len(mask_files)} masks...", end='\r')
+    elapsed = time.time() - start_time
+    print(f"[PRELOAD] ✓ All {len(mask_files)} masks loaded in {elapsed:.1f}s ({len(mask_files)/elapsed:.0f} masks/sec)")
+    print()
 
-    # Open video
-    cap = cv2.VideoCapture(VIDEO_PATH)
-    if not cap.isOpened():
+    # Interactive video selection (or use command line arg)
+    if VIDEO_PATH_ARG:
+        VIDEO_PATH = VIDEO_PATH_ARG
+        print(f"[VIDEO] Using video from command line: {VIDEO_PATH}\n")
+    else:
+        VIDEO_PATH = select_video_file()
+        if VIDEO_PATH is None:
+            return
+
+    # Get video info first (need dimensions for FFmpeg)
+    cap_info = cv2.VideoCapture(VIDEO_PATH)
+    if not cap_info.isOpened():
         print(f"[ERROR] Could not open video: {VIDEO_PATH}")
         return
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap_info.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap_info.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap_info.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap_info.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap_info.release()
+
+    # Get FFmpeg from static-ffmpeg for GPU decoding
+    import static_ffmpeg
+    ffmpeg_path_decode, _ = static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()
+
+    # Start FFmpeg with NVDEC GPU hardware decoding
+    ffmpeg_decode_cmd = [
+        ffmpeg_path_decode,
+        '-hwaccel', 'cuda',          # Enable CUDA hardware acceleration
+        '-i', VIDEO_PATH,             # Input video
+        '-f', 'rawvideo',             # Raw pixel output
+        '-pix_fmt', 'bgr24',          # BGR format for OpenCV compatibility
+        '-vsync', '0',                # No frame duplication
+        '-'                           # Output to stdout pipe
+    ]
+
+    print("[GPU] Starting NVDEC hardware video decoding...")
+    ffmpeg_decode_process = subprocess.Popen(
+        ffmpeg_decode_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=width * height * 3 * 10  # Buffer 10 frames
+    )
 
     print(f"[VIDEO] Video: {VIDEO_PATH}")
     print(f"   Resolution: {width}x{height}")
@@ -107,37 +152,59 @@ def visualize_masks():
     # Create output directory
     os.makedirs("results", exist_ok=True)
 
-    # Create video writer (triple width for side-by-side)
+    # Create video writer (triple width for side-by-side) - GPU NVENC encoding
     output_width = width * 3
     output_height = height
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(OUTPUT_VIDEO, fourcc, fps, (output_width, output_height))
 
-    if not out.isOpened():
-        print(f"[ERROR] ERROR: Could not create output video: {OUTPUT_VIDEO}")
-        return
+    # Get FFmpeg from static-ffmpeg
+    import static_ffmpeg
+    ffmpeg_path, _ = static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()
 
+    # Start FFmpeg process with NVENC GPU encoding
+    ffmpeg_cmd = [
+        ffmpeg_path,
+        '-y',  # Overwrite output
+        '-f', 'rawvideo',
+        '-vcodec', 'rawvideo',
+        '-s', f'{output_width}x{output_height}',
+        '-pix_fmt', 'bgr24',
+        '-r', str(fps),
+        '-i', '-',  # Input from pipe
+        '-c:v', 'h264_nvenc',
+        '-preset', 'p4',  # Fast preset
+        '-b:v', '10M',
+        '-pix_fmt', 'yuv420p',
+        OUTPUT_VIDEO
+    ]
+
+    print("[GPU] Using NVENC hardware encoding for maximum speed!")
     print("[PROCESSING] Creating visualization video (10fps mode)...")
     print(f"   Output: {OUTPUT_VIDEO}")
     print()
 
+    ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
     frame_idx = 0
     frames_processed = 0
     output_frames_generated = 0
+    frame_size = width * height * 3  # BGR24 = 3 bytes per pixel
 
     while True:
-        ret, frame = cap.read()
-        if not ret:
+        # Read raw frame from GPU decode pipe
+        raw_frame = ffmpeg_decode_process.stdout.read(frame_size)
+        if not raw_frame or len(raw_frame) != frame_size:
             break
+
+        # Convert to numpy array and make writable copy (frombuffer is read-only)
+        frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((height, width, 3)).copy()
 
         # **KEY CHANGE**: Calculate mask index by dividing frame_idx by calculated repeat count
         # This spreads the available masks across all video frames
         mask_idx = int(frame_idx / calculated_repeat)
 
-        # Load corresponding mask (same mask for 10 consecutive frames)
-        if mask_idx < len(mask_files):
-            mask_path = os.path.join(MASKS_FOLDER, mask_files[mask_idx])
-            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        # Get pre-loaded mask (instant - no disk I/O!)
+        if mask_idx < len(preloaded_masks):
+            mask = preloaded_masks[mask_idx]
 
             # Resize mask to match video dimensions if needed
             if mask is not None and mask.shape[:2] != (height, width):
@@ -145,60 +212,25 @@ def visualize_masks():
         else:
             mask = None
 
-        # Create visualization
+        # FAST GPU MODE: Simple side-by-side visualization (no text overlays)
         if mask is not None:
-            # Convert mask to 3-channel for visualization
+            # Convert mask to 3-channel (fast operation)
             mask_color = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
-            # Create colored overlay (red mask with 50% transparency)
-            overlay = frame.copy()
+            # Create simple red overlay (fast operation)
             red_mask = np.zeros_like(frame)
             red_mask[:, :, 2] = mask  # Red channel only
-            overlay = cv2.addWeighted(overlay, 0.7, red_mask, 0.3, 0)
+            overlay = cv2.addWeighted(frame, 0.7, red_mask, 0.3, 0)
 
-            # Add text labels
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.7
-            thickness = 2
-            color = (255, 255, 255)
-
-            # Calculate mask coverage
-            white_pixels = np.sum(mask > 127)
-            total_pixels = width * height
-            coverage_pct = (white_pixels / total_pixels) * 100
-
-            # Add labels with mask index info
-            repeat_num = int((frame_idx % calculated_repeat) + 1)
-            cv2.putText(frame, f"Frame {frame_idx}", (10, 30), font, font_scale, color, thickness)
-            cv2.putText(mask_color, f"Mask #{mask_idx} ({coverage_pct:.2f}%)", (10, 30), font, font_scale, color, thickness)
-            cv2.putText(mask_color, f"Repeat {repeat_num}/{int(calculated_repeat)}", (10, 60), font, 0.5, (255, 255, 0), 1)
-            cv2.putText(overlay, f"Overlay", (10, 30), font, font_scale, color, thickness)
-
-            # Get bounding box
-            coords = cv2.findNonZero(mask)
-            if coords is not None:
-                x, y, w, h = cv2.boundingRect(coords)
-                # Draw bounding box on overlay
-                cv2.rectangle(overlay, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                # Draw bbox info
-                cv2.putText(overlay, f"BBox: {w}x{h}", (x, y-10), font, 0.5, (0, 255, 0), 1)
-
-            # Combine side-by-side
+            # Combine side-by-side (fast operation)
             combined = np.hstack([frame, mask_color, overlay])
         else:
-            # No mask available - show just the frame
+            # No mask - show black frames
             no_mask = np.zeros_like(frame)
-            text_img = frame.copy()
+            combined = np.hstack([frame, no_mask, no_mask])
 
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            cv2.putText(frame, f"Frame {frame_idx}", (10, 30), font, 0.7, (255, 255, 255), 2)
-            cv2.putText(no_mask, "NO MASK", (width//2 - 100, height//2), font, 1.5, (0, 0, 255), 3)
-            cv2.putText(text_img, "NO MASK", (width//2 - 100, height//2), font, 1.5, (0, 0, 255), 3)
-
-            combined = np.hstack([frame, no_mask, text_img])
-
-        # Write frame
-        out.write(combined)
+        # Write frame to FFmpeg pipe
+        ffmpeg_process.stdin.write(combined.tobytes())
         frames_processed += 1
         output_frames_generated += 1
         frame_idx += 1
@@ -221,8 +253,13 @@ def visualize_masks():
     print("   - Right: Overlay with red mask + green bounding box")
     print()
 
-    cap.release()
-    out.release()
+    # Close FFmpeg decode process
+    ffmpeg_decode_process.stdout.close()
+    ffmpeg_decode_process.wait()
+
+    # Close FFmpeg encode process
+    ffmpeg_process.stdin.close()
+    ffmpeg_process.wait()
 
     # Open the video automatically (Windows)
     try:
@@ -235,4 +272,10 @@ def visualize_masks():
     print()
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    if len(sys.argv) >= 2:
+        VIDEO_PATH_ARG = sys.argv[1]
+    if len(sys.argv) >= 3:
+        MASKS_FOLDER = sys.argv[2]
+
     visualize_masks()

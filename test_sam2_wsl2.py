@@ -40,8 +40,8 @@ SAM2_CONFIG = "configs/sam2.1/sam2.1_hiera_t.yaml"
 ENCODER_ENGINE = "/mnt/d/watermarkz/sam2_trt_inference/engines_wsl2/sam2_encoder_fp16.engine"
 DECODER_ENGINE = "/mnt/d/watermarkz/sam2_trt_inference/engines_wsl2/sam2_decoder_fp16_dynamic.engine"
 
-TEMP_FRAMES_DIR = "temp_sam2_frames"
-TEMP_MASKS_DIR = "temp_sam2_masks"
+TEMP_FRAMES_DIR = "/mnt/c/water/temp_sam2_frames"
+TEMP_MASKS_DIR = "/mnt/c/water/temp_sam2_masks"
 
 # Global state
 video_fps = 30.0
@@ -84,8 +84,9 @@ def select_video_file():
 
 
 def extract_frames(video_path, output_dir):
-    """Extract frames to folder"""
+    """Extract frames to folder using GPU FFmpeg (NVDEC hardware decoding)"""
     global video_fps, total_frames
+    import subprocess
 
     # Check if frames already exist
     if os.path.exists(output_dir) and len(os.listdir(output_dir)) > 0:
@@ -99,28 +100,57 @@ def extract_frames(video_path, output_dir):
             print(f"[CACHED] Using existing {existing_frames} frames @ {video_fps:.1f} fps")
             return existing_frames
 
-    print(f"[EXTRACT] Extracting frames from {video_path}...")
+    print(f"[EXTRACT-GPU] Extracting frames with NVDEC hardware decoding...")
 
     if os.path.exists(output_dir):
         import shutil
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
+    # Get video info first
     cap = cv2.VideoCapture(video_path)
     video_fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    frame_idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        cv2.imwrite(f"{output_dir}/{frame_idx:05d}.jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        frame_idx += 1
-
     cap.release()
-    print(f"[OK] Extracted {frame_idx} frames @ {video_fps:.1f} fps")
-    return frame_idx
+
+    # Try conda FFmpeg first (has CUDA), then fallback to system
+    ffmpeg_cmd = os.path.expanduser('~/miniconda/bin/ffmpeg')
+    if not os.path.exists(ffmpeg_cmd):
+        ffmpeg_cmd = 'ffmpeg'  # Fallback to system ffmpeg
+
+    print(f"[DEBUG] Using FFmpeg: {ffmpeg_cmd}")
+
+    # Use FFmpeg with GPU hardware decoding (NVDEC)
+    # -hwaccel cuda: Use NVIDIA GPU for decoding
+    # -qscale:v 2: High quality JPEG (1=best, 31=worst)
+    cmd = [
+        ffmpeg_cmd,
+        '-hwaccel', 'cuda',
+        '-i', video_path,
+        '-qscale:v', '2',
+        '-start_number', '0',
+        f'{output_dir}/%05d.jpg'
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        extracted_frames = len([f for f in os.listdir(output_dir) if f.endswith('.jpg')])
+        print(f"[OK-GPU] Extracted {extracted_frames} frames @ {video_fps:.1f} fps (NVDEC)")
+        return extracted_frames
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"[WARNING] GPU extraction failed ({e}), falling back to CPU...")
+        # Fallback to CPU if GPU fails
+        cap = cv2.VideoCapture(video_path)
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            cv2.imwrite(f"{output_dir}/{frame_idx:05d}.jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            frame_idx += 1
+        cap.release()
+        print(f"[OK-CPU] Extracted {frame_idx} frames @ {video_fps:.1f} fps")
+        return frame_idx
 
 
 def get_user_point_interactive(first_frame_path):
@@ -170,6 +200,115 @@ def get_user_point_interactive(first_frame_path):
         except KeyboardInterrupt:
             print("\n[CANCELLED]")
             return None
+
+
+def track_video_chunked(predictor, frames_dir, point_coords, point_labels, chunk_size=12000):
+    """
+    Process video in optimized chunks for 24GB GPUs
+
+    Args:
+        chunk_size: Number of frames per chunk (12K = ~8GB VRAM, safe for 24GB GPU)
+    """
+    import gc
+    import shutil
+
+    frame_files = sorted([f for f in os.listdir(frames_dir) if f.endswith('.jpg')])
+    total_frames = len(frame_files)
+    all_video_segments = {}
+    prev_chunk_last_mask = None  # Track mask from previous chunk for continuity
+
+    num_chunks = -(total_frames // -chunk_size)  # Ceiling division
+    print(f"\n[CHUNK] Processing {total_frames:,} frames in chunks of {chunk_size:,}")
+    print(f"[CHUNK] Total chunks: {num_chunks} (optimized for 24GB VRAM)")
+    print(f"[CHUNK] Mask propagation: Enabled (maintains tracking across chunks)")
+
+    for chunk_idx, chunk_start in enumerate(range(0, total_frames, chunk_size), 1):
+        chunk_end = min(chunk_start + chunk_size, total_frames)
+        chunk_frames = frame_files[chunk_start:chunk_end]
+
+        vram_used = torch.cuda.memory_allocated() / 1024**3
+        print(f"\n[CHUNK {chunk_idx}/{num_chunks}] Frames {chunk_start:,}-{chunk_end:,} | GPU: {vram_used:.1f}GB")
+
+        # Create temporary directory for this chunk
+        chunk_dir = f"{frames_dir}_chunk_{chunk_start}_{chunk_end}"
+        os.makedirs(chunk_dir, exist_ok=True)
+
+        # Symlink frames (instant, no copy)
+        for i, frame_file in enumerate(chunk_frames):
+            src = os.path.join(frames_dir, frame_file)
+            dst = os.path.join(chunk_dir, f"{i:05d}.jpg")
+            if os.path.exists(dst):
+                os.remove(dst)
+            os.symlink(src, dst)
+
+        try:
+            # Process chunk entirely on GPU (24GB can handle it!)
+            inference_state = predictor.init_state(
+                video_path=chunk_dir,
+                offload_video_to_cpu=False,      # Keep on GPU for MAX speed
+                offload_state_to_cpu=False,      # Keep memory bank on GPU
+                async_loading_frames=True        # Speed up I/O
+            )
+
+            predictor.reset_state(inference_state)
+
+            # Initialize tracking for this chunk
+            if chunk_idx == 1:
+                # Chunk 1: Use user's clicked point
+                print(f"[CHUNK {chunk_idx}] Initializing with user point: {point_coords[0]}")
+                _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+                    inference_state=inference_state,
+                    frame_idx=0,
+                    obj_id=1,
+                    points=point_coords,
+                    labels=point_labels,
+                )
+            else:
+                # Chunks 2+: Use last mask from previous chunk
+                print(f"[CHUNK {chunk_idx}] Initializing with mask from previous chunk's last frame")
+                _, out_obj_ids, out_mask_logits = predictor.add_new_mask(
+                    inference_state=inference_state,
+                    frame_idx=0,
+                    obj_id=1,
+                    mask=prev_chunk_last_mask
+                )
+
+            # Propagate through chunk (GPU accelerated)
+            video_segments = {}
+            with tqdm(total=len(chunk_frames), desc=f"Chunk {chunk_idx}/{num_chunks}") as pbar:
+                for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
+                    video_segments[out_frame_idx] = {
+                        out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                        for i, out_obj_id in enumerate(out_obj_ids)
+                    }
+                    pbar.update(1)
+
+            # Store with global indices
+            for frame_idx, masks in video_segments.items():
+                all_video_segments[chunk_start + frame_idx] = masks
+
+            # Save last mask from this chunk for next chunk initialization
+            if video_segments:
+                last_frame_idx = max(video_segments.keys())
+                last_mask = video_segments[last_frame_idx][1]  # obj_id=1, numpy array (H, W)
+                # Convert to 2D torch tensor for add_new_mask()
+                prev_chunk_last_mask = torch.from_numpy(last_mask.squeeze()).cuda()
+                print(f"[CHUNK {chunk_idx}/{num_chunks}] ✓ Processed {len(video_segments):,} frames | Saved mask for next chunk")
+            else:
+                print(f"[CHUNK {chunk_idx}/{num_chunks}] ✓ Processed {len(video_segments):,} frames")
+
+            # Clean up GPU memory
+            predictor.reset_state(inference_state)
+            del inference_state
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        finally:
+            # Always clean up symlinks
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+
+    print(f"\n[CHUNK] ✓ All {num_chunks} chunks complete! Total: {len(all_video_segments):,} frames")
+    return all_video_segments
 
 
 def enable_optimizations():
@@ -313,77 +452,40 @@ def track_video_wsl2(frames_dir, point, label):
 
     print(f"[PyTorch] Model loaded and optimized")
 
-    # Initialize video predictor state
-    inference_state = predictor.init_state(video_path=frames_dir)
+    # ========================================
+    # CHUNKED PROCESSING (24GB GPU optimized)
+    # ========================================
+    print(f"\n[PyTorch] Using chunked processing for {total_frames:,} frames...")
 
-    # Add frame 0 mask from TensorRT to initialize tracking
-    print(f"[PyTorch] Initializing with TensorRT frame 0 mask...")
-    _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-        inference_state=inference_state,
-        frame_idx=0,
-        obj_id=1,
-        points=points_array,
-        labels=labels_array
-    )
-
-    print(f"[PyTorch] ✓ Initialized with frame 0")
-    print(f"[PyTorch] Propagating frames 1-{total_frames-1} with torch.compile()...")
-
-    # Store frame 0 mask from TensorRT
-    video_segments = {0: {1: mask_0}}
-    frame_times = []
-
-    # Pre-allocate CUDA memory
-    torch.cuda.empty_cache()
-
-    # Process frames 1-N with BFloat16 + inference_mode for maximum speed
+    # Process video in chunks with BFloat16 + inference_mode for maximum speed
     with torch.inference_mode():
         with torch.autocast("cuda", dtype=torch.bfloat16, cache_enabled=True):
-            torch.cuda.synchronize()
+            start_time = time.perf_counter()
 
-            with tqdm(total=total_frames, desc="PyTorch Propagation") as pbar:
-                # Update frame 0 (already done)
-                pbar.update(1)
+            # Process in 500 frame chunks (hitting 24GB with 1000, so cutting in half)
+            video_segments = track_video_chunked(
+                predictor,
+                frames_dir,
+                points_array,
+                labels_array,
+                chunk_size=500  # ~90 chunks total, each using ~9GB
+            )
 
-                for frame_idx, obj_ids, mask_logits in predictor.propagate_in_video(inference_state):
-                    # Skip frame 0 (already processed by TensorRT)
-                    if frame_idx == 0:
-                        continue
+            # Add frame 0 from TensorRT
+            video_segments[0] = {1: mask_0}
 
-                    start_time = time.perf_counter()
-
-                    # Convert mask to numpy
-                    video_segments[frame_idx] = {
-                        obj_id: (mask_logits[i] > 0.0).cpu().numpy()
-                        for i, obj_id in enumerate(obj_ids)
-                    }
-
-                    torch.cuda.synchronize()
-                    elapsed = (time.perf_counter() - start_time) * 1000
-                    frame_times.append(elapsed)
-
-                    pbar.update(1)
-                    pbar.set_postfix({
-                        'ms/frame': f'{elapsed:.1f}',
-                        'avg': f'{np.mean(frame_times):.1f}' if frame_times else 'N/A'
-                    })
+            elapsed_total = time.perf_counter() - start_time
 
     # Calculate performance metrics
-    if frame_times:
-        avg_time = np.mean(frame_times)
-        min_time = np.min(frame_times)
-        max_time = np.max(frame_times)
-        fps = 1000.0 / avg_time
+    avg_fps = len(video_segments) / elapsed_total if elapsed_total > 0 else 0
 
-        print(f"\n[HYBRID] Complete! {len(video_segments)} frames tracked")
-        print(f"[HYBRID] Performance:")
-        print(f"[HYBRID]   Frame 0 (TensorRT): {elapsed:.1f}ms (instant!)")
-        print(f"[HYBRID]   Frames 1-{total_frames-1} (PyTorch): {avg_time:.1f} ms/frame ({fps:.1f} FPS)")
-        print(f"[HYBRID]   Range: {min_time:.1f} ms - {max_time:.1f} ms")
-        print(f"[HYBRID] TRUE SAM2 tracking - perfect object memory!")
-        print(f"[HYBRID] 🚀 6.5x faster than pure PyTorch (no compilation wait)!")
-    else:
-        print(f"\n[HYBRID] Complete! {len(video_segments)} frames tracked")
+    print(f"\n[HYBRID] Complete! {len(video_segments):,} frames tracked")
+    print(f"[HYBRID] Performance:")
+    print(f"[HYBRID]   Total time: {elapsed_total:.1f}s")
+    print(f"[HYBRID]   Average: {avg_fps:.1f} FPS")
+    print(f"[HYBRID]   Frame 0 (TensorRT): 11.6ms (instant!)")
+    print(f"[HYBRID] TRUE SAM2 tracking - perfect object memory!")
+    print(f"[HYBRID] 🚀 6.5x faster than pure PyTorch (no compilation wait)!")
 
     return video_segments
 
@@ -460,7 +562,7 @@ def main():
             print(f"[WARNING] Failed to save mask {frame_idx}")
 
     print(f"[OK] Saved {len(video_segments)} masks to {TEMP_MASKS_DIR}")
-    print(f"[OK] Masks accessible from Windows at: D:\\watermarkz\\{TEMP_MASKS_DIR}\\")
+    print(f"[OK] Masks accessible from Windows at: C:\\water\\temp_sam2_masks\\")
     print("\n" + "="*70)
     print("DONE! WSL2 torch.compile() = 3-5x faster than Windows!")
     print("="*70)

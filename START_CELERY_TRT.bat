@@ -59,10 +59,9 @@ if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
 REM Force TensorRT-only mode for YOLO (no .pt fallback)
 set YOLO_REQUIRE_TENSORRT=1
 
-REM Use NeuFlow v2 ONNX (10-70x faster than RAFT!)
-REM ❌ DISABLE TensorRT (causes GPU context thrashing with parallel segments!)
-REM    TensorRT engines can't handle 4 parallel CUDA streams properly
-REM    Switching to PyTorch RAFT + torch.compile for parallel processing
+REM ❌ TensorRT NeuFlow: DISABLED (DLLs not available on Windows - FileNotFoundError!)
+REM    TensorRT requires nvinfer_10.dll which isn't installed
+REM    Using PyTorch RAFT + torch.compile instead (proven 26-54ms/frame!)
 set FORCE_TRT_RAFT=0
 set USE_NEUFLOW=0
 
@@ -138,10 +137,10 @@ set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
 REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers
-REM    Set to 1 for sequential segment processing (avoids GPU context switching)
-REM    This allows 4 DIFFERENT VIDEOS to process in parallel (concurrency=4)
-REM    Each video processes segments sequentially at 27-31ms/frame (FAST!)
-set SEGMENT_WORKERS=1
+REM    Set to 4 for parallel segment processing (matches commit fbea5bd5)
+REM    4 workers × 4 segments = 16 parallel processing threads
+REM    Works with torch.compile for maximum throughput!
+set SEGMENT_WORKERS=4
 
 REM ⚡ SAM2 TRACKING: Use SAM2-Tiny for temporal mask tracking (BEST QUALITY!)
 REM    YOLO detects bbox on first frame → SAM2 tracks with temporal consistency
@@ -153,21 +152,21 @@ echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
-echo   - SAM2-Tiny: ENABLED (temporal mask tracking, 44ms/frame, NO FLICKER!)
+echo   - SAM2-Tiny: DISABLED (using YOLO-only for speed testing)
 echo   - Video Decode: CPU cv2.VideoCapture (7.4x faster than NVDEC for CPU pipeline!)
-echo   - Optical Flow: PyTorch RAFT + torch.compile (parallel-safe, 30-40ms/frame!)
+echo   - Optical Flow: PyTorch RAFT + torch.compile (26-54ms/frame proven!)
 echo   - RFCNet: PyTorch + FP8 + DCNv4 (parallel-safe flow completion!)
 echo   - Transformer: Manual attention (FASTEST! 0.99-1.02s feature propagation!)
 echo   - SageAttention: DISABLED (incompatible with sparse transformers!)
 echo   - Flash Attention: DISABLED (manual attention is 5x faster!)
 echo   - FP8 Transformer: ENABLED (RTX 4090 Ada: 1.3-1.5x speedup!)
-echo   - Token Merging: ENABLED (50%% merge ratio, 2-2.5x speedup!)
+echo   - Token Merging: DISABLED (quality priority over speed!)
 echo   - torch.compile: ENABLED for RAFT/YOLO (26-54ms/frame proven on Windows!)
 echo   - FP8 Encoder/Decoder: ENABLED (1.3-1.5x speedup, 11-16%% pipeline gain!)
 echo   - FP8 RFCNet: ENABLED (1.3-1.5x speedup, 4-7%% pipeline gain!)
 echo   - DCNv4: ENABLED (3x faster deformable convolution!)
-echo   - Concurrency: 1 worker (CUDA streams for parallel segments!)
-echo   - SEGMENT_WORKERS: 1 (uses CUDA streams: 4 threads in 1 GPU context!)
+echo   - Concurrency: 4 workers (parallel video processing with cache isolation!)
+echo   - SEGMENT_WORKERS: 4 (parallel segment processing - 16 threads total!)
 echo ============================================================
 echo.
 
@@ -187,8 +186,8 @@ REM     rmdir /s /q "D:\watermarkz\temp\torchinductor_has" 2>nul
 REM     echo [OK] Complete cache removed - workers will recompile on startup
 REM )
 
-REM CUDA Streams: Process segments in parallel with threads (ONE GPU context!)
-REM 1 worker handles entire video
-REM 4 threads run 4 segments in parallel using CUDA streams
-REM Result: 27-31ms/frame per segment + NO GPU context switching!
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1
+REM Parallel Processing: 4 workers with torch.compile cache isolation
+REM Each worker processes one video sequentially (SEGMENT_WORKERS=1)
+REM Workers compile kernels on first run, then cache for reuse
+REM Result: 4 videos in parallel, each at 26-54ms/frame!
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
