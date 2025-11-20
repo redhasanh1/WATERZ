@@ -127,6 +127,8 @@ model_surgery_patches.py
 persistent_worker_pool.py
 warmup_torch_compile.py
 compile_*.py
+*.backup
+*.OLD
 
 # Build automation batch files
 BUILD_*.bat
