@@ -29,7 +29,9 @@
       "Bash(git commit:*)",
       "Bash(git pull:*)",
       "Bash(git stash:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git fetch:*)",
+      "Bash(cmd /c \"%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe check_nvdec_api.py\")"
     ],
     "deny": [],
     "ask": []

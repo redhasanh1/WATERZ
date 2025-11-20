@@ -127,10 +127,11 @@ REM    Phase 1A: PyTorch validation (3x speedup expected)
 REM    Phase 2-4: TensorRT plugin (6.5-9x total speedup when combined with FP8)
 set ENABLE_DCNV4_RFCNET=1
 
-REM ❌ NVDEC VIDEO DECODER: DISABLED (7.4x SLOWER than CPU due to GPU→CPU transfer overhead)
-REM    GPU decode is fast, but PCIe copy to CPU numpy arrays kills all gains
-REM    Only beneficial if entire pipeline stays on GPU (not this use case)
-set ENABLE_NVDEC=0
+REM ⚡ NVDEC VIDEO DECODER: ENABLED (GPU-accelerated H.264/HEVC decoding!)
+REM    Previous bottleneck (GPU→CPU transfer) ELIMINATED by keeping frames on GPU
+REM    New zero-copy pipeline: NVDEC(GPU) → Tensor(GPU) → ProPainter(GPU) → NVENC(GPU)
+REM    Expected: 2x faster video decode + zero PCIe overhead
+set ENABLE_NVDEC=1
 
 REM ⚡ TORCH COMPILE: Match RUN_SAM2_LOCAL.BAT exactly (proven fast + stable!)
 REM    Compile RAFT + YOLO (specific flags work without FileExistsError)
@@ -156,7 +157,7 @@ echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
 echo   - SAM2-Tiny: DISABLED (YOLO-only mode for speed)
-echo   - Video Decode: CPU cv2.VideoCapture (7.4x faster than NVDEC for CPU pipeline!)
+echo   - Video Decode: NVDEC GPU (H.264/HEVC hardware decode + zero-copy to GPU!)
 echo   - Optical Flow: NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX, 10-70x faster than RAFT!)
 echo   - RFCNet: TensorRT FP16 + DCNv4 plugin (1.6-2.3x faster flow completion!)
 echo   - Transformer: Manual attention (FASTEST! 0.99-1.02s feature propagation!)

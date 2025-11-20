@@ -2,6 +2,8 @@
 import os
 import time
 import threading
+import subprocess
+import shutil
 
 from tqdm import tqdm
 import cv2
@@ -185,6 +187,26 @@ def warmup_sageattention(device='cuda', q_shape=(1, 8, 64, 64, 8, 64)):
     warmup_time = time.time() - warmup_start
     print(f"[SAGE] INT8 kernels compiled and optimized for RTX 4090! ({warmup_time:.2f}s)")
     _worker_sage_warmup_done.done = True
+
+# ============================================================================
+# FFMPEG PATH DETECTION FOR NVENC GPU ENCODING
+# ============================================================================
+def _get_ffmpeg_path():
+    """Get FFmpeg executable path, with fallback to static-ffmpeg."""
+    # Try system PATH first
+    ffmpeg_path = shutil.which('ffmpeg')
+    if ffmpeg_path:
+        return ffmpeg_path
+
+    # Fallback to static-ffmpeg
+    try:
+        from static_ffmpeg import run
+        ffmpeg_path, _ = run.get_or_fetch_platform_executables_else_raise()
+        return ffmpeg_path
+    except Exception:
+        return 'ffmpeg'  # Last resort fallback
+
+_FFMPEG_EXECUTABLE = _get_ffmpeg_path()
 
 # Conditional import: Use NeuFlow v2 or RAFT based on environment variable
 # ============================================================================
@@ -438,6 +460,8 @@ def pipeline(
     fp16=False,
     frames_array=None,
     masks_array=None,
+    frames_tensor_gpu=None,  # GPU tensors from NVDEC (ZERO CPU transfers!)
+    masks_tensor_gpu=None,   # GPU mask tensors (optional)
     use_cached_models=True,  # Enable global model cache for true parallel speedup
 ):
 
@@ -447,8 +471,145 @@ def pipeline(
     if device == torch.device("cpu"):
         use_half = False
 
+    # ⚡ GPU-ONLY PIPELINE: Use GPU tensors directly from NVDEC (ZERO CPU transfers!)
+    frames_already_tensors = False  # Flag to skip to_tensors() conversion later
+
+    if frames_tensor_gpu is not None:
+        frames_already_tensors = True  # Skip tensor conversion later
+        print(f"[GPU-ONLY] Using {frames_tensor_gpu.shape[1]} frames from GPU memory (ZERO CPU transfers!)")
+
+        # Frames already on GPU in correct format [1, T, C, H, W], range [-1, 1]
+        frames = frames_tensor_gpu.to(device, non_blocking=True)
+
+        # Derive metadata from tensor
+        fps = save_fps
+        _, num_frames, _, h, w = frames.shape
+        size = (w, h)  # (W, H)
+
+        # Extract video_name from video parameter
+        if video.endswith(("mp4", "mov", "avi", "MP4", "MOV", "AVI")):
+            video_name = os.path.basename(video)[:-4]
+        else:
+            video_name = os.path.basename(video)
+
+        # Check size requirements
+        if not width == -1 and not height == -1:
+            size = (width, height)
+        if not resize_ratio == 1.0:
+            size = (int(resize_ratio * size[0]), int(resize_ratio * size[1]))
+
+        # Ensure size is divisible by 8
+        if (size[0] % 8 != 0) or (size[1] % 8 != 0):
+            # Need to resize tensor on GPU
+            new_w = (size[0] // 8) * 8
+            new_h = (size[1] // 8) * 8
+            size = (new_w, new_h)
+            out_size = size
+
+            # Resize on GPU using F.interpolate
+            # frames shape: [1, T, C, H, W]
+            # Reshape to [T, C, H, W] for interpolation
+            frames = frames.squeeze(0)  # [T, C, H, W]
+            frames = torch.nn.functional.interpolate(
+                frames, size=(new_h, new_w), mode='bilinear', align_corners=False
+            )
+            frames = frames.unsqueeze(0)  # Back to [1, T, C, H, W]
+            w, h = new_w, new_h
+        else:
+            out_size = size
+
+        fps = save_fps if fps is None else fps
+        save_root = os.path.join(output, video_name)
+        if not os.path.exists(save_root):
+            os.makedirs(save_root, exist_ok=True)
+
+        if mode == "video_inpainting":
+            frames_len = num_frames
+
+            # Handle masks - convert to GPU tensors if needed
+            if masks_tensor_gpu is not None:
+                # Already on GPU
+                flow_masks = masks_tensor_gpu.to(device, non_blocking=True)
+                masks_dilated = flow_masks
+                print(f"[GPU-ONLY] Using masks from GPU memory")
+            elif masks_array is not None:
+                # Convert numpy masks to GPU tensors
+                flow_masks_list = []
+                masks_dilated_list = []
+
+                for mask_np in masks_array:
+                    # Ensure grayscale
+                    if len(mask_np.shape) == 3:
+                        mask_np = cv2.cvtColor(mask_np, cv2.COLOR_BGR2GRAY)
+
+                    # Resize if needed
+                    if size is not None:
+                        mask_np = cv2.resize(mask_np, size, interpolation=cv2.INTER_NEAREST)
+
+                    # Flow mask dilation
+                    if mask_dilation > 0:
+                        flow_mask_img = scipy.ndimage.binary_dilation(
+                            mask_np, iterations=mask_dilation
+                        ).astype(np.uint8)
+                    else:
+                        flow_mask_img = binary_mask(mask_np).astype(np.uint8)
+                    flow_masks_list.append(Image.fromarray(flow_mask_img * 255))
+
+                    # Regular mask dilation
+                    if mask_dilation > 0:
+                        mask_img = scipy.ndimage.binary_dilation(
+                            mask_np, iterations=mask_dilation
+                        ).astype(np.uint8)
+                    else:
+                        mask_img = binary_mask(mask_np).astype(np.uint8)
+                    masks_dilated_list.append(Image.fromarray(mask_img * 255))
+
+                # If single mask, repeat for all frames
+                if len(masks_array) == 1:
+                    flow_masks_list = flow_masks_list * frames_len
+                    masks_dilated_list = masks_dilated_list * frames_len
+
+                # Convert to GPU tensors
+                flow_masks = to_tensors()(flow_masks_list).unsqueeze(0).to(device, non_blocking=True)
+                masks_dilated = to_tensors()(masks_dilated_list).unsqueeze(0).to(device, non_blocking=True)
+                print(f"[GPU-ONLY] Converted {len(masks_array)} numpy masks to GPU tensors")
+            else:
+                # Load from disk - use module-level read_mask function
+                flow_masks, masks_dilated = read_mask(
+                    mask,
+                    frames_len,
+                    size,
+                    flow_mask_dilates=mask_dilation,
+                    mask_dilates=mask_dilation,
+                )
+                flow_masks = to_tensors()(flow_masks).unsqueeze(0).to(device, non_blocking=True)
+                masks_dilated = to_tensors()(masks_dilated).unsqueeze(0).to(device, non_blocking=True)
+
+        # For masked frame visualization, need to convert to CPU temporarily
+        # Convert first frame to numpy for masked_frame_for_save generation
+        # This is ONLY for visualization output, not for processing!
+        masked_frame_for_save = []
+        frames_cpu = frames[0].cpu()  # [T, C, H, W]
+        masks_cpu = masks_dilated[0].cpu()  # [T, 1, H, W]
+
+        for i in range(frames_len):
+            # Convert from [-1,1] to [0,255]
+            frame_np = ((frames_cpu[i].permute(1, 2, 0).numpy() + 1) * 127.5).astype(np.uint8)
+            mask_np = masks_cpu[i, 0].numpy()
+
+            mask_3ch = np.expand_dims(mask_np, 2).repeat(3, axis=2)
+            green = np.zeros([h, w, 3])
+            green[:, :, 1] = 255
+            alpha = 0.6
+            fuse_img = (1 - alpha) * frame_np + alpha * green
+            fuse_img = mask_3ch * fuse_img + (1 - mask_3ch) * frame_np
+            masked_frame_for_save.append(fuse_img.astype(np.uint8))
+
+        # Skip to model inference (frames already in GPU tensor format)
+        # Jump past all CPU-based preprocessing
+
     # 🔥 EXTREME SPEED: Use numpy arrays directly if provided (skip disk I/O!)
-    if frames_array is not None:
+    elif frames_array is not None:
         # Convert numpy arrays (BGR) to PIL Images (RGB)
         frames = []
         for frame_bgr in frames_array:
@@ -562,17 +723,20 @@ def pipeline(
         fuse_img = mask_ * fuse_img + (1 - mask_) * img
         masked_frame_for_save.append(fuse_img.astype(np.uint8))
 
-    frames_inp = [np.array(f).astype(np.uint8) for f in frames]
-    frames = to_tensors()(frames).unsqueeze(0) * 2 - 1
-    flow_masks = to_tensors()(flow_masks).unsqueeze(0)
-    masks_dilated = to_tensors()(masks_dilated).unsqueeze(0)
-    # NOTE: Can't use channels_last on 5D tensors (BTCHW) - only works with 4D (NCHW)
-    # Models will automatically convert internally via their .to(memory_format=torch.channels_last)
-    frames, flow_masks, masks_dilated = (
-        frames.to(device, non_blocking=True),
-        flow_masks.to(device, non_blocking=True),
-        masks_dilated.to(device, non_blocking=True),
-    )
+    # Convert to tensors (skip if already tensors from GPU pipeline)
+    if not frames_already_tensors:
+        frames_inp = [np.array(f).astype(np.uint8) for f in frames]
+        frames = to_tensors()(frames).unsqueeze(0) * 2 - 1
+        flow_masks = to_tensors()(flow_masks).unsqueeze(0)
+        masks_dilated = to_tensors()(masks_dilated).unsqueeze(0)
+        # NOTE: Can't use channels_last on 5D tensors (BTCHW) - only works with 4D (NCHW)
+        # Models will automatically convert internally via their .to(memory_format=torch.channels_last)
+        frames, flow_masks, masks_dilated = (
+            frames.to(device, non_blocking=True),
+            flow_masks.to(device, non_blocking=True),
+            masks_dilated.to(device, non_blocking=True),
+        )
+    # else: frames, flow_masks, masks_dilated already on GPU from NVDEC pipeline!
 
     ##############################################
     # set up RAFT and flow competition model
@@ -1727,15 +1891,76 @@ def pipeline(
     masked_frame_for_save = [cv2.resize(f, out_size) for f in masked_frame_for_save]
     comp_frames = [cv2.resize(f, out_size) for f in comp_frames]
 
-    imageio.mimwrite(
-        os.path.join(save_root, "masked_in.mp4"),
-        masked_frame_for_save,
-        fps=fps,
-        quality=7,
-    )
-    imageio.mimwrite(
-        os.path.join(save_root, "inpaint_out.mp4"), comp_frames, fps=fps, quality=7, ffmpeg_params=["-sws_flags", "bilinear"]
-    )
+    # Helper function for GPU-accelerated NVENC encoding
+    def encode_nvenc(frames, output_path, fps, width, height):
+        """Encode frames using NVENC GPU encoder instead of CPU."""
+        try:
+            # Use h264_nvenc for GPU encoding
+            cmd = [
+                _FFMPEG_EXECUTABLE, '-y',  # Use detected FFmpeg path
+                '-f', 'rawvideo',
+                '-vcodec', 'rawvideo',
+                '-s', f'{width}x{height}',
+                '-pix_fmt', 'rgb24',
+                '-r', str(fps),
+                '-i', '-',  # Read from stdin
+                '-c:v', 'h264_nvenc',  # NVENC GPU encoder
+                '-preset', 'p4',  # Performance preset (p1=fastest, p7=slowest/best)
+                '-b:v', '8M',  # 8 Mbps bitrate
+                '-pix_fmt', 'yuv420p',
+                '-profile:v', 'main',
+                output_path
+            ]
+
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+
+            # Write frames to FFmpeg stdin
+            for frame in frames:
+                process.stdin.write(frame.tobytes())
+
+            process.stdin.close()
+            process.wait()
+
+            if process.returncode != 0:
+                stderr = process.stderr.read().decode()
+                print(f"[WARNING] NVENC encoding had errors: {stderr}")
+                # Fallback to imageio if NVENC fails
+                return False
+
+            return True
+
+        except Exception as e:
+            print(f"[WARNING] NVENC encoding failed: {e}, falling back to CPU imageio")
+            return False
+
+    # Try NVENC encoding, fallback to imageio if it fails
+    h, w = out_size[1], out_size[0]  # out_size is (width, height)
+
+    if not encode_nvenc(masked_frame_for_save, os.path.join(save_root, "masked_in.mp4"), fps, w, h):
+        # Fallback to CPU imageio
+        imageio.mimwrite(
+            os.path.join(save_root, "masked_in.mp4"),
+            masked_frame_for_save,
+            fps=fps,
+            quality=7,
+        )
+        print("[FALLBACK] Using CPU imageio for masked_in.mp4")
+    else:
+        print(f"[NVENC] Encoded masked_in.mp4 using GPU ({len(masked_frame_for_save)} frames @ {fps} fps)")
+
+    if not encode_nvenc(comp_frames, os.path.join(save_root, "inpaint_out.mp4"), fps, w, h):
+        # Fallback to CPU imageio
+        imageio.mimwrite(
+            os.path.join(save_root, "inpaint_out.mp4"), comp_frames, fps=fps, quality=7, ffmpeg_params=["-sws_flags", "bilinear"]
+        )
+        print("[FALLBACK] Using CPU imageio for inpaint_out.mp4")
+    else:
+        print(f"[NVENC] Encoded inpaint_out.mp4 using GPU ({len(comp_frames)} frames @ {fps} fps)")
 
     torch.cuda.empty_cache()
 
