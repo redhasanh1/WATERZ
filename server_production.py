@@ -223,11 +223,147 @@ except Exception as e:
     if not GPU_AVAILABLE:
         print(f"[INFO] FFmpeg not available (API-only mode): {e}")
 
+def detect_nvenc_capability():
+    """
+    Detect if NVENC (GPU encoding) is available in FFmpeg.
+
+    Returns:
+        bool: True if h264_nvenc encoder is available, False otherwise
+    """
+    if not FFMPEG_EXE:
+        return False
+
+    try:
+        result = subprocess.run(
+            [FFMPEG_EXE, '-encoders'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        # Check if h264_nvenc appears in the encoder list
+        has_nvenc = 'h264_nvenc' in result.stdout
+        return has_nvenc
+    except Exception as e:
+        print(f"[WARNING] Failed to detect NVENC capability: {e}")
+        return False
+
+def get_encoder_config():
+    """
+    Get the appropriate encoder configuration based on available hardware.
+
+    Returns:
+        dict: Encoder configuration with 'codec', 'preset', 'fallback_preset', and 'name'
+    """
+    has_nvenc = detect_nvenc_capability()
+
+    if has_nvenc and not IS_RAILWAY:
+        # GPU encoding with NVENC (local environment with GPU)
+        return {
+            'codec': 'h264_nvenc',
+            'preset': 'p1',  # Fastest NVENC preset
+            'fallback_preset': 'p4',  # Balanced fallback
+            'name': 'NVENC (GPU)'
+        }
+    else:
+        # CPU encoding with libx264 (Railway or no GPU)
+        return {
+            'codec': 'libx264',
+            'preset': 'ultrafast',  # Fastest CPU preset
+            'fallback_preset': 'veryfast',  # Slightly slower fallback
+            'name': 'libx264 (CPU)'
+        }
+
+# Detect encoder capability at startup
+HAS_NVENC = detect_nvenc_capability() if FFMPEG_EXE else False
+ENCODER_CONFIG = get_encoder_config() if FFMPEG_EXE else None
+
+if FFMPEG_EXE:
+    print(f"[OK] Video encoder: {ENCODER_CONFIG['name']}")
+    if IS_RAILWAY and HAS_NVENC:
+        print(f"[WARNING] NVENC detected but running on Railway - using CPU encoding instead")
+    elif not HAS_NVENC and not IS_RAILWAY:
+        print(f"[INFO] NVENC not available - using CPU encoding (slower but compatible)")
+
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
 # Stores frames/masks in RAM for instant access (no Redis, no disk!)
 FRAME_CACHE = {}
 FRAME_CACHE_LOCK = threading.Lock()
+
+# Cross-platform file locking utility for shared frame buffer
+import contextlib
+import platform
+import time
+
+@contextlib.contextmanager
+def file_lock(file_path, timeout=10):
+    """
+    Cross-platform file locking context manager.
+
+    Args:
+        file_path: Path to the file to lock
+        timeout: Maximum seconds to wait for lock (default 10)
+
+    Yields:
+        None (lock is held within context)
+
+    Raises:
+        TimeoutError: If lock cannot be acquired within timeout
+    """
+    lock_file = f"{file_path}.lock"
+    lock_fd = None
+    start_time = time.time()
+
+    try:
+        # Create lock file
+        lock_fd = open(lock_file, 'w')
+
+        # Platform-specific locking
+        if platform.system() == 'Windows':
+            import msvcrt
+            # Try to lock with timeout
+            while True:
+                try:
+                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+                    break  # Lock acquired
+                except OSError:
+                    if time.time() - start_time > timeout:
+                        raise TimeoutError(f"Could not acquire lock on {file_path} within {timeout}s")
+                    time.sleep(0.01)  # 10ms retry interval
+        else:
+            import fcntl
+            # Try to lock with timeout
+            while True:
+                try:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break  # Lock acquired
+                except OSError:
+                    if time.time() - start_time > timeout:
+                        raise TimeoutError(f"Could not acquire lock on {file_path} within {timeout}s")
+                    time.sleep(0.01)  # 10ms retry interval
+
+        yield  # Lock held during this block
+
+    finally:
+        # Release lock
+        if lock_fd:
+            try:
+                if platform.system() == 'Windows':
+                    import msvcrt
+                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+            except:
+                pass
+            lock_fd.close()
+
+        # Cleanup lock file
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except:
+            pass
 
 # Import faster-propainter modules for direct pipeline processing
 # Note: These imports are moved to inside functions to avoid startup errors
@@ -1498,16 +1634,17 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
     seg_video_path = os.path.join(TEMP_DIR, f"{seg_prefix}.mp4")
 
     seg_label = f"{seg_idx + 1}/{total_segments}"
-    print(f"   [ENCODE]  Encoding segment {seg_label} to video (GPU NVENC)...")
+    encoder_name = ENCODER_CONFIG['name'] if ENCODER_CONFIG else 'default'
+    print(f"   [ENCODE]  Encoding segment {seg_label} to video ({encoder_name})...")
 
     try:
-        # Try faster preset p1 for maximum speed, fallback to p4 if fails
+        # Use detected encoder (NVENC if available, libx264 CPU fallback)
         encode_cmd = [
             FFMPEG_EXE, '-y',
             '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
-            '-c:v', 'h264_nvenc',
-            '-preset', 'p1',  # Fastest NVENC preset (was p4)
+            '-c:v', ENCODER_CONFIG['codec'],
+            '-preset', ENCODER_CONFIG['preset'],
             '-b:v', '8M',  # Increased bitrate for better quality at higher speed
             '-bufsize', '16M',
             '-pix_fmt', 'yuv420p',
@@ -1517,10 +1654,11 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
         result = subprocess.run(encode_cmd, capture_output=True, text=True)
 
         if result.returncode != 0:
-            # Fallback to p4 if p1 fails
-            print(f"   [WARNING]  p1 preset failed, trying p4...")
-            encode_cmd[encode_cmd.index('-preset') + 1] = 'p4'
-            subprocess.run(encode_cmd, capture_output=True, check=True)
+            # Fallback to slower preset if fast preset fails
+            print(f"   [WARNING]  {ENCODER_CONFIG['preset']} preset failed, trying {ENCODER_CONFIG['fallback_preset']}...")
+            print(f"   [DEBUG] Error: {result.stderr[:500]}")  # Show first 500 chars of error
+            encode_cmd[encode_cmd.index('-preset') + 1] = ENCODER_CONFIG['fallback_preset']
+            result = subprocess.run(encode_cmd, capture_output=True, text=True, check=True)
 
         print(f"   [OK] Segment {seg_label} encoded successfully")
         return seg_idx, seg_video_path
@@ -1805,14 +1943,14 @@ def encode_segment_background(redis_client, data):
             abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
             f.write(f"file '{abs_path}'\n")
 
-    # Encode with NVENC using file list (concat demuxer)
+    # Encode using detected encoder (NVENC or CPU fallback)
     encode_cmd = [
         FFMPEG_EXE, '-y',
         '-f', 'concat',
         '-safe', '0',
         '-i', file_list_path,
-        '-c:v', 'h264_nvenc',
-        '-preset', 'p4',  # Balanced speed/quality
+        '-c:v', ENCODER_CONFIG['codec'],
+        '-preset', ENCODER_CONFIG['fallback_preset'],  # Use fallback preset (more stable)
         '-b:v', '8M',
         '-pix_fmt', 'yuv420p',
         '-profile:v', 'main',
@@ -1820,7 +1958,14 @@ def encode_segment_background(redis_client, data):
     ]
 
     try:
-        result = subprocess.run(encode_cmd, capture_output=True, check=True, text=True, timeout=300)
+        result = subprocess.run(encode_cmd, capture_output=True, text=True, timeout=300)
+
+        # Check for encoding errors and show stderr
+        if result.returncode != 0:
+            print(f"[ENCODER ERROR] FFmpeg failed with return code {result.returncode}")
+            print(f"   Command: {' '.join(encode_cmd)}")
+            print(f"   stderr: {result.stderr}")
+            raise subprocess.CalledProcessError(result.returncode, encode_cmd, result.stdout, result.stderr)
         encode_duration = time.time() - encode_start
 
         encoded_size_mb = os.path.getsize(seg_video_path) / (1024 * 1024)
@@ -1852,10 +1997,28 @@ def encode_segment_background(redis_client, data):
 
     except subprocess.CalledProcessError as e:
         print(f"[ENCODER ERROR] Encoding failed for segment {seg_idx}!")
-        print(f"   stderr: {e.stderr}")
+        print(f"   Command: {' '.join(encode_cmd)}")
+        print(f"   Return code: {e.returncode}")
+        print(f"   stderr: {e.stderr if e.stderr else '(no stderr captured)'}")
+        print(f"   Encoder: {ENCODER_CONFIG['codec']} (preset: {ENCODER_CONFIG['fallback_preset']})")
+        # Cleanup partial file
+        if os.path.exists(seg_video_path):
+            try:
+                os.remove(seg_video_path)
+                print(f"   [CLEANUP] Removed partial video file")
+            except:
+                pass
         raise
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         print(f"[ENCODER ERROR] Encoding timed out after 300s for segment {seg_idx}")
+        print(f"   Command: {' '.join(encode_cmd)}")
+        # Cleanup partial file
+        if os.path.exists(seg_video_path):
+            try:
+                os.remove(seg_video_path)
+                print(f"   [CLEANUP] Removed partial video file after timeout")
+            except:
+                pass
         raise
 
 
@@ -3737,10 +3900,19 @@ def process_segment_task(self, segment_data):
                 print(f"   [MASKS] Loading {seg_duration} original frames + masks from disk...")
                 for frame_idx in range(seg_duration):
                     frame_file = f"{frame_idx:04d}.png"
-                    orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+
+                    # Load original frame
+                    orig_path = os.path.join(seg_frames_dir, frame_file)
+                    orig = cv2.imread(orig_path)
+                    if orig is None:
+                        raise RuntimeError(f"Failed to load original frame from {orig_path}")
                     original_frames.append(orig)
+
                     # Load corresponding mask
-                    mask = cv2.imread(os.path.join(seg_mask_dir, frame_file), cv2.IMREAD_GRAYSCALE)
+                    mask_path = os.path.join(seg_mask_dir, frame_file)
+                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                    if mask is None:
+                        raise RuntimeError(f"Failed to load mask from {mask_path}")
                     original_masks.append(mask)
 
             # Load cleaned frames from ProPainter output
@@ -3758,10 +3930,21 @@ def process_segment_task(self, segment_data):
                 # Load frame at index from ProPainter output (skip padding frames)
                 frame_idx = padding_offset + local_idx
                 frame_file = f"{frame_idx:04d}.png"
-                clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+                frame_path = os.path.join(seg_propainter_frames, frame_file)
+                clean = cv2.imread(frame_path)
                 if clean is None:
+                    # Frame loading failed - this is a critical error
                     print(f"   [ERROR] Failed to load cleaned frame {frame_file}!")
-                    print(f"   [DEBUG] Available frames: {available_frames[:5]}... (showing first 5)")
+                    print(f"   [DEBUG] Expected path: {frame_path}")
+                    print(f"   [DEBUG] Path exists: {os.path.exists(frame_path)}")
+                    print(f"   [DEBUG] ProPainter output dir: {seg_propainter_frames}")
+                    print(f"   [DEBUG] Available frames: {[os.path.basename(f) for f in available_frames[:10]]}")
+                    print(f"   [DEBUG] Padding offset: {padding_offset}, Segment duration: {seg_duration}")
+                    raise RuntimeError(
+                        f"Failed to load cleaned frame {frame_file} from ProPainter output. "
+                        f"Expected {len(available_frames)} frames, trying to load index {frame_idx}. "
+                        f"This indicates a frame index mismatch between ProPainter output and expected indices."
+                    )
                 cleaned_frames.append(clean)
 
             # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
@@ -3784,9 +3967,37 @@ def process_segment_task(self, segment_data):
                 else:
                     continue
 
-                # 🔥 DIRECT PASTE: Trust ProPainter's per-frame output
-                if cleaned_crop is not None and result_frame is not None:
-                    # Directly paste ProPainter's cleaned crop - it already processed each frame uniquely
+                # 🔥 MASK COMPOSITING: Alpha blend cleaned region with mask for smooth edges
+                if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
+                    # ProPainter output is already cropped to watermark region
+                    # Segment mask is also already cropped (from cropping step earlier)
+                    # So we DON'T double-crop the mask here!
+
+                    # Crop the mask to match the watermark region IF it's full-size
+                    # (Check dimensions to determine if already cropped)
+                    if segment_mask.shape[:2] == (height, width):
+                        # Mask is full-frame, crop it to watermark region
+                        cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    else:
+                        # Mask is already cropped, use as-is
+                        cropped_mask = segment_mask
+
+                    # Alpha blending for smooth compositing
+                    # Convert mask to 3-channel float [0, 1]
+                    mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
+
+                    # Get the region of interest (ROI) from result frame
+                    roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
+
+                    # Blend: where mask=1 (watermark), use cleaned; where mask=0, use original
+                    cleaned_crop_float = cleaned_crop.astype(float)
+                    blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+
+                    # Paste blended result back
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
+                elif cleaned_crop is not None and result_frame is not None:
+                    # No mask available - fall back to direct paste
+                    print(f"   [WARNING] No mask for frame {global_frame_idx} - using direct paste")
                     result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
 
                 # Save back to shared buffer

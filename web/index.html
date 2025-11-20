@@ -37,11 +37,6 @@
         "price": "0",
         "priceCurrency": "USD"
       },
-      "aggregateRating": {
-        "@type": "AggregateRating",
-        "ratingValue": "4.8",
-        "ratingCount": "1250"
-      },
       "description": "Professional AI-powered video object removal tool. Remove any object from videos with one click."
     }
     </script>
@@ -2026,17 +2021,9 @@
             progressDiv.style.display = 'block';
 
             try {
-                // Detect if it's a Sora URL and use appropriate endpoint
-                const isSoraUrl = url.includes('sora.chatgpt.com') ||
-                                  url.includes('backend/project_y') ||
-                                  url.includes('/p/s_') ||
-                                  url.startsWith('/backend');
+                const endpoint = `${API_BASE_URL}/api/download-from-url`;
 
-                const endpoint = isSoraUrl
-                    ? `${API_BASE_URL}/api/download-sora`
-                    : `${API_BASE_URL}/api/download-from-url`;
-
-                console.log(`Using endpoint: ${endpoint} for URL: ${url} (Sora: ${isSoraUrl})`);
+                console.log(`Using endpoint: ${endpoint} for URL: ${url}`);
 
                 // Send URL to backend for downloading
                 const response = await apiFetchUrl(endpoint, {
@@ -3081,7 +3068,41 @@
 </script>
 <!-- Theme Toggle Script -->
 <script src="js/theme.js"></script>
-<script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script></body>
+<script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script>
+
+<!-- Cookie Consent Banner -->
+<div id="cookieConsent" style="display: none; position: fixed; bottom: 0; left: 0; right: 0; background: rgba(26, 26, 46, 0.98); backdrop-filter: blur(10px); padding: 1.25rem 2rem; z-index: 10000; border-top: 1px solid rgba(102, 126, 234, 0.3); box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem;">
+        <div style="flex: 1; min-width: 300px;">
+            <p style="color: #e5e7eb; margin: 0 0 0.5rem 0; font-weight: 600;">We use cookies</p>
+            <p style="color: #9aa4b2; margin: 0; font-size: 0.9rem; line-height: 1.5;">We use cookies to improve your experience, analyze site traffic, and serve relevant ads. By clicking "Accept", you consent to our use of cookies. <a href="privacy.html" style="color: #667eea; text-decoration: underline;">Learn more</a></p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-shrink: 0;">
+            <button onclick="rejectCookies()" style="padding: 0.75rem 1.5rem; background: transparent; border: 2px solid rgba(102, 126, 234, 0.4); border-radius: 8px; color: #e5e7eb; font-weight: 600; cursor: pointer; transition: all 0.3s;">Reject</button>
+            <button onclick="acceptCookies()" style="padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); transition: all 0.3s;">Accept</button>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    const consent = localStorage.getItem('cookieConsent');
+    if (!consent) {
+        document.getElementById('cookieConsent').style.display = 'block';
+    }
+})();
+
+function acceptCookies() {
+    localStorage.setItem('cookieConsent', 'accepted');
+    document.getElementById('cookieConsent').style.display = 'none';
+}
+
+function rejectCookies() {
+    localStorage.setItem('cookieConsent', 'rejected');
+    document.getElementById('cookieConsent').style.display = 'none';
+    // Disable analytics/advertising cookies here if needed
+}
+</script>
+</body>
 </html>
 
 
