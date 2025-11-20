@@ -332,7 +332,7 @@
             padding: 3rem;
             box-shadow: 0 10px 50px rgba(102, 126, 234, 0.15), 0 5px 20px rgba(240, 147, 251, 0.1);
             border: 2px solid transparent;
-            background-image: linear-gradient(white, white), var(--gradient-rainbow);
+            background-image: linear-gradient(var(--bg-card), var(--bg-card)), var(--gradient-rainbow);
             background-origin: border-box;
             background-clip: padding-box, border-box;
             margin-top: 2rem;
@@ -695,6 +695,87 @@
 
         html[data-theme="dark"] .user-dropdown-menu {
             box-shadow: 0 10px 40px rgba(15, 15, 30, 0.5);
+        }
+
+        /* Dark mode: Navigation header */
+        html[data-theme="dark"] .nav-header {
+            background: rgba(11, 16, 32, 0.98);
+            border-bottom-color: rgba(102, 126, 234, 0.2);
+        }
+
+        /* Dark mode: Mobile menu */
+        html[data-theme="dark"] .nav-left .nav-menu {
+            background: rgba(11, 16, 32, 0.98);
+            border-bottom-color: rgba(102, 126, 234, 0.2);
+        }
+
+        /* Dark mode: Feature cards */
+        html[data-theme="dark"] .feature-card {
+            background: var(--bg-card);
+            border-color: rgba(102, 126, 234, 0.15);
+        }
+
+        /* Dark mode: Info box */
+        html[data-theme="dark"] .info-box {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(240, 147, 251, 0.12) 100%);
+        }
+
+        /* Dark mode: Upload zone */
+        html[data-theme="dark"] .upload-zone {
+            border-color: rgba(102, 126, 234, 0.4);
+        }
+
+        html[data-theme="dark"] .upload-zone:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        /* Dark mode: Points list and other inline elements */
+        html[data-theme="dark"] #pointsList {
+            background: rgba(18, 24, 38, 0.8) !important;
+        }
+
+        /* Dark mode: Demo card glow adjustment */
+        html[data-theme="dark"] .demo-card {
+            box-shadow: 0 10px 50px rgba(102, 126, 234, 0.25), 0 5px 20px rgba(240, 147, 251, 0.15);
+        }
+
+        /* Dark mode: Hero background enhancement */
+        html[data-theme="dark"] .hero-background {
+            background:
+                radial-gradient(at 20% 30%, rgba(102, 126, 234, 0.2) 0px, transparent 50%),
+                radial-gradient(at 80% 20%, rgba(240, 147, 251, 0.2) 0px, transparent 50%),
+                radial-gradient(at 50% 80%, rgba(72, 187, 120, 0.15) 0px, transparent 50%),
+                radial-gradient(at 90% 60%, rgba(246, 173, 85, 0.15) 0px, transparent 50%);
+        }
+
+        /* Dark mode: Free credits box */
+        html[data-theme="dark"] .free-credits-box {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(240, 147, 251, 0.2) 100%);
+        }
+
+        /* Dark mode: Mobile menu item borders */
+        html[data-theme="dark"] .nav-menu li {
+            border-bottom-color: rgba(102, 126, 234, 0.1);
+        }
+
+        /* Dark mode: Cookie banner */
+        html[data-theme="dark"] #cookie-banner {
+            background: rgba(18, 24, 38, 0.95) !important;
+            border-color: rgba(102, 126, 234, 0.2) !important;
+        }
+
+        /* Dark mode: Ad containers */
+        html[data-theme="dark"] .ad-container,
+        html[data-theme="dark"] .ad-sidebar,
+        html[data-theme="dark"] .ad-banner-top,
+        html[data-theme="dark"] .ad-banner-bottom {
+            background: rgba(18, 24, 38, 0.8);
+        }
+
+        /* Dark mode: Theme toggle button */
+        html[data-theme="dark"] .theme-toggle {
+            background: rgba(102, 126, 234, 0.15);
+            border-color: rgba(102, 126, 234, 0.3);
         }
 
         .user-dropdown.active .user-dropdown-menu {
