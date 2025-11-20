@@ -21,18 +21,18 @@ except Exception:
 class YOLOWatermarkDetector:
     def __init__(self, model_path=None, require_tensorrt=None):
         """
-        Initialize YOLOv8 watermark detector - BATCH TENSORRT ONLY!
+        Initialize YOLOv8 watermark detector - prefers TensorRT, falls back to PyTorch
 
         Args:
             model_path: Path to custom YOLOv8 model, or None to use batch TensorRT engine
-            require_tensorrt: Ignored - always uses batch TensorRT engine (no fallbacks)
+            require_tensorrt: If True, fail if TensorRT not available. If False, allow PyTorch fallback
         """
         try:
             print("Loading YOLOv8 watermark detection model...")
             from ultralytics import YOLO
 
-            # ALWAYS require batch TensorRT - no fallbacks!
-            self._require_tensorrt = True
+            # Determine if TensorRT is required or optional
+            self._require_tensorrt = require_tensorrt if require_tensorrt is not None else True
             self._using_tensorrt = False
 
             if model_path:
@@ -40,50 +40,74 @@ class YOLOWatermarkDetector:
                 self.model = YOLO(model_path)
                 print(f"[OK] Loaded custom model: {model_path}")
             else:
-                # [INIT] BATCH-ENABLED ENGINE ONLY - NO FALLBACKS!
+                # Try batch-enabled TensorRT engine first
                 batch_engine = 'runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx4090.engine'
+                pytorch_model = 'runs/detect/new_sora_watermark/weights/best.pt'
 
-                if not os.path.exists(batch_engine):
-                    raise RuntimeError(
-                        f"[ERROR] BATCH ENGINE NOT FOUND: {batch_engine}\n"
-                        f"   Run BUILD_FP16_BATCH.bat to create it!\n"
-                        f"   NO FALLBACKS ALLOWED - EXTREME SPEED MODE ONLY!"
-                    )
+                # Attempt to load TensorRT engine
+                tensorrt_loaded = False
+                if os.path.exists(batch_engine):
+                    print(f"[INIT] Loading BATCH-ENABLED TensorRT engine: {batch_engine}")
+                    try:
+                        self.model = YOLO(batch_engine, task='detect')
 
-                # Check CUDA available
-                if (torch is None) or (not torch.cuda.is_available()):
-                    raise RuntimeError(
-                        "[ERROR] CUDA GPU not available!\n"
-                        f"   Batch TensorRT requires GPU\n"
-                        f"   Check that PyTorch CUDA is installed and GPU is accessible"
-                    )
+                        # Test the engine with a dummy inference to catch platform mismatches
+                        # (TensorRT engines built on Windows may fail when loaded in WSL2)
+                        print(f"[INIT] Testing TensorRT engine compatibility...")
+                        import numpy as np
+                        test_img = np.zeros((640, 640, 3), dtype=np.uint8)
+                        _ = self.model.predict(test_img, verbose=False, device=0)
 
-                # Load batch-enabled TensorRT engine
-                print(f"[INIT] Loading BATCH-ENABLED TensorRT engine: {batch_engine}")
-                try:
-                    self.model = YOLO(batch_engine, task='detect')
-                    print(f"[OK] RTX 4090 Batch TensorRT engine loaded! (~11 MB, batch 1-256)")
-                    print(f"   Expected performance: 0.7-1.2ms per frame (800-1400 fps @ batch 128)")
-                    self._using_tensorrt = True
-                except Exception as e:
-                    raise RuntimeError(
-                        f"[ERROR] Failed to load batch TensorRT engine: {e}\n"
-                        f"   Engine: {batch_engine}\n"
-                        f"   NO FALLBACKS - Fix the engine or rebuild it!"
-                    ) from e
+                        print(f"[OK] RTX 4090 Batch TensorRT engine loaded! (~11 MB, batch 1-256)")
+                        print(f"   Expected performance: 0.7-1.2ms per frame (800-1400 fps @ batch 128)")
+                        self._using_tensorrt = True
+                        tensorrt_loaded = True
+                    except Exception as trt_error:
+                        print(f"[WARN] TensorRT engine load/test failed: {trt_error}")
+                        if self._require_tensorrt:
+                            raise RuntimeError(
+                                f"[ERROR] Failed to load batch TensorRT engine: {trt_error}\n"
+                                f"   Engine: {batch_engine}\n"
+                                f"   NO FALLBACKS - Fix the engine or rebuild it!"
+                            ) from trt_error
+                        else:
+                            print(f"[INFO] Falling back to PyTorch model...")
+                            # Clear failed model
+                            self.model = None
+
+                # Fall back to PyTorch model if TensorRT not loaded
+                if not tensorrt_loaded:
+                    if not os.path.exists(pytorch_model):
+                        raise RuntimeError(
+                            f"[ERROR] Neither TensorRT engine nor PyTorch model found!\n"
+                            f"   TensorRT: {batch_engine}\n"
+                            f"   PyTorch: {pytorch_model}\n"
+                            f"   Run BUILD_FP16_BATCH.bat to create them!"
+                        )
+
+                    print(f"[INIT] Loading PyTorch model: {pytorch_model}")
+                    self.model = YOLO(pytorch_model, task='detect')
+                    print(f"[OK] Using PyTorch YOLO model (batch processing enabled)")
+                    print(f"   Expected performance: 3-5ms per frame (200-300 fps @ batch 128)")
 
             self.use_yolo = True
             print("[OK] YOLOv8 ready for watermark detection!")
 
         except Exception as e:
-            print(f"[ERROR] Could not load YOLOv8 batch TensorRT engine: {e}")
-            # NO FALLBACKS - fail fast!
-            raise RuntimeError(
-                f"[ERROR] BATCH TENSORRT ENGINE REQUIRED!\n"
-                f"   Error: {e}\n"
-                f"   Run BUILD_FP16_BATCH.bat to create the engine\n"
-                f"   NO FALLBACKS ALLOWED - EXTREME SPEED MODE ONLY!"
-            ) from e
+            print(f"[ERROR] Could not load YOLOv8 model: {e}")
+            if self._require_tensorrt:
+                raise RuntimeError(
+                    f"[ERROR] BATCH TENSORRT ENGINE REQUIRED!\n"
+                    f"   Error: {e}\n"
+                    f"   Run BUILD_FP16_BATCH.bat to create the engine\n"
+                    f"   NO FALLBACKS ALLOWED - EXTREME SPEED MODE ONLY!"
+                ) from e
+            else:
+                raise RuntimeError(
+                    f"[ERROR] Failed to load YOLO model!\n"
+                    f"   Error: {e}\n"
+                    f"   Check that model files exist and ultralytics is installed"
+                ) from e
 
     def detect(self, image, confidence_threshold=0.25, padding=30):
         """

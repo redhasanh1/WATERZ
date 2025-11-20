@@ -231,7 +231,7 @@ FRAME_CACHE_LOCK = threading.Lock()
 # Note: These imports are moved to inside functions to avoid startup errors
 # sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
 # from watermark import pipeline as faster_propainter_pipeline
-# from mytimer import timer_decorator  
+# from mytimer import timer_decorator
 # from pre_post_process import crop_video_mask, merge_videos_with_mask
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web'))
@@ -2556,7 +2556,173 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # We got the lock! This worker will dispatch segments
         print(f"🔒 Lock acquired - this worker will dispatch segments")
 
-        # ⚡ OPTIMIZATION: Use Celery chord to dispatch segments in parallel
+        # ⚡ OPTIMIZATION: Choose processing strategy based on SEGMENT_WORKERS
+        # SEGMENT_WORKERS=1: Use CUDA streams (thread-based, one GPU context, 27-31ms/frame)
+        # SEGMENT_WORKERS>1: Use Celery chord (process-based, multiple GPU contexts, slower)
+        segment_workers = int(os.getenv('SEGMENT_WORKERS', '1'))
+
+        if segment_workers == 1:
+            # CUDA Streams approach: Process segments in parallel using threads + CUDA streams
+            print(f"[CUDA STREAMS] Processing {len(segments)} segments in parallel with CUDA streams (thread-based)")
+            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Processing {len(segments)} segments with CUDA streams'})
+
+            # Import threading utilities
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import torch
+
+            # Add total_segments to each segment data
+            for seg in segment_tasks_data:
+                seg['total_segments'] = len(segments)
+
+            # Process all segments in parallel using threads + CUDA streams
+            segment_results = []
+
+            # Create a mock self object for direct calls (no Celery context)
+            class MockSelf:
+                pass  # process_segment_task will detect missing request.id and skip state updates
+
+            mock_self = MockSelf()
+
+            def process_segment_with_stream(seg_data, stream_id):
+                """Process one segment on a dedicated CUDA stream"""
+                try:
+                    print(f"[STREAM {stream_id}] Starting segment {seg_data['seg_idx']+1}/{len(segments)}")
+
+                    # Create and set CUDA stream for this segment
+                    if torch.cuda.is_available():
+                        stream = torch.cuda.Stream()
+                        with torch.cuda.stream(stream):
+                            print(f"[STREAM {stream_id}] Using dedicated CUDA stream for segment {seg_data['seg_idx']+1}")
+
+                            # Call process_segment_task.run() to bypass Celery task machinery
+                            # This calls the underlying function directly
+                            result = process_segment_task.run(seg_data)
+
+                            # Synchronize this stream before returning
+                            torch.cuda.current_stream().synchronize()
+                    else:
+                        # No CUDA, run on CPU
+                        result = process_segment_task.run(seg_data)
+
+                    print(f"[STREAM {stream_id}] Completed segment {seg_data['seg_idx']+1}/{len(segments)}")
+                    return result
+                except Exception as e:
+                    print(f"[STREAM {stream_id}] ERROR in segment {seg_data['seg_idx']+1}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+
+            # Use ThreadPoolExecutor to run segments in parallel
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                # Submit all segments to thread pool
+                futures = {
+                    executor.submit(process_segment_with_stream, seg_data, i): i
+                    for i, seg_data in enumerate(segment_tasks_data)
+                }
+
+                # Collect results as they complete
+                for future in as_completed(futures):
+                    stream_id = futures[future]
+                    try:
+                        result = future.result()
+                        segment_results.append(result)
+                    except Exception as e:
+                        print(f"[ERROR] Segment {stream_id} failed: {e}")
+                        raise
+
+            print(f"[OK] All {len(segment_results)} segments processed with CUDA streams!")
+
+            # CUDA Streams mode: segments processed synchronously, now encode final video
+            print(f"[ENCODE] Encoding final video from {len(segment_results)} segments...")
+
+            # Import encoding utilities
+            import subprocess
+            shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned")
+
+            # Check if we have cleaned frames
+            if not os.path.exists(shared_cleaned_dir):
+                raise RuntimeError(f"Cleaned frames directory not found: {shared_cleaned_dir}")
+
+            # Count frames
+            cleaned_frames = sorted([f for f in os.listdir(shared_cleaned_dir) if f.endswith('.png')])
+            print(f"[ENCODE] Found {len(cleaned_frames)} cleaned frames in {shared_cleaned_dir}")
+
+            # Encode video with NVENC
+            output_video = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
+            ffmpeg_path, ffprobe_path = get_ffmpeg_executables()
+
+            encode_cmd = [
+                ffmpeg_path,
+                '-y',
+                '-framerate', str(fps),
+                '-i', os.path.join(shared_cleaned_dir, '%04d.png'),
+                '-c:v', 'h264_nvenc',
+                '-preset', 'p4',
+                '-tune', 'hq',
+                '-b:v', '5M',
+                '-maxrate', '8M',
+                '-pix_fmt', 'yuv420p',
+                output_video
+            ]
+
+            print(f"[ENCODE] Encoding cleaned frames to video...")
+            result_encode = subprocess.run(encode_cmd, capture_output=True, text=True)
+            if result_encode.returncode != 0:
+                raise RuntimeError(f"FFmpeg encoding failed: {result_encode.stderr}")
+
+            print(f"[ENCODE] Video encoded: {output_video}")
+
+            # Merge audio from original
+            if os.path.exists(video_path):
+                print(f"[AUDIO] Merging audio from original video...")
+                temp_video = output_video.replace('.mp4', '_temp.mp4')
+                os.rename(output_video, temp_video)
+
+                audio_cmd = [
+                    ffmpeg_path,
+                    '-y',
+                    '-i', temp_video,
+                    '-i', video_path,
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-map', '0:v:0',
+                    '-map', '1:a:0?',
+                    '-shortest',
+                    output_video
+                ]
+
+                result_audio = subprocess.run(audio_cmd, capture_output=True, text=True)
+                if result_audio.returncode == 0:
+                    os.remove(temp_video)
+                    print(f"[AUDIO] Audio merged successfully")
+                else:
+                    os.rename(temp_video, output_video)
+                    print(f"[AUDIO] No audio track or merge failed, using video-only")
+
+            # Cleanup
+            print(f"[CLEANUP] Removing temp frames...")
+            shutil.rmtree(shared_cleaned_dir, ignore_errors=True)
+
+            # Release processing lock
+            try:
+                redis_client = celery.backend.client
+                lock_key = f'prepare_lock:{base_name}'
+                redis_client.delete(lock_key)
+                print(f"🔓 Released processing lock for video '{base_name}'")
+            except Exception as e:
+                print(f"[WARNING]  Failed to release lock: {e}")
+
+            print(f"[OK] Video processing complete! Output: {output_video}")
+
+            return {
+                'video_id': video_id,
+                'status': 'complete',
+                'message': f'Processed {len(segments)} segments with CUDA streams',
+                'output_path': output_video,
+                'segments_processed': len(segment_results)
+            }
+
+        # ⚡ FALLBACK: Use Celery chord to dispatch segments in parallel (process-based)
         # Chord automatically waits for ALL segments to complete, then triggers finalize
         print(f"[INIT] Creating chord: {len(segments)} segment tasks → finalize callback")
         self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
@@ -2622,6 +2788,7 @@ def process_segment_task(self, segment_data):
     - Upload cleaned frames back
 
     This task can run on ANY available worker with a GPU
+    Can also be called directly from threads (for CUDA streams mode)
     """
     try:
         seg_idx = segment_data['seg_idx']
@@ -2637,7 +2804,16 @@ def process_segment_task(self, segment_data):
         video_path = segment_data['video_path']  # For background encoder audio merge
 
         print(f"\n[SEGMENT] Worker processing segment {seg_idx+1}/{total_segments}: frames {start_frame}-{end_frame}")
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
+
+        # Helper function to safely update state (works in both Celery and thread modes)
+        def safe_update_state(state=None, meta=None):
+            try:
+                if hasattr(self, 'request') and self.request.id:
+                    self.update_state(state=state, meta=meta)
+            except:
+                pass  # Called from thread, skip state updates
+
+        safe_update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
 
         # Import required modules
         import subprocess
@@ -2679,7 +2855,7 @@ def process_segment_task(self, segment_data):
         if is_multi_pc:
             # Multi-PC mode: Each worker downloads video directly (faster, no tunnel congestion)
             print(f"   📦 Multi-PC mode: downloading video directly for frames {start_frame}-{end_frame}...")
-            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading video'})
+            safe_update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading video'})
 
             api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
             upload_filename = segment_data.get('upload_filename')
@@ -2729,7 +2905,7 @@ def process_segment_task(self, segment_data):
         else:
             # Single-PC mode: Try frame sharing first
             print(f"   [DOWNLOAD]  Loading frames {start_frame}-{end_frame}...")
-            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Loading frames'})
+            safe_update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Loading frames'})
 
             # [INIT] EXTREME SPEED: Try FRAME_CACHE first (pure memory, INSTANT!)
             cache_key = f"video_data:{base_name}"
@@ -2841,7 +3017,7 @@ def process_segment_task(self, segment_data):
 
         # [INIT] EXTREME SPEED: Try FRAME_CACHE first (pure memory, INSTANT!)
         print(f"   [MASKS] Loading masks...")
-        self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Loading masks'})
+        safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Loading masks'})
 
         # 🔥 TEMPORAL CONTEXT FIX: Load masks WITH PADDING (same range as frames)
         masks_needed = list(range(padded_start, padded_end + 1))
@@ -2899,7 +3075,7 @@ def process_segment_task(self, segment_data):
         # Try local filesystem first (same PC - FAST, direct file copy)
         if not masks_downloaded and shared_mask_dir and os.path.exists(shared_mask_dir):
             print(f"   [MASKS] Fallback: Copying masks from local shared directory...")
-            self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Copying masks'})
+            safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Copying masks'})
 
             try:
                 masks_needed = list(range(start_frame, end_frame + 1))
@@ -2930,7 +3106,7 @@ def process_segment_task(self, segment_data):
         # Fallback: HTTP download (different PC - SLOW but necessary for distributed workers)
         elif not masks_downloaded and origin_base and shared_mask_dir:
             print(f"   📥 Downloading masks from remote location...")
-            self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
+            safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
 
             try:
                 import requests
@@ -2971,7 +3147,7 @@ def process_segment_task(self, segment_data):
         detector = None
         if not masks_downloaded:
             print(f"   [REGEN] Regenerating masks with YOLO BATCH detection on {frames_copied} frames...")
-            self.update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Detecting watermarks'})
+            safe_update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Detecting watermarks'})
 
             detector = get_detector()
             last_valid_bbox = None
@@ -3096,7 +3272,7 @@ def process_segment_task(self, segment_data):
         # CONDITIONAL: Only run ProPainter if watermark was detected
         if not last_valid_bbox or frames_with_watermark == 0:
             print(f"   [SKIP]  No watermark detected - skipping ProPainter, encoding original frames")
-            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
+            safe_update_state(state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
 
             # Copy original frames to cleaned dir (no processing needed)
             # 🔥 SHARED BUFFER: Use global frame indices
@@ -3131,7 +3307,7 @@ def process_segment_task(self, segment_data):
         else:
             # Run ProPainter on this segment - watermark detected!
             print(f"   [PAINT] Running ProPainter on {frames_with_watermark} watermarked frames...")
-            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
+            safe_update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
 
             try:
                 # Use cached ProPainter pipeline (pre-loaded at worker startup)
@@ -3198,7 +3374,7 @@ def process_segment_task(self, segment_data):
 
             # Merge cleaned region back to full frames
             print(f"   🔗 Merging cleaned region (in-memory)...")
-            self.update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
+            safe_update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
 
             seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
             if not os.path.exists(seg_propainter_frames):
@@ -3289,7 +3465,7 @@ def process_segment_task(self, segment_data):
         print(f"   [OK] Cleaned frames ready in: {seg_cleaned_dir}")
         # ⚡ BACKGROUND ENCODING OPTIMIZATION: Signal encoder thread instead of blocking!
         # Worker returns immediately and starts next segment while encoding happens in background
-        self.update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
+        safe_update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
 
         # Count cleaned frames
         cleaned_frame_count = len([f for f in os.listdir(seg_cleaned_dir) if f.endswith('.png')])
@@ -3338,7 +3514,7 @@ def process_segment_task(self, segment_data):
 
         print(f"[OK] Segment {seg_idx+1}/{total_segments} complete - worker free to process next segment!")
 
-        # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
+        # Note: Don't call safe_update_state(state='SUCCESS') - it overrides the return value!
         # Celery automatically sets state to SUCCESS when the task returns normally
         # Chord will automatically trigger finalize when all segments complete
 

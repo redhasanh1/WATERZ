@@ -920,7 +920,13 @@ def pipeline(
                 fix_raft.fix_raft.forward = compiled_forward
                 print("[OK] RAFT torch.compile enabled (1.5-2x speedup)")
             except Exception as e:
-                print(f"[WARNING] RAFT torch.compile failed: {e}, using PyTorch")
+                error_type = type(e).__name__
+                if 'Triton' in str(e) or 'triton' in str(e):
+                    print(f"[WARNING] RAFT torch.compile failed (Triton error on WSL2): {error_type}")
+                    print(f"[HINT] Try setting TORCHINDUCTOR_COMPILE_THREADS=1 or disable Triton")
+                else:
+                    print(f"[WARNING] RAFT torch.compile failed ({error_type}): {e}")
+                print("[FALLBACK] Using PyTorch eager mode (slower but stable)")
 
     ##############################################
     # set up RFCNet with TensorRT acceleration
@@ -1065,7 +1071,13 @@ def pipeline(
                         self._model.forward = compiled_forward
                         print("[OK] RFCNet torch.compile enabled (1.5-2x speedup)")
                     except Exception as e:
-                        print(f"[WARNING] RFCNet torch.compile failed: {e}, using PyTorch")
+                        error_type = type(e).__name__
+                        if 'Triton' in str(e) or 'triton' in str(e):
+                            print(f"[WARNING] RFCNet torch.compile failed (Triton error on WSL2): {error_type}")
+                            print(f"[HINT] Try setting TORCHINDUCTOR_COMPILE_THREADS=1 or disable Triton")
+                        else:
+                            print(f"[WARNING] RFCNet torch.compile failed ({error_type}): {e}")
+                        print("[FALLBACK] Using PyTorch eager mode (slower but stable)")
 
         def forward(self, masked_flows: torch.Tensor, masks: torch.Tensor):
             """
