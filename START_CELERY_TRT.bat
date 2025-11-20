@@ -132,11 +132,12 @@ REM    GPU decode is fast, but PCIe copy to CPU numpy arrays kills all gains
 REM    Only beneficial if entire pipeline stays on GPU (not this use case)
 set ENABLE_NVDEC=0
 
-REM ⚡ TORCH COMPILE: DISABLED for transformer (Windows FileExistsError issue)
-REM    Keep RAFT compilation enabled (specific flag, no FileExistsError)
-REM    Disabling transformer compilation prevents random pixel artifacts
+REM ⚡ TORCH COMPILE: Match RUN_SAM2_LOCAL.BAT exactly (proven fast + stable!)
+REM    Compile RAFT + YOLO (specific flags work without FileExistsError)
+REM    NO transformer compilation (USE_TORCH_COMPILE=0 prevents random pixels)
 set USE_TORCH_COMPILE=0
 set USE_TORCH_COMPILE_RAFT=1
+set USE_TORCH_COMPILE_YOLO=1
 set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
