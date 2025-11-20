@@ -3438,8 +3438,15 @@ def process_segment_task(self, segment_data):
                 # 🔥 MASK COMPOSITING: Use mask to blend only the inpainted region
                 # This preserves other segments' work in non-masked areas
                 if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
-                    # Crop mask to ROI
-                    cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    # Check if mask needs cropping (handles both memory and disk pipelines)
+                    # Memory pipeline: segment_mask is full-size, needs cropping
+                    # Disk pipeline: segment_mask already cropped, use as-is
+                    if segment_mask.shape[:2] != cleaned_crop.shape[:2]:
+                        # Mask is full-size, crop to match cleaned_crop
+                        cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    else:
+                        # Mask already cropped
+                        cropped_mask = segment_mask
 
                     # Convert mask to 3-channel float [0, 1] for alpha blending
                     if len(cropped_mask.shape) == 2:
