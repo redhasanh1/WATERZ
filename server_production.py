@@ -259,7 +259,8 @@ if AUTH_ENABLED:
             db_pool = SimpleConnectionPool(
                 minconn=1,
                 maxconn=10,
-                dsn=DATABASE_URL
+                dsn=DATABASE_URL,
+                connect_timeout=5  # 5 second timeout to prevent hanging
             )
             print("[OK] Database connection pool initialized")
         else:
