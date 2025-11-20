@@ -723,6 +723,328 @@ def auth_logout():
     session.clear()
     return jsonify({'status': 'success'})
 
+
+# ----------------------------------------------------------------------------
+# User Profile Routes
+# ----------------------------------------------------------------------------
+
+@app.route('/api/user/profile', methods=['GET', 'OPTIONS'])
+def get_user_profile():
+    """Get user profile information."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication disabled'}), 500
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'signin_required'}), 401
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT id, email, name, credits, created_at, google_id
+            FROM users
+            WHERE id = %s
+        ''', (user_id,))
+
+        user = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        return jsonify({
+            'id': user[0],
+            'email': user[1],
+            'name': user[2],
+            'credits': user[3],
+            'created_at': user[4].isoformat() if user[4] else None,
+            'has_google_account': user[5] is not None
+        })
+
+    except Exception as e:
+        print(f"Error getting profile: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to get profile'}), 500
+
+
+@app.route('/api/user/profile', methods=['PUT', 'OPTIONS'])
+def update_user_profile():
+    """Update user profile (name, email)."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication disabled'}), 500
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'signin_required'}), 401
+
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+
+        if not name:
+            return jsonify({'error': 'Name is required'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            UPDATE users
+            SET name = %s
+            WHERE id = %s
+            RETURNING id, email, name, credits
+        ''', (name, user_id))
+
+        user = cursor.fetchone()
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        return jsonify({
+            'id': user[0],
+            'email': user[1],
+            'name': user[2],
+            'credits': user[3]
+        })
+
+    except Exception as e:
+        print(f"Error updating profile: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to update profile'}), 500
+
+
+@app.route('/api/user/change-password', methods=['POST', 'OPTIONS'])
+def change_password():
+    """Change user password."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication disabled'}), 500
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'signin_required'}), 401
+
+    try:
+        data = request.get_json()
+        current_password = data.get('currentPassword', '')
+        new_password = data.get('newPassword', '')
+
+        if not current_password or not new_password:
+            return jsonify({'error': 'Current and new passwords are required'}), 400
+
+        if len(new_password) < 8:
+            return jsonify({'error': 'New password must be at least 8 characters'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get current password hash
+        cursor.execute('''
+            SELECT password_hash, google_id
+            FROM users
+            WHERE id = %s
+        ''', (user_id,))
+
+        user = cursor.fetchone()
+
+        if not user:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'User not found'}), 404
+
+        # Check if user has Google account (no password)
+        if user[1] is not None and user[0] is None:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Google accounts cannot set passwords. Please use Google login.'}), 400
+
+        # Verify current password
+        if not user[0] or not bcrypt.checkpw(current_password.encode('utf-8'), user[0].encode('utf-8')):
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Current password is incorrect'}), 401
+
+        # Hash new password
+        new_password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+        # Update password
+        cursor.execute('''
+            UPDATE users
+            SET password_hash = %s
+            WHERE id = %s
+        ''', (new_password_hash, user_id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({'status': 'success', 'message': 'Password changed successfully'})
+
+    except Exception as e:
+        print(f"Error changing password: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to change password'}), 500
+
+
+# ----------------------------------------------------------------------------
+# Password Reset Routes
+# ----------------------------------------------------------------------------
+
+@app.route('/api/auth/forgot-password', methods=['POST', 'OPTIONS'])
+def forgot_password():
+    """Request password reset email."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication disabled'}), 500
+
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if user exists
+        cursor.execute('SELECT id, name FROM users WHERE email = %s', (email,))
+        user = cursor.fetchone()
+
+        # Always return success to prevent email enumeration
+        # But only send email if user exists
+        if user:
+            import secrets
+            import datetime
+
+            # Generate reset token
+            token = secrets.token_urlsafe(32)
+            expires_at = datetime.datetime.now() + datetime.timedelta(hours=1)
+
+            # Store token in database
+            cursor.execute('''
+                INSERT INTO password_reset_tokens (user_id, token, expires_at)
+                VALUES (%s, %s, %s)
+            ''', (user[0], token, expires_at))
+
+            conn.commit()
+
+            # TODO: Send email with reset link
+            # For now, just log the token (you need to implement email sending)
+            reset_url = f"{request.host_url}reset-password.html?token={token}"
+            print(f"Password reset link for {email}: {reset_url}")
+            print(f"Token expires at: {expires_at}")
+
+            # In production, send email here:
+            # send_password_reset_email(email, user[1], reset_url)
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'If an account exists with that email, a password reset link has been sent.'
+        })
+
+    except Exception as e:
+        print(f"Error in forgot password: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to process request'}), 500
+
+
+@app.route('/api/auth/reset-password', methods=['POST', 'OPTIONS'])
+def reset_password():
+    """Reset password using token."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication disabled'}), 500
+
+    try:
+        data = request.get_json()
+        token = data.get('token', '')
+        new_password = data.get('newPassword', '')
+
+        if not token or not new_password:
+            return jsonify({'error': 'Token and new password are required'}), 400
+
+        if len(new_password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Find valid token
+        cursor.execute('''
+            SELECT user_id, expires_at
+            FROM password_reset_tokens
+            WHERE token = %s AND used = FALSE
+        ''', (token,))
+
+        reset_token = cursor.fetchone()
+
+        if not reset_token:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Invalid or expired reset token'}), 400
+
+        # Check if token expired
+        import datetime
+        if reset_token[1] < datetime.datetime.now():
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Reset token has expired'}), 400
+
+        # Hash new password
+        password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+        # Update password
+        cursor.execute('''
+            UPDATE users
+            SET password_hash = %s
+            WHERE id = %s
+        ''', (password_hash, reset_token[0]))
+
+        # Mark token as used
+        cursor.execute('''
+            UPDATE password_reset_tokens
+            SET used = TRUE
+            WHERE token = %s
+        ''', (token,))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({'status': 'success', 'message': 'Password reset successfully'})
+
+    except Exception as e:
+        print(f"Error resetting password: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to reset password'}), 500
+
+
 # ----------------------------------------------------------------------------
 # End Authentication Routes
 # ----------------------------------------------------------------------------
@@ -1510,7 +1832,18 @@ def encode_segment_background(redis_client, data):
 
         # Cleanup file list and frames after successful encoding
         if os.path.exists(file_list_path):
-            os.remove(file_list_path)
+            try:
+                os.remove(file_list_path)
+            except PermissionError:
+                # Windows file locking - FFmpeg may still have handle open
+                # Try after small delay
+                import time
+                time.sleep(0.1)
+                try:
+                    os.remove(file_list_path)
+                except (PermissionError, OSError):
+                    # Still locked - skip cleanup (temp file, not critical)
+                    pass
 
         # Note: Don't cleanup shared_cleaned_dir yet - other segments may need it!
         # Final cleanup happens after all segments are encoded
@@ -2464,9 +2797,9 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             min_segments = 0
             min_chunk_frames = 60
 
-        # Force-split ONLY when YOLO fails (0-1 segments detected)
-        # If YOLO found multiple segments, preserve them - they represent distinct watermark regions
-        if min_segments and len(segments) <= 1 and frames_processed >= min_chunk_frames:
+        # Force-split ONLY when YOLO fails (0 segments detected)
+        # If YOLO found 1+ segments, preserve them - they represent valid watermark regions
+        if min_segments and len(segments) == 0 and frames_processed >= min_chunk_frames:
             # YOLO failed - split video into time-based chunks for parallel processing
             base_seg = segments[0] if segments else (0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])
             s0, e0, bb = base_seg
@@ -3408,16 +3741,30 @@ def process_segment_task(self, segment_data):
                     mask = cv2.imread(os.path.join(seg_mask_dir, frame_file), cv2.IMREAD_GRAYSCALE)
                     original_masks.append(mask)
 
-            # Load cleaned frames from ProPainter output (skip padding frames)
+            # Load cleaned frames from ProPainter output
+            # ProPainter outputs frames sequentially starting from 0000 (regardless of padding)
+            # So for a segment with 70 total frames (5 padding + 60 core + 5 padding),
+            # the core segment is at indices [padding_offset : padding_offset+seg_duration] = [5:65]
             print(f"   [OUTPUT] Extracting core segment from ProPainter output (frames {padding_offset} to {padding_offset + seg_duration})...")
-            for frame_idx in range(padding_offset, padding_offset + seg_duration):
+
+            # Count available frames in ProPainter output for debugging
+            import glob
+            available_frames = sorted(glob.glob(os.path.join(seg_propainter_frames, "*.png")))
+            print(f"   [DEBUG] ProPainter output has {len(available_frames)} frames total")
+
+            for local_idx in range(seg_duration):
+                # Load frame at index from ProPainter output (skip padding frames)
+                frame_idx = padding_offset + local_idx
                 frame_file = f"{frame_idx:04d}.png"
                 clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+                if clean is None:
+                    print(f"   [ERROR] Failed to load cleaned frame {frame_file}!")
+                    print(f"   [DEBUG] Available frames: {available_frames[:5]}... (showing first 5)")
                 cleaned_frames.append(clean)
 
             # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
             # This allows multiple segments to cooperatively edit the same frames
-            print(f"   🔗 Merging to shared frame buffer with mask-based alpha compositing...")
+            print(f"   🔗 Merging to shared frame buffer with direct paste...")
             for local_idx, (original, cleaned_crop, segment_mask) in enumerate(zip(original_frames, cleaned_frames, original_masks)):
                 # Use GLOBAL frame index for shared buffer
                 global_frame_idx = start_frame + local_idx
@@ -3435,33 +3782,10 @@ def process_segment_task(self, segment_data):
                 else:
                     continue
 
-                # 🔥 MASK COMPOSITING: Use mask to blend only the inpainted region
-                # This preserves other segments' work in non-masked areas
-                if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
-                    # Check if mask needs cropping (handles both memory and disk pipelines)
-                    # Memory pipeline: segment_mask is full-size, needs cropping
-                    # Disk pipeline: segment_mask already cropped, use as-is
-                    if segment_mask.shape[:2] != cleaned_crop.shape[:2]:
-                        # Mask is full-size, crop to match cleaned_crop
-                        cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                    else:
-                        # Mask already cropped
-                        cropped_mask = segment_mask
-
-                    # Convert mask to 3-channel float [0, 1] for alpha blending
-                    if len(cropped_mask.shape) == 2:
-                        # Grayscale mask - convert to 3 channels
-                        mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
-                    else:
-                        mask_3ch = cropped_mask.astype(float) / 255.0
-
-                    # Alpha composite: blend cleaned region using mask as alpha
-                    roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
-                    cleaned_crop_float = cleaned_crop.astype(float)
-                    blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
-
-                    # Paste blended result back
-                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
+                # 🔥 DIRECT PASTE: Trust ProPainter's per-frame output
+                if cleaned_crop is not None and result_frame is not None:
+                    # Directly paste ProPainter's cleaned crop - it already processed each frame uniquely
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
 
                 # Save back to shared buffer
                 cv2.imwrite(shared_frame_path, result_frame)
@@ -4552,6 +4876,18 @@ def index_html():
 def login_page():
     """Serve login page"""
     return send_file('web/login.html')
+
+
+@app.route('/profile.html')
+def profile_page():
+    """Serve profile page"""
+    return send_file('web/profile.html')
+
+
+@app.route('/reset-password.html')
+def reset_password_page():
+    """Serve password reset page"""
+    return send_file('web/reset-password.html')
 
 
 @app.route('/web/<path:path>')

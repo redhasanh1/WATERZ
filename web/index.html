@@ -572,17 +572,17 @@
         .nav-container {
             max-width: 1600px;
             margin: 0 auto;
-            padding: 0 4rem;
+            padding: 0 2rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 4rem;
+            gap: 2rem;
         }
 
         .nav-left {
             display: flex;
             align-items: center;
-            gap: 6rem;
+            gap: 2.5rem;
             flex: 1;
             min-width: 0;
         }
@@ -590,20 +590,20 @@
         .nav-right {
             display: flex;
             align-items: center;
-            gap: 3rem;
+            gap: 1.5rem;
             flex-shrink: 0;
         }
 
         .nav-auth {
             display: flex;
             align-items: center;
-            gap: 2.5rem;
+            gap: 1.25rem;
         }
 
         .nav-controls {
             display: flex;
             align-items: center;
-            gap: 1.5rem;
+            gap: 1rem;
         }
 
         .mobile-auth-controls {
@@ -642,14 +642,102 @@
             padding: 0;
         }
 
-        /* Navigation links - wide spacing */
+        /* Navigation links - comfortable spacing */
         .nav-left .nav-menu {
-            gap: 3.5rem;
+            gap: 2rem;
         }
 
-        /* User menu - comfortable spacing */
+        /* User menu - compact spacing */
         #userNav {
-            gap: 1.5rem !important;
+            gap: 1rem !important;
+        }
+
+        /* User dropdown menu */
+        .user-dropdown {
+            position: relative;
+        }
+
+        .user-dropdown-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: rgba(102, 126, 234, 0.08);
+            border: 1px solid rgba(102, 126, 234, 0.15);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: var(--text-primary);
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .user-dropdown-btn:hover {
+            background: rgba(102, 126, 234, 0.15);
+            border-color: rgba(102, 126, 234, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .user-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 0.5rem);
+            right: 0;
+            min-width: 220px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 0.5rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1000;
+        }
+
+        html[data-theme="dark"] .user-dropdown-menu {
+            box-shadow: 0 10px 40px rgba(15, 15, 30, 0.5);
+        }
+
+        .user-dropdown.active .user-dropdown-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .user-dropdown-menu-item {
+            display: flex;
+            align-items: center;
+            padding: 0.7rem 1rem;
+            color: var(--text-primary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .user-dropdown-menu-item:hover {
+            background: rgba(102, 126, 234, 0.1);
+            color: var(--primary);
+        }
+
+        .user-dropdown-menu-item.user-email {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            cursor: default;
+            padding: 0.6rem 1rem;
+            margin-bottom: 0.25rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .user-dropdown-menu-item.user-email:hover {
+            background: transparent;
+            color: var(--text-secondary);
         }
 
         .nav-menu a {
@@ -1092,6 +1180,9 @@
                     <li class="mobile-only mobile-user-section" id="mobileUserSection" style="display: none;">
                         <span id="mobileUserEmail" style="color: var(--primary); font-weight: 600;"></span>
                     </li>
+                    <li class="mobile-only mobile-user-section" id="mobileProfileSection" style="display: none;">
+                        <a href="profile.html" style="color: var(--text-secondary); text-decoration: none; font-weight: 600;">Profile</a>
+                    </li>
                     <li class="mobile-only mobile-user-section" id="mobileCreditsSection" style="display: none;">
                         <span id="mobileUserCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.5rem 1rem; border-radius: 20px; font-weight: 600;">0 credits</span>
                     </li>
@@ -1116,10 +1207,16 @@
                 <div class="nav-auth desktop-only">
                     <a href="login.html" class="nav-cta" id="signInLink">Sign In</a>
                     <ul class="nav-menu" id="userNav" style="display: none;">
-                        <li><span id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem;"></span></li>
                         <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
-                        <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta-small" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">Buy Credits</a></li>
-                        <li><a href="#" id="signOutBtn" class="nav-cta-small" style="background: rgba(239, 68, 68, 0.9);">Sign Out</a></li>
+                        <li class="user-dropdown">
+                            <button class="user-dropdown-btn" id="userDropdownBtn" aria-label="User menu">⋮</button>
+                            <div class="user-dropdown-menu">
+                                <div class="user-dropdown-menu-item user-email" id="userEmailDropdown"></div>
+                                <a href="profile.html" class="user-dropdown-menu-item">Profile</a>
+                                <a href="premium.html#pricing" class="user-dropdown-menu-item" id="buyCreditsDropdownBtn">Buy Credits</a>
+                                <a href="#" class="user-dropdown-menu-item" id="signOutDropdownBtn">Sign Out</a>
+                            </div>
+                        </li>
                     </ul>
                 </div>
 
@@ -2875,10 +2972,10 @@
       if (signInLink) signInLink.style.display = 'none';
       if (userNav) userNav.style.display = 'flex';
 
-      // Desktop: Show user email/name
-      const userEmailEl = document.getElementById('userEmail');
-      if (userEmailEl) {
-        userEmailEl.textContent = userData.name || userData.email;
+      // Desktop: Show user email/name in dropdown
+      const userEmailDropdownEl = document.getElementById('userEmailDropdown');
+      if (userEmailDropdownEl) {
+        userEmailDropdownEl.textContent = userData.email;
       }
 
       // Desktop: Show credits
@@ -2893,10 +2990,36 @@
         }
       }
 
-      // Desktop: Sign out button
-      const signOutBtn = document.getElementById('signOutBtn');
-      if (signOutBtn) {
-        signOutBtn.addEventListener('click', function(e) {
+      // Desktop: User dropdown toggle
+      const userDropdownBtn = document.getElementById('userDropdownBtn');
+      const userDropdown = userDropdownBtn?.closest('.user-dropdown');
+
+      if (userDropdownBtn && userDropdown) {
+        // Toggle dropdown on button click
+        userDropdownBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          userDropdown.classList.toggle('active');
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+          if (!userDropdown.contains(e.target)) {
+            userDropdown.classList.remove('active');
+          }
+        });
+
+        // Close dropdown on Esc key
+        document.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') {
+            userDropdown.classList.remove('active');
+          }
+        });
+      }
+
+      // Desktop: Sign out button (in dropdown)
+      const signOutDropdownBtn = document.getElementById('signOutDropdownBtn');
+      if (signOutDropdownBtn) {
+        signOutDropdownBtn.addEventListener('click', function(e) {
           e.preventDefault();
           localStorage.removeItem('user');
           window.location.href = 'login.html';
@@ -2906,12 +3029,14 @@
       // Mobile: Hide sign in link, show user sections
       const mobileSignInLink = document.getElementById('mobileSignInLink');
       const mobileUserSection = document.getElementById('mobileUserSection');
+      const mobileProfileSection = document.getElementById('mobileProfileSection');
       const mobileCreditsSection = document.getElementById('mobileCreditsSection');
       const mobileBuySection = document.getElementById('mobileBuySection');
       const mobileSignOutSection = document.getElementById('mobileSignOutSection');
 
       if (mobileSignInLink) mobileSignInLink.style.display = 'none';
       if (mobileUserSection) mobileUserSection.style.display = 'block';
+      if (mobileProfileSection) mobileProfileSection.style.display = 'block';
       if (mobileCreditsSection) mobileCreditsSection.style.display = 'block';
       if (mobileBuySection) mobileBuySection.style.display = 'block';
       if (mobileSignOutSection) mobileSignOutSection.style.display = 'block';
