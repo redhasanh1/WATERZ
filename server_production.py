@@ -223,66 +223,18 @@ except Exception as e:
     if not GPU_AVAILABLE:
         print(f"[INFO] FFmpeg not available (API-only mode): {e}")
 
-def detect_nvenc_capability():
-    """
-    Detect if NVENC (GPU encoding) is available in FFmpeg.
-
-    Returns:
-        bool: True if h264_nvenc encoder is available, False otherwise
-    """
-    if not FFMPEG_EXE:
-        return False
-
-    try:
-        result = subprocess.run(
-            [FFMPEG_EXE, '-encoders'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        # Check if h264_nvenc appears in the encoder list
-        has_nvenc = 'h264_nvenc' in result.stdout
-        return has_nvenc
-    except Exception as e:
-        print(f"[WARNING] Failed to detect NVENC capability: {e}")
-        return False
-
-def get_encoder_config():
-    """
-    Get the appropriate encoder configuration based on available hardware.
-
-    Returns:
-        dict: Encoder configuration with 'codec', 'preset', 'fallback_preset', and 'name'
-    """
-    has_nvenc = detect_nvenc_capability()
-
-    if has_nvenc and not IS_RAILWAY:
-        # GPU encoding with NVENC (local environment with GPU)
-        return {
-            'codec': 'h264_nvenc',
-            'preset': 'p1',  # Fastest NVENC preset
-            'fallback_preset': 'p4',  # Balanced fallback
-            'name': 'NVENC (GPU)'
-        }
-    else:
-        # CPU encoding with libx264 (Railway or no GPU)
-        return {
-            'codec': 'libx264',
-            'preset': 'ultrafast',  # Fastest CPU preset
-            'fallback_preset': 'veryfast',  # Slightly slower fallback
-            'name': 'libx264 (CPU)'
-        }
-
-# Detect encoder capability at startup
-HAS_NVENC = detect_nvenc_capability() if FFMPEG_EXE else False
-ENCODER_CONFIG = get_encoder_config() if FFMPEG_EXE else None
+# GPU-ONLY ENCODER CONFIG: Maximum speed with NVENC
+# NO CPU FALLBACK - full GPU extreme speed, no overhead
+ENCODER_CONFIG = {
+    'codec': 'h264_nvenc',
+    'preset': 'p1',  # Fastest NVENC preset
+    'fallback_preset': 'p4',  # Balanced fallback if p1 fails
+    'name': 'NVENC (GPU)'
+}
 
 if FFMPEG_EXE:
-    print(f"[OK] Video encoder: {ENCODER_CONFIG['name']}")
-    if IS_RAILWAY and HAS_NVENC:
-        print(f"[WARNING] NVENC detected but running on Railway - using CPU encoding instead")
-    elif not HAS_NVENC and not IS_RAILWAY:
-        print(f"[INFO] NVENC not available - using CPU encoding (slower but compatible)")
+    print(f"[OK] Video encoder: {ENCODER_CONFIG['name']} - EXTREME SPEED MODE")
+    print(f"[OK] No CPU fallback - pure GPU pipeline for maximum performance")
 
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
@@ -1813,12 +1765,34 @@ def background_encoder_worker():
             pubsub.subscribe('segment_ready')
 
             print("[BACKGROUND ENCODER] Listening for segment completion signals...")
-            print("[BACKGROUND ENCODER] Socket keepalive enabled - NO timeout!")
+            print("[BACKGROUND ENCODER] Socket keepalive enabled with 30s timeout!")
             print("[BACKGROUND ENCODER] PARALLEL MODE: Up to 4 concurrent NVENC streams!")
 
             # Create thread pool for parallel encoding (4 matches SEGMENT_WORKERS)
             with ThreadPoolExecutor(max_workers=4, thread_name_prefix="EncoderThread") as executor:
-                for message in pubsub.listen():
+                # Use get_message with timeout instead of blocking listen()
+                # This prevents indefinite blocking and allows graceful shutdown
+                last_heartbeat = time.time()
+                heartbeat_interval = 30  # 30 second heartbeat
+
+                while True:
+                    # Get message with timeout (non-blocking with periodic wakeup)
+                    message = pubsub.get_message(timeout=5.0)
+
+                    # Heartbeat check - ensure connection is alive
+                    if time.time() - last_heartbeat > heartbeat_interval:
+                        try:
+                            # Ping Redis to verify connection
+                            redis_client.ping()
+                            last_heartbeat = time.time()
+                        except Exception as e:
+                            print(f"[BACKGROUND ENCODER] Heartbeat failed: {e}")
+                            raise  # Trigger reconnection
+
+                    if message is None:
+                        # No message - continue waiting
+                        continue
+
                     if message['type'] == 'message':
                         try:
                             data = json.loads(message['data'])
@@ -1877,9 +1851,19 @@ def background_encoder_worker():
         except Exception as e:
             print(f"[BACKGROUND ENCODER] Connection lost: {e}")
             traceback.print_exc()
+
+            # Cleanup pubsub connection before reconnecting
+            try:
+                if 'pubsub' in locals():
+                    print("[BACKGROUND ENCODER] Closing old pubsub connection...")
+                    pubsub.unsubscribe()
+                    pubsub.close()
+            except Exception as cleanup_error:
+                print(f"[BACKGROUND ENCODER] Cleanup error (ignoring): {cleanup_error}")
+
             print("[BACKGROUND ENCODER] Reconnecting in 2 seconds...")
             time.sleep(2)
-            # Loop continues - auto-reconnect!
+            # Loop continues - auto-reconnect with fresh connection!
 
 
 def encode_segment_background(redis_client, data):
@@ -3949,59 +3933,62 @@ def process_segment_task(self, segment_data):
 
             # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
             # This allows multiple segments to cooperatively edit the same frames
-            print(f"   🔗 Merging to shared frame buffer with direct paste...")
+            print(f"   🔗 Merging to shared frame buffer with mask compositing + file locking...")
             for local_idx, (original, cleaned_crop, segment_mask) in enumerate(zip(original_frames, cleaned_frames, original_masks)):
                 # Use GLOBAL frame index for shared buffer
                 global_frame_idx = start_frame + local_idx
                 frame_file = f"{global_frame_idx:04d}.png"
                 shared_frame_path = os.path.join(shared_cleaned_dir, frame_file)
 
-                # Load existing state (may have edits from other segments) or original
-                if os.path.exists(shared_frame_path):
-                    # Another segment already edited this frame - load current state
-                    result_frame = cv2.imread(shared_frame_path)
-                    if result_frame is None:
-                        result_frame = original.copy() if original is not None else np.zeros((height, width, 3), dtype=np.uint8)
-                elif original is not None:
-                    result_frame = original.copy()
-                else:
-                    continue
-
-                # 🔥 MASK COMPOSITING: Alpha blend cleaned region with mask for smooth edges
-                if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
-                    # ProPainter output is already cropped to watermark region
-                    # Segment mask is also already cropped (from cropping step earlier)
-                    # So we DON'T double-crop the mask here!
-
-                    # Crop the mask to match the watermark region IF it's full-size
-                    # (Check dimensions to determine if already cropped)
-                    if segment_mask.shape[:2] == (height, width):
-                        # Mask is full-frame, crop it to watermark region
-                        cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                # 🔒 FILE LOCK: Prevent race conditions when multiple segments edit same frame
+                # This ensures atomic read-modify-write operations
+                with file_lock(shared_frame_path, timeout=5):
+                    # Load existing state (may have edits from other segments) or original
+                    if os.path.exists(shared_frame_path):
+                        # Another segment already edited this frame - load current state
+                        result_frame = cv2.imread(shared_frame_path)
+                        if result_frame is None:
+                            result_frame = original.copy() if original is not None else np.zeros((height, width, 3), dtype=np.uint8)
+                    elif original is not None:
+                        result_frame = original.copy()
                     else:
-                        # Mask is already cropped, use as-is
-                        cropped_mask = segment_mask
+                        continue
 
-                    # Alpha blending for smooth compositing
-                    # Convert mask to 3-channel float [0, 1]
-                    mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
+                    # 🔥 MASK COMPOSITING: Alpha blend cleaned region with mask for smooth edges
+                    if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
+                        # ProPainter output is already cropped to watermark region
+                        # Segment mask is also already cropped (from cropping step earlier)
+                        # So we DON'T double-crop the mask here!
 
-                    # Get the region of interest (ROI) from result frame
-                    roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
+                        # Crop the mask to match the watermark region IF it's full-size
+                        # (Check dimensions to determine if already cropped)
+                        if segment_mask.shape[:2] == (height, width):
+                            # Mask is full-frame, crop it to watermark region
+                            cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                        else:
+                            # Mask is already cropped, use as-is
+                            cropped_mask = segment_mask
 
-                    # Blend: where mask=1 (watermark), use cleaned; where mask=0, use original
-                    cleaned_crop_float = cleaned_crop.astype(float)
-                    blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+                        # Alpha blending for smooth compositing
+                        # Convert mask to 3-channel float [0, 1]
+                        mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
 
-                    # Paste blended result back
-                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
-                elif cleaned_crop is not None and result_frame is not None:
-                    # No mask available - fall back to direct paste
-                    print(f"   [WARNING] No mask for frame {global_frame_idx} - using direct paste")
-                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                        # Get the region of interest (ROI) from result frame
+                        roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
 
-                # Save back to shared buffer
-                cv2.imwrite(shared_frame_path, result_frame)
+                        # Blend: where mask=1 (watermark), use cleaned; where mask=0, use original
+                        cleaned_crop_float = cleaned_crop.astype(float)
+                        blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+
+                        # Paste blended result back
+                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
+                    elif cleaned_crop is not None and result_frame is not None:
+                        # No mask available - fall back to direct paste
+                        print(f"   [WARNING] No mask for frame {global_frame_idx} - using direct paste")
+                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+
+                    # Save back to shared buffer (within lock - atomic operation)
+                    cv2.imwrite(shared_frame_path, result_frame)
 
             print(f"   [OK] Merged {len(cleaned_frames)} frames to shared buffer: {shared_cleaned_dir}")
 
