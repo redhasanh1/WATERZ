@@ -56,7 +56,7 @@ except ValueError:
 SEGMENT_WORKERS = max(1, _segment_workers_env)
 
 # Force parallel segmentation for multi-GPU/multi-worker distribution (only if YOLO fails)
-os.environ.setdefault('MIN_SEGMENTS', '5')  # Fallback split if YOLO finds 0-1 segments
+os.environ.setdefault('MIN_SEGMENTS', '4')  # Force-split for parallel GPU processing
 os.environ.setdefault('MIN_CHUNK_FRAMES', '60')  # Minimum frames per chunk (fallback when YOLO fails)
 
 # Create directories
@@ -2940,16 +2940,16 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # Optional: force time-based splitting to ensure multi-GPU distribution
         try:
             import math
-            min_segments = int(os.getenv('MIN_SEGMENTS', '0'))
+            min_segments = int(os.getenv('MIN_SEGMENTS', '4'))  # Default 4 for parallel GPU processing
             min_chunk_frames = int(os.getenv('MIN_CHUNK_FRAMES', '60'))
         except Exception:
-            min_segments = 0
+            min_segments = 4
             min_chunk_frames = 60
 
-        # Force-split ONLY when YOLO fails (0 segments detected)
-        # If YOLO found 1+ segments, preserve them - they represent valid watermark regions
-        if min_segments and len(segments) == 0 and frames_processed >= min_chunk_frames:
-            # YOLO failed - split video into time-based chunks for parallel processing
+        # Force-split for parallel GPU processing when not enough segments detected
+        # Even if YOLO found 1 segment (stationary watermark), split for multi-GPU speed
+        if min_segments and len(segments) < min_segments and frames_processed >= min_chunk_frames:
+            # Split video into time-based chunks for parallel processing
             base_seg = segments[0] if segments else (0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])
             s0, e0, bb = base_seg
             duration = e0 - s0 + 1
@@ -2966,7 +2966,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     new_segments[-1] = (new_segments[-1][0], e0, new_segments[-1][2])
                     break
             segments = new_segments
-            print(f"🪓 Force-split enabled (YOLO fallback): created {len(segments)} time chunks (chunk≈{chunk} frames)")
+            print(f"🪓 Force-split for parallel GPU: {len(segments)} segments (≈{chunk} frames each) - EXTREME SPEED MODE!")
 
         # Provide a base URL so OTHER workers can fetch frames/masks from this host
         temp_base_url = temp_base or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
