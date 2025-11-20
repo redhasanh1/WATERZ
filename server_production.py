@@ -1594,6 +1594,7 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
         encode_cmd = [
             FFMPEG_EXE, '-y',
             '-framerate', str(fps),
+            '-start_number', '0',  # Start from 0000.png
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
             '-c:v', ENCODER_CONFIG['codec'],
             '-preset', ENCODER_CONFIG['preset'],
@@ -1909,9 +1910,41 @@ def encode_segment_background(redis_client, data):
     print(f"[ENCODER] Encoding segment {seg_idx}: frames {start_frame}-{end_frame} ({frame_count} frames) @ {fps} fps...")
     encode_start = time.time()
 
+    # 🔒 WAIT FOR FRAMES: Ensure all segment frames are available before encoding
+    # This prevents race condition where encoder starts before frames are written
+    expected_frames = end_frame - start_frame + 1
+    max_wait = 30  # seconds
+    wait_start = time.time()
+
+    while True:
+        missing_frames = []
+        for global_idx in range(start_frame, end_frame + 1):
+            frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
+            if not os.path.exists(frame_path):
+                missing_frames.append(global_idx)
+
+        if not missing_frames:
+            break  # All frames available
+
+        if time.time() - wait_start > max_wait:
+            print(f"[ENCODER ERROR] Timeout waiting for frames after {max_wait}s!")
+            print(f"[ENCODER ERROR] Missing {len(missing_frames)}/{expected_frames} frames: {missing_frames[:20]}...")
+            raise RuntimeError(f"Timeout: {len(missing_frames)} frames missing for segment {seg_idx}")
+
+        # Wait and retry
+        time.sleep(0.1)
+
+    print(f"[ENCODER] All {expected_frames} frames available for segment {seg_idx}")
+
     # 🔥 SHARED BUFFER: Create file list for this segment's frames only
     # (frames are named by global index in shared buffer)
     file_list_path = os.path.join(TEMP_DIR, f"encode_seg{seg_idx}_{video_id}.txt")
+    frames_added = 0
+
+    print(f"[ENCODER DEBUG] Creating file list for segment {seg_idx}")
+    print(f"[ENCODER DEBUG] Frame range: {start_frame}-{end_frame} ({expected_frames} frames expected)")
+    print(f"[ENCODER DEBUG] Source dir: {cleaned_dir}")
+
     with open(file_list_path, 'w') as f:
         for global_idx in range(start_frame, end_frame + 1):
             frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
@@ -1921,11 +1954,22 @@ def encode_segment_background(redis_client, data):
                 # Use duration 1/fps for each frame
                 f.write(f"file '{abs_path}'\n")
                 f.write(f"duration {1/fps}\n")
+                frames_added += 1
+            else:
+                print(f"[ENCODER WARNING] Frame {global_idx:04d}.png missing after wait!")
+
+    print(f"[ENCODER DEBUG] File list created: {frames_added}/{expected_frames} frames added")
+
+    if frames_added != expected_frames:
+        print(f"[ENCODER WARNING] ⚠️ MISSING FRAMES: Only {frames_added}/{expected_frames} frames in file list!")
         # Last frame needs to be repeated for proper duration
         last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
         if os.path.exists(last_frame_path):
             abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
+            print(f"[ENCODER WARNING] Adding fallback frame: {last_frame_path}")
             f.write(f"file '{abs_path}'\n")
+            f.write(f"duration {1/fps}\n")  # 🔥 FIX: Must include duration for concat demuxer!
+            print(f"[ENCODER WARNING] Fallback frame added with duration {1/fps:.6f}s")
 
     # Encode using detected encoder (NVENC or CPU fallback)
     encode_cmd = [
@@ -1949,6 +1993,20 @@ def encode_segment_background(redis_client, data):
             print(f"[ENCODER ERROR] FFmpeg failed with return code {result.returncode}")
             print(f"   Command: {' '.join(encode_cmd)}")
             print(f"   stderr: {result.stderr}")
+            # Debug: Show file list contents on failure
+            print(f"[ENCODER ERROR] File list contents ({file_list_path}):")
+            try:
+                with open(file_list_path, 'r') as debug_f:
+                    file_list_contents = debug_f.read()
+                    # Show first 50 lines or 2000 chars
+                    lines = file_list_contents.split('\n')
+                    if len(lines) > 50:
+                        print(f"   (showing first 50 of {len(lines)} lines)")
+                        print('\n'.join(lines[:50]))
+                    else:
+                        print(file_list_contents)
+            except Exception as read_err:
+                print(f"   Could not read file list: {read_err}")
             raise subprocess.CalledProcessError(result.returncode, encode_cmd, result.stdout, result.stderr)
         encode_duration = time.time() - encode_start
 
@@ -3137,6 +3195,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 ffmpeg_path,
                 '-y',
                 '-framerate', str(fps),
+                '-start_number', '0',  # Start from 0000.png
                 '-i', os.path.join(shared_cleaned_dir, '%04d.png'),
                 '-c:v', 'h264_nvenc',
                 '-preset', 'p4',
@@ -3931,6 +3990,27 @@ def process_segment_task(self, segment_data):
                     )
                 cleaned_frames.append(clean)
 
+            # 🔍 DEBUG: Verify frames are unique (not all the same)
+            import hashlib
+            if len(cleaned_frames) > 0:
+                frame_hashes = []
+                frame_sizes = []
+                for i, frame in enumerate(cleaned_frames[:5]):  # Check first 5 frames
+                    h = hashlib.md5(frame.tobytes()).hexdigest()[:8]
+                    frame_hashes.append(h)
+                    frame_sizes.append(frame.shape)
+                print(f"   [DEBUG] First 5 cleaned frame hashes: {frame_hashes}")
+                print(f"   [DEBUG] Frame shapes: {frame_sizes}")
+                if len(set(frame_hashes)) == 1:
+                    print(f"   [WARNING] ⚠️ ALL FRAMES HAVE SAME HASH - THEY ARE IDENTICAL!")
+                else:
+                    print(f"   [OK] Frames are unique ({len(set(frame_hashes))} different hashes)")
+
+                # Also check last few frames
+                if len(cleaned_frames) > 5:
+                    last_hashes = [hashlib.md5(f.tobytes()).hexdigest()[:8] for f in cleaned_frames[-3:]]
+                    print(f"   [DEBUG] Last 3 cleaned frame hashes: {last_hashes}")
+
             # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
             # This allows multiple segments to cooperatively edit the same frames
             print(f"   🔗 Merging to shared frame buffer with mask compositing + file locking...")
@@ -3992,25 +4072,71 @@ def process_segment_task(self, segment_data):
 
             print(f"   [OK] Merged {len(cleaned_frames)} frames to shared buffer: {shared_cleaned_dir}")
 
+            # 🔍 DEBUG: Verify written files are unique
+            written_files = sorted([f for f in os.listdir(shared_cleaned_dir) if f.endswith('.png')])
+            print(f"   [DEBUG] Written {len(written_files)} files to shared buffer")
+            if len(written_files) > 0:
+                # Check file sizes of first and last few files
+                first_files = written_files[:3]
+                last_files = written_files[-3:] if len(written_files) > 3 else []
+
+                print(f"   [DEBUG] First 3 files: {first_files}")
+                first_sizes = [os.path.getsize(os.path.join(shared_cleaned_dir, f)) for f in first_files]
+                print(f"   [DEBUG] First 3 file sizes: {first_sizes} bytes")
+
+                if last_files:
+                    print(f"   [DEBUG] Last 3 files: {last_files}")
+                    last_sizes = [os.path.getsize(os.path.join(shared_cleaned_dir, f)) for f in last_files]
+                    print(f"   [DEBUG] Last 3 file sizes: {last_sizes} bytes")
+
+                # Hash check on disk files
+                import hashlib
+                disk_hashes = []
+                for f in first_files:
+                    with open(os.path.join(shared_cleaned_dir, f), 'rb') as fh:
+                        disk_hashes.append(hashlib.md5(fh.read()).hexdigest()[:8])
+                print(f"   [DEBUG] First 3 disk file hashes: {disk_hashes}")
+                if len(set(disk_hashes)) == 1:
+                    print(f"   [WARNING] ⚠️ DISK FILES HAVE SAME HASH - POSSIBLE WRITE ISSUE!")
+                else:
+                    print(f"   [OK] Disk files are unique")
+
         # ⚡ PARALLEL ENCODING: Encode segment MP4 immediately (Blackwell NVENC!)
         print(f"   [OK] Cleaned frames ready in: {seg_cleaned_dir}")
         # ⚡ BACKGROUND ENCODING OPTIMIZATION: Signal encoder thread instead of blocking!
         # Worker returns immediately and starts next segment while encoding happens in background
         safe_update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
 
-        # Count cleaned frames
-        cleaned_frame_count = len([f for f in os.listdir(seg_cleaned_dir) if f.endswith('.png')])
-        if cleaned_frame_count == 0:
+        # Count segment's frames (not total in shared buffer)
+        segment_frame_count = end_frame - start_frame + 1
+        total_buffer_frames = len([f for f in os.listdir(seg_cleaned_dir) if f.endswith('.png')])
+        if total_buffer_frames == 0:
             raise RuntimeError(f"No cleaned frames found in {seg_cleaned_dir}")
 
-        print(f"   [OK] {cleaned_frame_count} cleaned frames ready - signaling background encoder!")
+        # 🔍 DEBUG: Verify segment frame range exists in buffer
+        print(f"   [DEBUG] Segment range: frames {start_frame}-{end_frame} ({segment_frame_count} frames)")
+        print(f"   [DEBUG] Total frames in shared buffer: {total_buffer_frames}")
+
+        # Check if this segment's frames actually exist
+        segment_frames_exist = 0
+        for frame_idx in range(start_frame, end_frame + 1):
+            frame_path = os.path.join(seg_cleaned_dir, f"{frame_idx:04d}.png")
+            if os.path.exists(frame_path):
+                segment_frames_exist += 1
+
+        if segment_frames_exist != segment_frame_count:
+            print(f"   [WARNING] ⚠️ Only {segment_frames_exist}/{segment_frame_count} segment frames exist in buffer!")
+        else:
+            print(f"   [OK] All {segment_frame_count} segment frames verified in buffer")
+
+        print(f"   [OK] {total_buffer_frames} cleaned frames ready - signaling background encoder!")
 
         # Store segment metadata in Redis for background encoder
         redis_client = celery.backend.client
         segment_key = f"video:{video_id}:segment:{seg_idx}"
         redis_client.hset(segment_key, 'cleaned_dir', seg_cleaned_dir)
         redis_client.hset(segment_key, 'fps', str(fps))
-        redis_client.hset(segment_key, 'frame_count', str(cleaned_frame_count))
+        redis_client.hset(segment_key, 'frame_count', str(segment_frame_count))
         redis_client.hset(segment_key, 'base_name', base_name)
         redis_client.hset(segment_key, 'status', 'ready_for_encoding')
         # 🔥 SHARED BUFFER: Store frame range for encoder
