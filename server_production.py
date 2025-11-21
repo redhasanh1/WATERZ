@@ -289,7 +289,10 @@ class FramePipeEncoder:
 
         missing = self.get_missing_frames()
         if missing:
-            print(f"[PIPE ENCODER WARNING] Missing {len(missing)} frames: {missing[:10]}...")
+            print(f"[PIPE ENCODER WARNING] Missing {len(missing)} frames!")
+            print(f"[PIPE ENCODER WARNING] Missing indices: {missing[:20]}{'...' if len(missing) > 20 else ''}")
+            if missing:
+                print(f"[PIPE ENCODER WARNING] First missing: {missing[0]}, Last missing: {missing[-1]}")
             # Fill missing frames with black or previous frame
             for i in missing:
                 if i > 0 and self.frames[i-1] is not None:
@@ -297,7 +300,9 @@ class FramePipeEncoder:
                 else:
                     self.frames[i] = np.zeros((self.height, self.width, 3), dtype=np.uint8)
 
+        expected_duration = self.total_frames / self.fps if self.fps > 0 else 0
         print(f"[PIPE ENCODER] Encoding {self.total_frames} frames ({self.width}x{self.height} @ {self.fps} fps)")
+        print(f"[PIPE ENCODER] Expected duration: {expected_duration:.2f}s")
 
         # FFmpeg command for rawvideo pipe input
         encode_cmd = [
