@@ -334,8 +334,14 @@ class SAM2Selector {
     drawAllMasks() {
         if (this.selections.length === 0) return;
 
-        // Create overlay for all masks
-        const overlay = this.ctx.createImageData(this.canvas.width, this.canvas.height);
+        // Create temporary canvas for the mask overlay
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.canvas.width;
+        tempCanvas.height = this.canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // Create ImageData to build mask
+        const maskData = tempCtx.createImageData(this.canvas.width, this.canvas.height);
 
         // Loop through all selections and composite their masks
         this.selections.forEach(selection => {
@@ -353,17 +359,23 @@ class SAM2Selector {
                     // If mask pixel is white (255), apply green overlay
                     if (mask.data[maskIdx] > 127) {
                         const idx = (y * this.canvas.width + x) * 4;
-                        overlay.data[idx] = this.maskColor[0];     // R (Green)
-                        overlay.data[idx + 1] = this.maskColor[1]; // G (Green)
-                        overlay.data[idx + 2] = this.maskColor[2]; // B (Green)
-                        overlay.data[idx + 3] = 255 * this.options.maskAlpha; // A
+                        maskData.data[idx] = this.maskColor[0];     // R (Green)
+                        maskData.data[idx + 1] = this.maskColor[1]; // G (Green)
+                        maskData.data[idx + 2] = this.maskColor[2]; // B (Green)
+                        maskData.data[idx + 3] = 255; // Full alpha on temp canvas
                     }
                 }
             }
         });
 
-        // Draw composite overlay
-        this.ctx.putImageData(overlay, 0, 0);
+        // Put mask data on temp canvas
+        tempCtx.putImageData(maskData, 0, 0);
+
+        // Draw overlay with transparency using globalAlpha (proper compositing)
+        this.ctx.save();
+        this.ctx.globalAlpha = this.options.maskAlpha;
+        this.ctx.drawImage(tempCanvas, 0, 0);
+        this.ctx.restore();
     }
 
     /**

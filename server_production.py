@@ -2020,7 +2020,7 @@ def encode_segment_background(redis_client, data):
     fps = float(segment_info.get('fps', 30))
     frame_count = int(segment_info.get('frame_count', 0))
     base_name = segment_info.get('base_name', 'video')
-    # 🔥 SHARED BUFFER: Get frame range for this segment
+    # [FIX] SHARED BUFFER: Get frame range for this segment
     start_frame = int(segment_info.get('start_frame', 0))
     end_frame = int(segment_info.get('end_frame', frame_count - 1))
 
@@ -2059,7 +2059,7 @@ def encode_segment_background(redis_client, data):
 
     print(f"[ENCODER] All {expected_frames} frames available for segment {seg_idx}")
 
-    # 🔥 SHARED BUFFER: Create file list for this segment's frames only
+    # [FIX] SHARED BUFFER: Create file list for this segment's frames only
     # (frames are named by global index in shared buffer)
     file_list_path = os.path.join(TEMP_DIR, f"encode_seg{seg_idx}_{video_id}.txt")
     frames_added = 0
@@ -2081,9 +2081,9 @@ def encode_segment_background(redis_client, data):
             else:
                 print(f"[ENCODER WARNING] Frame {global_idx:04d}.png missing after wait!")
 
-        # 🔥 FIX: Must be INSIDE 'with' block so file handle 'f' is still open!
+        # [FIX] FIX: Must be INSIDE 'with' block so file handle 'f' is still open!
         if frames_added != expected_frames:
-            print(f"[ENCODER WARNING] ⚠️ MISSING FRAMES: Only {frames_added}/{expected_frames} frames in file list!")
+            print(f"[ENCODER WARNING] [!] MISSING FRAMES: Only {frames_added}/{expected_frames} frames in file list!")
             # Last frame needs to be repeated for proper duration
             last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
             if os.path.exists(last_frame_path):
@@ -2103,7 +2103,7 @@ def encode_segment_background(redis_client, data):
             duration_entries = [l.strip() for l in lines if l.startswith('duration ')]
             print(f"[ENCODER DEBUG] File list verification: {len(file_entries)} files, {len(duration_entries)} durations")
             if len(file_entries) != len(duration_entries):
-                print(f"[ENCODER WARNING] ⚠️ MISMATCH: {len(file_entries)} files but {len(duration_entries)} durations!")
+                print(f"[ENCODER WARNING] [!] MISMATCH: {len(file_entries)} files but {len(duration_entries)} durations!")
             if len(file_entries) > 0:
                 print(f"[ENCODER DEBUG] First file: {file_entries[0]}")
                 print(f"[ENCODER DEBUG] Last file: {file_entries[-1]}")
@@ -2124,14 +2124,14 @@ def encode_segment_background(redis_client, data):
 
     if len(frame_hashes) > 1:
         if len(set(frame_hashes)) == 1:
-            print(f"[ENCODER ERROR] ⚠️ First {len(frame_hashes)} frames have IDENTICAL hashes: {frame_hashes}")
+            print(f"[ENCODER ERROR] [!] First {len(frame_hashes)} frames have IDENTICAL hashes: {frame_hashes}")
             print(f"[ENCODER ERROR] This indicates all frames are the same - STUCK FRAME DETECTED!")
         else:
             print(f"[ENCODER DEBUG] Frame uniqueness OK: {frame_hashes}")
 
     # Encode using detected encoder (NVENC or CPU fallback)
-    # 🔥 FIX: Use pattern input instead of concat demuxer (more reliable for sequential PNGs)
-    # 🔥 FIX: Force forward slashes for Windows (FFmpeg pattern parser is POSIX-based)
+    # [FIX] FIX: Use pattern input instead of concat demuxer (more reliable for sequential PNGs)
+    # [FIX] FIX: Force forward slashes for Windows (FFmpeg pattern parser is POSIX-based)
     pattern_path = os.path.join(cleaned_dir, '%04d.png').replace('\\', '/')
     encode_cmd = [
         FFMPEG_EXE, '-y',
@@ -2259,7 +2259,7 @@ def trigger_finalization(redis_client, video_id, total_segments):
                 use_zero_copy = True
                 print(f"[FINALIZE] ✓ Using zero-copy encoding from memory buffer")
             else:
-                print(f"[FINALIZE] ⚠️ Buffer incomplete - falling back to segment concatenation")
+                print(f"[FINALIZE] [!] Buffer incomplete - falling back to segment concatenation")
 
     if use_zero_copy:
         # Encode entire video directly from memory buffer
@@ -2371,7 +2371,7 @@ def trigger_finalization(redis_client, video_id, total_segments):
         if os.path.exists(seg_path):
             os.remove(seg_path)
 
-    # 🔥 SHARED BUFFER: Cleanup shared frame directory after finalization
+    # [FIX] SHARED BUFFER: Cleanup shared frame directory after finalization
     # Get shared_cleaned_dir from first segment's metadata
     segment_key = f"video:{video_id}:segment:0"
     shared_cleaned_dir_raw = redis_client.hget(segment_key, 'cleaned_dir')
@@ -2384,7 +2384,7 @@ def trigger_finalization(redis_client, video_id, total_segments):
     final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
     print(f"[FINALIZE] ✓ Final video ready: {final_output} ({final_size_mb:.2f} MB)")
 
-    # 🔥 UPLOAD TO RAILWAY: If running on local worker, upload result to API server
+    # [FIX] UPLOAD TO RAILWAY: If running on local worker, upload result to API server
     uploaded_path = None
     tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
     upload_enabled = os.getenv('UPLOAD_RESULT_BACK', '1')
@@ -2392,16 +2392,16 @@ def trigger_finalization(redis_client, video_id, total_segments):
     print(f"[FINALIZE] Upload config - TUNNEL_URL: {'SET' if os.getenv('TUNNEL_URL') else 'NOT SET'}, API_BASE_URL: {'SET' if os.getenv('API_BASE_URL') else 'NOT SET'}, UPLOAD_RESULT_BACK: {upload_enabled}")
 
     if not tunnel:
-        print(f"[FINALIZE] ⚠️  Skipping Railway upload - TUNNEL_URL/API_BASE_URL not set")
+        print(f"[FINALIZE] [!]  Skipping Railway upload - TUNNEL_URL/API_BASE_URL not set")
         print(f"[FINALIZE] 💡 Set TUNNEL_URL=https://your-railway-app.railway.app to enable auto-upload")
     elif upload_enabled != '1':
-        print(f"[FINALIZE] ⚠️  Skipping Railway upload - UPLOAD_RESULT_BACK={upload_enabled} (set to '1' to enable)")
+        print(f"[FINALIZE] [!]  Skipping Railway upload - UPLOAD_RESULT_BACK={upload_enabled} (set to '1' to enable)")
 
     if tunnel and upload_enabled == '1':
         try:
             import requests
             upload_url = tunnel.rstrip('/') + '/api/upload-result'
-            print(f"[FINALIZE] 📤 Uploading result to Railway: {upload_url}")
+            print(f"[FINALIZE] [UPLOAD] Uploading result to Railway: {upload_url}")
 
             # Quick connectivity test (15 second timeout) - fail fast if server down
             requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
@@ -2417,7 +2417,7 @@ def trigger_finalization(redis_client, video_id, total_segments):
                 j = resp.json()
                 if j.get('status') == 'success' and j.get('result_url'):
                     uploaded_path = j['result_url']
-                    print(f"[FINALIZE] ✅ Result uploaded to Railway: {uploaded_path}")
+                    print(f"[FINALIZE] [OK] Result uploaded to Railway: {uploaded_path}")
                     # Update Redis with Railway path instead of local path
                     redis_client.set(f"video:{video_id}:final_path", uploaded_path)
                     redis_client.set(f"video:{video_id}:uploaded", "true")
@@ -2433,14 +2433,14 @@ def trigger_finalization(redis_client, video_id, total_segments):
         redis_client.set(f"video:{video_id}:final_path", final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
 
-    # 🔥 FIX: Update distributed tracking to mark all segments complete
+    # [FIX] FIX: Update distributed tracking to mark all segments complete
     # Status endpoint checks segments:{video_id} to see progress
     # Without this, frontend shows "Segment 0/X complete" forever
     tracking_key = f"segments:{video_id}"
     total_segments_bytes = redis_client.get(f"{tracking_key}:total")
     if total_segments_bytes:
         redis_client.set(tracking_key, int(total_segments_bytes))  # Mark all segments complete
-        print(f"[FINALIZE] ✅ Marked all {int(total_segments_bytes)} segments complete in Redis tracking")
+        print(f"[FINALIZE] [OK] Marked all {int(total_segments_bytes)} segments complete in Redis tracking")
 
 # ============================================================================
 # REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
@@ -2494,7 +2494,7 @@ def start_redis_download_poller():
                         continue
 
                     # Download video to cache
-                    print(f"📥 Worker {os.getpid()}: Detected download signal for {video_id}")
+                    print(f"[DOWNLOAD] Worker {os.getpid()}: Detected download signal for {video_id}")
                     print(f"   [DOWNLOAD]  Downloading: {download_url}")
 
                     try:
@@ -2863,7 +2863,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     from urllib.parse import urljoin
                     import requests
                     download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
-                    print(f"🌐 Downloading video: {download_url}")
+                    print(f"[WEB] Downloading video: {download_url}")
                     r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
                     r.raise_for_status()
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -2997,7 +2997,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
 
             # [INIT] EXTREME SPEED: Load all frames to memory for batch processing
-            print(f"📥 Loading {total_frames} frames to memory (batch processing)...")
+            print(f"[DOWNLOAD] Loading {total_frames} frames to memory (batch processing)...")
 
             import time
             decode_start = time.time()
@@ -3051,7 +3051,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             print(f"[OK] Batch detection complete: {batch_duration:.3f}s ({ms_per_frame:.2f}ms per frame)")
 
             # [INIT] EXTREME SPEED: Process detections and store in Redis (in-memory!)
-            print(f"⚡ Creating masks and storing in Redis (in-memory)...")
+            print(f"[FAST] Creating masks and storing in Redis (in-memory)...")
             zero_mask = np.zeros((height, width), dtype=np.uint8)
             bboxes_per_frame = []
             frames_with_watermark = 0
@@ -3074,7 +3074,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             use_sam2 = os.getenv('USE_SAM2_TRACKING', '0') == '1'
 
             if use_sam2 and frames_with_watermark > 0:
-                print(f"⚡ Using SAM2-Tiny for temporal mask tracking (44ms/frame)...")
+                print(f"[FAST] Using SAM2-Tiny for temporal mask tracking (44ms/frame)...")
                 mask_start = time.time()
 
                 # Import SAM2 tracker
@@ -3122,7 +3122,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 mask_duration = time.time() - mask_start
                 print(f"   SAM2 tracking: {mask_duration:.3f}s ({mask_duration/frames_processed*1000:.2f}ms/frame)")
             else:
-                print(f"⚡ Creating {frames_processed} masks (GPU batch)...")
+                print(f"[FAST] Creating {frames_processed} masks (GPU batch)...")
                 mask_start = time.time()
 
                 # Compatibility: Check if GPU masks are available (older commits may not have this)
@@ -3140,7 +3140,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 print(f"   Mask creation: {mask_duration:.3f}s ({frames_processed/mask_duration:.1f} masks/sec)")
 
             # [INIT] EXTREME SPEED: Store in global memory (INSTANT!)
-            print(f"⚡ Storing {frames_processed} frames/masks in memory (INSTANT!)...")
+            print(f"[FAST] Storing {frames_processed} frames/masks in memory (INSTANT!)...")
             mem_start = time.time()
 
             # Validate tensor shapes before caching (defensive check)
@@ -3178,14 +3178,14 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             # OPTIONAL: Also write to disk for backup/remote workers
             # Disabled by default for EXTREME SPEED (memory-only)
             if os.getenv('WRITE_FRAMES_TO_DISK', '0') == '1':
-                print(f"💾 Also writing to disk (backup for remote workers)...")
+                print(f"[CACHE] Also writing to disk (backup for remote workers)...")
                 for i in range(frames_processed):
                     mask_path = os.path.join(shared_mask_dir, f"{i:04d}.png")
                     cv2.imwrite(mask_path, all_masks[i])
                     frame_path = os.path.join(shared_frames_dir, f"{i:04d}.png")
                     cv2.imwrite(frame_path, all_frames[i])
             else:
-                print(f"⚡ Skipping disk writes (pure memory for EXTREME SPEED!)")
+                print(f"[FAST] Skipping disk writes (pure memory for EXTREME SPEED!)")
 
             if frames_processed == 0:
                 raise RuntimeError("No frames processed - video may be corrupted")
@@ -3206,7 +3206,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
                 print("[INFO] No segments detected - processing entire video as one segment")
 
-            # 💾 Cache segment results for future duplicate requests (1 hour TTL)
+            # [CACHE] Cache segment results for future duplicate requests (1 hour TTL)
             try:
                 import json
                 import time
@@ -3217,7 +3217,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     'cached_at': time.time()
                 }
                 redis_client.setex(cache_key, 3600, json.dumps(cache_data))
-                print(f"💾 Cached YOLO results for '{base_name}' (1 hour TTL)")
+                print(f"[CACHE] Cached YOLO results for '{base_name}' (1 hour TTL)")
             except Exception as e:
                 print(f"[WARNING]  Failed to cache results: {e}")
         else:
@@ -3272,7 +3272,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # Provide a base URL so OTHER workers can fetch frames/masks from this host
         temp_base_url = temp_base or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
         if temp_base_url:
-            print(f"🌐 Shared temp base set for workers: {temp_base_url.rstrip('/')}/temp/")
+            print(f"[WEB] Shared temp base set for workers: {temp_base_url.rstrip('/')}/temp/")
         else:
             print("[WARNING]  No TEMP_BASE_URL/TUNNEL_URL set; only preparing worker can read local frames.")
 
@@ -3339,7 +3339,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # We got the lock! This worker will dispatch segments
         print(f"🔒 Lock acquired - this worker will dispatch segments")
 
-        # ⚡ OPTIMIZATION: Choose processing strategy based on SEGMENT_WORKERS
+        # [FAST] OPTIMIZATION: Choose processing strategy based on SEGMENT_WORKERS
         # SEGMENT_WORKERS=1: Use CUDA streams (thread-based, one GPU context, 27-31ms/frame)
         # SEGMENT_WORKERS>1: Use Celery chord (process-based, multiple GPU contexts, slower)
         segment_workers = int(os.getenv('SEGMENT_WORKERS', '1'))
@@ -3506,7 +3506,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 'segments_processed': len(segment_results)
             }
 
-        # ⚡ FALLBACK: Use Celery chord to dispatch segments in parallel (process-based)
+        # [FAST] FALLBACK: Use Celery chord to dispatch segments in parallel (process-based)
         # Chord automatically waits for ALL segments to complete, then triggers finalize
         print(f"[INIT] Creating chord: {len(segments)} segment tasks → finalize callback")
         self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
@@ -3615,7 +3615,7 @@ def process_segment_task(self, segment_data):
         seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
         seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
 
-        # 🔥 SHARED FRAME BUFFER FIX: All segments merge onto same directory
+        # [FIX] SHARED FRAME BUFFER FIX: All segments merge onto same directory
         # This allows multiple segments to cooperatively edit the same frames
         shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned")
         seg_cleaned_dir = shared_cleaned_dir  # Backwards compatibility alias
@@ -3662,7 +3662,7 @@ def process_segment_task(self, segment_data):
                         # Save to cache for future segments
                         with open(cached_video, 'wb') as f:
                             f.write(r.content)
-                        print(f"   💾 Video cached for future segments")
+                        print(f"   [CACHE] Video cached for future segments")
                         local_video = cached_video
 
                     cap2 = cv2.VideoCapture(local_video)
@@ -3696,7 +3696,7 @@ def process_segment_task(self, segment_data):
             memory_hits = 0
             segment_frames_memory = []  # Store frames in memory (skip disk!)
 
-            # 🔥 TEMPORAL CONTEXT FIX: Extract with neighbor padding for ProPainter
+            # [FIX] TEMPORAL CONTEXT FIX: Extract with neighbor padding for ProPainter
             # neighbor_length=10 means ±5 frames needed for temporal context
             neighbor_padding = 5
             padded_start = max(0, start_frame - neighbor_padding)
@@ -3704,7 +3704,7 @@ def process_segment_task(self, segment_data):
 
             if cache_key in FRAME_CACHE:
                 # INSTANT access to frames in memory!
-                print(f"   ⚡ Loading from memory cache WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
+                print(f"   [FAST] Loading from memory cache WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
                 with FRAME_CACHE_LOCK:
                     cached = FRAME_CACHE[cache_key]
                     cached_frames = cached['frames']
@@ -3815,7 +3815,7 @@ def process_segment_task(self, segment_data):
         print(f"   [MASKS] Loading masks...")
         safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Loading masks'})
 
-        # 🔥 TEMPORAL CONTEXT FIX: Load masks WITH PADDING (same range as frames)
+        # [FIX] TEMPORAL CONTEXT FIX: Load masks WITH PADDING (same range as frames)
         masks_needed = list(range(padded_start, padded_end + 1))
         masks_succeeded = 0
         memory_mask_hits = 0
@@ -3823,7 +3823,7 @@ def process_segment_task(self, segment_data):
 
         # Priority 1: Memory cache (INSTANT!)
         if cache_key in FRAME_CACHE:
-            print(f"   ⚡ Loading masks from memory WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
+            print(f"   [FAST] Loading masks from memory WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
             with FRAME_CACHE_LOCK:
                 cached = FRAME_CACHE[cache_key]
                 cached_masks = cached['masks']
@@ -3901,7 +3901,7 @@ def process_segment_task(self, segment_data):
 
         # Fallback: HTTP download (different PC - SLOW but necessary for distributed workers)
         elif not masks_downloaded and origin_base and shared_mask_dir:
-            print(f"   📥 Downloading masks from remote location...")
+            print(f"   [DOWNLOAD] Downloading masks from remote location...")
             safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
 
             try:
@@ -4036,7 +4036,7 @@ def process_segment_task(self, segment_data):
                         cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                         cv2.imwrite(mask_path, cropped_mask)
         elif using_memory_pipeline:
-            print(f"   ⚡ Skipping disk-based cropping - using in-memory pipeline (saves ~600ms!)")
+            print(f"   [FAST] Skipping disk-based cropping - using in-memory pipeline (saves ~600ms!)")
 
         print(f"   [OK] Prepared {frames_copied} frames and masks (including ±{neighbor_padding} neighbor padding)")
 
@@ -4071,13 +4071,13 @@ def process_segment_task(self, segment_data):
             safe_update_state(state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
 
             # Copy original frames to cleaned dir (no processing needed)
-            # 🔥 SHARED BUFFER: Use global frame indices
+            # [FIX] SHARED BUFFER: Use global frame indices
             if using_memory_pipeline:
                 # Write from memory (only core segment, skip padding)
-                # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
+                # [FIX] TEMPORAL CONTEXT FIX: Calculate padding offset
                 padding_offset = start_frame - padded_start
                 core_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
-                print(f"   💾 Writing {len(core_frames)} core segment frames from memory to shared buffer (skipping {padding_offset} padding frames)...")
+                print(f"   [CACHE] Writing {len(core_frames)} core segment frames from memory to shared buffer (skipping {padding_offset} padding frames)...")
                 for local_idx, frame in enumerate(core_frames):
                     # Use GLOBAL frame index for shared buffer
                     global_frame_idx = start_frame + local_idx
@@ -4129,7 +4129,7 @@ def process_segment_task(self, segment_data):
                 masks_array = None
 
                 if using_memory_pipeline:
-                    print(f"   ⚡ Cropping {len(segment_frames_memory)} frames/masks in memory (ZERO disk I/O!)")
+                    print(f"   [FAST] Cropping {len(segment_frames_memory)} frames/masks in memory (ZERO disk I/O!)")
                     import time
                     crop_start = time.time()
 
@@ -4191,10 +4191,10 @@ def process_segment_task(self, segment_data):
             # Load all frames into memory first (faster than disk I/O in loop)
             # [INIT] EXTREME SPEED: Use in-memory frames if available (no disk reads!)
             original_frames = []
-            original_masks = []  # 🔥 MASK COMPOSITING: Need masks for alpha blending
+            original_masks = []  # [FIX] MASK COMPOSITING: Need masks for alpha blending
             cleaned_frames = []
 
-            # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
+            # [FIX] TEMPORAL CONTEXT FIX: Calculate padding offset
             # ProPainter processed frames WITH padding, we only need core segment frames
             padding_offset = start_frame - padded_start  # How many padding frames before core segment
             print(f"   [CONTEXT] ProPainter processed {len(segment_frames_memory)} frames (padding offset: {padding_offset})")
@@ -4202,7 +4202,7 @@ def process_segment_task(self, segment_data):
             if using_memory_pipeline:
                 # Use already-loaded memory frames (ZERO disk I/O!)
                 # Extract ONLY core segment frames (skip padding)
-                print(f"   ⚡ Extracting core segment frames + masks from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
+                print(f"   [FAST] Extracting core segment frames + masks from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
                 original_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
                 original_masks = segment_masks_memory[padding_offset:padding_offset + seg_duration]
             else:
@@ -4269,7 +4269,7 @@ def process_segment_task(self, segment_data):
                 print(f"   [DEBUG] First 5 cleaned frame hashes: {frame_hashes}")
                 print(f"   [DEBUG] Frame shapes: {frame_sizes}")
                 if len(set(frame_hashes)) == 1:
-                    print(f"   [WARNING] ⚠️ ALL FRAMES HAVE SAME HASH - THEY ARE IDENTICAL!")
+                    print(f"   [WARNING] [!] ALL FRAMES HAVE SAME HASH - THEY ARE IDENTICAL!")
                 else:
                     print(f"   [OK] Frames are unique ({len(set(frame_hashes))} different hashes)")
 
@@ -4278,7 +4278,7 @@ def process_segment_task(self, segment_data):
                     last_hashes = [hashlib.md5(f.tobytes()).hexdigest()[:8] for f in cleaned_frames[-3:]]
                     print(f"   [DEBUG] Last 3 cleaned frame hashes: {last_hashes}")
 
-            # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
+            # [FIX] SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
             # This allows multiple segments to cooperatively edit the same frames
             print(f"   🔗 Merging to shared frame buffer with mask compositing + file locking...")
             for local_idx, (original, cleaned_crop, segment_mask) in enumerate(zip(original_frames, cleaned_frames, original_masks)):
@@ -4301,7 +4301,7 @@ def process_segment_task(self, segment_data):
                     else:
                         continue
 
-                    # 🔥 MASK COMPOSITING: Alpha blend cleaned region with mask for smooth edges
+                    # [FIX] MASK COMPOSITING: Alpha blend cleaned region with mask for smooth edges
                     if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
                         # ProPainter output is already cropped to watermark region
                         # Segment mask is also already cropped (from cropping step earlier)
@@ -4375,13 +4375,13 @@ def process_segment_task(self, segment_data):
                         disk_hashes.append(hashlib.md5(fh.read()).hexdigest()[:8])
                 print(f"   [DEBUG] First 3 disk file hashes: {disk_hashes}")
                 if len(set(disk_hashes)) == 1:
-                    print(f"   [WARNING] ⚠️ DISK FILES HAVE SAME HASH - POSSIBLE WRITE ISSUE!")
+                    print(f"   [WARNING] [!] DISK FILES HAVE SAME HASH - POSSIBLE WRITE ISSUE!")
                 else:
                     print(f"   [OK] Disk files are unique")
 
-        # ⚡ PARALLEL ENCODING: Encode segment MP4 immediately (Blackwell NVENC!)
+        # [FAST] PARALLEL ENCODING: Encode segment MP4 immediately (Blackwell NVENC!)
         print(f"   [OK] Cleaned frames ready in: {seg_cleaned_dir}")
-        # ⚡ BACKGROUND ENCODING OPTIMIZATION: Signal encoder thread instead of blocking!
+        # [FAST] BACKGROUND ENCODING OPTIMIZATION: Signal encoder thread instead of blocking!
         # Worker returns immediately and starts next segment while encoding happens in background
         safe_update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
 
@@ -4403,7 +4403,7 @@ def process_segment_task(self, segment_data):
                 segment_frames_exist += 1
 
         if segment_frames_exist != segment_frame_count:
-            print(f"   [WARNING] ⚠️ Only {segment_frames_exist}/{segment_frame_count} segment frames exist in buffer!")
+            print(f"   [WARNING] [!] Only {segment_frames_exist}/{segment_frame_count} segment frames exist in buffer!")
         else:
             print(f"   [OK] All {segment_frame_count} segment frames verified in buffer")
 
@@ -4417,7 +4417,7 @@ def process_segment_task(self, segment_data):
         redis_client.hset(segment_key, 'frame_count', str(segment_frame_count))
         redis_client.hset(segment_key, 'base_name', base_name)
         redis_client.hset(segment_key, 'status', 'ready_for_encoding')
-        # 🔥 SHARED BUFFER: Store frame range for encoder
+        # [FIX] SHARED BUFFER: Store frame range for encoder
         redis_client.hset(segment_key, 'start_frame', str(start_frame))
         redis_client.hset(segment_key, 'end_frame', str(end_frame))
 
@@ -4634,7 +4634,7 @@ def process_video_distributed_task(self, video_path, api_base=None, temp_base=No
         total_segments = len(segments)
 
         print(f"[OK] Video prepared: {total_segments} segments ready for distributed processing")
-        print(f"🌐 Distributing segments across all available workers...")
+        print(f"[WEB] Distributing segments across all available workers...")
 
         self.update_state(
             state='PROCESSING',
@@ -4725,7 +4725,7 @@ def process_image_task(self, image_path):
                     base_name = os.path.basename(image_path.replace('\\', '/'))
 
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
-                print(f"🌐 Image not found locally. Downloading from: {download_url}")
+                print(f"[WEB] Image not found locally. Downloading from: {download_url}")
                 try:
                     r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
                     r.raise_for_status()
@@ -4936,7 +4936,7 @@ def process_video_task(self, video_path):
                     base_name = os.path.basename(video_path.replace('\\', '/'))
 
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
-                print(f"🌐 Video not found locally. Downloading from: {download_url}")
+                print(f"[WEB] Video not found locally. Downloading from: {download_url}")
                 try:
                     r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
                     r.raise_for_status()
@@ -5652,7 +5652,7 @@ def get_status(task_id):
                                 filename = os.path.basename(final_path)
                                 result_url = f'/results/{filename}'
 
-                            print(f"[STATUS] ✅ Encoding complete for {video_id}! Returning: {result_url}")
+                            print(f"[STATUS] [OK] Encoding complete for {video_id}! Returning: {result_url}")
                             return jsonify({
                                 'state': 'SUCCESS',
                                 'result': {'result_url': result_url},
@@ -5913,7 +5913,7 @@ def download_from_url():
                 });
             """)
 
-            print(f"🌐 Navigating to: {url}")
+            print(f"[WEB] Navigating to: {url}")
             page.goto(url, wait_until='domcontentloaded', timeout=30000)
 
             time.sleep(2)
@@ -6094,7 +6094,7 @@ def download_sora():
                 });
             """)
 
-            print(f"🌐 Navigating to: {url}")
+            print(f"[WEB] Navigating to: {url}")
             page.goto(url, wait_until='domcontentloaded', timeout=30000)
 
             time.sleep(2)
@@ -6440,7 +6440,7 @@ def process_video():
             return jsonify({'status': 'error', 'message': 'Media not found'}), 404
 
         # Queue processing task via Celery and return the real task id
-        print(f"📤 Queuing processing task for: {video_path}")
+        print(f"[UPLOAD] Queuing processing task for: {video_path}")
 
         try:
             # Decide pipeline based on extension
@@ -6670,7 +6670,7 @@ def serve_result(filename):
         return jsonify({'error': 'File not found'}), 404
 
     # Send file with as_attachment to trigger download
-    print(f"[SERVE-RESULT] ✅ Serving file: {filename}")
+    print(f"[SERVE-RESULT] [OK] Serving file: {filename}")
     response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
 
     # Schedule file deletion after response is sent
@@ -6750,7 +6750,7 @@ def upload_result():
         up.save(dest)
         file_size_mb = os.path.getsize(dest) / (1024 * 1024)
 
-        print(f"[UPLOAD-RESULT] ✅ Saved {safe_name} ({file_size_mb:.2f} MB) to {dest}")
+        print(f"[UPLOAD-RESULT] [OK] Saved {safe_name} ({file_size_mb:.2f} MB) to {dest}")
         print(f"[UPLOAD-RESULT] File exists check: {os.path.exists(dest)}")
         print(f"[UPLOAD-RESULT] RESULT_DIR contents: {os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else 'DIR NOT FOUND'}")
 
@@ -7124,7 +7124,7 @@ def stripe_webhook():
                             result = cur.fetchone()
                             if result:
                                 new_balance = result[0]
-                                print(f"[BILLING] ✅ Credits added successfully. User {user_id} new balance: {new_balance}")
+                                print(f"[BILLING] [OK] Credits added successfully. User {user_id} new balance: {new_balance}")
                             else:
                                 print(f"[BILLING] ❌ User {user_id} not found in database")
                     except Exception as e:
