@@ -19,6 +19,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
+# Email utilities for password reset
+from email_utils import send_reset_email
+
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -1135,42 +1138,39 @@ def forgot_password():
         if not email:
             return jsonify({'error': 'Email is required'}), 400
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        with get_db() as conn:
+            cursor = conn.cursor()
 
-        # Check if user exists
-        cursor.execute('SELECT id, name FROM users WHERE email = %s', (email,))
-        user = cursor.fetchone()
+            # Check if user exists
+            cursor.execute('SELECT id, name FROM users WHERE email = %s', (email,))
+            user = cursor.fetchone()
 
-        # Always return success to prevent email enumeration
-        # But only send email if user exists
-        if user:
-            import secrets
-            import datetime
+            # Always return success to prevent email enumeration
+            # But only send email if user exists
+            if user:
+                import secrets
+                import datetime
 
-            # Generate reset token
-            token = secrets.token_urlsafe(32)
-            expires_at = datetime.datetime.now() + datetime.timedelta(hours=1)
+                # Generate reset token
+                token = secrets.token_urlsafe(32)
+                expires_at = datetime.datetime.now() + datetime.timedelta(hours=1)
 
-            # Store token in database
-            cursor.execute('''
-                INSERT INTO password_reset_tokens (user_id, token, expires_at)
-                VALUES (%s, %s, %s)
-            ''', (user[0], token, expires_at))
+                # Store token in database
+                cursor.execute('''
+                    INSERT INTO password_reset_tokens (user_id, token, expires_at)
+                    VALUES (%s, %s, %s)
+                ''', (user[0], token, expires_at))
 
-            conn.commit()
+                # Generate reset URL and send email
+                reset_url = f"{request.host_url}reset-password.html?token={token}"
 
-            # TODO: Send email with reset link
-            # For now, just log the token (you need to implement email sending)
-            reset_url = f"{request.host_url}reset-password.html?token={token}"
-            print(f"Password reset link for {email}: {reset_url}")
-            print(f"Token expires at: {expires_at}")
+                try:
+                    send_reset_email(email, reset_url)
+                except Exception as mail_err:
+                    print(f"[WARNING] Email failed for {email}: {mail_err}")
+                    # Still return success to prevent email enumeration
 
-            # In production, send email here:
-            # send_password_reset_email(email, user[1], reset_url)
-
-        cursor.close()
-        conn.close()
+            cursor.close()
 
         return jsonify({
             'status': 'success',
@@ -1204,50 +1204,46 @@ def reset_password():
         if len(new_password) < 8:
             return jsonify({'error': 'Password must be at least 8 characters'}), 400
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        with get_db() as conn:
+            cursor = conn.cursor()
 
-        # Find valid token
-        cursor.execute('''
-            SELECT user_id, expires_at
-            FROM password_reset_tokens
-            WHERE token = %s AND used = FALSE
-        ''', (token,))
+            # Find valid token
+            cursor.execute('''
+                SELECT user_id, expires_at
+                FROM password_reset_tokens
+                WHERE token = %s AND used = FALSE
+            ''', (token,))
 
-        reset_token = cursor.fetchone()
+            reset_token = cursor.fetchone()
 
-        if not reset_token:
+            if not reset_token:
+                cursor.close()
+                return jsonify({'error': 'Invalid or expired reset token'}), 400
+
+            # Check if token expired
+            import datetime
+            if reset_token[1] < datetime.datetime.now():
+                cursor.close()
+                return jsonify({'error': 'Reset token has expired'}), 400
+
+            # Hash new password
+            password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+            # Update password
+            cursor.execute('''
+                UPDATE users
+                SET password_hash = %s
+                WHERE id = %s
+            ''', (password_hash, reset_token[0]))
+
+            # Mark token as used
+            cursor.execute('''
+                UPDATE password_reset_tokens
+                SET used = TRUE
+                WHERE token = %s
+            ''', (token,))
+
             cursor.close()
-            conn.close()
-            return jsonify({'error': 'Invalid or expired reset token'}), 400
-
-        # Check if token expired
-        import datetime
-        if reset_token[1] < datetime.datetime.now():
-            cursor.close()
-            conn.close()
-            return jsonify({'error': 'Reset token has expired'}), 400
-
-        # Hash new password
-        password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-        # Update password
-        cursor.execute('''
-            UPDATE users
-            SET password_hash = %s
-            WHERE id = %s
-        ''', (password_hash, reset_token[0]))
-
-        # Mark token as used
-        cursor.execute('''
-            UPDATE password_reset_tokens
-            SET used = TRUE
-            WHERE token = %s
-        ''', (token,))
-
-        conn.commit()
-        cursor.close()
-        conn.close()
 
         return jsonify({'status': 'success', 'message': 'Password reset successfully'})
 
