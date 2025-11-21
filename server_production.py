@@ -3003,47 +3003,22 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             decode_start = time.time()
 
             if use_nvdec:
-                # NVDEC hardware decoder - FULL GPU PIPELINE!
-                # Keep frames on GPU, only convert to numpy when absolutely needed
-                import torch
+                # NVDEC hardware decoder - uses optimized library conversion
+                all_frames = nvdec_loader.load_all_frames(to_numpy=True, color_format='BGR')
 
-                # Load as GPU tensors (no CPU transfer!)
-                frames_gpu_tensor = nvdec_loader.load_all_frames_gpu(normalize=False)
-                # Shape: [1, T, C, H, W] - squeeze batch dim
-                if len(frames_gpu_tensor.shape) == 5:
-                    frames_gpu_tensor = frames_gpu_tensor.squeeze(0)  # [T, C, H, W]
-
-                frames_processed = frames_gpu_tensor.shape[0]
+                frames_processed = len(all_frames)
                 decode_time = time.time() - decode_start
-                print(f"[OK] NVDEC decoded {frames_processed} frames on GPU: {decode_time:.3f}s ({decode_time/frames_processed*1000:.2f}ms/frame)")
-                print(f"[GPU] Frames shape: {frames_gpu_tensor.shape}, device: {frames_gpu_tensor.device}")
+                print(f"[OK] NVDEC decoded {frames_processed} frames: {decode_time:.3f}s ({decode_time/frames_processed*1000:.2f}ms/frame)")
                 nvdec_loader.close()
 
-                # Uniqueness check on GPU (no CPU transfer for check!)
+                # Uniqueness check
                 if frames_processed > 1:
-                    # Just check first and last frame means are different
-                    mean_first = frames_gpu_tensor[0].float().mean().item()
-                    mean_last = frames_gpu_tensor[-1].float().mean().item()
-                    if abs(mean_first - mean_last) < 0.01:
-                        raise RuntimeError(f"[NVDEC ERROR] Frames may be identical (mean={mean_first:.2f}) - clone() fix failed!")
-                    print(f"[OK] NVDEC frames verified unique: first_mean={mean_first:.2f}, last_mean={mean_last:.2f}")
-
-                # Convert to numpy list for compatibility (single batch transfer)
-                # TODO: Keep on GPU longer once YOLO/ProPainter support GPU tensors
-                print(f"[GPU→CPU] Batch converting {frames_processed} frames to numpy BGR...")
-                transfer_start = time.time()
-                # [T, C, H, W] -> [T, H, W, C] and RGB->BGR
-                frames_nhwc = frames_gpu_tensor.permute(0, 2, 3, 1).contiguous()
-                # RGB to BGR: reverse channel order, convert to uint8
-                frames_bgr = frames_nhwc[:, :, :, [2, 1, 0]].to(torch.uint8)
-                frames_cpu = frames_bgr.cpu().numpy()
-                all_frames = [frames_cpu[i] for i in range(frames_processed)]
-                transfer_time = time.time() - transfer_start
-                print(f"[OK] GPU→CPU transfer: {transfer_time:.3f}s ({transfer_time/frames_processed*1000:.2f}ms/frame)")
-
-                # Free GPU memory
-                del frames_gpu_tensor
-                torch.cuda.empty_cache()
+                    import hashlib
+                    h0 = hashlib.md5(all_frames[0].tobytes()).hexdigest()[:8]
+                    h1 = hashlib.md5(all_frames[-1].tobytes()).hexdigest()[:8]
+                    if h0 == h1:
+                        raise RuntimeError(f"[NVDEC ERROR] All frames identical (hash={h0}) - clone() fix failed!")
+                    print(f"[OK] NVDEC frames verified unique: first={h0}, last={h1}")
             else:
                 # CPU decoder (only if NVDEC disabled)
                 all_frames = []
