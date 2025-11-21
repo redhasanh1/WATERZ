@@ -108,6 +108,23 @@
             };
         })();
     </script>
+    <script>
+        // Pre-warm Railway API container on page load (prevents cold start delays)
+        (function() {
+            var prewarm = function() {
+                var base = window.API_BASE_URL || '';
+                fetch(base + '/api/health', {
+                    method: 'GET',
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                })
+                .then(function() { console.log('✅ API pre-warmed'); })
+                .catch(function() { console.log('⚠️ API warming up...'); });
+            };
+            // Try immediately, and again after API_BASE_URL might be set from tunnel_url.txt
+            prewarm();
+            setTimeout(prewarm, 500);
+        })();
+    </script>
     <style>
         /* MarkRemoverAI AI - Revolutionary Vibrant Design */
         :root {
