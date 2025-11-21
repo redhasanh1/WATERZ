@@ -2875,9 +2875,9 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
 
-        # NVDEC hardware decoder - DISABLED (causes stuck frames)
-        # Using CPU decoding with zero-copy encoding pipeline
-        use_nvdec = False
+        # NVDEC hardware decoder - FIXED with .clone() to prevent buffer reuse
+        # Zero-copy encoding bypasses disk I/O race conditions
+        use_nvdec = True
         nvdec_loader = None
         cap = None
 
@@ -3013,6 +3013,15 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 decode_time = time.time() - decode_start
                 print(f"[OK] NVDEC decoded {frames_processed} frames: {decode_time:.3f}s ({decode_time/frames_processed*1000:.2f}ms/frame)")
                 nvdec_loader.close()
+
+                # Uniqueness check - verify .clone() fix worked
+                if frames_processed > 1:
+                    import hashlib
+                    h0 = hashlib.md5(all_frames[0].tobytes()).hexdigest()[:8]
+                    h1 = hashlib.md5(all_frames[-1].tobytes()).hexdigest()[:8]
+                    if h0 == h1:
+                        raise RuntimeError(f"[NVDEC ERROR] All frames identical (hash={h0}) - clone() fix failed!")
+                    print(f"[OK] NVDEC frames verified unique: first={h0}, last={h1}")
             else:
                 # CPU decoder (only if NVDEC disabled)
                 all_frames = []
