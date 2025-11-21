@@ -2875,9 +2875,9 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
 
-        # NVDEC hardware decoder - RE-ENABLED with zero-copy pipeline
-        # Zero-copy encoding bypasses disk I/O race conditions
-        use_nvdec = True
+        # NVDEC hardware decoder - DISABLED (causes stuck frames)
+        # Using CPU decoding with zero-copy encoding pipeline
+        use_nvdec = False
         nvdec_loader = None
         cap = None
 
@@ -2906,11 +2906,6 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         base_name = Path(video_path).stem
         # Use provided video_id (from upload task_id) for cache consistency, fallback to Celery task ID
         video_id = video_id or (self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8])
-
-        # Initialize frame buffer for zero-copy encoding
-        with FRAME_BUFFER_LOCK:
-            FRAME_BUFFER[video_id] = FramePipeEncoder(video_id, total_frames, width, height, fps)
-        print(f"[OK] Frame buffer initialized for {video_id}: {total_frames} frames @ {width}x{height}")
 
         # 🔒 DEDUPLICATION: Check if this video is already being prepared by another worker
         try:
@@ -3228,6 +3223,14 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             # frames_with_watermark should be loaded from cache, but add fallback
             if 'frames_with_watermark' not in locals():
                 frames_with_watermark = 0  # Fallback if not in cache
+
+        # Initialize frame buffer for zero-copy encoding (now that frames_processed is known)
+        if frames_processed and frames_processed > 0:
+            with FRAME_BUFFER_LOCK:
+                FRAME_BUFFER[video_id] = FramePipeEncoder(video_id, frames_processed, width, height, fps)
+            print(f"[OK] Frame buffer initialized for {video_id}: {frames_processed} frames @ {width}x{height}")
+        else:
+            print(f"[WARNING] Cannot initialize frame buffer - frames_processed is {frames_processed}")
 
         # Optional: force time-based splitting to ensure multi-GPU distribution
         try:
