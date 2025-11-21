@@ -124,6 +124,13 @@
             prewarm();
             setTimeout(prewarm, 500);
         })();
+
+        // Auto-login for localhost testing
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            var testUser = { id: 'test-local', email: 'test@localhost', name: 'Local Tester', credits: 999 };
+            localStorage.setItem('user', JSON.stringify(testUser));
+            console.log('🔓 Localhost: Auto-logged in as test user');
+        }
     </script>
     <style>
         /* MarkRemoverAI AI - Revolutionary Vibrant Design */
@@ -1981,7 +1988,7 @@
         }
 
         function apiFetchPath(path, options) {
-            const url = `${API_BASE_URL}${path}`;
+            const url = `${window.API_BASE_URL || ''}${path}`;
             return apiFetchUrl(url, options);
         }
 
