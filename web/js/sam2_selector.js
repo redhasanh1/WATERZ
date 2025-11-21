@@ -384,13 +384,10 @@ class SAM2Selector {
     drawAllPoints() {
         this.selections.forEach(selection => {
             selection.points.forEach(point => {
-                // Convert from canvas coordinates to rendered video coordinates
-                const relativeX = (point.x / this.canvas.width) * this.renderWidth;
-                const relativeY = (point.y / this.canvas.height) * this.renderHeight;
-
-                // Add letterbox offset to get display coordinates
-                const x = relativeX + this.offsetX;
-                const y = relativeY + this.offsetY;
+                // Points are stored in canvas coordinates (native video resolution)
+                // Draw directly since canvas is at native resolution
+                const x = point.x;
+                const y = point.y;
                 const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
 
                 // Draw circle
