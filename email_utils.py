@@ -41,14 +41,27 @@ def send_reset_email(to_email: str, reset_url: str):
 
     print(f"[EMAIL DEBUG] Connecting to {smtp_server}:{smtp_port}...")
 
-    with smtplib.SMTP_SSL(
-        smtp_server,
-        int(smtp_port),
-        context=ssl.create_default_context(),
-    ) as server:
-        print(f"[EMAIL DEBUG] Logging in as {smtp_username}...")
-        server.login(smtp_username, smtp_password)
-        print(f"[EMAIL DEBUG] Sending message...")
-        server.send_message(msg)
+    port = int(smtp_port)
+
+    # Port 465 uses SSL, Port 587 uses STARTTLS
+    if port == 465:
+        with smtplib.SMTP_SSL(
+            smtp_server,
+            port,
+            context=ssl.create_default_context(),
+        ) as server:
+            print(f"[EMAIL DEBUG] Logging in as {smtp_username}...")
+            server.login(smtp_username, smtp_password)
+            print(f"[EMAIL DEBUG] Sending message...")
+            server.send_message(msg)
+    else:
+        # Port 587 with STARTTLS
+        with smtplib.SMTP(smtp_server, port) as server:
+            print(f"[EMAIL DEBUG] Starting TLS...")
+            server.starttls(context=ssl.create_default_context())
+            print(f"[EMAIL DEBUG] Logging in as {smtp_username}...")
+            server.login(smtp_username, smtp_password)
+            print(f"[EMAIL DEBUG] Sending message...")
+            server.send_message(msg)
 
     print(f"[EMAIL SUCCESS] Reset link sent to {to_email}")
