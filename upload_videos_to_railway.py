@@ -8,24 +8,24 @@ import requests
 
 # Configuration
 SITE_URL = "https://markremoverai.com"
-ADMIN_SECRET = "dev-secret-123"  # Will use Railway env var in production
+ADMIN_SECRET = "c9737e23556159506143180a6ea5137225aedf633079833d8c78a2a33d3fa59b"  # Railway admin secret
 
 # Videos to upload
 VIDEOS = [
     {
-        'path': 'web/demos/before.mp4',
+        'path': 'videostotrain/s2.mp4',
         'type': 'static',
-        'description': 'Demo video - before watermark removal'
+        'description': 'Before watermark removal - end preview'
     },
     {
-        'path': 'web/demos/after.mp4',
+        'path': 'videostotrain/s2removed.mp4',
         'type': 'static',
-        'description': 'Demo video - after watermark removal'
+        'description': 'After watermark removal - end preview'
     },
     {
-        'path': 'sora_with_watermark.mp4',
-        'type': 'training',
-        'description': 'Sora video with watermark'
+        'path': 'videostotrain/cool.mp4',
+        'type': 'static',
+        'description': 'AI preview - middle section'
     }
 ]
 

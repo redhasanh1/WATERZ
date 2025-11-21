@@ -156,12 +156,11 @@ class SAM2Selector {
 
     /**
      * Convert mouse event to canvas coordinates
-     * Uses offsetX/offsetY with letterbox compensation
      */
     getCanvasPoint(e) {
-        // Use offsetX/offsetY - relative to canvas element
-        const clickX = e.offsetX;
-        const clickY = e.offsetY;
+        const rect = this.canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
 
         // Subtract letterbox offset to get position relative to rendered video
         const relativeX = clickX - this.offsetX;
@@ -176,8 +175,6 @@ class SAM2Selector {
         // Convert to canvas coordinates using actual rendered video dimensions
         const videoX = Math.floor((relativeX / this.renderWidth) * this.canvas.width);
         const videoY = Math.floor((relativeY / this.renderHeight) * this.canvas.height);
-
-        console.log(`[SAM2Selector] Click: (${clickX.toFixed(1)}, ${clickY.toFixed(1)}) → Relative: (${relativeX.toFixed(1)}, ${relativeY.toFixed(1)}) → Canvas: (${videoX}, ${videoY})`);
 
         // Clamp to video bounds
         return {
@@ -304,14 +301,20 @@ class SAM2Selector {
     }
 
     /**
-     * Draw current state (mask overlay + points only)
-     * Video is visible through transparent canvas - no need to draw it
+     * Draw current state (video frame + mask overlay + points)
      */
     draw() {
         if (!this.videoWidth) return;
 
-        // Clear canvas (keeps it transparent, video shows through)
+        // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Draw video frame (scaled)
+        this.ctx.drawImage(
+            this.video,
+            0, 0, this.videoWidth, this.videoHeight,
+            0, 0, this.canvas.width, this.canvas.height
+        );
 
         // Draw all mask overlays
         this.drawAllMasks();
@@ -331,8 +334,14 @@ class SAM2Selector {
     drawAllMasks() {
         if (this.selections.length === 0) return;
 
-        // Create overlay for all masks
-        const overlay = this.ctx.createImageData(this.canvas.width, this.canvas.height);
+        // Create temporary canvas for the mask overlay
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.canvas.width;
+        tempCanvas.height = this.canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // Create ImageData to build mask
+        const maskData = tempCtx.createImageData(this.canvas.width, this.canvas.height);
 
         // Loop through all selections and composite their masks
         this.selections.forEach(selection => {
@@ -350,17 +359,23 @@ class SAM2Selector {
                     // If mask pixel is white (255), apply green overlay
                     if (mask.data[maskIdx] > 127) {
                         const idx = (y * this.canvas.width + x) * 4;
-                        overlay.data[idx] = this.maskColor[0];     // R (Green)
-                        overlay.data[idx + 1] = this.maskColor[1]; // G (Green)
-                        overlay.data[idx + 2] = this.maskColor[2]; // B (Green)
-                        overlay.data[idx + 3] = 255 * this.options.maskAlpha; // A
+                        maskData.data[idx] = this.maskColor[0];     // R (Green)
+                        maskData.data[idx + 1] = this.maskColor[1]; // G (Green)
+                        maskData.data[idx + 2] = this.maskColor[2]; // B (Green)
+                        maskData.data[idx + 3] = 255; // Full alpha on temp canvas
                     }
                 }
             }
         });
 
-        // Draw composite overlay
-        this.ctx.putImageData(overlay, 0, 0);
+        // Put mask data on temp canvas
+        tempCtx.putImageData(maskData, 0, 0);
+
+        // Draw overlay with transparency using globalAlpha (proper compositing)
+        this.ctx.save();
+        this.ctx.globalAlpha = this.options.maskAlpha;
+        this.ctx.drawImage(tempCanvas, 0, 0);
+        this.ctx.restore();
     }
 
     /**
@@ -369,13 +384,10 @@ class SAM2Selector {
     drawAllPoints() {
         this.selections.forEach(selection => {
             selection.points.forEach(point => {
-                // Convert from canvas coordinates to rendered video coordinates
-                const relativeX = (point.x / this.canvas.width) * this.renderWidth;
-                const relativeY = (point.y / this.canvas.height) * this.renderHeight;
-
-                // Add letterbox offset to get display coordinates
-                const x = relativeX + this.offsetX;
-                const y = relativeY + this.offsetY;
+                // Points are stored in canvas coordinates (native video resolution)
+                // Draw directly since canvas is at native resolution
+                const x = point.x;
+                const y = point.y;
                 const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
 
                 // Draw circle

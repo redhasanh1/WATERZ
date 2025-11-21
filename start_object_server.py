@@ -36,7 +36,15 @@ from sam2_trt_predictor import SAM2TensorRTPredictor
 load_dotenv()
 
 # Configuration
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+# Try environment variable, then redis_url.txt file, then localhost
+REDIS_URL = os.getenv('REDIS_URL')
+if not REDIS_URL:
+    redis_url_file = Path(__file__).parent / 'redis_url.txt'
+    if redis_url_file.exists():
+        REDIS_URL = redis_url_file.read_text().strip()
+        print(f"[CONFIG] Loaded Redis URL from {redis_url_file}")
+    else:
+        REDIS_URL = 'redis://localhost:6379/0'
 
 # TensorRT Engine Paths
 ENCODER_ENGINE = r"D:\watermarkz\sam2_trt_inference\engines\sam2_encoder_fp16.engine"

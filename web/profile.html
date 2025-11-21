@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile - MarkRemoverAI</title>
+    <link rel="icon" type="image/png" href="emblem.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Primary Colors */
+            --primary: #667eea;
+            --primary-dark: #5a67d8;
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+            /* Light Mode (Default) */
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-card: rgba(248, 250, 252, 0.85);
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --border-color: rgba(102, 126, 234, 0.12);
+        }
+
+        /* Dark Mode Override */
+        html[data-theme="dark"] {
+            --bg-primary: #0b1020;
+            --bg-secondary: #121826;
+            --bg-card: rgba(26, 26, 46, 0.85);
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
+            --border-color: rgba(102, 126, 234, 0.12);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding-top: 80px;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .profile-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Navigation Header */
+        .nav-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            z-index: 1000;
+            padding: 1.25rem 0;
+            transition: background-color 0.3s ease;
+        }
+
+        html[data-theme="dark"] .nav-header {
+            background: rgba(11, 16, 32, 0.98);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1.5rem;
+            transition: transform 0.2s ease;
+        }
+
+        .nav-logo:hover {
+            transform: translateY(-1px);
+        }
+
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 2.25rem;
+            list-style: none;
+        }
+
+        .nav-menu a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+
+        .nav-menu a:hover {
+            color: var(--primary);
+        }
+
+        .mobile-menu-toggle {
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            cursor: pointer;
+            padding: 10px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+        }
+
+        .mobile-menu-toggle span {
+            width: 26px;
+            height: 2.5px;
+            background: var(--text-primary);
+            border-radius: 3px;
+            transition: all 0.3s ease;
+        }
+
+        @media (max-width: 768px) {
+            .nav-menu {
+                position: fixed;
+                top: 75px;
+                left: 0;
+                right: 0;
+                flex-direction: column;
+                background: rgba(15, 15, 30, 0.98);
+                backdrop-filter: blur(20px);
+                padding: 1.5rem 0;
+                transform: translateY(-100%);
+                opacity: 0;
+                pointer-events: none;
+                transition: all 0.4s ease;
+            }
+
+            .nav-menu.active {
+                transform: translateY(0);
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+            .mobile-menu-toggle {
+                display: flex;
+            }
+
+            .desktop-only {
+                display: none !important;
+            }
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 2.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease;
+        }
+
+        html[data-theme="dark"] .card {
+            box-shadow: 0 20px 60px rgba(15, 15, 30, 0.45);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        input {
+            width: 100%;
+            padding: 0.95rem 1rem;
+            border: 2px solid rgba(102, 126, 234, 0.25);
+            border-radius: 12px;
+            font-size: 1rem;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
+        }
+
+        input:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.95rem 1rem;
+            border-radius: 12px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            width: 100%;
+            margin-top: 1rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.35);
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 2px solid rgba(102, 126, 234, 0.25);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #f56565 0%, #c53030 100%);
+        }
+
+        .btn-danger:hover {
+            box-shadow: 0 12px 30px rgba(245, 101, 101, 0.35);
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            font-weight: 500;
+        }
+
+        .alert-success {
+            background: rgba(72, 187, 120, 0.15);
+            color: #48bb78;
+            border: 2px solid rgba(72, 187, 120, 0.3);
+        }
+
+        .alert-error {
+            background: rgba(245, 101, 101, 0.15);
+            color: #f56565;
+            border: 2px solid rgba(245, 101, 101, 0.3);
+        }
+
+        .user-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .info-item {
+            padding: 1.25rem;
+            background: var(--bg-secondary);
+            border: 2px solid rgba(102, 126, 234, 0.15);
+            border-radius: 12px;
+        }
+
+        .info-item-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-item-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .credits-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 1.5rem;
+            background: linear-gradient(135deg, #667eea 0%, #f093fb 30%, #f6ad55 60%, #48bb78 100%);
+            color: white;
+        }
+
+        .forgot-password-link {
+            display: inline-block;
+            margin-top: 0.5rem;
+            color: var(--primary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .forgot-password-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav-header">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">
+                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                        </linearGradient>
+                    </defs>
+                    <rect width="40" height="40" rx="10" fill="url(#logoGradient)"/>
+                    <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
+                    <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
+                    <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                    <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                    <circle cx="25" cy="15" r="2" fill="#10b981"/>
+                </svg>
+                <span>MarkRemoverAI</span>
+            </a>
+
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="/">Home</a></li>
+                <li><a href="premium.html#pricing">Pricing</a></li>
+                <li><a href="profile.html">Profile</a></li>
+                <li class="desktop-only"><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;">Dark</button></li>
+            </ul>
+
+            <div class="mobile-menu-toggle" id="mobileMenuToggle">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Profile Content -->
+    <div class="profile-container">
+        <h1 style="font-size: 2.5rem; margin-bottom: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Your Profile</h1>
+
+        <div id="globalMessage" class="alert" style="display: none;"></div>
+
+        <!-- Account Information Card -->
+        <div class="card">
+            <h2>Account Information</h2>
+            <div class="user-info-grid">
+                <div class="info-item">
+                    <div class="info-item-label">Name</div>
+                    <div class="info-item-value" id="displayName">Loading...</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-item-label">Email</div>
+                    <div class="info-item-value" id="displayEmail">Loading...</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-item-label">Credits</div>
+                    <div class="info-item-value">
+                        <span class="credits-badge" id="displayCredits">0</span>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="info-item-label">Member Since</div>
+                    <div class="info-item-value" id="displayCreatedAt">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Update Profile Card -->
+        <div class="card">
+            <h2>Update Profile</h2>
+            <form id="updateProfileForm">
+                <div class="form-group">
+                    <label for="updateName">Full Name</label>
+                    <input type="text" id="updateName" name="updateName" placeholder="Alex Morgan" autocomplete="name">
+                </div>
+                <button type="submit" class="btn">Update Profile</button>
+            </form>
+        </div>
+
+        <!-- Change Password Card -->
+        <div class="card">
+            <h2>Change Password</h2>
+            <form id="changePasswordForm">
+                <div class="form-group">
+                    <label for="currentPassword">Current Password</label>
+                    <input type="password" id="currentPassword" name="currentPassword" placeholder="••••••••" autocomplete="current-password" required>
+                </div>
+                <div class="form-group">
+                    <label for="newPassword">New Password</label>
+                    <input type="password" id="newPassword" name="newPassword" placeholder="••••••••" autocomplete="new-password" required minlength="8">
+                    <small style="color: var(--text-secondary); font-size: 0.85rem;">Minimum 8 characters</small>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm New Password</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" placeholder="••••••••" autocomplete="new-password" required minlength="8">
+                </div>
+                <button type="submit" class="btn">Change Password</button>
+                <a href="reset-password.html" class="forgot-password-link">Forgot your password?</a>
+            </form>
+        </div>
+
+        <!-- Quick Actions Card -->
+        <div class="card">
+            <h2>Quick Actions</h2>
+            <button onclick="window.location.href='premium.html#pricing'" class="btn btn-secondary">Buy More Credits</button>
+            <button id="signOutBtn" class="btn btn-secondary" style="margin-top: 1rem;">Sign Out</button>
+        </div>
+    </div>
+
+    <script src="js/theme.js"></script>
+    <script>
+        (function() {
+            const API_BASE = window.API_BASE_URL || '';
+
+            // Check authentication
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            if (!user || !user.id) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // Show global message
+            function showMessage(message, type = 'success') {
+                const messageEl = document.getElementById('globalMessage');
+                messageEl.textContent = message;
+                messageEl.className = `alert alert-${type}`;
+                messageEl.style.display = 'block';
+                setTimeout(() => {
+                    messageEl.style.display = 'none';
+                }, 5000);
+            }
+
+            // Load profile data
+            async function loadProfile() {
+                try {
+                    const response = await fetch(`${API_BASE}/api/user/profile`, {
+                        method: 'GET',
+                        credentials: 'include'
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to load profile');
+                    }
+
+                    const data = await response.json();
+
+                    // Update display
+                    document.getElementById('displayName').textContent = data.name || 'Not set';
+                    document.getElementById('displayEmail').textContent = data.email || user.email;
+                    document.getElementById('displayCredits').textContent = data.credits !== undefined ? data.credits : user.credits;
+
+                    if (data.created_at) {
+                        const date = new Date(data.created_at);
+                        document.getElementById('displayCreatedAt').textContent = date.toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                        });
+                    } else {
+                        document.getElementById('displayCreatedAt').textContent = 'Unknown';
+                    }
+
+                    // Update form
+                    document.getElementById('updateName').value = data.name || '';
+
+                    // Update localStorage
+                    const updatedUser = {
+                        ...user,
+                        name: data.name,
+                        email: data.email,
+                        credits: data.credits
+                    };
+                    localStorage.setItem('user', JSON.stringify(updatedUser));
+                } catch (error) {
+                    console.error('Error loading profile:', error);
+                    // Fallback to localStorage data
+                    document.getElementById('displayName').textContent = user.name || 'Not set';
+                    document.getElementById('displayEmail').textContent = user.email;
+                    document.getElementById('displayCredits').textContent = user.credits || 0;
+                    document.getElementById('displayCreatedAt').textContent = 'Unknown';
+                    document.getElementById('updateName').value = user.name || '';
+                }
+            }
+
+            // Update profile
+            document.getElementById('updateProfileForm').addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                const name = document.getElementById('updateName').value.trim();
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/user/profile`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({ name })
+                    });
+
+                    if (!response.ok) {
+                        const data = await response.json();
+                        throw new Error(data.error || 'Update failed');
+                    }
+
+                    const data = await response.json();
+
+                    // Update display and localStorage
+                    const updatedUser = {
+                        ...user,
+                        name: data.name
+                    };
+                    localStorage.setItem('user', JSON.stringify(updatedUser));
+
+                    document.getElementById('displayName').textContent = data.name || 'Not set';
+                    showMessage('Profile updated successfully!', 'success');
+                } catch (error) {
+                    console.error('Update error:', error);
+                    showMessage(error.message, 'error');
+                }
+            });
+
+            // Change password
+            document.getElementById('changePasswordForm').addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                const currentPassword = document.getElementById('currentPassword').value;
+                const newPassword = document.getElementById('newPassword').value;
+                const confirmPassword = document.getElementById('confirmPassword').value;
+
+                if (newPassword !== confirmPassword) {
+                    showMessage('New passwords do not match', 'error');
+                    return;
+                }
+
+                if (newPassword.length < 8) {
+                    showMessage('Password must be at least 8 characters', 'error');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/user/change-password`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({ currentPassword, newPassword })
+                    });
+
+                    if (!response.ok) {
+                        const data = await response.json();
+                        throw new Error(data.error || 'Password change failed');
+                    }
+
+                    // Clear form
+                    document.getElementById('changePasswordForm').reset();
+                    showMessage('Password changed successfully!', 'success');
+                } catch (error) {
+                    console.error('Password change error:', error);
+                    showMessage(error.message, 'error');
+                }
+            });
+
+            // Sign out
+            document.getElementById('signOutBtn').addEventListener('click', async function() {
+                try {
+                    await fetch(`${API_BASE}/api/auth/logout`, {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+                } catch (error) {
+                    console.error('Logout error:', error);
+                }
+                localStorage.removeItem('user');
+                window.location.href = 'login.html';
+            });
+
+            // Mobile menu toggle
+            const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+            const navMenu = document.getElementById('navMenu');
+
+            if (mobileMenuToggle) {
+                mobileMenuToggle.addEventListener('click', function() {
+                    navMenu.classList.toggle('active');
+                    mobileMenuToggle.classList.toggle('active');
+                });
+            }
+
+            // Load profile on page load
+            loadProfile();
+        })();
+    </script>
+</body>
+</html>

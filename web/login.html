@@ -169,13 +169,34 @@
             transform: translateY(-7.5px) rotate(-45deg);
         }
 
+        .mobile-theme-controls {
+            display: none;
+        }
+
+        .desktop-only {
+            display: initial;
+        }
+
         @media (max-width: 768px) {
             .nav-container {
                 padding: 0 1.5rem;
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+            }
+
+            .desktop-only {
+                display: none !important;
+            }
+
+            .mobile-theme-controls {
+                display: flex !important;
+                order: 1;
             }
 
             .mobile-menu-toggle {
                 display: flex;
+                order: 2;
             }
 
             .nav-menu {
@@ -377,8 +398,12 @@
                 <li><a href="index.html#remove-watermark">Remove Objects</a></li>
                 <li><a href="premium.html#pricing">Pricing</a></li>
                 <li><a href="index.html#comparison">Results</a></li>
-                <li><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;" aria-label="Toggle theme">Dark</button></li>
+                <li class="desktop-only"><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;" aria-label="Toggle theme">Dark</button></li>
             </ul>
+
+            <div class="mobile-theme-controls" style="display: none;">
+                <button id="mobileThemeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.45rem 0.85rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" aria-label="Toggle theme">Dark</button>
+            </div>
 
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
                 <span></span>
@@ -420,6 +445,10 @@
 
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+
+                <div style="text-align: right; margin-top: 0.5rem;">
+                    <a href="reset-password.html" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; font-weight: 600;">Forgot your password?</a>
+                </div>
 
                 <button type="submit" class="btn">Sign in</button>
             </form>
@@ -573,7 +602,9 @@
             showMessage('Processing...', '');
 
             try {
-                const apiUrl = API_BASE ? `${API_BASE}/api/auth/register` : '/api/auth/register';
+                // Use /login endpoint if no name (sign in), /register if name provided (sign up)
+                const endpoint = name ? '/api/auth/register' : '/api/auth/login';
+                const apiUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
 
                 const payload = { email, password };
                 if (name) {
@@ -585,14 +616,15 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
+                    credentials: 'include',  // Send cookies for session management
                     body: JSON.stringify(payload)
                 });
 
                 const data = await response.json();
 
                 if (response.ok) {
-                    // Store user in localStorage
-                    localStorage.setItem('user', JSON.stringify(data));
+                    // Store user in localStorage (extract user object from response)
+                    localStorage.setItem('user', JSON.stringify(data.user || data));
 
                     showMessage(data.message || 'Success! Redirecting...', 'success');
 

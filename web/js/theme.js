@@ -8,6 +8,7 @@
 
     const root = document.documentElement;
     const themeToggleBtn = document.getElementById('themeToggle');
+    const mobileThemeToggleBtn = document.getElementById('mobileThemeToggle');
 
     /**
      * Apply theme to the page
@@ -16,15 +17,27 @@
     function applyTheme(theme) {
         if (theme === 'dark') {
             root.setAttribute('data-theme', 'dark');
+            // Update desktop button
             if (themeToggleBtn) {
                 themeToggleBtn.textContent = 'Light';
                 themeToggleBtn.setAttribute('aria-label', 'Switch to light mode');
             }
+            // Update mobile button
+            if (mobileThemeToggleBtn) {
+                mobileThemeToggleBtn.textContent = 'Light';
+                mobileThemeToggleBtn.setAttribute('aria-label', 'Switch to light mode');
+            }
         } else {
             root.removeAttribute('data-theme');
+            // Update desktop button
             if (themeToggleBtn) {
                 themeToggleBtn.textContent = 'Dark';
                 themeToggleBtn.setAttribute('aria-label', 'Switch to dark mode');
+            }
+            // Update mobile button
+            if (mobileThemeToggleBtn) {
+                mobileThemeToggleBtn.textContent = 'Dark';
+                mobileThemeToggleBtn.setAttribute('aria-label', 'Switch to dark mode');
             }
         }
     }
@@ -70,9 +83,12 @@
     const initialTheme = getCurrentTheme();
     applyTheme(initialTheme);
 
-    // Attach toggle event listener
+    // Attach toggle event listeners (both desktop and mobile)
     if (themeToggleBtn) {
         themeToggleBtn.addEventListener('click', toggleTheme);
+    }
+    if (mobileThemeToggleBtn) {
+        mobileThemeToggleBtn.addEventListener('click', toggleTheme);
     }
 
     // Listen for system theme changes

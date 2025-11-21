@@ -20,6 +20,8 @@ pip_cache/
 *.engine
 *.onnx
 *.trt
+*.ts
+*.lock
 
 # Results and uploads
 uploads/
@@ -121,6 +123,12 @@ add_trt_*.py
 extract_*.py
 cache_config.py
 sparse_transformer_*.py
+model_surgery_patches.py
+persistent_worker_pool.py
+warmup_torch_compile.py
+compile_*.py
+*.backup
+*.OLD
 
 # Build automation batch files
 BUILD_*.bat
@@ -135,6 +143,17 @@ FULL_REBUILD_AND_TEST.bat
 SWAP_TO_V4_ENGINE.bat
 test_*.bat
 benchmark_nvdec.bat
+COMPILE_*.bat
+CLEAN_*.bat
+FIX_*.bat
+INSTALL_*.bat
+start_celery_trt_compressed.bat
+
+# Experimental shell scripts
+RUN_WSL2_*.sh
+build_*.sh
+COMPILE_*.sh
+INSTALL_WSL2_DEPS.sh
 
 # ============================================
 # Build Artifacts and Intermediates
@@ -193,6 +212,9 @@ SPARSE_*.md
 TENSORRT_*.md
 TRANSFORMER_*.md
 ULTRA_FAST_*.md
+REVOLUTIONARY_*.md
+WARMUP_*.md
+*_SUMMARY.md
 
 # ============================================
 # Temporary Data Files
@@ -204,10 +226,15 @@ RUN_ME_FROM_CMD.txt
 phase*_*.txt
 *_baseline_results.txt
 untracked_files.txt
+QUICK_START_*.txt
+TS_FILES_*.txt
+ts_test_result.txt
 
 # Intermediate/experimental transformer implementations
 faster-propainter-main/custom_kernel_transformer.py
 faster-propainter-main/model/modules/tensorrt_transformer.py
+faster-propainter-main/weights/
+faster-propainter-main/load_ts_models.py
 mmdeploy
 mmdeploy
 sam2_trt_inference/
@@ -221,6 +248,9 @@ pure_trt_masks/frame_00000.jpg
 *.png
 temp_sam2_masks/00000.png
 /temp_sam2_masks
+/temp_sam2_masks
+*.png
+*.png
 /temp_sam2_masks
 *.png
 *.png

@@ -3,13 +3,23 @@ chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
 REM ✅ AUTO-LOAD REDIS_URL from redis_url.txt
-if exist redis_url.txt (
-    for /f "usebackq tokens=*" %%A in ("redis_url.txt") do set REDIS_URL=%%A
-    echo [REDIS] Loaded from redis_url.txt: %REDIS_URL%
+set REDIS_CONFIG_FILE=%~dp0redis_url.txt
+echo [DEBUG] Looking for redis_url.txt at: %REDIS_CONFIG_FILE%
+
+if exist "%REDIS_CONFIG_FILE%" (
+    echo [DEBUG] File exists, reading...
+    REM Read first line of redis_url.txt directly
+    set /p REDIS_URL=<"%REDIS_CONFIG_FILE%"
+    echo [REDIS] ✅ Loaded from redis_url.txt
+    echo [REDIS] Value: %REDIS_URL%
 ) else (
-    echo [REDIS] Using default localhost (redis_url.txt not found)
+    echo [REDIS] ❌ redis_url.txt not found at: %REDIS_CONFIG_FILE%
+    echo [REDIS] Using default localhost fallback
     set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
 )
+
+echo [DEBUG] Final REDIS_URL = %REDIS_URL%
+echo.
 
 REM ✅ AUTO-LOAD TUNNEL_URL from web\tunnel_url.txt for Railway upload
 if exist web\tunnel_url.txt (
@@ -117,20 +127,23 @@ REM    Phase 1A: PyTorch validation (3x speedup expected)
 REM    Phase 2-4: TensorRT plugin (6.5-9x total speedup when combined with FP8)
 set ENABLE_DCNV4_RFCNET=1
 
-REM ❌ NVDEC VIDEO DECODER: DISABLED (7.4x SLOWER than CPU due to GPU→CPU transfer overhead)
-REM    GPU decode is fast, but PCIe copy to CPU numpy arrays kills all gains
-REM    Only beneficial if entire pipeline stays on GPU (not this use case)
-set ENABLE_NVDEC=0
+REM ⚡ NVDEC VIDEO DECODER: ENABLED (GPU-accelerated H.264/HEVC decoding!)
+REM    Previous bottleneck (GPU→CPU transfer) ELIMINATED by keeping frames on GPU
+REM    New zero-copy pipeline: NVDEC(GPU) → Tensor(GPU) → ProPainter(GPU) → NVENC(GPU)
+REM    Expected: 2x faster video decode + zero PCIe overhead
+set ENABLE_NVDEC=1
 
-REM ⚡ TORCH COMPILE: DISABLED (not thread-safe - causes FileExistsError cache races)
-REM    PyTorch 2.4.1 torch.compile has NO thread-safe caching mechanism
-REM    We get 2.48x speedup from Flash Attention + FP8 (STABLE!)
-REM    Next: Token Merging for 2-3x additional speedup (6x total)
+REM ⚡ TORCH COMPILE: Match RUN_SAM2_LOCAL.BAT exactly (proven fast + stable!)
+REM    Compile RAFT + YOLO (specific flags work without FileExistsError)
+REM    NO transformer compilation (USE_TORCH_COMPILE=0 prevents random pixels)
 set USE_TORCH_COMPILE=0
+set USE_TORCH_COMPILE_RAFT=1
+set USE_TORCH_COMPILE_YOLO=1
 set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
 REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (must match --concurrency!)
+REM    Parallel mode: 4 workers (per-PID cache isolation prevents conflicts)
 set SEGMENT_WORKERS=4
 
 REM ⚡ SAM2 TRACKING: Use SAM2-Tiny for temporal mask tracking (BEST QUALITY!)
@@ -143,29 +156,30 @@ echo.
 echo ============================================================
 echo OPTIMIZED CONFIG (RTX 4090):
 echo   - YOLO: TensorRT batch 64 (FASTEST! 748 fps benchmark)
-echo   - SAM2-Tiny: ENABLED (temporal mask tracking, 44ms/frame, NO FLICKER!)
-echo   - Video Decode: CPU cv2.VideoCapture (7.4x faster than NVDEC for CPU pipeline!)
+echo   - SAM2-Tiny: DISABLED (YOLO-only mode for speed)
+echo   - Video Decode: NVDEC GPU (H.264/HEVC hardware decode + zero-copy to GPU!)
 echo   - Optical Flow: NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX, 10-70x faster than RAFT!)
 echo   - RFCNet: TensorRT FP16 + DCNv4 plugin (1.6-2.3x faster flow completion!)
 echo   - Transformer: Manual attention (FASTEST! 0.99-1.02s feature propagation!)
 echo   - SageAttention: DISABLED (incompatible with sparse transformers!)
 echo   - Flash Attention: DISABLED (manual attention is 5x faster!)
-echo   - FP8 Transformer: ENABLED (RTX 4090 Ada: 1.3-1.5x speedup!)
-echo   - Token Merging: ENABLED (50%% merge ratio, 2-2.5x speedup!)
-echo   - torch.compile: DISABLED (not thread-safe, causes cache races)
-echo   - FP8 Encoder/Decoder: ENABLED (1.3-1.5x speedup, 11-16%% pipeline gain!)
+echo   - FP8 Transformer: DISABLED (torch.compile optimizes instead!)
+echo   - Token Merging: DISABLED (quality priority)
+echo   - torch.compile: ENABLED (sequential = safe, 1.5-2x RAFT speedup!)
+echo   - FP8 Encoder/Decoder: DISABLED (precision artifacts fixed!)
 echo   - FP8 RFCNet: ENABLED (1.3-1.5x speedup, 4-7%% pipeline gain!)
 echo   - DCNv4: ENABLED (3x faster deformable convolution!)
-echo   - Concurrency: 4 workers (TRUE 4-way parallel!)
-echo   - SEGMENT_WORKERS: 4 (all segments process simultaneously)
+echo   - Concurrency: solo (SINGLE WORKER - last segment triggers finalize!)
+echo   - SEGMENT_WORKERS: 4 (segments processed sequentially)
+echo   - torch.compile: ENABLED (1.5-2x speedup on RAFT!)
 echo ============================================================
 echo.
 
-REM Disable ALL torch.compile caching to avoid multi-worker file locking race conditions
-REM Workers will compile kernels on first run (~20-40s startup), then cache in memory
-REM This avoids FileExistsError crashes when 4 workers compile same kernels simultaneously
-set TORCHINDUCTOR_FX_GRAPH_CACHE=0
-set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
+REM ✅ ENABLE torch.compile caching to match local script behavior (stable + fast!)
+REM Per-PID cache isolation (cache_config.py) prevents multi-worker conflicts
+REM Matches RUN_SAM2_LOCAL.BAT settings for identical quality + speed
+set TORCHINDUCTOR_FX_GRAPH_CACHE=1
+set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=1
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
 REM Clean any corrupted torch.compile cache before starting
@@ -175,7 +189,38 @@ REM     rmdir /s /q "D:\watermarkz\temp\torchinductor_has" 2>nul
 REM     echo [OK] Complete cache removed - workers will recompile on startup
 REM )
 
-REM Use thread pool with THREAD-LOCAL TensorRT contexts for TRUE PARALLEL execution!
-REM Each thread gets its own TensorRT context = NO LOCKS = FULL PARALLEL!
-REM concurrency=4 = 4 threads, each with separate context (minimal VRAM overhead)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+REM Sequential mode: 1 worker for torch.compile safety
+REM concurrency=1 = 1 thread, safe for torch.compile (no cache conflicts)
+
+echo.
+echo ============================================================
+echo STARTING CELERY WORKER...
+echo ============================================================
+echo [DEBUG] Connecting to Redis broker: %REDIS_URL%
+echo.
+echo [TEST] Testing Redis connectivity...
+echo [DEBUG] Batch file REDIS_URL: %REDIS_URL%
+
+REM Test Redis connection using Python - Pass URL as command line arg instead of env var
+echo | set /p="[TEST] Attempting connection... "
+"%PYTHON_PATH%" -c "import redis, sys; url = '%REDIS_URL%'; r = redis.from_url(url, socket_connect_timeout=3, socket_timeout=3); r.ping(); print('[OK] Connection successful!'); sys.exit(0)"
+if errorlevel 1 (
+    echo FAILED
+    echo.
+    echo [ERROR] ❌ Cannot connect to Redis server!
+    echo [ERROR] Redis URL attempted: %REDIS_URL%
+    echo.
+    echo [FIX] Options:
+    echo   1. Check redis_url.txt has correct Railway Redis URL
+    echo   2. Verify Railway Redis service is running
+    echo   3. Check network/firewall allows connection to Railway
+    echo   4. For local dev: Start Redis locally with: redis-server
+    echo.
+    pause
+    exit /b 1
+)
+
+echo [INFO] This may take 10-30s for model loading...
+echo.
+
+"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=solo
