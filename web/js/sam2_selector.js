@@ -296,14 +296,20 @@ class SAM2Selector {
     }
 
     /**
-     * Draw current state (mask overlay + points only)
-     * Video is visible through transparent canvas - no need to draw it
+     * Draw current state (video frame + mask overlay + points)
      */
     draw() {
         if (!this.videoWidth) return;
 
-        // Clear canvas (keeps it transparent, video shows through)
+        // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Draw video frame (scaled)
+        this.ctx.drawImage(
+            this.video,
+            0, 0, this.videoWidth, this.videoHeight,
+            0, 0, this.canvas.width, this.canvas.height
+        );
 
         // Draw all mask overlays
         this.drawAllMasks();
