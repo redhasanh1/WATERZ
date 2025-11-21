@@ -6879,7 +6879,6 @@ def get_stats():
 
 
 @app.route('/api/sam2/select-object', methods=['POST'])
-@require_auth
 def sam2_select_object():
     """Interactive SAM2 object selection - uses local worker via Redis pub/sub"""
     try:
