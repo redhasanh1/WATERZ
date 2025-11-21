@@ -242,6 +242,124 @@ if FFMPEG_EXE:
 FRAME_CACHE = {}
 FRAME_CACHE_LOCK = threading.Lock()
 
+# Zero-copy frame buffer for direct GPU→FFmpeg piping
+FRAME_BUFFER = {}
+FRAME_BUFFER_LOCK = threading.Lock()
+
+class FramePipeEncoder:
+    """
+    Zero-copy frame encoder that pipes frames directly to FFmpeg.
+    Eliminates disk I/O bottleneck by keeping frames in memory.
+    """
+
+    def __init__(self, video_id, total_frames, width, height, fps):
+        self.video_id = video_id
+        self.total_frames = total_frames
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.frames = [None] * total_frames  # Pre-allocate frame slots
+        self.frames_received = 0
+        self.lock = threading.Lock()
+
+    def add_frame(self, index, frame):
+        """Add a frame to the buffer at the specified index."""
+        with self.lock:
+            if 0 <= index < self.total_frames:
+                self.frames[index] = frame.copy()  # Copy to ensure persistence
+                if self.frames[index] is not None:
+                    self.frames_received += 1
+
+    def is_complete(self):
+        """Check if all frames have been received."""
+        with self.lock:
+            return self.frames_received >= self.total_frames
+
+    def get_missing_frames(self):
+        """Get list of missing frame indices."""
+        with self.lock:
+            return [i for i in range(self.total_frames) if self.frames[i] is None]
+
+    def encode_to_video(self, output_path):
+        """
+        Encode all buffered frames directly to video via FFmpeg pipe.
+        Uses rawvideo input to bypass filesystem entirely.
+        """
+        import subprocess
+
+        missing = self.get_missing_frames()
+        if missing:
+            print(f"[PIPE ENCODER WARNING] Missing {len(missing)} frames: {missing[:10]}...")
+            # Fill missing frames with black or previous frame
+            for i in missing:
+                if i > 0 and self.frames[i-1] is not None:
+                    self.frames[i] = self.frames[i-1].copy()
+                else:
+                    self.frames[i] = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+
+        print(f"[PIPE ENCODER] Encoding {self.total_frames} frames ({self.width}x{self.height} @ {self.fps} fps)")
+
+        # FFmpeg command for rawvideo pipe input
+        encode_cmd = [
+            FFMPEG_EXE, '-y',
+            '-f', 'rawvideo',
+            '-vcodec', 'rawvideo',
+            '-s', f'{self.width}x{self.height}',
+            '-pix_fmt', 'bgr24',
+            '-r', str(self.fps),
+            '-i', 'pipe:0',
+            '-c:v', ENCODER_CONFIG['codec'],
+            '-preset', ENCODER_CONFIG.get('preset', 'p4'),
+            '-b:v', '8M',
+            '-pix_fmt', 'yuv420p',
+            '-profile:v', 'main',
+            output_path
+        ]
+
+        print(f"[PIPE ENCODER] FFmpeg command: {' '.join(encode_cmd)}")
+
+        try:
+            # Launch FFmpeg process
+            process = subprocess.Popen(
+                encode_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+
+            # Write all frames to stdin
+            for i, frame in enumerate(self.frames):
+                if frame is not None:
+                    process.stdin.write(frame.tobytes())
+                else:
+                    # Should not happen after filling missing frames
+                    black_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+                    process.stdin.write(black_frame.tobytes())
+
+            process.stdin.close()
+            stdout, stderr = process.communicate(timeout=300)
+
+            if process.returncode != 0:
+                print(f"[PIPE ENCODER ERROR] FFmpeg failed: {stderr.decode()}")
+                raise RuntimeError(f"FFmpeg encoding failed with code {process.returncode}")
+
+            output_size = os.path.getsize(output_path) / (1024 * 1024)
+            print(f"[PIPE ENCODER] ✓ Encoded: {output_size:.2f} MB")
+            return output_path
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raise RuntimeError("FFmpeg encoding timed out after 300s")
+        except Exception as e:
+            print(f"[PIPE ENCODER ERROR] {e}")
+            raise
+
+    def clear(self):
+        """Clear all frames to free memory."""
+        with self.lock:
+            self.frames = [None] * self.total_frames
+            self.frames_received = 0
+
 # Cross-platform file locking utility for shared frame buffer
 import contextlib
 import platform
@@ -1595,7 +1713,7 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
             FFMPEG_EXE, '-y',
             '-framerate', str(fps),
             '-start_number', '0',  # Start from 0000.png
-            '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+            '-i', os.path.join(seg_cleaned_dir, '%04d.png').replace('\\', '/'),
             '-c:v', ENCODER_CONFIG['codec'],
             '-preset', ENCODER_CONFIG['preset'],
             '-b:v', '8M',  # Increased bitrate for better quality at higher speed
@@ -1958,25 +2076,64 @@ def encode_segment_background(redis_client, data):
             else:
                 print(f"[ENCODER WARNING] Frame {global_idx:04d}.png missing after wait!")
 
+        # 🔥 FIX: Must be INSIDE 'with' block so file handle 'f' is still open!
+        if frames_added != expected_frames:
+            print(f"[ENCODER WARNING] ⚠️ MISSING FRAMES: Only {frames_added}/{expected_frames} frames in file list!")
+            # Last frame needs to be repeated for proper duration
+            last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
+            if os.path.exists(last_frame_path):
+                abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
+                print(f"[ENCODER WARNING] Adding fallback frame: {last_frame_path}")
+                f.write(f"file '{abs_path}'\n")
+                f.write(f"duration {1/fps}\n")
+                print(f"[ENCODER WARNING] Fallback frame added with duration {1/fps:.6f}s")
+
     print(f"[ENCODER DEBUG] File list created: {frames_added}/{expected_frames} frames added")
 
-    if frames_added != expected_frames:
-        print(f"[ENCODER WARNING] ⚠️ MISSING FRAMES: Only {frames_added}/{expected_frames} frames in file list!")
-        # Last frame needs to be repeated for proper duration
-        last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
-        if os.path.exists(last_frame_path):
-            abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
-            print(f"[ENCODER WARNING] Adding fallback frame: {last_frame_path}")
-            f.write(f"file '{abs_path}'\n")
-            f.write(f"duration {1/fps}\n")  # 🔥 FIX: Must include duration for concat demuxer!
-            print(f"[ENCODER WARNING] Fallback frame added with duration {1/fps:.6f}s")
+    # Verify file list was written correctly
+    try:
+        with open(file_list_path, 'r') as verify_f:
+            lines = verify_f.readlines()
+            file_entries = [l.strip() for l in lines if l.startswith('file ')]
+            duration_entries = [l.strip() for l in lines if l.startswith('duration ')]
+            print(f"[ENCODER DEBUG] File list verification: {len(file_entries)} files, {len(duration_entries)} durations")
+            if len(file_entries) != len(duration_entries):
+                print(f"[ENCODER WARNING] ⚠️ MISMATCH: {len(file_entries)} files but {len(duration_entries)} durations!")
+            if len(file_entries) > 0:
+                print(f"[ENCODER DEBUG] First file: {file_entries[0]}")
+                print(f"[ENCODER DEBUG] Last file: {file_entries[-1]}")
+    except Exception as e:
+        print(f"[ENCODER ERROR] Could not verify file list: {e}")
+
+    # Hash verification: ensure frames are actually different
+    import hashlib
+    frame_hashes = []
+    for global_idx in range(start_frame, min(start_frame + 5, end_frame + 1)):
+        frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
+        if os.path.exists(frame_path):
+            try:
+                with open(frame_path, 'rb') as fh:
+                    frame_hashes.append(hashlib.md5(fh.read()).hexdigest()[:8])
+            except Exception:
+                pass
+
+    if len(frame_hashes) > 1:
+        if len(set(frame_hashes)) == 1:
+            print(f"[ENCODER ERROR] ⚠️ First {len(frame_hashes)} frames have IDENTICAL hashes: {frame_hashes}")
+            print(f"[ENCODER ERROR] This indicates all frames are the same - STUCK FRAME DETECTED!")
+        else:
+            print(f"[ENCODER DEBUG] Frame uniqueness OK: {frame_hashes}")
 
     # Encode using detected encoder (NVENC or CPU fallback)
+    # 🔥 FIX: Use pattern input instead of concat demuxer (more reliable for sequential PNGs)
+    # 🔥 FIX: Force forward slashes for Windows (FFmpeg pattern parser is POSIX-based)
+    pattern_path = os.path.join(cleaned_dir, '%04d.png').replace('\\', '/')
     encode_cmd = [
         FFMPEG_EXE, '-y',
-        '-f', 'concat',
-        '-safe', '0',
-        '-i', file_list_path,
+        '-framerate', str(fps),  # MUST be before -i
+        '-start_number', str(start_frame),  # Start from segment's first frame
+        '-i', pattern_path,  # Pattern input (more reliable than concat)
+        '-frames:v', str(expected_frames),  # Limit to exact frame count
         '-c:v', ENCODER_CONFIG['codec'],
         '-preset', ENCODER_CONFIG['fallback_preset'],  # Use fallback preset (more stable)
         '-b:v', '8M',
@@ -1984,6 +2141,8 @@ def encode_segment_background(redis_client, data):
         '-profile:v', 'main',
         seg_video_path
     ]
+
+    print(f"[ENCODER DEBUG] FFmpeg command: {' '.join(encode_cmd)}")
 
     try:
         result = subprocess.run(encode_cmd, capture_output=True, text=True, timeout=300)
@@ -2068,26 +2227,13 @@ def trigger_finalization(redis_client, video_id, total_segments):
     """
     Concatenate all encoded segments and merge audio.
     Called automatically when all segments are encoded.
+
+    ZERO-COPY MODE: If FRAME_BUFFER is available, encode directly from memory
+    to bypass disk I/O race conditions that cause stuck frames.
     """
     import subprocess
 
     print(f"\n[FINALIZE] Starting finalization for video {video_id}")
-
-    # Collect all segment video paths from Redis (in order)
-    segment_paths = []
-    for seg_idx in range(total_segments):
-        segment_key = f"video:{video_id}:segment:{seg_idx}"
-        encoded_path_raw = redis_client.hget(segment_key, 'encoded_path')
-
-        # Decode bytes to string
-        encoded_path = encoded_path_raw.decode() if isinstance(encoded_path_raw, bytes) else encoded_path_raw
-
-        if not encoded_path or not os.path.exists(encoded_path):
-            raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
-
-        segment_paths.append(encoded_path)
-
-    print(f"[FINALIZE] Found {len(segment_paths)} encoded segments")
 
     # Get video metadata (decode bytes)
     base_name_raw = redis_client.get(f"video:{video_id}:base_name")
@@ -2096,27 +2242,84 @@ def trigger_finalization(redis_client, video_id, total_segments):
     video_path_raw = redis_client.get(f"video:{video_id}:video_path")
     video_path = video_path_raw.decode() if isinstance(video_path_raw, bytes) else video_path_raw
 
-    # Create concat list
-    concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
-    with open(concat_list_path, 'w') as f:
-        for seg_path in segment_paths:
-            abs_path = os.path.abspath(seg_path).replace('\\', '/')
-            f.write(f"file '{abs_path}'\n")
+    # Try zero-copy encoding from FRAME_BUFFER first
+    use_zero_copy = False
+    with FRAME_BUFFER_LOCK:
+        if video_id in FRAME_BUFFER:
+            buffer = FRAME_BUFFER[video_id]
+            print(f"[FINALIZE] Zero-copy mode: FRAME_BUFFER has {buffer.frames_received}/{buffer.total_frames} frames")
 
-    # Concatenate with copy codec (instant - no re-encoding)
-    temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
+            # Use zero-copy if we have most frames (allow some missing)
+            if buffer.frames_received >= buffer.total_frames * 0.9:
+                use_zero_copy = True
+                print(f"[FINALIZE] ✓ Using zero-copy encoding from memory buffer")
+            else:
+                print(f"[FINALIZE] ⚠️ Buffer incomplete - falling back to segment concatenation")
 
-    concat_cmd = [
-        FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
-        '-i', concat_list_path,
-        '-c', 'copy',  # No re-encoding - instant!
-        temp_processed
-    ]
+    if use_zero_copy:
+        # Encode entire video directly from memory buffer
+        temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
 
-    print(f"[FINALIZE] Concatenating segments with copy codec...")
-    subprocess.run(concat_cmd, capture_output=True, check=True, text=True, timeout=60)
-    concat_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
-    print(f"[FINALIZE] ✓ Concatenated: {concat_size_mb:.2f} MB")
+        with FRAME_BUFFER_LOCK:
+            buffer = FRAME_BUFFER[video_id]
+            print(f"[FINALIZE] Encoding {buffer.frames_received} frames from memory to {temp_processed}")
+            buffer.encode_to_video(temp_processed)
+
+        # Verify output
+        if not os.path.exists(temp_processed) or os.path.getsize(temp_processed) == 0:
+            print(f"[FINALIZE ERROR] Zero-copy encoding failed - falling back to segment concatenation")
+            use_zero_copy = False
+        else:
+            output_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
+            print(f"[FINALIZE] ✓ Zero-copy encoded: {output_size_mb:.2f} MB")
+
+        # Cleanup buffer
+        with FRAME_BUFFER_LOCK:
+            if video_id in FRAME_BUFFER:
+                del FRAME_BUFFER[video_id]
+                print(f"[FINALIZE] Cleaned up FRAME_BUFFER for {video_id}")
+
+    if not use_zero_copy:
+        # Collect all segment video paths from Redis (in order)
+        segment_paths = []
+        for seg_idx in range(total_segments):
+            segment_key = f"video:{video_id}:segment:{seg_idx}"
+            encoded_path_raw = redis_client.hget(segment_key, 'encoded_path')
+
+            # Decode bytes to string
+            encoded_path = encoded_path_raw.decode() if isinstance(encoded_path_raw, bytes) else encoded_path_raw
+
+            if not encoded_path or not os.path.exists(encoded_path):
+                raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
+
+            segment_paths.append(encoded_path)
+
+        print(f"[FINALIZE] Found {len(segment_paths)} encoded segments")
+
+        # Create concat list
+        concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
+        with open(concat_list_path, 'w') as f:
+            for seg_path in segment_paths:
+                abs_path = os.path.abspath(seg_path).replace('\\', '/')
+                f.write(f"file '{abs_path}'\n")
+
+        # Concatenate with copy codec (instant - no re-encoding)
+        temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
+
+        concat_cmd = [
+            FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
+            '-i', concat_list_path,
+            '-c', 'copy',  # No re-encoding - instant!
+            temp_processed
+        ]
+
+        print(f"[FINALIZE] Concatenating segments with copy codec...")
+        subprocess.run(concat_cmd, capture_output=True, check=True, text=True, timeout=60)
+        concat_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
+        print(f"[FINALIZE] ✓ Concatenated: {concat_size_mb:.2f} MB")
+    else:
+        segment_paths = []  # No segment cleanup needed for zero-copy
+        concat_list_path = None
 
     # Merge audio from original
     final_output = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
@@ -2157,7 +2360,7 @@ def trigger_finalization(redis_client, video_id, total_segments):
         print(f"[FINALIZE] Using processed video only")
 
     # Cleanup
-    if os.path.exists(concat_list_path):
+    if concat_list_path and os.path.exists(concat_list_path):
         os.remove(concat_list_path)
     for seg_path in segment_paths:
         if os.path.exists(seg_path):
@@ -2672,8 +2875,9 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
 
-        # NVDEC hardware decoder - NO FALLBACKS! (1.16x faster than CPU)
-        use_nvdec = os.getenv("ENABLE_NVDEC", "0") == "1"
+        # NVDEC hardware decoder - RE-ENABLED with zero-copy pipeline
+        # Zero-copy encoding bypasses disk I/O race conditions
+        use_nvdec = True
         nvdec_loader = None
         cap = None
 
@@ -2702,6 +2906,11 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         base_name = Path(video_path).stem
         # Use provided video_id (from upload task_id) for cache consistency, fallback to Celery task ID
         video_id = video_id or (self.request.id[:8] if getattr(self.request, 'id', None) else uuid.uuid4().hex[:8])
+
+        # Initialize frame buffer for zero-copy encoding
+        with FRAME_BUFFER_LOCK:
+            FRAME_BUFFER[video_id] = FramePipeEncoder(video_id, total_frames, width, height, fps)
+        print(f"[OK] Frame buffer initialized for {video_id}: {total_frames} frames @ {width}x{height}")
 
         # 🔒 DEDUPLICATION: Check if this video is already being prepared by another worker
         try:
@@ -2796,6 +3005,15 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             if use_nvdec:
                 # NVDEC hardware decoder - NO FALLBACK! (1.16x faster)
                 all_frames = nvdec_loader.load_all_frames(to_numpy=True, color_format='BGR')
+
+                # Defensive: ensure no batch dimension if tensor returned instead of list
+                if hasattr(all_frames, 'shape'):
+                    print(f"[DEBUG] NVDEC returned tensor with shape: {all_frames.shape}")
+                    if len(all_frames.shape) == 5:
+                        print(f"[WARNING] Squeezing batch dim from tensor {all_frames.shape}")
+                        all_frames = all_frames.squeeze(0)
+                        print(f"[DEBUG] After squeeze: {all_frames.shape}")
+
                 frames_processed = len(all_frames)
                 decode_time = time.time() - decode_start
                 print(f"[OK] NVDEC decoded {frames_processed} frames: {decode_time:.3f}s ({decode_time/frames_processed*1000:.2f}ms/frame)")
@@ -2923,6 +3141,22 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             # [INIT] EXTREME SPEED: Store in global memory (INSTANT!)
             print(f"⚡ Storing {frames_processed} frames/masks in memory (INSTANT!)...")
             mem_start = time.time()
+
+            # Validate tensor shapes before caching (defensive check)
+            if hasattr(all_frames, 'shape'):
+                print(f"[DEBUG] Cache: all_frames is tensor with shape {all_frames.shape}")
+                if len(all_frames.shape) == 5:
+                    print(f"[WARNING] Cache: squeezing batch dim from {all_frames.shape}")
+                    all_frames = all_frames.squeeze(0)
+                    print(f"[DEBUG] Cache: after squeeze {all_frames.shape}")
+            else:
+                print(f"[DEBUG] Cache: all_frames is list with {len(all_frames)} items")
+
+            if hasattr(all_masks, 'shape'):
+                print(f"[DEBUG] Cache: all_masks is tensor with shape {all_masks.shape}")
+                if len(all_masks.shape) == 5:
+                    print(f"[WARNING] Cache: squeezing batch dim from masks {all_masks.shape}")
+                    all_masks = all_masks.squeeze(0)
 
             # Store in global FRAME_CACHE (just storing Python references - INSTANT!)
             cache_key = f"video_data:{base_name}"
@@ -3196,7 +3430,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 '-y',
                 '-framerate', str(fps),
                 '-start_number', '0',  # Start from 0000.png
-                '-i', os.path.join(shared_cleaned_dir, '%04d.png'),
+                '-i', os.path.join(shared_cleaned_dir, '%04d.png').replace('\\', '/'),
                 '-c:v', 'h264_nvenc',
                 '-preset', 'p4',
                 '-tune', 'hq',
@@ -3465,6 +3699,18 @@ def process_segment_task(self, segment_data):
                 with FRAME_CACHE_LOCK:
                     cached = FRAME_CACHE[cache_key]
                     cached_frames = cached['frames']
+
+                    # Debug: Log cache data type and shape
+                    if hasattr(cached_frames, 'shape'):
+                        print(f"   [DEBUG] Cache frames type: tensor, shape: {cached_frames.shape}")
+                        if len(cached_frames.shape) == 5:
+                            print(f"   [WARNING] Cache has 5D tensor - len() will be wrong! Squeezing...")
+                            cached_frames = cached_frames.squeeze(0)
+                            cached['frames'] = cached_frames  # Update cache
+                            print(f"   [DEBUG] After squeeze: {cached_frames.shape}")
+                    else:
+                        print(f"   [DEBUG] Cache frames type: {type(cached_frames).__name__}, len: {len(cached_frames)}")
+
                     total_frames = len(cached_frames)  # Update total_frames from cache
 
                     # Recalculate padded_end with correct total_frames
@@ -3832,6 +4078,11 @@ def process_segment_task(self, segment_data):
                     # Only write if not already written by another segment
                     if not os.path.exists(dst):
                         cv2.imwrite(dst, frame)
+
+                    # Also add to in-memory frame buffer for zero-copy encoding
+                    with FRAME_BUFFER_LOCK:
+                        if video_id in FRAME_BUFFER:
+                            FRAME_BUFFER[video_id].add_frame(global_frame_idx, frame)
             else:
                 # Copy from disk
                 for local_idx in range(frames_copied):
@@ -3844,6 +4095,13 @@ def process_segment_task(self, segment_data):
                     # Only write if not already written by another segment
                     if os.path.exists(src) and not os.path.exists(dst):
                         shutil.copy2(src, dst)
+
+                        # Also add to in-memory frame buffer for zero-copy encoding
+                        frame = cv2.imread(src)
+                        if frame is not None:
+                            with FRAME_BUFFER_LOCK:
+                                if video_id in FRAME_BUFFER:
+                                    FRAME_BUFFER[video_id].add_frame(global_frame_idx, frame)
 
         else:
             # Run ProPainter on this segment - watermark detected!
@@ -4070,7 +4328,18 @@ def process_segment_task(self, segment_data):
                     # Save back to shared buffer (within lock - atomic operation)
                     cv2.imwrite(shared_frame_path, result_frame)
 
+                    # Also add to in-memory frame buffer for zero-copy encoding
+                    with FRAME_BUFFER_LOCK:
+                        if video_id in FRAME_BUFFER:
+                            FRAME_BUFFER[video_id].add_frame(global_frame_idx, result_frame)
+
             print(f"   [OK] Merged {len(cleaned_frames)} frames to shared buffer: {shared_cleaned_dir}")
+
+            # Report buffer status
+            with FRAME_BUFFER_LOCK:
+                if video_id in FRAME_BUFFER:
+                    buffer = FRAME_BUFFER[video_id]
+                    print(f"   [BUFFER] Frame buffer has {buffer.frames_received}/{buffer.total_frames} frames")
 
             # 🔍 DEBUG: Verify written files are unique
             written_files = sorted([f for f in os.listdir(shared_cleaned_dir) if f.endswith('.png')])
@@ -4790,7 +5059,7 @@ def process_video_task(self, video_path):
                 FFMPEG_EXE, '-i', video_path,
                 '-qscale:v', '2',
                 '-start_number', '0',  # Start numbering at 0 to match frame indices
-                os.path.join(original_frames_dir, '%04d.png')
+                os.path.join(original_frames_dir, '%04d.png').replace('\\', '/')
             ]
             subprocess.run(extract_cmd, capture_output=True, check=True)
 

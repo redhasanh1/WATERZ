@@ -1078,7 +1078,18 @@
             .nav-cta {
                 margin: 0.5rem 1rem;
             }
+
+            /* Show hamburger-only items in mobile menu */
+            .hamburger-only {
+                display: block !important;
+            }
         }
+
+        /* Hide hamburger-only items on desktop */
+        .hamburger-only {
+            display: none;
+        }
+
         /* Ad zones */
         .ad-container {
             background: rgba(26, 26, 46, 0.5);
@@ -1250,8 +1261,8 @@
                 <ul class="nav-menu" id="navMenu">
                     <li><a href="/">Home</a></li>
                     <li><a href="#how-to">How It Works</a></li>
-                    <li><a href="#comparison">Examples</a></li>
                     <li><a href="premium.html#pricing">Pricing</a></li>
+                    <li class="hamburger-only"><a href="#comparison">Examples</a></li>
                     <!-- Mobile-only: User Navigation Items -->
                     <li class="mobile-only mobile-user-section" id="mobileUserSection" style="display: none;">
                         <span id="mobileUserEmail" style="color: var(--primary); font-weight: 600;"></span>
