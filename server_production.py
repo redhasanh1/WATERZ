@@ -2878,17 +2878,21 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         cap = None
 
         if use_nvdec:
-            # NVDEC REQUIRED - NO CPU FALLBACK!
-            from nvdec_video_loader import NVDECVideoLoader
-            nvdec_loader = NVDECVideoLoader(video_path, device_id=0)
-            props = nvdec_loader.get_properties()
-            fps = int(props['fps'])
-            width = props['width']
-            height = props['height']
-            total_frames = props['total_frames']
-            print(f"[OK] NVDEC hardware decoder: {width}x{height} @ {fps} fps ({total_frames} frames)")
-        else:
-            # CPU decoder (if NVDEC disabled)
+            try:
+                from nvdec_video_loader import NVDECVideoLoader
+                nvdec_loader = NVDECVideoLoader(video_path, device_id=0)
+                props = nvdec_loader.get_properties()
+                fps = int(props['fps'])
+                width = props['width']
+                height = props['height']
+                total_frames = props['total_frames']
+                print(f"[OK] NVDEC hardware decoder: {width}x{height} @ {fps} fps ({total_frames} frames)")
+            except ImportError:
+                print("[WARNING] nvdec_video_loader not available, falling back to CPU decoder")
+                use_nvdec = False
+
+        if not use_nvdec:
+            # CPU decoder fallback
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 raise Exception(f"Failed to open video: {video_path}")
