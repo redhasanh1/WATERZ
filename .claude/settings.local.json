@@ -61,7 +61,8 @@
       "Bash(cmd /c \"fsutil reparsepoint query D:\\watermarkz\\faster-propainter-main\\weights 2>nul || echo Not a junction/symlink\")",
       "Bash(cmd /c \"powershell -Command \"\"(Get-Content ''D:\\watermarkz\\entrypoint.sh'' -Raw).Replace([char]13+[char]10, [char]10) | Set-Content -NoNewline ''D:\\watermarkz\\entrypoint.sh''\"\"\")",
       "Bash(cmd /c \"findstr /M /R \"\"^\"\" D:\\watermarkz\\entrypoint.sh > nul && echo File exists\")",
-      "Bash(cmd /c \"for %I in (D:\\watermarkz\\entrypoint.sh) do @echo Size: %~zI bytes\")"
+      "Bash(cmd /c \"for %I in (D:\\watermarkz\\entrypoint.sh) do @echo Size: %~zI bytes\")",
+      "Bash(cmd /c \"copy D:\\watermarkz\\test_hybrid_sam2_tracking.py D:\\watermarkz\\test_local\\test_sam2_tracking.py\")"
     ],
     "deny": [],
     "ask": []

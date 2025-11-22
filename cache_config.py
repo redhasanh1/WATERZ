@@ -70,9 +70,11 @@ triton_cache_dir = os.path.join(os.path.dirname(__file__), 'temp', f'.triton_cac
 os.makedirs(cache_dir, exist_ok=True)
 os.makedirs(triton_cache_dir, exist_ok=True)
 
-# Set per-worker cache directories
-os.environ['TORCHINDUCTOR_CACHE_DIR'] = cache_dir
-os.environ['TRITON_CACHE_DIR'] = triton_cache_dir
+# Set per-worker cache directories (only if not already set by batch file)
+if 'TORCHINDUCTOR_CACHE_DIR' not in os.environ:
+    os.environ['TORCHINDUCTOR_CACHE_DIR'] = cache_dir
+if 'TRITON_CACHE_DIR' not in os.environ:
+    os.environ['TRITON_CACHE_DIR'] = triton_cache_dir
 
 # Enable FX graph cache and autotune cache (set in START_CELERY_TRT.bat)
 # os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] is already set by batch file
