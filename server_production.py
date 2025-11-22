@@ -1872,15 +1872,10 @@ def background_encoder_worker():
         try:
             redis_client = celery.backend.client
 
-            # Configure pubsub with NO timeout and keepalive
+            # Configure pubsub with NO timeout (keepalive disabled for Railway proxy compatibility)
             pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
             pubsub.connection_pool.connection_kwargs['socket_timeout'] = None
-            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = True
-            pubsub.connection_pool.connection_kwargs['socket_keepalive_options'] = {
-                1: 60,   # TCP_KEEPIDLE
-                2: 10,   # TCP_KEEPINTVL
-                3: 6     # TCP_KEEPCNT
-            }
+            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = False
 
             pubsub.subscribe('segment_ready')
 
@@ -6914,12 +6909,12 @@ def sam2_select_object():
             'video_height': video_height
         }
 
-        print(f"[SAM2] Publishing request {request_id} to channel: sam2:selection:request")
+        print(f"[SAM2] Pushing request {request_id} to list: sam2:selection:request")
         print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
-        redis_client.publish('sam2:selection:request', json.dumps(request_data))
+        redis_client.lpush('sam2:selection:request', json.dumps(request_data))
 
-        # Wait for response (timeout: 5 seconds)
-        timeout = 5.0
+        # Wait for response (timeout: 30 seconds for high load scenarios)
+        timeout = 30.0
         start_time = time.time()
 
         print(f"[SAM2] Waiting for response on: {response_channel}")

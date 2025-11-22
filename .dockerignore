@@ -1,81 +1,133 @@
-# Git
+# ===========================================
+# Docker Ignore for Celery Worker Image
+# PyTorch-only mode (~10-12GB image)
+# ===========================================
+
+# ----- Git -----
 .git
 .gitignore
 .gitattributes
+.github/
 
-# IDE
+# ----- IDE -----
 .vscode
 .idea
 *.swp
 *.swo
+*.code-workspace
 
-# Python cache
+# ----- Python Cache -----
 __pycache__
 *.py[cod]
 *$py.class
-*.so
 .Python
+*.egg-info/
+dist/
+build/
 
-# Virtual environments
+# ----- Virtual Environments -----
 venv/
+venv*/
 ENV/
 env/
+.venv/
 
-# Temporary files
-temp/*
-!temp/.gitkeep
-uploads/*
-!uploads/.gitkeep
-results/*
-!results/.gitkeep
-cache/*
-!cache/.gitkeep
-pip_cache/*
-!pip_cache/.gitkeep
+# ----- Temporary/Runtime Directories -----
+temp/
+uploads/
+results/
+cache/
+pip_cache/
+temp_sam2_masks/
+temp_sam2_frames/
+temp_sam2_output/
 
-# Logs
+# ----- Logs -----
 *.log
 logs/
 
-# OS files
+# ----- OS Files -----
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Documentation
+# ----- Documentation -----
 *.md
-!README.md
 docs/
 
-# Test files
+# ----- Test Files -----
 tests/
+test/
 test_*.py
 *_test.py
 
-# Build artifacts (keep only the engines we need)
-*.pt
-*.onnx
-*.pth
-*.safetensors
-# Keep the TensorRT engine we need
-!runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine
+# ----- TensorRT Engines (Using PyTorch mode) -----
+*.engine
+# *.onnx  # Commented out - NeuFlow ONNX model needed for USE_NEUFLOW=1
+engines/
+TensorRT-*/
+dcnv4_tensorrt_plugin/
 
-# Node.js (if any)
+# ----- Training Data (Not needed for inference) -----
+videostotrain/
+NEW_SORA_TRAINING/
+yolo_training/
+runs/detect/*/images/
+runs/detect/*/labels/
+
+# ----- Unused Models/Frameworks -----
+E2FGVI/
+edgeconnect/
+mmdeploy/
+tensorrt-llm-study/
+
+# ----- Node.js -----
 node_modules/
-package-lock.json
+package*.json
 
-# Windows batch files (not needed in Docker)
+# ----- Windows Files (Linux container) -----
 *.bat
+*.exe
+*.dll
+*.pdb
+*.msi
+redis*.exe
+EventLog.dll
+nul
 
-# Claude Code
+# ----- Claude Code -----
 .claude/
 
-# Misc
-nul
+# ----- Web Frontend (Not needed for Celery worker) -----
+web/
+static/
+templates/
+
+# ----- Archives -----
 *.zip
 *.tar.gz
 *.tgz
-redis*.exe
-redis*.pdb
-redis*.dll
-EventLog.dll
+*.rar
+*.7z
+
+# ----- Videos (test data) -----
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# ----- Python Packages (Use pip instead) -----
+python_packages/
+
+# ----- Jupyter -----
+*.ipynb
+.ipynb_checkpoints/
+
+# ----- Git histories in submodules -----
+ProPainter-main/.git/
+segment-anything-2/.git/
+ProPainter/.git/
+
+# ----- Symlinked weights (already copied from main weights/) -----
+faster-propainter-main/weights/

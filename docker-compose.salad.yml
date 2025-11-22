@@ -1,0 +1,96 @@
+# ===========================================
+# Docker Compose for Local Testing
+# Simulates Salad.com GPU environment
+# ===========================================
+
+version: '3.8'
+
+services:
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.celery
+    image: watermarkz-celery:latest
+    container_name: watermarkz-celery-worker
+
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Environment variables
+    environment:
+      # Redis connection (replace with your Railway URL)
+      - REDIS_URL=${REDIS_URL:-redis://localhost:6379/0}
+
+      # PyTorch mode (no TensorRT)
+      - YOLO_REQUIRE_TENSORRT=0
+      - FORCE_TRT_RFCNET=0
+      - FORCE_TRT_TRANSFORMER=0
+      - FORCE_TRT_RAFT=0
+
+      # Optimizations
+      - USE_TORCH_COMPILE=1
+      - USE_NEUFLOW=1
+      - ENABLE_FP8_TRANSFORMER=1
+      - ENABLE_NVDEC=1
+
+      # SAM2 tracking
+      - USE_SAM2_TRACKING=1
+
+      # Test model loading on startup
+      - TEST_MODELS=1
+
+    # Mount data volume for runtime files
+    volumes:
+      - celery_data:/data
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "celery", "-A", "server_production.celery", "inspect", "ping", "-d", "celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Optional: Local Redis for testing
+  redis:
+    image: redis:7-alpine
+    container_name: watermarkz-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles:
+      - with-redis
+
+volumes:
+  celery_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ===========================================
+# Usage:
+#
+# 1. Build the image:
+#    docker-compose -f docker-compose.salad.yml build
+#
+# 2. Run with external Redis (Railway):
+#    REDIS_URL=redis://... docker-compose -f docker-compose.salad.yml up
+#
+# 3. Run with local Redis:
+#    docker-compose -f docker-compose.salad.yml --profile with-redis up
+#
+# 4. Push to Docker Hub:
+#    docker tag watermarkz-celery:latest yourusername/watermarkz-celery:latest
+#    docker push yourusername/watermarkz-celery:latest
+# ===========================================

@@ -16,6 +16,7 @@ import json
 import time
 import base64
 import threading
+import argparse
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
@@ -50,13 +51,18 @@ if not REDIS_URL:
 ENCODER_ENGINE = r"D:\watermarkz\sam2_trt_inference\engines\sam2_encoder_fp16.engine"
 DECODER_ENGINE = r"D:\watermarkz\sam2_trt_inference\engines\sam2_decoder_fp16_dynamic.engine"
 
-# Redis channels
-CHANNEL_REQUEST = 'sam2:selection:request'
+# Redis channels/lists
+LIST_REQUEST = 'sam2:selection:request'  # Changed to list for proper load distribution
 CHANNEL_RESPONSE_PREFIX = 'sam2:selection:response:'
+
+# Worker configuration (set by command line args)
+WORKER_ID = 0
+DASHBOARD_PORT = 5555
 
 # Global state
 worker_stats = {
     'status': 'initializing',
+    'worker_id': 0,
     'requests_processed': 0,
     'requests_failed': 0,
     'current_request': None,
@@ -110,12 +116,9 @@ def connect_redis():
         redis_client = redis.from_url(REDIS_URL, decode_responses=False)
         redis_client.ping()
 
-        redis_pubsub = redis_client.pubsub()
-        redis_pubsub.subscribe(CHANNEL_REQUEST)
-
         worker_stats['redis_connected'] = True
         print(f"[REDIS] Connected to {REDIS_URL[:40]}...")
-        print(f"[REDIS] Subscribed to channel: {CHANNEL_REQUEST}")
+        print(f"[REDIS] Listening on list: {LIST_REQUEST} (BRPOP)")
         return True
     except Exception as e:
         print(f"[ERROR] Redis connection failed: {e}")
@@ -134,7 +137,7 @@ def process_selection_request(request_data):
         frame_base64 = request_data.get('frame_data')
         points = request_data.get('points', [])
 
-        print(f"[REQUEST] Processing {request_id} with {len(points)} points")
+        print(f"[WORKER {WORKER_ID}] Processing {request_id} with {len(points)} points")
         worker_stats['current_request'] = request_id
 
         # Decode frame from base64
@@ -185,7 +188,7 @@ def process_selection_request(request_data):
             'processing_time_ms': processing_time_ms
         }
 
-        print(f"[OK] Processed {request_id} in {processing_time_ms}ms (IoU: {score:.3f})")
+        print(f"[WORKER {WORKER_ID}] Processed {request_id} in {processing_time_ms}ms (IoU: {score:.3f})")
         worker_stats['current_request'] = None
 
         return response
@@ -206,10 +209,10 @@ def process_selection_request(request_data):
 
 
 def redis_listener():
-    """Listen for Redis messages and process them"""
-    global redis_pubsub, redis_client, worker_stats
+    """Listen for Redis messages and process them using BRPOP for load distribution"""
+    global redis_client, worker_stats
 
-    print(f"[WORKER] Starting Redis listener...")
+    print(f"[WORKER {WORKER_ID}] Starting Redis listener (BRPOP)...")
     worker_stats['status'] = 'idle'
 
     # Pre-load SAM2 model
@@ -217,20 +220,22 @@ def redis_listener():
 
     while True:
         try:
-            # Poll for messages with timeout
-            message = redis_pubsub.get_message(timeout=0.01)  # 10ms poll interval
+            # Block waiting for work from the list (proper load distribution)
+            # BRPOP returns (key, value) tuple or None on timeout
+            result = redis_client.brpop(LIST_REQUEST, timeout=1)  # 1 second timeout
 
-            if message and message['type'] == 'message':
+            if result:
                 worker_stats['status'] = 'processing'
 
-                # Parse request
-                request_data = json.loads(message['data'])
+                # Parse request (result is tuple: (list_name, data))
+                _, message_data = result
+                request_data = json.loads(message_data)
                 request_id = request_data.get('request_id')
 
                 # Process request
                 response = process_selection_request(request_data)
 
-                # Publish response to specific channel
+                # Publish response to specific channel (still use pub/sub for responses)
                 response_channel = CHANNEL_RESPONSE_PREFIX + request_id
                 redis_client.publish(response_channel, json.dumps(response))
 
@@ -437,15 +442,32 @@ def api_stats():
 
 def main():
     """Start worker and dashboard"""
+    global WORKER_ID, DASHBOARD_PORT, worker_stats
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="SAM2 Selection Worker")
+    parser.add_argument("--worker-id", type=int, default=0,
+                        help="Worker ID (0-4) for multi-worker setup")
+    parser.add_argument("--port", type=int, default=None,
+                        help="Dashboard port (default: 5555 + worker_id)")
+    args = parser.parse_args()
+
+    # Set worker configuration
+    WORKER_ID = args.worker_id
+    DASHBOARD_PORT = args.port if args.port else 5555 + WORKER_ID
+    worker_stats['worker_id'] = WORKER_ID
+
     print("="*70)
-    print("SAM2 SELECTION WORKER")
+    print(f"SAM2 SELECTION WORKER #{WORKER_ID}")
     print("="*70)
+    print(f"[CONFIG] Worker ID: {WORKER_ID}")
+    print(f"[CONFIG] Dashboard Port: {DASHBOARD_PORT}")
     print(f"[CONFIG] Redis: {REDIS_URL[:40]}...")
-    print(f"[CONFIG] Request Channel: {CHANNEL_REQUEST}")
+    print(f"[CONFIG] Request List: {LIST_REQUEST} (BRPOP)")
     print(f"[CONFIG] Response Channel: {CHANNEL_RESPONSE_PREFIX}<request_id>")
     print(f"[CONFIG] Encoder: {ENCODER_ENGINE}")
     print(f"[CONFIG] Decoder: {DECODER_ENGINE}")
-    print(f"[CONFIG] Poll Interval: 10ms")
+    print(f"[CONFIG] Mode: Multi-worker (proper load distribution)")
     print("="*70)
 
     # Connect to Redis
@@ -458,10 +480,10 @@ def main():
     listener_thread.start()
 
     # Start Flask dashboard
-    print(f"\n[DASHBOARD] Starting web dashboard on http://localhost:5555")
-    print(f"[DASHBOARD] Visit http://localhost:5555 to monitor worker\n")
+    print(f"\n[DASHBOARD] Starting web dashboard on http://localhost:{DASHBOARD_PORT}")
+    print(f"[DASHBOARD] Visit http://localhost:{DASHBOARD_PORT} to monitor worker\n")
 
-    app.run(host='0.0.0.0', port=5555, debug=False)
+    app.run(host='0.0.0.0', port=DASHBOARD_PORT, debug=False)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,163 @@
+============================================
+DOCKER BUILD & DEPLOYMENT GUIDE
+Celery Worker for Salad.com GPU Cloud
+============================================
+
+PREREQUISITES:
+- Docker Desktop with WSL2 backend
+- NVIDIA Container Toolkit (for local GPU testing)
+- Docker Hub account (free tier works fine)
+
+============================================
+1. BUILD THE IMAGE
+============================================
+
+# Build from D:\watermarkz directory
+cd D:\watermarkz
+docker build -f Dockerfile.celery -t watermarkz-celery:latest .
+
+# Expected build time: 15-30 minutes (first build)
+# Expected image size: ~10-12GB
+
+============================================
+2. TEST LOCALLY (Optional)
+============================================
+
+# Test with local Redis
+docker-compose -f docker-compose.salad.yml --profile with-redis up
+
+# Test with Railway Redis
+set REDIS_URL=redis://default:PASSWORD@HOST:PORT/0
+docker-compose -f docker-compose.salad.yml up
+
+# Check logs
+docker logs watermarkz-celery-worker
+
+============================================
+3. PUSH TO DOCKER HUB
+============================================
+
+# Login to Docker Hub
+docker login
+
+# Tag the image
+docker tag watermarkz-celery:latest YOUR_USERNAME/watermarkz-celery:latest
+
+# Push to Docker Hub (takes 10-20 min for 10GB)
+docker push YOUR_USERNAME/watermarkz-celery:latest
+
+============================================
+4. DEPLOY TO SALAD
+============================================
+
+A. Create Container Group on Salad Dashboard:
+   - Image: YOUR_USERNAME/watermarkz-celery:latest
+   - Container Gateway: Disabled (Celery worker, not web server)
+   - GPU: Any (works on all types with PyTorch mode)
+   - vCPUs: 4
+   - Memory: 16GB
+   - Storage: 20GB
+
+B. Environment Variables:
+   REDIS_URL=redis://default:PASSWORD@HOST:PORT/0
+   USE_TORCH_COMPILE=1
+   USE_NEUFLOW=1
+   ENABLE_FP8_TRANSFORMER=1
+   USE_SAM2_TRACKING=1
+
+C. Startup Probe:
+   - Command: python -c "import torch; print('OK')"
+   - Initial delay: 60s
+   - Period: 30s
+
+D. Replica Count:
+   - Start with 1 for testing
+   - Scale up to 3-10 for production
+
+============================================
+5. MONITOR & DEBUG
+============================================
+
+# Check Celery connection
+docker exec -it watermarkz-celery-worker celery -A server_production.celery inspect ping
+
+# Check GPU status
+docker exec -it watermarkz-celery-worker nvidia-smi
+
+# Check worker stats
+docker exec -it watermarkz-celery-worker celery -A server_production.celery inspect stats
+
+# View task queue
+docker exec -it watermarkz-celery-worker celery -A server_production.celery inspect active
+
+============================================
+ENVIRONMENT VARIABLES REFERENCE
+============================================
+
+REQUIRED:
+  REDIS_URL              - Redis connection URL for Celery broker
+
+OPTIONAL - Performance:
+  USE_TORCH_COMPILE=1    - Enable torch.compile (recommended)
+  USE_NEUFLOW=1          - Use NeuFlow for optical flow
+  ENABLE_FP8_TRANSFORMER=1 - FP8 quantization on Ada+ GPUs
+  ENABLE_NVDEC=1         - GPU video decoding
+
+OPTIONAL - Features:
+  USE_SAM2_TRACKING=1    - Enable SAM2 object tracking
+  TEST_MODELS=1          - Test model loading on startup
+
+OPTIONAL - Debug:
+  CELERY_LOGLEVEL=debug  - Verbose Celery logging
+
+============================================
+TROUBLESHOOTING
+============================================
+
+1. "CUDA not available"
+   - Ensure NVIDIA Container Toolkit is installed
+   - Check: nvidia-smi inside container
+
+2. "Redis connection refused"
+   - Verify REDIS_URL is correct
+   - Check Redis is accessible from Salad network
+
+3. "Out of memory"
+   - Reduce batch size in server_production.py
+   - Use smaller GPU (3060) requires lower batch
+
+4. "Model not found"
+   - Check runs/detect/new_sora_watermark/weights/best.pt exists
+   - Rebuild image if files were added after build
+
+5. Slow first inference:
+   - torch.compile caches on first run
+   - Subsequent runs are much faster
+
+============================================
+UPDATING THE IMAGE
+============================================
+
+# Make code changes, then rebuild
+docker build -f Dockerfile.celery -t watermarkz-celery:latest .
+
+# Push new version
+docker push YOUR_USERNAME/watermarkz-celery:latest
+
+# On Salad: Redeploy the container group to pull new image
+
+============================================
+COST ESTIMATION (Salad.com)
+============================================
+
+- RTX 3060: ~$0.05/hour
+- RTX 3080: ~$0.10/hour
+- RTX 4070: ~$0.12/hour
+- RTX 4090: ~$0.25/hour
+
+Processing speed (approx):
+- 3060: 30-45 seconds/video
+- 3080: 20-30 seconds/video
+- 4090: 10-15 seconds/video
+
+============================================
