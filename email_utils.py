@@ -1,67 +1,54 @@
 import os
-import ssl
-import smtplib
-from email.message import EmailMessage
+import requests
 
 def send_reset_email(to_email: str, reset_url: str):
-    """Send password reset email via SMTP."""
+    """Send password reset email via Brevo HTTP API."""
 
-    # Debug logging
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = os.getenv("SMTP_PORT", "465")
-    smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    smtp_from = os.getenv("SMTP_FROM")
+    api_key = os.getenv("BREVO_API_KEY")
+    smtp_from = os.getenv("SMTP_FROM", "noreply@markremoverai.com")
 
-    print(f"[EMAIL DEBUG] Server: {smtp_server}")
-    print(f"[EMAIL DEBUG] Port: {smtp_port}")
-    print(f"[EMAIL DEBUG] Username: {smtp_username}")
-    print(f"[EMAIL DEBUG] Password: {'*' * len(smtp_password) if smtp_password else 'NOT SET'}")
+    print(f"[EMAIL DEBUG] Using Brevo HTTP API")
     print(f"[EMAIL DEBUG] From: {smtp_from}")
     print(f"[EMAIL DEBUG] To: {to_email}")
+    print(f"[EMAIL DEBUG] API Key: {'*' * 20}...{api_key[-8:] if api_key else 'NOT SET'}")
 
-    if not all([smtp_server, smtp_port, smtp_username, smtp_password, smtp_from]):
-        missing = []
-        if not smtp_server: missing.append("SMTP_SERVER")
-        if not smtp_port: missing.append("SMTP_PORT")
-        if not smtp_username: missing.append("SMTP_USERNAME")
-        if not smtp_password: missing.append("SMTP_PASSWORD")
-        if not smtp_from: missing.append("SMTP_FROM")
-        raise ValueError(f"Missing SMTP environment variables: {', '.join(missing)}")
+    if not api_key:
+        raise ValueError("Missing BREVO_API_KEY environment variable")
 
-    msg = EmailMessage()
-    msg["Subject"] = "Reset your MarkRemoverAI password"
-    msg["From"] = smtp_from
-    msg["To"] = to_email
-    msg.set_content(
-        f"Click the link below to reset your password (expires in 1 hour):\n\n"
-        f"{reset_url}\n\n"
-        "If you didn't request this, please ignore this email."
-    )
+    url = "https://api.brevo.com/v3/smtp/email"
 
-    print(f"[EMAIL DEBUG] Connecting to {smtp_server}:{smtp_port}...")
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
+    }
 
-    port = int(smtp_port)
+    payload = {
+        "sender": {
+            "name": "MarkRemoverAI",
+            "email": smtp_from
+        },
+        "to": [
+            {
+                "email": to_email
+            }
+        ],
+        "subject": "Reset your MarkRemoverAI password",
+        "textContent": (
+            f"Click the link below to reset your password (expires in 1 hour):\n\n"
+            f"{reset_url}\n\n"
+            "If you didn't request this, please ignore this email."
+        )
+    }
 
-    # Port 465 uses SSL, Port 587 uses STARTTLS
-    if port == 465:
-        with smtplib.SMTP_SSL(
-            smtp_server,
-            port,
-            context=ssl.create_default_context(),
-        ) as server:
-            print(f"[EMAIL DEBUG] Logging in as {smtp_username}...")
-            server.login(smtp_username, smtp_password)
-            print(f"[EMAIL DEBUG] Sending message...")
-            server.send_message(msg)
+    print(f"[EMAIL DEBUG] Sending via Brevo API...")
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    if response.status_code == 201:
+        print(f"[EMAIL SUCCESS] Reset link sent to {to_email}")
+        return True
     else:
-        # Port 587 with STARTTLS
-        with smtplib.SMTP(smtp_server, port) as server:
-            print(f"[EMAIL DEBUG] Starting TLS...")
-            server.starttls(context=ssl.create_default_context())
-            print(f"[EMAIL DEBUG] Logging in as {smtp_username}...")
-            server.login(smtp_username, smtp_password)
-            print(f"[EMAIL DEBUG] Sending message...")
-            server.send_message(msg)
-
-    print(f"[EMAIL SUCCESS] Reset link sent to {to_email}")
+        error_msg = f"Brevo API error {response.status_code}: {response.text}"
+        print(f"[EMAIL ERROR] {error_msg}")
+        raise Exception(error_msg)
