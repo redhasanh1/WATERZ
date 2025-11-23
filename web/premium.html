@@ -894,50 +894,82 @@
 
             <!-- Monthly Subscription Plans -->
             <div style="text-align: center; margin-bottom: 2.5rem; padding-top: 3rem; border-top: 2px solid rgba(102, 126, 234, 0.15);">
-                <h3 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">Monthly Subscription Plans</h3>
-                <p style="color: var(--text-secondary); font-size: 1.1rem;">Recurring credits every month • Best for regular users</p>
+                <h3 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">Subscription Plans</h3>
+                <p style="color: var(--text-secondary); font-size: 1.1rem;">Recurring credits • Best for regular users</p>
+
+                <!-- Billing Toggle -->
+                <div style="display: inline-flex; align-items: center; gap: 1rem; margin-top: 1.5rem; padding: 0.5rem; background: rgba(102, 126, 234, 0.1); border-radius: 50px;">
+                    <span id="monthlyLabel" style="font-weight: 600; color: var(--primary); padding: 0.5rem 1rem; background: white; border-radius: 50px; cursor: pointer; transition: all 0.3s;">Monthly</span>
+                    <label style="position: relative; display: inline-block; width: 50px; height: 26px; cursor: pointer;">
+                        <input type="checkbox" id="billingToggle" style="opacity: 0; width: 0; height: 0;">
+                        <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--primary); border-radius: 26px; transition: 0.3s;"></span>
+                        <span id="toggleKnob" style="position: absolute; content: ''; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s;"></span>
+                    </label>
+                    <span id="annualLabel" style="font-weight: 600; color: var(--text-secondary); padding: 0.5rem 1rem; cursor: pointer; transition: all 0.3s;">Annual <span style="color: var(--success); font-size: 0.8rem;">Save up to 38%</span></span>
+                </div>
             </div>
 
             <div class="pricing-grid" style="gap: 2.5rem;">
-                <!-- Starter Plan -->
+                <!-- Free Plan -->
                 <div class="pricing-card" style="position: relative; overflow: hidden;">
                     <div class="pricing-header">
                         <h3>Free</h3>
                         <div class="pricing-price">$0<span>/month</span></div>
                     </div>
+                    <ul class="pricing-features" style="margin: 1.5rem 0;">
+                        <li>5 credits on signup</li>
+                        <li>~50 seconds of video</li>
+                        <li>720p processing</li>
+                    </ul>
                     <button class="btn-pricing secondary" onclick="signUp('free')">Start Free</button>
-                    <p style="color: var(--text-secondary); margin-top: 1rem;">Try it out with complimentary credits on signup.</p>
                 </div>
 
-                <!-- Starter Plan -->
-                <div class="pricing-card" style="position: relative; overflow: hidden;">
-                    <div class="pricing-header">
-                        <h3>Starter</h3>
-                        <div class="pricing-price">$4.99<span>/month</span></div>
-                    </div>
-                    <button class="btn-pricing primary" onclick="signUp('starter')">Get Starter</button>
-                    <p style="color: var(--text-secondary); margin-top: 1rem;">Great for creators refreshing smaller catalogs each month.</p>
-                </div>
-
-                <!-- Professional Plan -->
-                <div class="pricing-card popular" style="transform: translateY(-14px);">
-                    <div class="popular-badge">MOST POPULAR</div>
+                <!-- Pro Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;" data-plan="pro">
                     <div class="pricing-header">
                         <h3>Pro</h3>
-                        <div class="pricing-price">$9.99<span>/month</span></div>
+                        <div class="pricing-price" data-monthly="$19.99" data-annual="$149">$19.99<span class="price-period">/month</span></div>
                     </div>
-                    <button class="btn-pricing primary" onclick="signUp('pro')">Start Pro</button>
-                    <p style="color: var(--text-secondary); margin-top: 1rem;">Built for independent creators and teams refreshing rights-cleared assets weekly.</p>
+                    <ul class="pricing-features" style="margin: 1.5rem 0;">
+                        <li><span class="credits-display" data-monthly="75" data-annual="900">75</span> credits<span class="credits-period">/month</span></li>
+                        <li>~12.5 min of video</li>
+                        <li>Priority processing</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('pro')">Get Pro</button>
+                    <p class="annual-savings" style="color: var(--success); margin-top: 1rem; font-weight: 600; display: none;">Save 38% with annual</p>
                 </div>
 
-                <!-- Enterprise Plan -->
-                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                <!-- Business Plan -->
+                <div class="pricing-card popular" style="transform: translateY(-14px);" data-plan="business">
+                    <div class="popular-badge">MOST POPULAR</div>
                     <div class="pricing-header">
-                        <h3>Enterprise</h3>
-                        <div class="pricing-price">$49.99<span>/month</span></div>
+                        <h3>Business</h3>
+                        <div class="pricing-price" data-monthly="$49.99" data-annual="$399">$49.99<span class="price-period">/month</span></div>
                     </div>
-                    <button class="btn-pricing primary" onclick="signUp('enterprise')">Go Enterprise</button>
-                    <p style="color: var(--text-secondary); margin-top: 1rem;">For agencies and teams processing larger libraries every month.</p>
+                    <ul class="pricing-features" style="margin: 1.5rem 0;">
+                        <li><span class="credits-display" data-monthly="200" data-annual="2400">200</span> credits<span class="credits-period">/month</span></li>
+                        <li>~33 min of video</li>
+                        <li>Priority processing</li>
+                        <li>Perfect for real estate & agencies</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('business')">Get Business</button>
+                    <p class="annual-savings" style="color: var(--success); margin-top: 1rem; font-weight: 600; display: none;">Save 33% with annual</p>
+                </div>
+
+                <!-- Agency Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;" data-plan="agency">
+                    <div class="pricing-header">
+                        <h3>Agency</h3>
+                        <div class="pricing-price" data-monthly="$99.99" data-annual="$799">$99.99<span class="price-period">/month</span></div>
+                    </div>
+                    <ul class="pricing-features" style="margin: 1.5rem 0;">
+                        <li><span class="credits-display" data-monthly="500" data-annual="6000">500</span> credits<span class="credits-period">/month</span></li>
+                        <li>~83 min of video</li>
+                        <li>Priority processing</li>
+                        <li>Team collaboration</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('agency')">Get Agency</button>
+                    <p class="annual-savings" style="color: var(--success); margin-top: 1rem; font-weight: 600; display: none;">Save 33% with annual</p>
                 </div>
             </div>
 
@@ -981,6 +1013,73 @@
             document.getElementById('pricing').scrollIntoView({ behavior: 'smooth' });
         }
 
+        // Track billing period (monthly or annual)
+        let isAnnualBilling = false;
+
+        // Toggle switch functionality
+        const billingToggle = document.getElementById('billingToggle');
+        const toggleKnob = document.getElementById('toggleKnob');
+        const monthlyLabel = document.getElementById('monthlyLabel');
+        const annualLabel = document.getElementById('annualLabel');
+
+        function updatePricingDisplay() {
+            const priceElements = document.querySelectorAll('.pricing-price[data-monthly]');
+            const creditsElements = document.querySelectorAll('.credits-display');
+            const periodElements = document.querySelectorAll('.price-period');
+            const creditsPeriodElements = document.querySelectorAll('.credits-period');
+            const savingsElements = document.querySelectorAll('.annual-savings');
+
+            priceElements.forEach(el => {
+                const price = isAnnualBilling ? el.dataset.annual : el.dataset.monthly;
+                el.innerHTML = price + '<span class="price-period">' + (isAnnualBilling ? '/year' : '/month') + '</span>';
+            });
+
+            creditsElements.forEach(el => {
+                el.textContent = isAnnualBilling ? el.dataset.annual : el.dataset.monthly;
+            });
+
+            creditsPeriodElements.forEach(el => {
+                el.textContent = isAnnualBilling ? '/year' : '/month';
+            });
+
+            savingsElements.forEach(el => {
+                el.style.display = isAnnualBilling ? 'none' : 'block';
+            });
+
+            // Update toggle appearance
+            if (isAnnualBilling) {
+                toggleKnob.style.transform = 'translateX(24px)';
+                monthlyLabel.style.background = 'transparent';
+                monthlyLabel.style.color = 'var(--text-secondary)';
+                annualLabel.style.background = 'white';
+                annualLabel.style.borderRadius = '50px';
+            } else {
+                toggleKnob.style.transform = 'translateX(0)';
+                monthlyLabel.style.background = 'white';
+                monthlyLabel.style.color = 'var(--primary)';
+                annualLabel.style.background = 'transparent';
+            }
+        }
+
+        if (billingToggle) {
+            billingToggle.addEventListener('change', function() {
+                isAnnualBilling = this.checked;
+                updatePricingDisplay();
+            });
+
+            monthlyLabel.addEventListener('click', () => {
+                billingToggle.checked = false;
+                isAnnualBilling = false;
+                updatePricingDisplay();
+            });
+
+            annualLabel.addEventListener('click', () => {
+                billingToggle.checked = true;
+                isAnnualBilling = true;
+                updatePricingDisplay();
+            });
+        }
+
         async function signUp(plan) {
             if (plan === 'free') {
                 window.location.href = 'login.html';
@@ -994,8 +1093,10 @@
                     window.location.href = 'login.html';
                     return;
                 }
+                // Append _annual suffix if annual billing is selected
+                const planId = isAnnualBilling ? plan + '_annual' : plan;
                 // Pass user_id to checkout
-                await Billing.startCheckout(plan, { user_id: user.id });
+                await Billing.startCheckout(planId, { user_id: user.id });
             } catch (error) {
                 console.error('Stripe checkout error:', error);
                 alert('We were unable to start checkout. Please try again or contact support.');

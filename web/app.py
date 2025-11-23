@@ -106,15 +106,31 @@ CREDITS_ON_SIGNUP = int(os.environ.get('CREDITS_ON_SIGNUP', '5'))
 
 # Credits per subscription (on first purchase)
 CREDITS_ON_SUB = {
+    # Monthly plans
+    'pro': int(os.environ.get('CREDITS_ON_SUB_PRO', '75')),
+    'business': int(os.environ.get('CREDITS_ON_SUB_BUSINESS', '200')),
+    'agency': int(os.environ.get('CREDITS_ON_SUB_AGENCY', '500')),
+    # Annual plans (all credits upfront)
+    'pro_annual': int(os.environ.get('CREDITS_ON_SUB_PRO_ANNUAL', '900')),
+    'business_annual': int(os.environ.get('CREDITS_ON_SUB_BUSINESS_ANNUAL', '2400')),
+    'agency_annual': int(os.environ.get('CREDITS_ON_SUB_AGENCY_ANNUAL', '6000')),
+    # Legacy support
     'starter': int(os.environ.get('CREDITS_ON_SUB_STARTER', '20')),
-    'pro': int(os.environ.get('CREDITS_ON_SUB_PRO', '50')),
     'enterprise': int(os.environ.get('CREDITS_ON_SUB_ENTERPRISE', '300')),
 }
 
 # Credits per renewal (defaults to same as on sub)
 CREDITS_ON_RENEW = {
-    'starter': int(os.environ.get('CREDITS_ON_RENEW_STARTER', str(CREDITS_ON_SUB['starter']))),
+    # Monthly plans
     'pro': int(os.environ.get('CREDITS_ON_RENEW_PRO', str(CREDITS_ON_SUB['pro']))),
+    'business': int(os.environ.get('CREDITS_ON_RENEW_BUSINESS', str(CREDITS_ON_SUB['business']))),
+    'agency': int(os.environ.get('CREDITS_ON_RENEW_AGENCY', str(CREDITS_ON_SUB['agency']))),
+    # Annual plans
+    'pro_annual': int(os.environ.get('CREDITS_ON_RENEW_PRO_ANNUAL', str(CREDITS_ON_SUB['pro_annual']))),
+    'business_annual': int(os.environ.get('CREDITS_ON_RENEW_BUSINESS_ANNUAL', str(CREDITS_ON_SUB['business_annual']))),
+    'agency_annual': int(os.environ.get('CREDITS_ON_RENEW_AGENCY_ANNUAL', str(CREDITS_ON_SUB['agency_annual']))),
+    # Legacy support
+    'starter': int(os.environ.get('CREDITS_ON_RENEW_STARTER', str(CREDITS_ON_SUB['starter']))),
     'enterprise': int(os.environ.get('CREDITS_ON_RENEW_ENTERPRISE', str(CREDITS_ON_SUB['enterprise']))),
 }
 
@@ -216,8 +232,16 @@ def _consume_credits(email: str, amount: int, reason: str) -> bool:
 # Stripe configuration
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_PRICE_LOOKUP = {
-    'starter': os.environ.get('STRIPE_PRICE_ID_STARTER', ''),
+    # Monthly plans
     'pro': os.environ.get('STRIPE_PRICE_ID_PRO', ''),
+    'business': os.environ.get('STRIPE_PRICE_ID_BUSINESS', ''),
+    'agency': os.environ.get('STRIPE_PRICE_ID_AGENCY', ''),
+    # Annual plans
+    'pro_annual': os.environ.get('STRIPE_PRICE_ID_PRO_ANNUAL', ''),
+    'business_annual': os.environ.get('STRIPE_PRICE_ID_BUSINESS_ANNUAL', ''),
+    'agency_annual': os.environ.get('STRIPE_PRICE_ID_AGENCY_ANNUAL', ''),
+    # Legacy support
+    'starter': os.environ.get('STRIPE_PRICE_ID_STARTER', ''),
     'enterprise': os.environ.get('STRIPE_PRICE_ID_ENTERPRISE', ''),
 }
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
