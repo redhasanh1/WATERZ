@@ -193,6 +193,10 @@ def detect_segments(
     """
     Detect segments where watermark stays in same position.
 
+    Uses FIRST position in segment as reference (not running average) for more stable
+    segment detection. Only creates new segment when watermark moves significantly from
+    its initial position.
+
     Args:
         detections_per_frame: List of bbox per frame (None if no detection)
         position_tolerance: Max pixel movement to consider "static" (default 5px)
@@ -208,6 +212,7 @@ def detect_segments(
     segments = []
     current_segment_start = None
     current_segment_bboxes = []
+    segment_anchor_bbox = None  # First bbox in segment - used as stable reference
 
     for frame_idx, bbox in enumerate(detections_per_frame):
         if bbox is None:
@@ -217,6 +222,7 @@ def detect_segments(
                 segments.append((current_segment_start, frame_idx - 1, avg_bbox))
             current_segment_start = None
             current_segment_bboxes = []
+            segment_anchor_bbox = None
             continue
 
         # We have a detection
@@ -224,20 +230,23 @@ def detect_segments(
             # Start new segment
             current_segment_start = frame_idx
             current_segment_bboxes = [bbox]
+            segment_anchor_bbox = bbox  # This is the anchor for comparison
         else:
-            # Check if bbox is similar to segment
-            avg_bbox_so_far = average_bbox(current_segment_bboxes)
-            if bboxes_similar(bbox, avg_bbox_so_far, position_tolerance=position_tolerance):
+            # Compare against FIRST bbox in segment (anchor), not running average
+            # This prevents drift from causing spurious segment breaks
+            if bboxes_similar(bbox, segment_anchor_bbox, position_tolerance=position_tolerance):
                 # Continue current segment
                 current_segment_bboxes.append(bbox)
             else:
-                # Position changed - end current segment and start new one
+                # Position changed significantly from anchor - end current segment
                 if len(current_segment_bboxes) >= min_segment_length:
                     avg_bbox = average_bbox(current_segment_bboxes)
                     segments.append((current_segment_start, frame_idx - 1, avg_bbox))
 
+                # Start new segment with this bbox as new anchor
                 current_segment_start = frame_idx
                 current_segment_bboxes = [bbox]
+                segment_anchor_bbox = bbox
 
     # Handle final segment
     if current_segment_start is not None and len(current_segment_bboxes) >= min_segment_length:

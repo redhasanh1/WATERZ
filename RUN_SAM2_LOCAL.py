@@ -28,19 +28,21 @@ BASE_DIR = Path(__file__).parent
 PROPAINTER_DIR = BASE_DIR / "faster-propainter-main"
 sys.path.insert(0, str(PROPAINTER_DIR))
 
-from watermark import pipeline as faster_propainter_pipeline
-from crop_utils import calculate_crop_region
-from segment_detector import detect_segments, merge_adjacent_segments
-from yolo_detector import YOLOWatermarkDetector
-
-# WSL2/Linux detection for torch.compile optimization
+# torch.compile requires Visual Studio C++ environment on Windows
+# Use START_CELERY_TRT_LOCAL.bat or call vcvars64.bat first to enable it
 IS_WSL2 = 'microsoft' in platform.release().lower() if hasattr(platform, 'release') else False
 IS_LINUX = sys.platform.startswith('linux')
-ENABLE_TORCH_COMPILE = IS_WSL2 or IS_LINUX
 
-if ENABLE_TORCH_COMPILE:
-    # WSL2/Linux: Enable torch.compile with Triton kernels
-    print(f"[COMPILE] Detected WSL2/Linux - enabling torch.compile")
+# Check if torch.compile was enabled externally (e.g., by batch file)
+if os.getenv('USE_TORCH_COMPILE_RAFT', '0') == '1':
+    print(f"[COMPILE] torch.compile enabled for RAFT (set externally)")
+    os.environ['TORCHINDUCTOR_CACHE_DIR'] = str(BASE_DIR / '.torch_compile_cache')
+    os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
+    os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
+    os.environ['TORCH_CUDAGRAPHS'] = '0'
+    os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
+elif IS_WSL2 or IS_LINUX:
+    print(f"[COMPILE] Enabling torch.compile for RAFT (Linux/WSL2)")
     os.environ['TORCHINDUCTOR_CACHE_DIR'] = str(BASE_DIR / '.torch_compile_cache')
     os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
     os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
@@ -48,9 +50,14 @@ if ENABLE_TORCH_COMPILE:
     os.environ['TORCH_CUDAGRAPHS'] = '0'
     os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
 else:
-    # Windows: Disable torch.compile (no Triton support)
-    print(f"[COMPILE] Windows detected - torch.compile disabled")
+    # Windows: Disable torch.compile by default (requires Visual Studio C++ environment)
+    print(f"[INFO] torch.compile disabled on Windows (use START_CELERY_TRT_LOCAL.bat for 1.5x speedup)")
     os.environ['USE_TORCH_COMPILE_RAFT'] = '0'
+
+from watermark import pipeline as faster_propainter_pipeline
+from crop_utils import calculate_crop_region
+from segment_detector import detect_segments, merge_adjacent_segments
+from yolo_detector import YOLOWatermarkDetector
 
 # Paths
 TEMP_DIR = BASE_DIR / "temp"
@@ -376,8 +383,10 @@ def process_sam2_local(video_path, masks_folder):
                 cv2.imwrite(str(sam2_masks_dir / mask_file), mask)
 
     print(f"\n[5/7] Detecting motion segments...")
-    position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '50'))
-    min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '3'))
+    # Very high tolerance = only split when watermark REALLY moves (150+ pixels)
+    position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '150'))
+    # Minimum 60 frames (~2 sec) before creating new segment
+    min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '60'))
 
     # Build detections list from masks
     detections_per_frame = []
@@ -408,45 +417,28 @@ def process_sam2_local(video_path, masks_folder):
 
     print(f"[OK] Detected {len(segments)} segments")
 
-    # Fill gaps (uncovered frames)
-    frames_with_masks = set()
-    for i in range(extracted_frames):
-        mask_path = sam2_masks_dir / f"{i:04d}.png"
-        if mask_path.exists():
-            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-            if mask is not None and np.count_nonzero(mask) > 0:
-                frames_with_masks.add(i)
+    # Extend segments to cover all frames (no gap filling, just extend boundaries)
+    if segments:
+        # Make sure first segment starts at 0
+        first_start, first_end, first_bbox = segments[0]
+        if first_start > 0:
+            segments[0] = (0, first_end, first_bbox)
 
-    frames_in_segments = set()
-    for start_f, end_f, _ in segments:
-        frames_in_segments.update(range(start_f, end_f + 1))
+        # Make sure last segment ends at last frame
+        last_start, last_end, last_bbox = segments[-1]
+        if last_end < extracted_frames - 1:
+            segments[-1] = (last_start, extracted_frames - 1, last_bbox)
 
-    uncovered_frames = sorted(frames_with_masks - frames_in_segments)
-
-    if uncovered_frames:
-        print(f"[OK] Creating filler segments for {len(uncovered_frames)} uncovered frames...")
-        for frame_idx in uncovered_frames:
-            mask_path = sam2_masks_dir / f"{frame_idx:04d}.png"
-            if mask_path.exists():
-                mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-                if mask is not None:
-                    coords = cv2.findNonZero(mask)
-                    if coords is not None:
-                        x, y, w, h = cv2.boundingRect(coords)
-                        bbox = (x, y, x+w, y+h)
-
-                        start_frame = frame_idx
-                        end_frame = frame_idx
-
-                        if frame_idx < extracted_frames - 1 and (frame_idx + 1) not in frames_in_segments:
-                            end_frame = frame_idx + 1
-                        elif frame_idx > 0 and (frame_idx - 1) not in frames_in_segments:
-                            start_frame = frame_idx - 1
-
-                        segments.append((start_frame, end_frame, bbox))
-
-        segments.sort(key=lambda seg: seg[0])
-        print(f"[OK] Total segments after gap filling: {len(segments)}")
+        # Fill gaps between segments by extending adjacent segments
+        new_segments = []
+        for i, (start, end, bbox) in enumerate(segments):
+            if i > 0:
+                prev_end = new_segments[-1][1]
+                if start > prev_end + 1:
+                    # Gap exists - extend current segment backward to cover it
+                    start = prev_end + 1
+            new_segments.append((start, end, bbox))
+        segments = new_segments
 
     print(f"\n[6/7] Running ProPainter on {len(segments) if segments else 1} segment(s)...")
 
@@ -693,44 +685,56 @@ def process_sam2_local(video_path, masks_folder):
 
 
 def main():
-    print("="*80)
-    print("SAM2 LOCAL - Simple Watermark Removal")
-    print("="*80)
-    print()
-    print("This script will:")
-    print("  1. Let you pick a video file")
-    print("  2. Use masks from temp_sam2_masks/")
-    print("  3. Remove watermarks with ProPainter")
-    print("  4. Save result to results/")
-    print()
-
-    # Select video
-    video_path = select_video()
-    if not video_path:
-        return
-
-    # Process
-    output_path = process_sam2_local(video_path, str(MASKS_FOLDER))
-
-    if output_path:
-        print("\n" + "="*80)
-        print("✅ SUCCESS!")
+    while True:
         print("="*80)
-        print(f"Output: {output_path}")
+        print("SAM2 LOCAL - Simple Watermark Removal")
         print("="*80)
+        print()
+        print("This script will:")
+        print("  1. Let you pick a video file")
+        print("  2. Use masks from temp_sam2_masks/")
+        print("  3. Remove watermarks with ProPainter")
+        print("  4. Save result to results/")
+        print()
 
-        # Ask to open
-        print("\nOpen output video? (y/n): ", end='')
+        # Select video
+        video_path = select_video()
+        if not video_path:
+            break
+
+        # Process
+        output_path = process_sam2_local(video_path, str(MASKS_FOLDER))
+
+        if output_path:
+            print("\n" + "="*80)
+            print("SUCCESS!")
+            print("="*80)
+            print(f"Output: {output_path}")
+            print("="*80)
+
+            # Ask to open
+            print("\nOpen output video? (y/n): ", end='')
+            try:
+                answer = input().strip().lower()
+                if answer == 'y':
+                    os.startfile(output_path)
+            except:
+                pass
+        else:
+            print("\n" + "="*80)
+            print("FAILED")
+            print("="*80)
+
+        # Ask to process another video
+        print("\nProcess another video? (y/n): ", end='')
         try:
             answer = input().strip().lower()
-            if answer == 'y':
-                os.startfile(output_path)
+            if answer != 'y':
+                print("Exiting...")
+                break
+            print("\n")
         except:
-            pass
-    else:
-        print("\n" + "="*80)
-        print("❌ FAILED")
-        print("="*80)
+            break
 
 
 if __name__ == "__main__":
