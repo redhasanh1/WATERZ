@@ -37,7 +37,9 @@ class LamaInpainterOptimized:
             self.model = LaMa(self.device)
 
             # Try torch.compile() for additional 2-3x speedup (PyTorch 2.0+)
-            if self.device == 'cuda':
+            # Disabled by default - requires working C++ compiler on Windows
+            import os
+            if self.device == 'cuda' and os.getenv("USE_TORCH_COMPILE", "0") == "1":
                 try:
                     print("  Applying torch.compile() optimization...")
                     # Compile the internal model for faster inference

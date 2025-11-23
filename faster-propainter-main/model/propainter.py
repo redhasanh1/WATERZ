@@ -222,15 +222,20 @@ class BidirectionalPropagation(nn.Module):
         self._use_triton_fused = triton_is_available()
 
         if self.learnable:
+            # DCNv4 disabled - CUDA kernel issues on Windows
+            use_dcnv4 = False
+            print(f"[PROPAINTER] Creating BidirectionalPropagation with DCNv4={use_dcnv4} (hardcoded OFF for stability)")
             for i, module in enumerate(self.prop_list):
-                # Use DCNv4 if available (3x faster)
+                # Use DCNv4 if enabled (3x faster but requires working CUDA kernels)
                 # DCNv4 layers initialize randomly, but offset generation loads from checkpoint
-                if DCNV4_AVAILABLE:
+                if use_dcnv4:
                     self.deform_align[module] = DeformableAlignmentDCNv4(
                         channel, channel, 3, padding=1, deform_groups=16)
+                    print(f"[PROPAINTER] {module}: Using DCNv4 (FAST but may have CUDA kernel issues)")
                 else:
                     self.deform_align[module] = DeformableAlignment(
                         channel, channel, 3, padding=1, deform_groups=16)
+                    print(f"[PROPAINTER] {module}: Using standard DeformableAlignment (STABLE)")
 
                 self.backbone[module] = nn.Sequential(
                     nn.Conv2d(2*channel+2, channel, 3, 1, 1),

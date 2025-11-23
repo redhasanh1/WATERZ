@@ -19,95 +19,73 @@ except Exception:
     torch = None
 
 class YOLOWatermarkDetector:
-    def __init__(self, model_path=None, require_tensorrt=None):
+    def __init__(self, model_path=None, use_compile=None):
         """
-        Initialize YOLOv8 watermark detector - prefers TensorRT, falls back to PyTorch
+        Initialize YOLOv8 watermark detector with PyTorch + optional torch.compile optimization
 
         Args:
-            model_path: Path to custom YOLOv8 model, or None to use batch TensorRT engine
-            require_tensorrt: If True, fail if TensorRT not available. If False, allow PyTorch fallback
+            model_path: Path to custom YOLOv8 model, or None to use default model
+            use_compile: If True, apply torch.compile optimization. Default: check USE_TORCH_COMPILE env var
         """
+        # Default: disabled (requires working C++ compiler on Windows)
+        if use_compile is None:
+            use_compile = os.getenv("USE_TORCH_COMPILE", "0") == "1"
         try:
             print("Loading YOLOv8 watermark detection model...")
             from ultralytics import YOLO
 
-            # Determine if TensorRT is required or optional
-            self._require_tensorrt = require_tensorrt if require_tensorrt is not None else True
-            self._using_tensorrt = False
+            self._compiled = False
 
             if model_path:
                 # Use custom model
                 self.model = YOLO(model_path)
                 print(f"[OK] Loaded custom model: {model_path}")
             else:
-                # Try batch-enabled TensorRT engine first
-                batch_engine = 'runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx4090.engine'
+                # Load PyTorch model
                 pytorch_model = 'runs/detect/new_sora_watermark/weights/best.pt'
 
-                # Attempt to load TensorRT engine
-                tensorrt_loaded = False
-                if os.path.exists(batch_engine):
-                    print(f"[INIT] Loading BATCH-ENABLED TensorRT engine: {batch_engine}")
-                    try:
-                        self.model = YOLO(batch_engine, task='detect')
+                if not os.path.exists(pytorch_model):
+                    raise RuntimeError(
+                        f"[ERROR] PyTorch model not found!\n"
+                        f"   Model: {pytorch_model}\n"
+                        f"   Ensure the model file exists."
+                    )
 
-                        # Test the engine with a dummy inference to catch platform mismatches
-                        # (TensorRT engines built on Windows may fail when loaded in WSL2)
-                        print(f"[INIT] Testing TensorRT engine compatibility...")
-                        import numpy as np
-                        test_img = np.zeros((640, 640, 3), dtype=np.uint8)
-                        _ = self.model.predict(test_img, verbose=False, device=0)
+                print(f"[INIT] Loading PyTorch model: {pytorch_model}")
+                self.model = YOLO(pytorch_model, task='detect')
+                print(f"[OK] PyTorch YOLO model loaded")
 
-                        print(f"[OK] RTX 4090 Batch TensorRT engine loaded! (~11 MB, batch 1-256)")
-                        print(f"   Expected performance: 0.7-1.2ms per frame (800-1400 fps @ batch 128)")
-                        self._using_tensorrt = True
-                        tensorrt_loaded = True
-                    except Exception as trt_error:
-                        print(f"[WARN] TensorRT engine load/test failed: {trt_error}")
-                        if self._require_tensorrt:
-                            raise RuntimeError(
-                                f"[ERROR] Failed to load batch TensorRT engine: {trt_error}\n"
-                                f"   Engine: {batch_engine}\n"
-                                f"   NO FALLBACKS - Fix the engine or rebuild it!"
-                            ) from trt_error
-                        else:
-                            print(f"[INFO] Falling back to PyTorch model...")
-                            # Clear failed model
-                            self.model = None
-
-                # Fall back to PyTorch model if TensorRT not loaded
-                if not tensorrt_loaded:
-                    if not os.path.exists(pytorch_model):
-                        raise RuntimeError(
-                            f"[ERROR] Neither TensorRT engine nor PyTorch model found!\n"
-                            f"   TensorRT: {batch_engine}\n"
-                            f"   PyTorch: {pytorch_model}\n"
-                            f"   Run BUILD_FP16_BATCH.bat to create them!"
-                        )
-
-                    print(f"[INIT] Loading PyTorch model: {pytorch_model}")
-                    self.model = YOLO(pytorch_model, task='detect')
-                    print(f"[OK] Using PyTorch YOLO model (batch processing enabled)")
-                    print(f"   Expected performance: 3-5ms per frame (200-300 fps @ batch 128)")
+            # Apply torch.compile optimization for faster inference
+            if use_compile and torch is not None and torch.cuda.is_available():
+                try:
+                    print("[INIT] Applying torch.compile optimization...")
+                    # Use reduce-overhead mode for repeated inference workloads
+                    self.model.model = torch.compile(
+                        self.model.model,
+                        mode='reduce-overhead',
+                        backend='inductor'
+                    )
+                    self._compiled = True
+                    print("[OK] torch.compile applied (mode='reduce-overhead')")
+                    print("   Note: First inference will be slower due to compilation")
+                    print("   Expected performance: 1.5-3ms per frame after warmup")
+                except Exception as compile_error:
+                    print(f"[WARN] torch.compile failed: {compile_error}")
+                    print("[INFO] Continuing with unoptimized PyTorch model")
+            else:
+                print("[INFO] torch.compile skipped (use_compile=False or no CUDA)")
+                print("   Expected performance: 3-5ms per frame")
 
             self.use_yolo = True
             print("[OK] YOLOv8 ready for watermark detection!")
 
         except Exception as e:
             print(f"[ERROR] Could not load YOLOv8 model: {e}")
-            if self._require_tensorrt:
-                raise RuntimeError(
-                    f"[ERROR] BATCH TENSORRT ENGINE REQUIRED!\n"
-                    f"   Error: {e}\n"
-                    f"   Run BUILD_FP16_BATCH.bat to create the engine\n"
-                    f"   NO FALLBACKS ALLOWED - EXTREME SPEED MODE ONLY!"
-                ) from e
-            else:
-                raise RuntimeError(
-                    f"[ERROR] Failed to load YOLO model!\n"
-                    f"   Error: {e}\n"
-                    f"   Check that model files exist and ultralytics is installed"
-                ) from e
+            raise RuntimeError(
+                f"[ERROR] Failed to load YOLO model!\n"
+                f"   Error: {e}\n"
+                f"   Check that model files exist and ultralytics is installed"
+            ) from e
 
     def detect(self, image, confidence_threshold=0.25, padding=30):
         """
@@ -126,19 +104,8 @@ class YOLOWatermarkDetector:
 
         h, w = image.shape[:2]
 
-        # Run YOLOv8 detection
-        # Force GPU when TensorRT mode is required (no CPU fallback!)
-        if self._require_tensorrt:
-            # TensorRT mode - MUST use GPU, fail if unavailable
-            if torch is None or not torch.cuda.is_available():
-                raise RuntimeError(
-                    "TensorRT mode requires CUDA GPU but torch.cuda.is_available() is False. "
-                    "Check that PyTorch CUDA is installed and GPU is accessible."
-                )
-            device_arg = 0  # GPU only
-        else:
-            # Regular mode - allow CPU fallback
-            device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
+        # Use GPU if available, otherwise CPU
+        device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
 
         results = self.model(image, conf=confidence_threshold, device=device_arg, verbose=False)
 
@@ -164,20 +131,17 @@ class YOLOWatermarkDetector:
                     'confidence': conf
                 })
 
-                # Removed confidence logging - progress shown via task updates instead
-                pass
-
         return bboxes
 
     def batch_detect(self, images, confidence_threshold=0.25, padding=30, batch_size=128):
         """
-        Detect watermarks in multiple images using batched inference (FAST!)
+        Detect watermarks in multiple images using batched inference
 
         Args:
             images: List of numpy arrays [(H, W, 3) BGR, ...]
             confidence_threshold: Minimum confidence for detections (0-1)
             padding: Pixels to add around detected region
-            batch_size: Number of images to process per batch (default 128 for TensorRT)
+            batch_size: Number of images to process per batch
 
         Returns:
             List of detection lists - one per image: [[{bbox, confidence}, ...], ...]
@@ -185,13 +149,8 @@ class YOLOWatermarkDetector:
         if not self.use_yolo or not images:
             return [[] for _ in images]
 
-        # Force GPU for batch processing
-        if self._require_tensorrt:
-            if torch is None or not torch.cuda.is_available():
-                raise RuntimeError("TensorRT batch mode requires CUDA GPU")
-            device_arg = 0  # GPU only
-        else:
-            device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
+        # Use GPU if available
+        device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
 
         all_results = []
         num_images = len(images)
@@ -232,13 +191,13 @@ class YOLOWatermarkDetector:
 
     def detect_batch(self, images, confidence_threshold=0.25, padding=30, batch_size=128):
         """
-        Batch detect watermarks in multiple images (EXTREME SPEED!)
+        Batch detect watermarks in multiple images
 
         Args:
             images: List of numpy arrays [(H, W, 3) BGR, ...]
             confidence_threshold: Minimum confidence for detections (0-1)
             padding: Pixels to add around detected region
-            batch_size: Batch size for TensorRT inference (64, 128, or 256 for RTX 4090)
+            batch_size: Batch size for inference
 
         Returns:
             List of detection lists [
@@ -253,20 +212,12 @@ class YOLOWatermarkDetector:
         if not images:
             return []
 
-        # Determine device
-        if self._require_tensorrt:
-            if torch is None or not torch.cuda.is_available():
-                raise RuntimeError(
-                    "TensorRT mode requires CUDA GPU but torch.cuda.is_available() is False."
-                )
-            device_arg = 0  # GPU only
-        else:
-            device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
+        # Use GPU if available
+        device_arg = 0 if (torch is not None and torch.cuda.is_available()) else 'cpu'
 
         all_detections = []
 
-        # [CRITICAL] Pad all images to 640x640 for TensorRT batch engine
-        # TensorRT engine expects square 640x640 inputs
+        # Pad all images to 640x640 for consistent batch processing
         padded_images = []
         pad_info = []  # Store (scale, pad_left, pad_top, orig_w, orig_h) for each image
 
@@ -302,7 +253,7 @@ class YOLOWatermarkDetector:
             batch_info = pad_info[i:i + batch_size]
             orig_images = images[i:i + batch_size]
 
-            # Run batch inference on 640x640 padded images (EXTREME SPEED!)
+            # Run batch inference on 640x640 padded images
             results = self.model(batch, conf=confidence_threshold, device=device_arg,
                                verbose=False, imgsz=640)
 

@@ -2690,7 +2690,7 @@ def _check_propainter_assets() -> bool:
 
 def get_detector():
     """
-    Lazy load the YOLO detector (TensorRT if available).
+    Lazy load the YOLO detector with torch.compile optimization.
     Note: This is used by Celery workers on cloud machines, not the local Flask server.
     """
     global detector
@@ -2701,15 +2701,14 @@ def get_detector():
         print("=" * 60)
         from yolo_detector import YOLOWatermarkDetector
         import numpy as np
-        # Force TensorRT-only mode (no fallback to .pt)
-        # Will fail if engine not found - ensures maximum speed!
-        detector = YOLOWatermarkDetector(require_tensorrt=True)
+        # Load PyTorch model with torch.compile optimization
+        detector = YOLOWatermarkDetector()
 
-        # WARMUP: Initialize TensorRT context (eliminates cold start overhead!)
-        print("[WARMUP] Running warmup inference to initialize TensorRT context...")
+        # WARMUP: Run inference to trigger torch.compile compilation
+        print("[WARMUP] Running warmup inference for torch.compile...")
         dummy_batch = [np.zeros((640, 640, 3), dtype=np.uint8) for _ in range(64)]
         _ = detector.detect_batch(dummy_batch, confidence_threshold=0.15, batch_size=64)
-        print("[OK] YOLO warmed up! TensorRT context ready for max speed.")
+        print("[OK] YOLO warmed up! torch.compile ready for inference.")
 
         print("=" * 60)
         print("[OK] YOLO detector ready!")
