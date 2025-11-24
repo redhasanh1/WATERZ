@@ -466,19 +466,19 @@ class TemporalSparseTransformerBlock(nn.Module):
                 # Enable error suppression to handle cache corruption gracefully
                 torch._dynamo.config.suppress_errors = True
                 # Compile each transformer layer individually
-                # Use default mode (no CUDA graphs, avoids tensor aliasing issues)
+                # Use max-autotune-no-cudagraphs for RTX 3070 compatibility
                 compiled_blocks = []
                 for i, layer in enumerate(self.transformer):
                     compiled_layer = torch.compile(
                         layer,
-                        mode="default",
+                        mode="max-autotune-no-cudagraphs",
                         backend="inductor",
                         fullgraph=False
                     )
                     compiled_blocks.append(compiled_layer)
 
                 self.transformer = nn.ModuleList(compiled_blocks)
-                print("[OK] TemporalSparseTransformerBlock: torch.compile enabled (default mode)")
+                print("[OK] TemporalSparseTransformerBlock: torch.compile enabled (max-autotune-no-cudagraphs)")
                 print(f"[INFO] Compiled {len(compiled_blocks)} transformer layers individually")
                 print("[INFO] Expected speedup: 1.5-3x on RTX 4090 Ada Lovelace")
             except Exception as e:

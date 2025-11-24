@@ -935,11 +935,11 @@ def pipeline(
     if os.getenv("USE_TORCH_COMPILE_RAFT", "0") == "1":
         if hasattr(fix_raft, 'fix_raft') and device.type == 'cuda':
             try:
-                print("[COMPILE] Compiling RAFT with torch.compile (mode=max-autotune)...")
+                print("[COMPILE] Compiling RAFT with torch.compile (no-cudagraphs)...")
                 compiled_forward = torch.compile(
                     fix_raft.fix_raft.forward,
                     backend="inductor",
-                    mode="max-autotune",
+                    mode="max-autotune-no-cudagraphs",
                     dynamic=True,
                     fullgraph=False,
                 )
@@ -1080,11 +1080,11 @@ def pipeline(
                 # torch.compile for RFCNet (1.5-2x speedup)
                 if os.getenv("USE_TORCH_COMPILE_RAFT", "0") == "1" and device.type == 'cuda':
                     try:
-                        print("[COMPILE] Compiling RFCNet with torch.compile...")
+                        print("[COMPILE] Compiling RFCNet with torch.compile (no-cudagraphs)...")
                         compiled_forward = torch.compile(
                             self._model.forward,
                             backend="inductor",
-                            mode="max-autotune",
+                            mode="max-autotune-no-cudagraphs",
                             dynamic=True,
                             fullgraph=False,
                         )
@@ -1488,6 +1488,8 @@ def pipeline(
                 end_f = min(video_length, f + short_clip_len)
 
                 # Use autocast for automatic mixed precision if FP16 enabled
+                # Mark step for CUDA graphs (reduce-overhead mode)
+                torch.compiler.cudagraph_mark_step_begin()
                 if use_half:
                     with torch.cuda.amp.autocast():
                         if f == 0:
@@ -1500,14 +1502,16 @@ def pipeline(
                     else:
                         flows_f, flows_b = fix_raft(frames[:, f - 1 : end_f], iters=raft_iter)
 
-                gt_flows_f_list.append(flows_f)
-                gt_flows_b_list.append(flows_b)
+                gt_flows_f_list.append(flows_f.clone())
+                gt_flows_b_list.append(flows_b.clone())
                 # Removed empty_cache() - was forcing GPU sync barrier
 
             gt_flows_f = torch.cat(gt_flows_f_list, dim=1)
             gt_flows_b = torch.cat(gt_flows_b_list, dim=1)
             gt_flows_bi = (gt_flows_f, gt_flows_b)
         else:
+            # Mark step for CUDA graphs (reduce-overhead mode)
+            torch.compiler.cudagraph_mark_step_begin()
             if use_half:
                 with torch.cuda.amp.autocast():
                     gt_flows_bi = fix_raft(frames, iters=raft_iter)
@@ -1540,6 +1544,8 @@ def pipeline(
                 e_f = min(flow_length, f + subvideo_length + pad_len)
                 pad_len_s = max(0, f) - s_f
                 pad_len_e = e_f - min(flow_length, f + subvideo_length)
+                # Mark step for CUDA graphs (reduce-overhead mode)
+                torch.compiler.cudagraph_mark_step_begin()
                 pred_flows_bi_sub, _ = fix_flow_complete.forward_bidirect_flow(
                     (gt_flows_bi[0][:, s_f:e_f], gt_flows_bi[1][:, s_f:e_f]),
                     flow_masks[:, s_f : e_f + 1],
@@ -1551,10 +1557,10 @@ def pipeline(
                 )
 
                 pred_flows_f.append(
-                    pred_flows_bi_sub[0][:, pad_len_s : e_f - s_f - pad_len_e]
+                    pred_flows_bi_sub[0][:, pad_len_s : e_f - s_f - pad_len_e].clone()
                 )
                 pred_flows_b.append(
-                    pred_flows_bi_sub[1][:, pad_len_s : e_f - s_f - pad_len_e]
+                    pred_flows_bi_sub[1][:, pad_len_s : e_f - s_f - pad_len_e].clone()
                 )
                 # Removed empty_cache() - was forcing GPU sync barrier
 
@@ -1562,6 +1568,8 @@ def pipeline(
             pred_flows_b = torch.cat(pred_flows_b, dim=1)
             pred_flows_bi = (pred_flows_f, pred_flows_b)
         else:
+            # Mark step for CUDA graphs (reduce-overhead mode)
+            torch.compiler.cudagraph_mark_step_begin()
             pred_flows_bi, _ = fix_flow_complete.forward_bidirect_flow(
                 gt_flows_bi, flow_masks
             )

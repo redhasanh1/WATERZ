@@ -19,9 +19,14 @@ import shutil
 import subprocess
 import json
 import torch
+import torch._inductor
 import platform
 from pathlib import Path
 from tkinter import Tk, filedialog
+
+# Global CUDA graphs kill switch (RTX 3070 compatibility)
+torch._inductor.config.triton.cudagraphs = False
+torch._inductor.config.triton.cudagraph_trees = False
 
 # Add ProPainter to path
 BASE_DIR = Path(__file__).parent
@@ -42,13 +47,19 @@ if os.getenv('USE_TORCH_COMPILE_RAFT', '0') == '1':
     os.environ['TORCH_CUDAGRAPHS'] = '0'
     os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
 elif IS_WSL2 or IS_LINUX:
-    print(f"[COMPILE] Enabling torch.compile for RAFT (Linux/WSL2)")
-    os.environ['TORCHINDUCTOR_CACHE_DIR'] = str(BASE_DIR / '.torch_compile_cache')
-    os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
-    os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
-    os.environ['USE_TORCH_COMPILE_RAFT'] = '1'
-    os.environ['TORCH_CUDAGRAPHS'] = '0'
-    os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
+    # Only auto-enable if user hasn't explicitly disabled it
+    if os.getenv('USE_TORCH_COMPILE_RAFT') != '0':
+        print(f"[OPTIMIZE] Enabling Flash Attention (Linux/WSL2)")
+        os.environ['TORCHINDUCTOR_CACHE_DIR'] = str(BASE_DIR / '.torch_compile_cache')
+        os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
+        os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
+        os.environ['USE_TORCH_COMPILE_RAFT'] = '0'  # Disabled - slow on RTX 3070
+        os.environ['USE_TORCH_COMPILE'] = '0'  # Disabled - slow on RTX 3070
+        os.environ['ENABLE_FLASH_ATTENTION'] = '1'  # Use SDPA for faster attention
+        os.environ['TORCH_CUDAGRAPHS'] = '0'
+        os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
+    else:
+        print(f"[INFO] torch.compile disabled by user (USE_TORCH_COMPILE_RAFT=0)")
 else:
     # Windows: Disable torch.compile by default (requires Visual Studio C++ environment)
     print(f"[INFO] torch.compile disabled on Windows (use START_CELERY_TRT_LOCAL.bat for 1.5x speedup)")
