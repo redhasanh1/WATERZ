@@ -99,9 +99,9 @@ nul
 .claude/
 
 # ----- Web Frontend (Not needed for Celery worker) -----
-web/
-static/
-templates/
+# web/  # Commented - Railway needs this folder!
+# static/  # Commented - Railway needs this folder!
+# templates/  # Commented - Railway needs this folder!
 
 # ----- Archives -----
 *.zip
@@ -131,3 +131,9 @@ ProPainter/.git/
 
 # ----- Symlinked weights (already copied from main weights/) -----
 faster-propainter-main/weights/
+
+# ----- NeuFlow models (disabled with USE_NEUFLOW=0) -----
+faster-propainter-main/models/
+
+# ----- TensorRT engines in faster-propainter -----
+faster-propainter-main/engines/
