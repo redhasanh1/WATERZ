@@ -19,184 +19,56 @@ import shutil
 import subprocess
 import json
 import torch
+import torch._inductor
 import platform
 from pathlib import Path
 from tkinter import Tk, filedialog
+
+# Global CUDA graphs kill switch (RTX 3070 compatibility)
+torch._inductor.config.triton.cudagraphs = False
+torch._inductor.config.triton.cudagraph_trees = False
 
 # Add ProPainter to path
 BASE_DIR = Path(__file__).parent
 PROPAINTER_DIR = BASE_DIR / "faster-propainter-main"
 sys.path.insert(0, str(PROPAINTER_DIR))
 
+# torch.compile requires Visual Studio C++ environment on Windows
+# Use START_CELERY_TRT_LOCAL.bat or call vcvars64.bat first to enable it
+IS_WSL2 = 'microsoft' in platform.release().lower() if hasattr(platform, 'release') else False
+IS_LINUX = sys.platform.startswith('linux')
+
+# Check if torch.compile was enabled externally (e.g., by batch file)
+if os.getenv('USE_TORCH_COMPILE_RAFT', '0') == '1':
+    print(f"[COMPILE] torch.compile enabled for RAFT (set externally)")
+    os.environ['TORCHINDUCTOR_CACHE_DIR'] = str(BASE_DIR / '.torch_compile_cache')
+    os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
+    os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
+    os.environ['TORCH_CUDAGRAPHS'] = '0'
+    os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
+elif IS_WSL2 or IS_LINUX:
+    # Only auto-enable if user hasn't explicitly disabled it
+    if os.getenv('USE_TORCH_COMPILE_RAFT') != '0':
+        print(f"[OPTIMIZE] Enabling Flash Attention (Linux/WSL2)")
+        os.environ['TORCHINDUCTOR_CACHE_DIR'] = str(BASE_DIR / '.torch_compile_cache')
+        os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
+        os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
+        os.environ['USE_TORCH_COMPILE_RAFT'] = '0'  # Disabled - slow on RTX 3070
+        os.environ['USE_TORCH_COMPILE'] = '0'  # Disabled - slow on RTX 3070
+        os.environ['ENABLE_FLASH_ATTENTION'] = '1'  # Use SDPA for faster attention
+        os.environ['TORCH_CUDAGRAPHS'] = '0'
+        os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
+    else:
+        print(f"[INFO] torch.compile disabled by user (USE_TORCH_COMPILE_RAFT=0)")
+else:
+    # Windows: Disable torch.compile by default (requires Visual Studio C++ environment)
+    print(f"[INFO] torch.compile disabled on Windows (use START_CELERY_TRT_LOCAL.bat for 1.5x speedup)")
+    os.environ['USE_TORCH_COMPILE_RAFT'] = '0'
+
 from watermark import pipeline as faster_propainter_pipeline
 from crop_utils import calculate_crop_region
 from segment_detector import detect_segments, merge_adjacent_segments
 from yolo_detector import YOLOWatermarkDetector
-
-
-# Module-level worker function for ProcessPoolExecutor (must be picklable!)
-def _process_segment_worker(seg_data):
-    """
-    Worker function for parallel segment processing (multiprocessing mode).
-    Must be at module level to be picklable!
-
-    This worker runs in a SEPARATE Python process, so it needs to:
-    1. Re-import all modules
-    2. Set up paths
-    3. Configure environment
-    """
-    import sys
-    import os
-    import torch
-    from pathlib import Path
-
-    # Re-setup Python path for worker process
-    # __file__ points to RUN_SAM2_LOCAL.py which may be in faster-propainter-main/../
-    # We need to resolve to the actual watermarkz root directory
-    try:
-        script_path = Path(__file__).resolve()
-        # If RUN_SAM2_LOCAL.py is in watermarkz/, BASE_DIR = watermarkz/
-        # If it's in watermarkz/faster-propainter-main/../, resolve to watermarkz/
-        BASE_DIR = script_path.parent
-        # Ensure we're at the root (where faster-propainter-main exists as a subdir)
-        while BASE_DIR.name == 'faster-propainter-main' or not (BASE_DIR / 'faster-propainter-main').exists():
-            if BASE_DIR.parent == BASE_DIR:  # Reached root
-                break
-            BASE_DIR = BASE_DIR.parent
-    except:
-        # Fallback to using seg_data which contains full paths
-        BASE_DIR = Path(seg_data['frames_dir']).parent.parent.parent
-
-    PROPAINTER_DIR = BASE_DIR / "faster-propainter-main"
-    if str(PROPAINTER_DIR) not in sys.path:
-        sys.path.insert(0, str(PROPAINTER_DIR))
-
-    # CRITICAL: Import cache_config BEFORE watermark to set up per-worker cache isolation
-    # This prevents FileExistsError when multiple workers compile models simultaneously
-    sys.path.insert(0, str(BASE_DIR))
-    try:
-        import cache_config  # Sets TORCHINDUCTOR_CACHE_DIR per worker
-    except ImportError:
-        pass  # cache_config.py may not exist in older setups
-
-    # Import pipeline in worker process (this will trigger watermark.py imports)
-    from watermark import pipeline as faster_propainter_pipeline
-
-    import time
-    seg_idx = seg_data['seg_idx']
-    num_frames = seg_data['end_f'] - seg_data['start_f'] + 1
-    neighbor_length = seg_data.get('neighbor_length', 10)
-    ref_stride = seg_data.get('ref_stride', 10)
-    dynamic_subvideo = seg_data.get('dynamic_subvideo', 120)
-
-    # CUDA context reinitialization for worker process
-    # Spawn mode gives clean state, but explicitly reinitialize for safety
-    use_fp16 = False
-    cuda_device_id = 0
-    if torch.cuda.is_available():
-        try:
-            # Reinitialize CUDA context in worker process
-            cuda_device_id = seg_data.get('cuda_device', 0)
-            torch.cuda.set_device(cuda_device_id)
-            torch.cuda.init()  # Force CUDA context initialization
-            use_fp16 = True
-            print(f"[WORKER {seg_idx}] CUDA initialized on device {cuda_device_id}")
-        except Exception as e:
-            print(f"[WORKER {seg_idx}] CUDA init failed: {e}, falling back to CPU")
-            use_fp16 = False
-
-    start_time = time.time()
-    print(f"[WORKER {seg_idx}] [T+{time.time():.2f}] Starting segment {seg_idx+1}: {num_frames} frames (neighbor={neighbor_length})")
-
-    try:
-        # Create dedicated CUDA stream for this worker
-        # With spawn mode, each worker has clean CUDA state (no inherited corruption from fork)
-        if torch.cuda.is_available() and use_fp16:
-            print(f"[WORKER {seg_idx}] [T+{time.time():.2f}] Creating CUDA stream...")
-            stream = torch.cuda.Stream()
-            print(f"[WORKER {seg_idx}] [T+{time.time():.2f}] CUDA stream created, starting pipeline...")
-            with torch.cuda.stream(stream):
-                faster_propainter_pipeline(
-                    video=str(seg_data['frames_dir']),
-                    mask=str(seg_data['masks_dir']),
-                    output=str(seg_data['output']),
-                    resize_ratio=1.0,
-                    mask_dilation=4,
-                    ref_stride=ref_stride,
-                    neighbor_length=neighbor_length,
-                    subvideo_length=dynamic_subvideo,
-                    raft_iter=10,
-                    mode="video_inpainting",
-                    save_frames=True,
-                    fp16=use_fp16,
-                    frames_array=None,
-                    masks_array=None
-                )
-                torch.cuda.current_stream().synchronize()
-        else:
-            faster_propainter_pipeline(
-                video=str(seg_data['frames_dir']),
-                mask=str(seg_data['masks_dir']),
-                output=str(seg_data['output']),
-                resize_ratio=1.0,
-                mask_dilation=4,
-                ref_stride=ref_stride,
-                neighbor_length=neighbor_length,
-                subvideo_length=dynamic_subvideo,
-                raft_iter=10,
-                mode="video_inpainting",
-                save_frames=True,
-                fp16=use_fp16,
-                frames_array=None,
-                masks_array=None
-            )
-
-        elapsed = time.time() - start_time
-        print(f"[WORKER {seg_idx}] [T+{time.time():.2f}] Completed segment {seg_idx+1} in {elapsed:.2f}s")
-        return seg_data
-    except Exception as e:
-        elapsed = time.time() - start_time
-        print(f"[WORKER {seg_idx}] [T+{time.time():.2f}] ERROR in segment {seg_idx+1} after {elapsed:.2f}s: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-
-
-# WSL2/Linux detection for torch.compile optimization
-IS_WSL2 = 'microsoft' in platform.release().lower() if hasattr(platform, 'release') else False
-IS_LINUX = sys.platform.startswith('linux')
-ENABLE_TORCH_COMPILE = IS_WSL2 or IS_LINUX
-
-# WSL2-specific parallel worker optimization
-# WSL2 may perform better with fewer workers due to overhead differences vs native Linux
-if 'MAX_PARALLEL_STREAMS' not in os.environ:
-    if IS_WSL2:
-        # WSL2: Start conservative (can be overridden via env var)
-        # Testing shows 2-3 workers may be optimal vs 4 on native Linux
-        default_workers = 2
-        os.environ['MAX_PARALLEL_STREAMS'] = str(default_workers)
-        print(f"[WSL2] Default parallel workers: {default_workers} (override with MAX_PARALLEL_STREAMS env var)")
-    else:
-        # Native Linux/Windows: Use 4 workers by default
-        os.environ.setdefault('MAX_PARALLEL_STREAMS', '1')  # Default to sequential (safest)
-
-# Only auto-configure if env vars not already set (allows test_local.py/batch files to override)
-if 'USE_TORCH_COMPILE_RAFT' not in os.environ:
-    if ENABLE_TORCH_COMPILE:
-        # WSL2/Linux: Enable torch.compile with Triton kernels
-        print(f"[COMPILE] Detected WSL2/Linux - enabling torch.compile")
-        os.environ['TORCHINDUCTOR_CACHE_DIR'] = str(BASE_DIR / '.torch_compile_cache')
-        os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
-        os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
-        os.environ['USE_TORCH_COMPILE_RAFT'] = '1'
-        os.environ['TORCH_CUDAGRAPHS'] = '0'
-        os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
-    else:
-        # Windows: Disable torch.compile by default (can be overridden via env var)
-        print(f"[COMPILE] Windows detected - torch.compile disabled (set USE_TORCH_COMPILE_RAFT=1 to override)")
-        os.environ['USE_TORCH_COMPILE_RAFT'] = '0'
-else:
-    print(f"[COMPILE] Using pre-set USE_TORCH_COMPILE_RAFT={os.environ['USE_TORCH_COMPILE_RAFT']}")
 
 # Paths
 TEMP_DIR = BASE_DIR / "temp"
@@ -361,18 +233,12 @@ def process_sam2_local(video_path, masks_folder):
 
     # Initialize YOLO detector
     print(f"\n[2/7] Detecting watermarks with YOLO...")
-    # Allow fallback to regular YOLO if TensorRT engine not available (e.g., in WSL2)
-    detector = YOLOWatermarkDetector(require_tensorrt=False)
+    detector = YOLOWatermarkDetector(require_tensorrt=True)
 
-    # Warmup engine if using TensorRT
-    if detector._using_tensorrt:
-        print(f"[YOLO] Warming up TensorRT engine...")
-        dummy_batch = [np.zeros((640, 640, 3), dtype=np.uint8) for _ in range(64)]
-        _ = detector.detect_batch(dummy_batch, confidence_threshold=0.15, batch_size=64)
-        print(f"[OK] TensorRT engine warmed up!")
-    else:
-        print(f"[YOLO] Using PyTorch model (no warmup needed)")
-
+    # CRITICAL: Warmup TensorRT engine
+    print(f"[YOLO] Warming up TensorRT engine...")
+    dummy_batch = [np.zeros((640, 640, 3), dtype=np.uint8) for _ in range(64)]
+    _ = detector.detect_batch(dummy_batch, confidence_threshold=0.15, batch_size=64)
     print(f"[OK] YOLO detector ready!")
 
     # Detection parameters (from working server)
@@ -528,8 +394,10 @@ def process_sam2_local(video_path, masks_folder):
                 cv2.imwrite(str(sam2_masks_dir / mask_file), mask)
 
     print(f"\n[5/7] Detecting motion segments...")
-    position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '5'))
-    min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '10'))
+    # Very high tolerance = only split when watermark REALLY moves (150+ pixels)
+    position_tolerance = int(os.getenv('SAM2_POSITION_TOLERANCE', '150'))
+    # Minimum 60 frames (~2 sec) before creating new segment
+    min_segment_length = int(os.getenv('SAM2_MIN_SEGMENT_LENGTH', '60'))
 
     # Build detections list from masks
     detections_per_frame = []
@@ -556,51 +424,32 @@ def process_sam2_local(video_path, masks_folder):
     )
 
     if len(segments) > 1:
-        segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=30)
+        segments = merge_adjacent_segments(segments, position_tolerance=position_tolerance, max_gap=60)
 
     print(f"[OK] Detected {len(segments)} segments")
 
-    # Gap-filling disabled - matches server_production.py behavior
-    # Previously created duplicate/tiny segments causing overhead
-    # # Fill gaps (uncovered frames)
-    # frames_with_masks = set()
-    # for i in range(extracted_frames):
-    #     mask_path = sam2_masks_dir / f"{i:04d}.png"
-    #     if mask_path.exists():
-    #         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-    #         if mask is not None and np.count_nonzero(mask) > 0:
-    #             frames_with_masks.add(i)
-    #
-    # frames_in_segments = set()
-    # for start_f, end_f, _ in segments:
-    #     frames_in_segments.update(range(start_f, end_f + 1))
-    #
-    # uncovered_frames = sorted(frames_with_masks - frames_in_segments)
-    #
-    # if uncovered_frames:
-    #     print(f"[OK] Creating filler segments for {len(uncovered_frames)} uncovered frames...")
-    #     for frame_idx in uncovered_frames:
-    #         mask_path = sam2_masks_dir / f"{frame_idx:04d}.png"
-    #         if mask_path.exists():
-    #             mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-    #             if mask is not None:
-    #                 coords = cv2.findNonZero(mask)
-    #                 if coords is not None:
-    #                     x, y, w, h = cv2.boundingRect(coords)
-    #                     bbox = (x, y, x+w, y+h)
-    #
-    #                     start_frame = frame_idx
-    #                     end_frame = frame_idx
-    #
-    #                     if frame_idx < extracted_frames - 1 and (frame_idx + 1) not in frames_in_segments:
-    #                         end_frame = frame_idx + 1
-    #                     elif frame_idx > 0 and (frame_idx - 1) not in frames_in_segments:
-    #                         start_frame = frame_idx - 1
-    #
-    #                     segments.append((start_frame, end_frame, bbox))
-    #
-    #     segments.sort(key=lambda seg: seg[0])
-    #     print(f"[OK] Total segments after gap filling: {len(segments)}")
+    # Extend segments to cover all frames (no gap filling, just extend boundaries)
+    if segments:
+        # Make sure first segment starts at 0
+        first_start, first_end, first_bbox = segments[0]
+        if first_start > 0:
+            segments[0] = (0, first_end, first_bbox)
+
+        # Make sure last segment ends at last frame
+        last_start, last_end, last_bbox = segments[-1]
+        if last_end < extracted_frames - 1:
+            segments[-1] = (last_start, extracted_frames - 1, last_bbox)
+
+        # Fill gaps between segments by extending adjacent segments
+        new_segments = []
+        for i, (start, end, bbox) in enumerate(segments):
+            if i > 0:
+                prev_end = new_segments[-1][1]
+                if start > prev_end + 1:
+                    # Gap exists - extend current segment backward to cover it
+                    start = prev_end + 1
+            new_segments.append((start, end, bbox))
+        segments = new_segments
 
     print(f"\n[6/7] Running ProPainter on {len(segments) if segments else 1} segment(s)...")
 
@@ -644,15 +493,8 @@ def process_sam2_local(video_path, masks_folder):
             propainter_output = output_dir / cropped_dir.name / "frames"
 
         else:
-            # Multiple segments - SEQUENTIAL processing (faster due to no GPU context switching)
-            # Parallel caused context thrashing - sequential with optimized models is 3x faster!
-            max_parallel = int(os.getenv('MAX_PARALLEL_STREAMS', '1'))
-            use_parallel = max_parallel > 1
-
-            if use_parallel:
-                print(f"[OK] Processing {len(segments)} segments IN PARALLEL with {max_parallel} CUDA streams...")
-            else:
-                print(f"[OK] Processing {len(segments)} segments SEQUENTIALLY (optimized for no context switching)...")
+            # Multiple segments
+            print(f"[OK] Processing {len(segments)} segments with adaptive params...")
 
             seg_outputs = []
             for seg_idx in range(len(segments)):
@@ -665,12 +507,9 @@ def process_sam2_local(video_path, masks_folder):
             ref_stride = 10
             dynamic_subvideo = 120  # For cropped segments, use larger chunks
 
-            # Prepare segment data
-            if use_parallel:
-                print(f"[OK] Preparing {len(segments)} segments for parallel processing...")
-            segment_prep_data = []
-
             for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                print(f"  Segment {seg_idx+1}/{len(segments)}: frames {start_f}-{end_f} (neighbor={neighbor_length})")
+
                 seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
                     seg_bbox, crop_w, crop_h, padding_ratio=0.15, min_size=128
                 )
@@ -698,132 +537,26 @@ def process_sam2_local(video_path, masks_folder):
 
                     cv2.imwrite(str(seg_masks_dir / f"{frame_idx-start_f:04d}.png"), seg_mask)
 
-                segment_prep_data.append({
-                    'seg_idx': seg_idx,
-                    'start_f': start_f,
-                    'end_f': end_f,
-                    'frames_dir': seg_frames_dir,
-                    'masks_dir': seg_masks_dir,
-                    'output': seg_outputs[seg_idx],
-                    'neighbor_length': neighbor_length,
-                    'ref_stride': ref_stride,
-                    'dynamic_subvideo': dynamic_subvideo
-                })
+                faster_propainter_pipeline(
+                    video=str(seg_frames_dir),
+                    mask=str(seg_masks_dir),
+                    output=str(seg_outputs[seg_idx]),
+                    resize_ratio=1.0,
+                    mask_dilation=4,
+                    ref_stride=ref_stride,
+                    neighbor_length=neighbor_length,
+                    subvideo_length=dynamic_subvideo,
+                    raft_iter=10,
+                    mode="video_inpainting",
+                    save_frames=True,
+                    fp16=use_fp16,
+                    frames_array=None,
+                    masks_array=None
+                )
 
-            # Process segments (sequential or parallel based on MAX_PARALLEL_STREAMS)
-            if use_parallel:
-                # PARALLEL MODE with ProcessPoolExecutor for true multiprocessing (no GIL!)
-                parallel_mode = os.getenv('PARALLEL_MODE', 'threading')
-
-                if parallel_mode == 'multiprocessing':
-                    from concurrent.futures import ProcessPoolExecutor, as_completed
-                    print(f"[PARALLEL] Using ProcessPoolExecutor with {max_parallel} workers (TRUE multiprocessing - no GIL!)")
-                    print(f"[PARALLEL] First run: ~{max_parallel*2}s warmup (model loading per process)")
-                    print(f"[PARALLEL] Subsequent runs: ~1.8s total (4x speedup!)")
-                    print(f"[PARALLEL] VRAM usage: ~{max_parallel*5}GB ({max_parallel} model copies)")
-                    executor_class = ProcessPoolExecutor
-                    worker_func = _process_segment_worker  # Module-level function (picklable)
-                else:
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-                    print(f"[PARALLEL] Using ThreadPoolExecutor (threading mode - GIL limited!)")
-                    print(f"[WARNING] ThreadPoolExecutor will NOT give 4x speedup due to Python GIL")
-                    print(f"[HINT] Set PARALLEL_MODE=multiprocessing for true parallel speedup")
-                    executor_class = ThreadPoolExecutor
-
-                    # Inline worker for threading mode
-                    def worker_func(seg_data):
-                        seg_idx = seg_data['seg_idx']
-                        num_frames = seg_data['end_f'] - seg_data['start_f'] + 1
-                        print(f"[THREAD {seg_idx}] Starting segment {seg_idx+1}/{len(segments)}: {num_frames} frames")
-
-                        if torch.cuda.is_available():
-                            stream = torch.cuda.Stream()
-                            with torch.cuda.stream(stream):
-                                faster_propainter_pipeline(
-                                    video=str(seg_data['frames_dir']),
-                                    mask=str(seg_data['masks_dir']),
-                                    output=str(seg_data['output']),
-                                    resize_ratio=1.0,
-                                    mask_dilation=4,
-                                    ref_stride=seg_data['ref_stride'],
-                                    neighbor_length=seg_data['neighbor_length'],
-                                    subvideo_length=seg_data['dynamic_subvideo'],
-                                    raft_iter=10,
-                                    mode="video_inpainting",
-                                    save_frames=True,
-                                    fp16=use_fp16,
-                                    frames_array=None,
-                                    masks_array=None
-                                )
-                                torch.cuda.current_stream().synchronize()
-                        else:
-                            faster_propainter_pipeline(
-                                video=str(seg_data['frames_dir']),
-                                mask=str(seg_data['masks_dir']),
-                                output=str(seg_data['output']),
-                                resize_ratio=1.0,
-                                mask_dilation=4,
-                                ref_stride=seg_data['ref_stride'],
-                                neighbor_length=seg_data['neighbor_length'],
-                                subvideo_length=seg_data['dynamic_subvideo'],
-                                raft_iter=10,
-                                mode="video_inpainting",
-                                save_frames=True,
-                                fp16=use_fp16,
-                                frames_array=None,
-                                masks_array=None
-                            )
-
-                        print(f"[THREAD {seg_idx}] Completed segment {seg_idx+1}/{len(segments)}")
-                        return seg_data
-
-                # Use ProcessPoolExecutor/ThreadPoolExecutor to run segments in parallel
-                with executor_class(max_workers=max_parallel) as executor:
-                    futures = {
-                        executor.submit(worker_func, seg_data): i
-                        for i, seg_data in enumerate(segment_prep_data)
-                    }
-
-                    completed_segments = []
-                    for future in as_completed(futures):
-                        stream_id = futures[future]
-                        try:
-                            result = future.result()
-                            completed_segments.append(result)
-                        except Exception as e:
-                            print(f"[ERROR] Segment {stream_id} failed: {e}")
-                            raise
-
-                print(f"[OK] All {len(completed_segments)} segments processed in parallel!")
-            else:
-                # SEQUENTIAL MODE (faster with Flash Attention + no context switching!)
-                for seg_data in segment_prep_data:
-                    seg_idx = seg_data['seg_idx']
-                    num_frames = seg_data['end_f'] - seg_data['start_f'] + 1
-                    print(f"  Segment {seg_idx+1}/{len(segments)}: {num_frames} frames (neighbor={neighbor_length})")
-
-                    faster_propainter_pipeline(
-                        video=str(seg_data['frames_dir']),
-                        mask=str(seg_data['masks_dir']),
-                        output=str(seg_data['output']),
-                        resize_ratio=1.0,
-                        mask_dilation=4,
-                        ref_stride=ref_stride,
-                        neighbor_length=neighbor_length,
-                        subvideo_length=dynamic_subvideo,
-                        raft_iter=10,
-                        mode="video_inpainting",
-                        save_frames=True,
-                        fp16=use_fp16,
-                        frames_array=None,
-                        masks_array=None
-                    )
-
-                print(f"[OK] All {len(segment_prep_data)} segments processed sequentially!")
-
-            # Clear GPU after processing
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                # Clear GPU
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             # Merge segments
             print(f"[OK] Merging {len(segments)} segments...")
@@ -963,56 +696,57 @@ def process_sam2_local(video_path, masks_folder):
 
 
 def main():
-    print("="*80)
-    print("SAM2 LOCAL - Simple Watermark Removal")
-    print("="*80)
-    print()
-    print("This script will:")
-    print("  1. Let you pick a video file")
-    print("  2. Use masks from temp_sam2_masks/")
-    print("  3. Remove watermarks with ProPainter")
-    print("  4. Save result to results/")
-    print()
-
-    # Select video
-    video_path = select_video()
-    if not video_path:
-        return
-
-    # Process
-    output_path = process_sam2_local(video_path, str(MASKS_FOLDER))
-
-    if output_path:
-        print("\n" + "="*80)
-        print("✅ SUCCESS!")
+    while True:
         print("="*80)
-        print(f"Output: {output_path}")
+        print("SAM2 LOCAL - Simple Watermark Removal")
         print("="*80)
+        print()
+        print("This script will:")
+        print("  1. Let you pick a video file")
+        print("  2. Use masks from temp_sam2_masks/")
+        print("  3. Remove watermarks with ProPainter")
+        print("  4. Save result to results/")
+        print()
 
-        # Ask to open
-        print("\nOpen output video? (y/n): ", end='')
+        # Select video
+        video_path = select_video()
+        if not video_path:
+            break
+
+        # Process
+        output_path = process_sam2_local(video_path, str(MASKS_FOLDER))
+
+        if output_path:
+            print("\n" + "="*80)
+            print("SUCCESS!")
+            print("="*80)
+            print(f"Output: {output_path}")
+            print("="*80)
+
+            # Ask to open
+            print("\nOpen output video? (y/n): ", end='')
+            try:
+                answer = input().strip().lower()
+                if answer == 'y':
+                    os.startfile(output_path)
+            except:
+                pass
+        else:
+            print("\n" + "="*80)
+            print("FAILED")
+            print("="*80)
+
+        # Ask to process another video
+        print("\nProcess another video? (y/n): ", end='')
         try:
             answer = input().strip().lower()
-            if answer == 'y':
-                os.startfile(output_path)
+            if answer != 'y':
+                print("Exiting...")
+                break
+            print("\n")
         except:
-            pass
-    else:
-        print("\n" + "="*80)
-        print("❌ FAILED")
-        print("="*80)
+            break
 
 
 if __name__ == "__main__":
-    # Force spawn mode for CUDA + torch.compile compatibility
-    # WSL2/Linux defaults to 'fork' which causes CUDA context corruption
-    # Spawn ensures each worker has clean CUDA state and isolated torch.compile cache
-    import multiprocessing
-    try:
-        multiprocessing.set_start_method('spawn', force=True)
-        print("[MULTIPROCESSING] Spawn mode enabled for CUDA safety")
-    except RuntimeError:
-        # Already set (e.g., by previous import or test)
-        print("[MULTIPROCESSING] Start method already configured")
-
     main()

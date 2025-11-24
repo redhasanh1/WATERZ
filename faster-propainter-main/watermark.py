@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
-os.environ['TORCHDYNAMO_DISABLE'] = '1'  # Completely disable torch.compile
 import time
 import threading
-import subprocess
-import shutil
 
 from tqdm import tqdm
 import cv2
@@ -189,38 +186,47 @@ def warmup_sageattention(device='cuda', q_shape=(1, 8, 64, 64, 8, 64)):
     print(f"[SAGE] INT8 kernels compiled and optimized for RTX 4090! ({warmup_time:.2f}s)")
     _worker_sage_warmup_done.done = True
 
+# Conditional import: Use NeuFlow v2 or RAFT based on environment variable
 # ============================================================================
-# FFMPEG PATH DETECTION FOR NVENC GPU ENCODING
+# STARTUP DIAGNOSTICS - Optical Flow Model Selection
 # ============================================================================
-def _get_ffmpeg_path():
-    """Get FFmpeg executable path, with fallback to static-ffmpeg."""
-    # Try system PATH first
-    ffmpeg_path = shutil.which('ffmpeg')
-    if ffmpeg_path:
-        return ffmpeg_path
+_USE_NEUFLOW = os.getenv("USE_NEUFLOW", "0") == "1"
+_FORCE_TRT_RAFT = os.getenv("FORCE_TRT_RAFT", "0").lower() in ("1", "true", "yes", "on")
+_NEUFLOW_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "neuflow_things_fp16.engine") if os.path.dirname(__file__) else "models/neuflow_things_fp16.engine"
+_NEUFLOW_EXISTS = os.path.exists(_NEUFLOW_MODEL_PATH)
 
-    # Fallback to static-ffmpeg
-    try:
-        from static_ffmpeg import run
-        ffmpeg_path, _ = run.get_or_fetch_platform_executables_else_raise()
-        return ffmpeg_path
-    except Exception:
-        return 'ffmpeg'  # Last resort fallback
-
-_FFMPEG_EXECUTABLE = _get_ffmpeg_path()
-
-# ============================================================================
-# OPTICAL FLOW MODEL - PyTorch RAFT with torch.compile
-# ============================================================================
 print("=" * 70)
 print("OPTICAL FLOW MODEL CONFIGURATION")
 print("=" * 70)
-print(f"  -> Using PyTorch RAFT (with optional torch.compile)")
-print(f"  USE_TORCH_COMPILE_RAFT = {os.getenv('USE_TORCH_COMPILE_RAFT', '0')}")
+print(f"Environment Variables:")
+print(f"  USE_NEUFLOW       = {os.getenv('USE_NEUFLOW', '0')} (Active: {_USE_NEUFLOW})")
+print(f"  FORCE_TRT_RAFT    = {os.getenv('FORCE_TRT_RAFT', '0')} (Active: {_FORCE_TRT_RAFT})")
+print(f"  ENABLE_FLASH_ATTENTION = {os.getenv('ENABLE_FLASH_ATTENTION', '0')}")
+print(f"  RFCNET_TORCHTRT   = {os.getenv('RFCNET_TORCHTRT', '0')}")
+print()
+print(f"Model File Status:")
+print(f"  NeuFlow v2 TensorRT FP16 = {'[OK] EXISTS' if _NEUFLOW_EXISTS else '[X] NOT FOUND'} ({_NEUFLOW_MODEL_PATH})")
+print()
+print(f"Expected Behavior:")
+if _USE_NEUFLOW:
+    if _NEUFLOW_EXISTS:
+        print(f"  -> Will use NeuFlow v2 TensorRT FP16 (3-4x faster than ONNX Runtime, 10-70x faster than RAFT)")
+    else:
+        print(f"  -> ERROR: USE_NEUFLOW=1 but model file missing!")
+        print(f"  -> Build TensorRT engine using: tools/BUILD_NEUFLOW_TRT.bat")
+elif _FORCE_TRT_RAFT:
+    print(f"  -> Will attempt TensorRT RAFT FP16 (fallback to PyTorch if not available)")
+else:
+    print(f"  -> Will use PyTorch RAFT (slowest, but most compatible)")
 print("=" * 70)
 print()
 
-from model.modules.flow_comp_raft import RAFT_bi
+if _USE_NEUFLOW:
+    from model.modules.flow_comp_neuflow import NeuFlow_bi as RAFT_bi
+    print("[OK] Using NeuFlow v2 for optical flow (10-70x faster than RAFT)")
+else:
+    from model.modules.flow_comp_raft import RAFT_bi
+    # RAFT can use PyTorch or TensorRT depending on FORCE_TRT_RAFT env var
 from model.recurrent_flow_completion import RecurrentFlowCompleteNet
 from model.propainter import InpaintGenerator
 from utils.download_util import load_file_from_url
@@ -238,11 +244,6 @@ warnings.filterwarnings("ignore")
 # ============================================================================
 _GLOBAL_MODELS_CACHE = None
 _MODEL_CACHE_LOCK = None
-
-# Cache version marker - increment to force cache invalidation
-# Version includes DCNv4 setting to ensure cache is cleared when setting changes
-_CACHE_VERSION = f"v3_dcnv4={os.getenv('ENABLE_DCNV4_RFCNET', '0')}"
-print(f"[CACHE] Module loaded with cache version: {_CACHE_VERSION}")
 
 pretrain_model_url = "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/"
 
@@ -437,8 +438,6 @@ def pipeline(
     fp16=False,
     frames_array=None,
     masks_array=None,
-    frames_tensor_gpu=None,  # GPU tensors from NVDEC (ZERO CPU transfers!)
-    masks_tensor_gpu=None,   # GPU mask tensors (optional)
     use_cached_models=True,  # Enable global model cache for true parallel speedup
 ):
 
@@ -448,145 +447,8 @@ def pipeline(
     if device == torch.device("cpu"):
         use_half = False
 
-    # ⚡ GPU-ONLY PIPELINE: Use GPU tensors directly from NVDEC (ZERO CPU transfers!)
-    frames_already_tensors = False  # Flag to skip to_tensors() conversion later
-
-    if frames_tensor_gpu is not None:
-        frames_already_tensors = True  # Skip tensor conversion later
-        print(f"[GPU-ONLY] Using {frames_tensor_gpu.shape[1]} frames from GPU memory (ZERO CPU transfers!)")
-
-        # Frames already on GPU in correct format [1, T, C, H, W], range [-1, 1]
-        frames = frames_tensor_gpu.to(device, non_blocking=True)
-
-        # Derive metadata from tensor
-        fps = save_fps
-        _, num_frames, _, h, w = frames.shape
-        size = (w, h)  # (W, H)
-
-        # Extract video_name from video parameter
-        if video.endswith(("mp4", "mov", "avi", "MP4", "MOV", "AVI")):
-            video_name = os.path.basename(video)[:-4]
-        else:
-            video_name = os.path.basename(video)
-
-        # Check size requirements
-        if not width == -1 and not height == -1:
-            size = (width, height)
-        if not resize_ratio == 1.0:
-            size = (int(resize_ratio * size[0]), int(resize_ratio * size[1]))
-
-        # Ensure size is divisible by 8
-        if (size[0] % 8 != 0) or (size[1] % 8 != 0):
-            # Need to resize tensor on GPU
-            new_w = (size[0] // 8) * 8
-            new_h = (size[1] // 8) * 8
-            size = (new_w, new_h)
-            out_size = size
-
-            # Resize on GPU using F.interpolate
-            # frames shape: [1, T, C, H, W]
-            # Reshape to [T, C, H, W] for interpolation
-            frames = frames.squeeze(0)  # [T, C, H, W]
-            frames = torch.nn.functional.interpolate(
-                frames, size=(new_h, new_w), mode='bilinear', align_corners=False
-            )
-            frames = frames.unsqueeze(0)  # Back to [1, T, C, H, W]
-            w, h = new_w, new_h
-        else:
-            out_size = size
-
-        fps = save_fps if fps is None else fps
-        save_root = os.path.join(output, video_name)
-        if not os.path.exists(save_root):
-            os.makedirs(save_root, exist_ok=True)
-
-        if mode == "video_inpainting":
-            frames_len = num_frames
-
-            # Handle masks - convert to GPU tensors if needed
-            if masks_tensor_gpu is not None:
-                # Already on GPU
-                flow_masks = masks_tensor_gpu.to(device, non_blocking=True)
-                masks_dilated = flow_masks
-                print(f"[GPU-ONLY] Using masks from GPU memory")
-            elif masks_array is not None:
-                # Convert numpy masks to GPU tensors
-                flow_masks_list = []
-                masks_dilated_list = []
-
-                for mask_np in masks_array:
-                    # Ensure grayscale
-                    if len(mask_np.shape) == 3:
-                        mask_np = cv2.cvtColor(mask_np, cv2.COLOR_BGR2GRAY)
-
-                    # Resize if needed
-                    if size is not None:
-                        mask_np = cv2.resize(mask_np, size, interpolation=cv2.INTER_NEAREST)
-
-                    # Flow mask dilation
-                    if mask_dilation > 0:
-                        flow_mask_img = scipy.ndimage.binary_dilation(
-                            mask_np, iterations=mask_dilation
-                        ).astype(np.uint8)
-                    else:
-                        flow_mask_img = binary_mask(mask_np).astype(np.uint8)
-                    flow_masks_list.append(Image.fromarray(flow_mask_img * 255))
-
-                    # Regular mask dilation
-                    if mask_dilation > 0:
-                        mask_img = scipy.ndimage.binary_dilation(
-                            mask_np, iterations=mask_dilation
-                        ).astype(np.uint8)
-                    else:
-                        mask_img = binary_mask(mask_np).astype(np.uint8)
-                    masks_dilated_list.append(Image.fromarray(mask_img * 255))
-
-                # If single mask, repeat for all frames
-                if len(masks_array) == 1:
-                    flow_masks_list = flow_masks_list * frames_len
-                    masks_dilated_list = masks_dilated_list * frames_len
-
-                # Convert to GPU tensors
-                flow_masks = to_tensors()(flow_masks_list).unsqueeze(0).to(device, non_blocking=True)
-                masks_dilated = to_tensors()(masks_dilated_list).unsqueeze(0).to(device, non_blocking=True)
-                print(f"[GPU-ONLY] Converted {len(masks_array)} numpy masks to GPU tensors")
-            else:
-                # Load from disk - use module-level read_mask function
-                flow_masks, masks_dilated = read_mask(
-                    mask,
-                    frames_len,
-                    size,
-                    flow_mask_dilates=mask_dilation,
-                    mask_dilates=mask_dilation,
-                )
-                flow_masks = to_tensors()(flow_masks).unsqueeze(0).to(device, non_blocking=True)
-                masks_dilated = to_tensors()(masks_dilated).unsqueeze(0).to(device, non_blocking=True)
-
-        # For masked frame visualization, need to convert to CPU temporarily
-        # Convert first frame to numpy for masked_frame_for_save generation
-        # This is ONLY for visualization output, not for processing!
-        masked_frame_for_save = []
-        frames_cpu = frames[0].cpu()  # [T, C, H, W]
-        masks_cpu = masks_dilated[0].cpu()  # [T, 1, H, W]
-
-        for i in range(frames_len):
-            # Convert from [-1,1] to [0,255]
-            frame_np = ((frames_cpu[i].permute(1, 2, 0).numpy() + 1) * 127.5).astype(np.uint8)
-            mask_np = masks_cpu[i, 0].numpy()
-
-            mask_3ch = np.expand_dims(mask_np, 2).repeat(3, axis=2)
-            green = np.zeros([h, w, 3])
-            green[:, :, 1] = 255
-            alpha = 0.6
-            fuse_img = (1 - alpha) * frame_np + alpha * green
-            fuse_img = mask_3ch * fuse_img + (1 - mask_3ch) * frame_np
-            masked_frame_for_save.append(fuse_img.astype(np.uint8))
-
-        # Skip to model inference (frames already in GPU tensor format)
-        # Jump past all CPU-based preprocessing
-
     # 🔥 EXTREME SPEED: Use numpy arrays directly if provided (skip disk I/O!)
-    elif frames_array is not None:
+    if frames_array is not None:
         # Convert numpy arrays (BGR) to PIL Images (RGB)
         frames = []
         for frame_bgr in frames_array:
@@ -700,51 +562,324 @@ def pipeline(
         fuse_img = mask_ * fuse_img + (1 - mask_) * img
         masked_frame_for_save.append(fuse_img.astype(np.uint8))
 
-    # Convert to tensors (skip if already tensors from GPU pipeline)
-    if not frames_already_tensors:
-        frames_inp = [np.array(f).astype(np.uint8) for f in frames]
-        frames = to_tensors()(frames).unsqueeze(0) * 2 - 1
-        flow_masks = to_tensors()(flow_masks).unsqueeze(0)
-        masks_dilated = to_tensors()(masks_dilated).unsqueeze(0)
-        # NOTE: Can't use channels_last on 5D tensors (BTCHW) - only works with 4D (NCHW)
-        # Models will automatically convert internally via their .to(memory_format=torch.channels_last)
-        frames, flow_masks, masks_dilated = (
-            frames.to(device, non_blocking=True),
-            flow_masks.to(device, non_blocking=True),
-            masks_dilated.to(device, non_blocking=True),
-        )
-    # else: frames, flow_masks, masks_dilated already on GPU from NVDEC pipeline!
+    frames_inp = [np.array(f).astype(np.uint8) for f in frames]
+    frames = to_tensors()(frames).unsqueeze(0) * 2 - 1
+    flow_masks = to_tensors()(flow_masks).unsqueeze(0)
+    masks_dilated = to_tensors()(masks_dilated).unsqueeze(0)
+    # NOTE: Can't use channels_last on 5D tensors (BTCHW) - only works with 4D (NCHW)
+    # Models will automatically convert internally via their .to(memory_format=torch.channels_last)
+    frames, flow_masks, masks_dilated = (
+        frames.to(device, non_blocking=True),
+        flow_masks.to(device, non_blocking=True),
+        masks_dilated.to(device, non_blocking=True),
+    )
 
     ##############################################
     # set up RAFT and flow competition model
     ##############################################
-    # PyTorch RAFT with optional torch.compile optimization
+    # Try to use TensorRT FastFlowNet engine for optical flow; fallback to PyTorch RAFT
     class _RAFTAdapter:
         def __init__(self, device: torch.device, use_half: bool):
             self.device = device
             self.use_half = use_half and (device.type == "cuda")
-            self._model_type = "PyTorch RAFT"
+            self._trt_ready = False
+            self._ctx = None
+            self._engine = None
+            self._in_idx = None
+            self._out_idx = None
+            self._binding_dtype_in = None
+            self._binding_dtype_out = None
+            self._in_name = None
+            self._out_name = None
+            self._use_v3 = False
+            self._stream = None
+            self._model_type = "unknown"  # Track which model is actually loaded
+            # Enforce TensorRT-only mode when requested (no PyTorch fallback)
+            def _parse_bool(val: str) -> bool:
+                return str(val).lower() in ("1", "true", "yes", "on")
+            self._force_trt = _parse_bool(os.getenv("FORCE_TRT_RAFT", "0"))
 
-            # Load PyTorch RAFT model
-            ckpt_path = load_file_from_url(
-                url=os.path.join(pretrain_model_url, "raft-things.pth"),
-                model_dir="weights",
-                progress=True,
-                file_name=None,
-            )
-            self._raft = RAFT_bi(ckpt_path, device)
-            print("[OK] RAFT PyTorch model initialized")
-            print("   Expected performance: 3-5ms per frame")
+            # PRIORITY 1: Check USE_NEUFLOW FIRST (takes precedence over TensorRT)
+            if os.getenv("USE_NEUFLOW", "0") == "1":
+                # NeuFlow v2 uses TensorRT FP16 engine with fallback to PyTorch RAFT
+                model_path = os.path.join(os.path.dirname(__file__), "models", "neuflow_things_fp16.engine")
+
+                # Try TensorRT NeuFlow first
+                neuflow_loaded = False
+                if os.path.exists(model_path) and os.path.getsize(model_path) > 0:
+                    try:
+                        self._raft = RAFT_bi(model_path, device)
+                        self._model_type = "NeuFlow v2 TensorRT FP16"
+                        print("[OK] Using NeuFlow v2 TensorRT for optical flow (10-70x faster than RAFT)")
+                        print("[PERF] TensorRT FP16 = 3-4X FASTER than ONNX Runtime!")
+                        neuflow_loaded = True
+                    except Exception as e:
+                        print(f"[WARNING] NeuFlow TensorRT failed to load: {e}")
+                        print("[INFO] Falling back to PyTorch RAFT...")
+
+                # Fallback to PyTorch RAFT if TensorRT failed
+                if not neuflow_loaded:
+                    from model.modules.flow_comp_raft import RAFT_bi as PyTorch_RAFT
+                    # Look in parent directory (D:\watermarkz\weights\) for the model
+                    raft_path = os.path.join(os.path.dirname(__file__), "..", "weights", "raft-things.pth")
+                    self._raft = PyTorch_RAFT(raft_path, device)
+                    self._model_type = "PyTorch RAFT"
+                    print(f"[OK] RAFT PyTorch model initialized")
+
+                    # Apply torch.compile for 1.5-2x speedup
+                    if os.getenv("USE_TORCH_COMPILE_RAFT", "0") == "1":
+                        try:
+                            print("[COMPILE] Compiling RAFT with torch.compile...")
+                            self._raft.fix_raft.forward = torch.compile(
+                                self._raft.fix_raft.forward,
+                                dynamic=True
+                            )
+                            self._model_type = "PyTorch RAFT (compiled)"
+                            print("[OK] RAFT torch.compile enabled (1.5-2x speedup)")
+                        except Exception as e:
+                            print(f"[WARNING] RAFT torch.compile failed: {e}, using PyTorch")
+
+                self._trt_ready = False  # Disable TensorRT path in __call__
+            else:
+                # PRIORITY 2: Try TensorRT RAFT (only when USE_NEUFLOW=0 AND FORCE_TRT_RAFT=1)
+                # When FORCE_TRT_RAFT=0, skip TensorRT entirely and use PyTorch RAFT
+                self._trt_ready = False  # Default to PyTorch
+                if self._force_trt:
+                    # Candidate engine paths (absolute + relative)
+                    engine_candidates = [
+                        os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'raft', 'raft_fp16.engine'),
+                        os.path.join(os.path.dirname(__file__), 'engines', 'raft', 'raft_fp16.engine'),
+                    ]
+                    engine_path = None
+                    for p in engine_candidates:
+                        if os.path.exists(p):
+                            engine_path = p
+                            break
+
+                    if not engine_path:
+                        raise RuntimeError("FORCE_TRT_RAFT=1 set but RAFT engine not found at expected locations")
+
+                if self._force_trt and engine_path and device.type == 'cuda':
+                    try:
+                        # Ensure TensorRT DLLs are available on Windows
+                        trt_root = os.environ.get('TENSORRT_ROOT') or os.path.join(os.getcwd(), 'TensorRT-10.7.0.23')
+                        trt_lib = os.path.join(trt_root, 'lib')
+                        if os.name == 'nt' and os.path.isdir(trt_lib):
+                            try:
+                                os.add_dll_directory(trt_lib)
+                            except Exception:
+                                pass
+                        import tensorrt as trt
+                        logger = trt.Logger(trt.Logger.WARNING)
+                        runtime = trt.Runtime(logger)
+                        with open(engine_path, 'rb') as f:
+                            self._engine = runtime.deserialize_cuda_engine(f.read())
+                        if self._engine is None:
+                            raise RuntimeError('TRT engine deserialize failed')
+                        # Don't create context here - will be created per-thread lazily
+                        self._ctx = None
+                        # Resolve bindings robustly (support legacy and TensorRT 10 v3 I/O)
+                        try:
+                            nb = self._engine.num_bindings  # may not exist on TRT 10
+                        except Exception:
+                            nb = None
+                        if isinstance(nb, int) and nb > 0:
+                            for i in range(nb):
+                                if self._engine.binding_is_input(i) and self._in_idx is None:
+                                    self._in_idx = i
+                                    self._binding_dtype_in = self._engine.get_binding_dtype(i)
+                                if (not self._engine.binding_is_input(i)) and self._out_idx is None:
+                                    self._out_idx = i
+                                    self._binding_dtype_out = self._engine.get_binding_dtype(i)
+                            assert self._in_idx is not None and self._out_idx is not None
+                        else:
+                            # TensorRT 10 v3 API uses named tensors
+                            self._use_v3 = True
+                            n_io = self._engine.num_io_tensors
+                            for i in range(n_io):
+                                name = self._engine.get_tensor_name(i)
+                                mode = self._engine.get_tensor_mode(name)
+                                if mode == trt.TensorIOMode.INPUT and self._in_name is None:
+                                    self._in_name = name
+                                    self._binding_dtype_in = self._engine.get_tensor_dtype(name)
+                                elif mode == trt.TensorIOMode.OUTPUT and self._out_name is None:
+                                    self._out_name = name
+                                    self._binding_dtype_out = self._engine.get_tensor_dtype(name)
+                            assert self._in_name is not None and self._out_name is not None
+                        # Create a dedicated CUDA stream to avoid default-stream sync penalties
+                        import torch as _torch
+                        if device.type == 'cuda':
+                            try:
+                                self._stream = _torch.cuda.Stream(device=device)
+                            except Exception:
+                                self._stream = None
+                        self._trt_ready = True
+                        self._model_type = "TensorRT RAFT FP16"
+                        print(f"[OK] Using TensorRT RAFT engine: {engine_path}")
+                        # DEBUG: Print engine shape ranges
+                        if self._use_v3:
+                            print(f"[TRT DEBUG] Input tensor: {self._in_name}, Output tensor: {self._out_name}")
+                        else:
+                            print(f"[TRT DEBUG] Input binding: {self._in_idx}, Output binding: {self._out_idx}")
+                    except Exception as e:
+                        if self._force_trt:
+                            raise
+                        else:
+                            print(f"[WARNING] TensorRT RAFT engine load failed, falling back to PyTorch: {e}")
+                            self._trt_ready = False
+
+                # PRIORITY 3: Fallback to PyTorch RAFT (if TensorRT failed)
+                if not self._trt_ready:
+                    if self._force_trt:
+                        raise RuntimeError("FORCE_TRT_RAFT=1 set but TensorRT RAFT engine is not available")
+
+                    # Original RAFT with PyTorch
+                    ckpt_path = load_file_from_url(
+                        url=os.path.join(pretrain_model_url, "raft-things.pth"),
+                        model_dir="weights",
+                        progress=True,
+                        file_name=None,
+                    )
+                    self._raft = RAFT_bi(ckpt_path, device)
+                    self._model_type = "PyTorch RAFT"
+                    print("[OK] RAFT PyTorch model initialized")
+
+                    # Apply torch.compile for 1.5-2x speedup
+                    if os.getenv("USE_TORCH_COMPILE_RAFT", "0") == "1":
+                        try:
+                            print("[COMPILE] Compiling RAFT with torch.compile...")
+                            self._raft.fix_raft.forward = torch.compile(
+                                self._raft.fix_raft.forward,
+                                dynamic=True
+                            )
+                            self._model_type = "PyTorch RAFT (compiled)"
+                            print("[OK] RAFT torch.compile enabled (1.5-2x speedup)")
+                        except Exception as e:
+                            print(f"[WARNING] RAFT torch.compile failed: {e}, using PyTorch")
 
         @property
         def model_type(self) -> str:
             """Return the actual optical flow model type being used"""
             return self._model_type
 
+        def _get_thread_context(self):
+            """Get or create TensorRT execution context for current thread"""
+            if not hasattr(_thread_local, 'trt_contexts'):
+                _thread_local.trt_contexts = {}
+
+            thread_id = threading.get_ident()
+            if thread_id not in _thread_local.trt_contexts:
+                # Create new context for this thread
+                ctx = self._engine.create_execution_context()
+                _thread_local.trt_contexts[thread_id] = ctx
+                print(f"[TRT] Created new execution context for thread {thread_id}")
+
+            return _thread_local.trt_contexts[thread_id]
+
         @torch.inference_mode()
         def __call__(self, frames_btchw: torch.Tensor, iters: int = 20):
             # frames: [B, T, C, H, W]
-            return self._raft(frames_btchw, iters=iters)
+            if not self._trt_ready:
+                return self._raft(frames_btchw, iters=iters)
+
+            B, T, C, H, W = frames_btchw.shape
+            assert B == 1, "Adapter expects batch=1"
+
+            # Dtypes for engine bindings
+            import tensorrt as trt  # type: ignore
+            in_half = (self._binding_dtype_in == trt.DataType.HALF)
+            out_half = (self._binding_dtype_out == trt.DataType.HALF)
+
+            def _exec_pair(img0: torch.Tensor, img1: torch.Tensor) -> torch.Tensor:
+                # img0/img1: [B, C, H, W] on device
+                # Build input [B,2,3,H,W]
+                if self._stream is not None:
+                    with torch.cuda.stream(self._stream):
+                        inp = torch.stack((img0, img1), dim=1)
+                        if in_half:
+                            inp = inp.half()
+                        else:
+                            inp = inp.float()
+                else:
+                    inp = torch.stack((img0, img1), dim=1)
+                    if in_half:
+                        inp = inp.half()
+                    else:
+                        inp = inp.float()
+                # Allocate output tensor [B,2,H,W]
+                if self._stream is not None:
+                    with torch.cuda.stream(self._stream):
+                        out = torch.empty((B, 2, H, W), device=inp.device, dtype=torch.float16 if out_half else torch.float32)
+                else:
+                    out = torch.empty((B, 2, H, W), device=inp.device, dtype=torch.float16 if out_half else torch.float32)
+                # DEBUG: Log shape before execution (only first time)
+                if not hasattr(self, '_trt_shape_logged'):
+                    print(f"[TRT EXEC] Input shape: {inp.shape}, dtype: {inp.dtype}")
+                    print(f"[TRT EXEC] Output shape: {out.shape}, dtype: {out.dtype}")
+                    print(f"[TRT] Thread-local contexts enabled - TRUE PARALLEL execution!")
+                    self._trt_shape_logged = True
+
+                # Get thread-local context (NO LOCK NEEDED - each thread has its own!)
+                ctx = self._get_thread_context()
+
+                # Execute depending on TRT API
+                if not getattr(self, '_use_v3', False):
+                    # Legacy bindings API
+                    ctx.set_binding_shape(self._in_idx, tuple(inp.shape))
+                    # Query num_bindings safely
+                    try:
+                        nb = self._engine.num_bindings
+                    except Exception:
+                        nb = 2
+                    bindings = [None] * int(nb)
+                    bindings[self._in_idx] = int(inp.data_ptr())
+                    bindings[self._out_idx] = int(out.data_ptr())
+                    ok = ctx.execute_v2(bindings)
+                else:
+                    # TensorRT 10 v3 API
+                    try:
+                        success = ctx.set_input_shape(self._in_name, tuple(inp.shape))
+                        if not success:
+                            print(f"[TRT ERROR] set_input_shape failed for shape {inp.shape}")
+                    except Exception as e:
+                        print(f"[TRT ERROR] Exception in set_input_shape: {e}")
+                        raise
+                    ctx.set_tensor_address(self._in_name, int(inp.data_ptr()))
+                    ctx.set_tensor_address(self._out_name, int(out.data_ptr()))
+                    if self._stream is not None:
+                        stream_ptr = int(self._stream.cuda_stream)
+                    else:
+                        stream_ptr = int(torch.cuda.current_stream().cuda_stream)
+                    ok = ctx.execute_async_v3(stream_ptr)
+
+                if not ok:
+                    # DEBUG: Print shapes and binding info to understand failure
+                    print(f"[TRT FAIL] Input shape: {inp.shape}, dtype: {inp.dtype}")
+                    print(f"[TRT FAIL] Output shape: {out.shape}, dtype: {out.dtype}")
+                    print(f"[TRT FAIL] Expected input: {self._in_name}, output: {self._out_name}")
+                    print(f"[TRT FAIL] Device: {inp.device}")
+                    raise RuntimeError(f'TRT execute failed - input shape: {inp.shape}, output shape: {out.shape}')
+                return out
+
+            # Prepare frame tensors on device
+            dev_frames = frames_btchw.to(self.device, non_blocking=True)
+            if self.use_half:
+                dev_frames = dev_frames.half()
+            flows_f = []
+            flows_b = []
+            for t in range(T - 1):
+                f0 = dev_frames[:, t]
+                f1 = dev_frames[:, t + 1]
+                ff = _exec_pair(f0, f1)
+                fb = _exec_pair(f1, f0)
+                flows_f.append(ff)
+                flows_b.append(fb)
+            # Ensure TRT stream completes before consuming outputs on default stream
+            if self._stream is not None:
+                torch.cuda.current_stream().wait_stream(self._stream)
+            flows_f = torch.cat(flows_f, dim=0).unsqueeze(0)  # [1, T-1, 2, H, W]
+            flows_b = torch.cat(flows_b, dim=0).unsqueeze(0)
+            return flows_f, flows_b
 
     # ============================================================================
     # MODEL CACHING: Load models once per worker, reuse across segments
@@ -761,14 +896,7 @@ def pipeline(
         with _MODEL_CACHE_LOCK:
             if _GLOBAL_MODELS_CACHE is None:
                 print(f"[INIT] Creating global model cache (worker first-time initialization)...")
-                _GLOBAL_MODELS_CACHE = {'_version': _CACHE_VERSION}
-
-            # Check cache version - if different, clear all cached models
-            cached_version = _GLOBAL_MODELS_CACHE.get('_version', 'v0')
-            if cached_version != _CACHE_VERSION:
-                print(f"[CACHE] Version mismatch! Cached={cached_version}, Current={_CACHE_VERSION}")
-                print(f"[CACHE] Clearing ALL cached models to pick up new settings...")
-                _GLOBAL_MODELS_CACHE = {'_version': _CACHE_VERSION}
+                _GLOBAL_MODELS_CACHE = {}
 
             if cache_key not in _GLOBAL_MODELS_CACHE:
                 print(f"[CACHE] Loading models for key={cache_key}... (this happens ONCE per worker)")
@@ -789,13 +917,6 @@ def pipeline(
             else:
                 print(f"[CACHE] Reusing cached models for {cache_key} (ZERO reload time!)")
 
-                # Check if RAFT model needs to be recreated (e.g., from previous failed initialization)
-                if _GLOBAL_MODELS_CACHE[cache_key]['raft'] is None:
-                    print(f"[CACHE] RAFT model was None, recreating...")
-                    raft_model = _RAFTAdapter(device, use_half)
-                    _GLOBAL_MODELS_CACHE[cache_key]['raft'] = raft_model
-                    print(f"[CACHE] Optical flow model recreated: {raft_model.model_type}")
-
             fix_raft = _GLOBAL_MODELS_CACHE[cache_key]['raft']
             # Validate which optical flow model is actually loaded
             if fix_raft is not None:
@@ -810,67 +931,167 @@ def pipeline(
         else:
             raise RuntimeError("[ERROR] Optical flow model failed to initialize! Check logs for errors.")
 
-    # torch.compile for RAFT (1.5-2x speedup)
+    # torch.compile for RAFT (1.5-2x speedup on non-TensorRT)
     if os.getenv("USE_TORCH_COMPILE_RAFT", "0") == "1":
-        if hasattr(fix_raft, '_raft') and device.type == 'cuda':
+        if hasattr(fix_raft, 'fix_raft') and device.type == 'cuda':
             try:
-                print("[COMPILE] Compiling RAFT with torch.compile (mode=reduce-overhead)...")
+                print("[COMPILE] Compiling RAFT with torch.compile (no-cudagraphs)...")
                 compiled_forward = torch.compile(
-                    fix_raft._raft.forward,
+                    fix_raft.fix_raft.forward,
                     backend="inductor",
-                    mode="reduce-overhead",
+                    mode="max-autotune-no-cudagraphs",
                     dynamic=True,
                     fullgraph=False,
                 )
-                fix_raft._raft.forward = compiled_forward
+                fix_raft.fix_raft.forward = compiled_forward
                 print("[OK] RAFT torch.compile enabled (1.5-2x speedup)")
             except Exception as e:
-                error_type = type(e).__name__
-                if 'Triton' in str(e) or 'triton' in str(e):
-                    print(f"[WARNING] RAFT torch.compile failed (Triton error on WSL2): {error_type}")
-                    print(f"[HINT] Try setting TORCHINDUCTOR_COMPILE_THREADS=1 or disable Triton")
-                else:
-                    print(f"[WARNING] RAFT torch.compile failed ({error_type}): {e}")
-                print("[FALLBACK] Using PyTorch eager mode (slower but stable)")
+                print(f"[WARNING] RAFT torch.compile failed: {e}, using PyTorch")
 
     ##############################################
-    # set up RFCNet with PyTorch + torch.compile
+    # set up RFCNet with TensorRT acceleration
     ##############################################
+    # Try to use TensorRT RFCNet engine; fallback to PyTorch RecurrentFlowCompleteNet
     class _RFCNetAdapter:
         def __init__(self, device: torch.device, use_half: bool, ckpt_path: str):
             self.device = device
             self.use_half = use_half and (device.type == "cuda")
+            self._trt_ready = False
+            self._ctx = None
+            self._engine = None
+            self._use_v3 = False
+            self._stream = None
+            self._in_names = None  # (masked_flows_name, masks_name)
+            self._out_name = None
 
-            # Load PyTorch RecurrentFlowCompleteNet
-            print(f"Loading PyTorch RecurrentFlowCompleteNet from: {ckpt_path}")
-            self._model = RecurrentFlowCompleteNet(ckpt_path)
-            for p in self._model.parameters():
-                p.requires_grad = False
-            self._model.to(device, non_blocking=True)
-            self._model.eval()
-            print("[OK] RFCNet PyTorch model initialized")
+            # Enforce TensorRT-only mode when requested
+            def _parse_bool(val: str) -> bool:
+                return str(val).lower() in ("1", "true", "yes", "on")
+            self._force_trt = _parse_bool(os.getenv("FORCE_TRT_RFCNET", "0"))
 
-            # torch.compile for RFCNet (1.5-2x speedup)
-            if os.getenv("USE_TORCH_COMPILE_RAFT", "0") == "1" and device.type == 'cuda':
+            # Candidate engine paths (DCNv4 version)
+            engine_candidates = [
+                os.path.join(os.getcwd(), 'engines', 'rfcnet', 'rfcnet_dcnv4_fp16.engine'),
+                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'rfcnet', 'rfcnet_dcnv4_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), 'engines', 'rfcnet', 'rfcnet_dcnv4_fp16.engine'),
+            ]
+            engine_path = None
+            for p in engine_candidates:
+                if os.path.exists(p):
+                    engine_path = p
+                    break
+
+            if not engine_path and self._force_trt:
+                raise RuntimeError("FORCE_TRT_RFCNET=1 set but RFCNet engine not found at expected locations")
+
+            if engine_path and device.type == 'cuda':
                 try:
-                    print("[COMPILE] Compiling RFCNet with torch.compile (mode=reduce-overhead)...")
-                    compiled_forward = torch.compile(
-                        self._model.forward,
-                        backend="inductor",
-                        mode="reduce-overhead",
-                        dynamic=True,
-                        fullgraph=False,
-                    )
-                    self._model.forward = compiled_forward
-                    print("[OK] RFCNet torch.compile enabled (1.5-2x speedup)")
-                except Exception as e:
-                    error_type = type(e).__name__
-                    if 'Triton' in str(e) or 'triton' in str(e):
-                        print(f"[WARNING] RFCNet torch.compile failed (Triton error on WSL2): {error_type}")
-                        print(f"[HINT] Try setting TORCHINDUCTOR_COMPILE_THREADS=1 or disable Triton")
+                    # Ensure TensorRT DLLs are available
+                    trt_root = os.environ.get('TENSORRT_ROOT') or os.path.join(os.getcwd(), 'TensorRT-10.13.3.9')
+                    trt_lib = os.path.join(trt_root, 'lib')
+                    if os.name == 'nt' and os.path.isdir(trt_lib):
+                        try:
+                            os.add_dll_directory(trt_lib)
+                        except Exception:
+                            pass
+
+                    # Load DCNv4 plugin (required for RFCNet TensorRT engine)
+                    import ctypes
+                    plugin_path = os.path.join(os.getcwd(), 'dcnv4_tensorrt_plugin', 'build', 'Release', 'dcnv4_plugin.dll')
+                    # Also add plugin directory to DLL search path for dependencies
+                    plugin_dir = os.path.dirname(plugin_path)
+                    if os.path.isdir(plugin_dir):
+                        try:
+                            os.add_dll_directory(plugin_dir)
+                        except Exception:
+                            pass
+                    if os.path.exists(plugin_path):
+                        try:
+                            ctypes.CDLL(plugin_path)
+                        except Exception as e:
+                            if self._force_trt:
+                                raise RuntimeError(f'Failed to load DCNv4 plugin from {plugin_path}: {e}')
+                            else:
+                                print(f"[WARNING] DCNv4 plugin load failed: {e}")
+                                raise
                     else:
-                        print(f"[WARNING] RFCNet torch.compile failed ({error_type}): {e}")
-                    print("[FALLBACK] Using PyTorch eager mode (slower but stable)")
+                        if self._force_trt:
+                            raise RuntimeError(f'DCNv4 plugin not found at {plugin_path}')
+                        else:
+                            print(f"[WARNING] DCNv4 plugin not found at {plugin_path}")
+                            raise FileNotFoundError(f'DCNv4 plugin not found at {plugin_path}')
+
+                    import tensorrt as trt
+                    logger = trt.Logger(trt.Logger.WARNING)
+                    runtime = trt.Runtime(logger)
+                    with open(engine_path, 'rb') as f:
+                        self._engine = runtime.deserialize_cuda_engine(f.read())
+                    if self._engine is None:
+                        raise RuntimeError('TRT engine deserialize failed')
+                    # Don't create context here - will be created per-thread lazily
+                    self._ctx = None
+
+                    # Use TensorRT 10 v3 API (named tensors)
+                    self._use_v3 = True
+                    n_io = self._engine.num_io_tensors
+                    input_names = []
+                    for i in range(n_io):
+                        name = self._engine.get_tensor_name(i)
+                        mode = self._engine.get_tensor_mode(name)
+                        if mode == trt.TensorIOMode.INPUT:
+                            input_names.append(name)
+                        elif mode == trt.TensorIOMode.OUTPUT and self._out_name is None:
+                            self._out_name = name
+
+                    # Expected input names: "masked_flows" and "masks"
+                    if len(input_names) == 2:
+                        # Sort to ensure consistent order
+                        input_names.sort()
+                        self._in_names = tuple(input_names)
+                    assert self._in_names is not None and self._out_name is not None, \
+                        f"Failed to find expected inputs/output. Found: inputs={input_names}, output={self._out_name}"
+
+                    # Create dedicated CUDA stream
+                    if device.type == 'cuda':
+                        try:
+                            self._stream = torch.cuda.Stream(device=device)
+                        except Exception:
+                            self._stream = None
+
+                    self._trt_ready = True
+                    print(f"[OK] Using TensorRT RFCNet engine: {engine_path}")
+                    print(f"   Expected speedup: 8.45x (30.78ms -> 3.64ms per inference)")
+                except Exception as e:
+                    if self._force_trt:
+                        raise
+                    else:
+                        print(f"[WARNING] TensorRT RFCNet engine load failed, falling back to PyTorch: {e}")
+                        self._trt_ready = False
+
+            # Fallback to PyTorch if TensorRT not available
+            if not self._trt_ready:
+                print(f"Loading PyTorch RecurrentFlowCompleteNet from: {ckpt_path}")
+                self._model = RecurrentFlowCompleteNet(ckpt_path)
+                for p in self._model.parameters():
+                    p.requires_grad = False
+                self._model.to(device, non_blocking=True)
+                self._model.eval()
+
+                # torch.compile for RFCNet (1.5-2x speedup)
+                if os.getenv("USE_TORCH_COMPILE_RAFT", "0") == "1" and device.type == 'cuda':
+                    try:
+                        print("[COMPILE] Compiling RFCNet with torch.compile (no-cudagraphs)...")
+                        compiled_forward = torch.compile(
+                            self._model.forward,
+                            backend="inductor",
+                            mode="max-autotune-no-cudagraphs",
+                            dynamic=True,
+                            fullgraph=False,
+                        )
+                        self._model.forward = compiled_forward
+                        print("[OK] RFCNet torch.compile enabled (1.5-2x speedup)")
+                    except Exception as e:
+                        print(f"[WARNING] RFCNet torch.compile failed: {e}, using PyTorch")
 
         def forward(self, masked_flows: torch.Tensor, masks: torch.Tensor):
             """
@@ -884,7 +1105,73 @@ def pipeline(
                 flow: (B, T, 2, H, W) tensor
                 masks_updated: (B, T, 1, H, W) tensor
             """
-            return self._model.forward(masked_flows, masks)
+            if self._trt_ready:
+                return self._forward_trt(masked_flows, masks)
+            else:
+                return self._model.forward(masked_flows, masks)
+
+        def _get_thread_context(self):
+            """Get or create TensorRT execution context for current thread"""
+            if not hasattr(_thread_local, 'rfcnet_contexts'):
+                _thread_local.rfcnet_contexts = {}
+
+            thread_id = threading.get_ident()
+            if thread_id not in _thread_local.rfcnet_contexts:
+                # Create new context for this thread
+                ctx = self._engine.create_execution_context()
+                _thread_local.rfcnet_contexts[thread_id] = ctx
+                print(f"[TRT RFCNet] Created new execution context for thread {thread_id}")
+
+            return _thread_local.rfcnet_contexts[thread_id]
+
+        def _forward_trt(self, masked_flows: torch.Tensor, masks: torch.Tensor):
+            """TensorRT execution path."""
+            # Convert to FP16 if needed
+            if self.use_half:
+                masked_flows = masked_flows.half()
+                masks = masks.half()
+            else:
+                masked_flows = masked_flows.float()
+                masks = masks.float()
+
+            # Allocate output tensor
+            B, T, _, H, W = masked_flows.shape
+            dtype = torch.float16 if self.use_half else torch.float32
+
+            if self._stream is not None:
+                with torch.cuda.stream(self._stream):
+                    flow_out = torch.empty((B, T, 2, H, W), device=self.device, dtype=dtype)
+            else:
+                flow_out = torch.empty((B, T, 2, H, W), device=self.device, dtype=dtype)
+
+            # Get thread-local context (NO LOCK NEEDED - each thread has its own!)
+            ctx = self._get_thread_context()
+
+            # Set input shapes
+            ctx.set_input_shape(self._in_names[0], tuple(masked_flows.shape))
+            ctx.set_input_shape(self._in_names[1], tuple(masks.shape))
+
+            # Set tensor addresses
+            ctx.set_tensor_address(self._in_names[0], int(masked_flows.data_ptr()))
+            ctx.set_tensor_address(self._in_names[1], int(masks.data_ptr()))
+            ctx.set_tensor_address(self._out_name, int(flow_out.data_ptr()))
+
+            # Execute
+            if self._stream is not None:
+                stream_ptr = int(self._stream.cuda_stream)
+            else:
+                stream_ptr = int(torch.cuda.current_stream().cuda_stream)
+
+            ok = ctx.execute_async_v3(stream_ptr)
+            if not ok:
+                raise RuntimeError('TRT RFCNet execute failed')
+
+            # Ensure stream completes
+            if self._stream is not None:
+                torch.cuda.current_stream().wait_stream(self._stream)
+
+            # Return (flow, masks) - masks unchanged for compatibility
+            return flow_out, masks
 
         def forward_bidirect_flow(self, masked_flows_bi, masks_bi):
             """
@@ -896,9 +1183,25 @@ def pipeline(
 
             Returns:
                 pred_flows_bi: Tuple of [pred_flows_f, pred_flows_b]
-                pred_edges_bi: Tuple of [None, None]
+                pred_edges_bi: Tuple of [None, None] (edges not used in TRT mode)
             """
-            return self._model.forward_bidirect_flow(masked_flows_bi, masks_bi)
+            if self._trt_ready:
+                # Extract forward and backward flows from tuple
+                flows_f, flows_b = masked_flows_bi
+
+                # Extract forward/backward masks (B, T-1, 1, H, W)
+                masks_f = masks_bi[:, :-1, ...].contiguous()
+                masks_b = masks_bi[:, 1:, ...].contiguous()
+
+                # Process forward and backward separately
+                pred_f, _ = self._forward_trt(flows_f, masks_f)
+                pred_b, _ = self._forward_trt(flows_b, masks_b)
+
+                # Return tuple format for compatibility
+                return [pred_f, pred_b], [None, None]
+            else:
+                # Use PyTorch model's native implementation
+                return self._model.forward_bidirect_flow(masked_flows_bi, masks_bi)
 
         def combine_flow(self, masked_flows_bi, pred_flows_bi, masks):
             """
@@ -921,33 +1224,133 @@ def pipeline(
             return pred_flows_forward, pred_flows_backward
 
         def half(self):
-            """Convert model to half precision."""
-            self._model.half()
+            """No-op for compatibility (TRT engine already uses FP16)."""
             return self
 
     ##############################################
-    # Transformer Adapter (PyTorch only)
+    # TensorRT Sparse Transformer Adapter (NO FALLBACK)
     ##############################################
-    class _TransformerAdapter:
-        """PyTorch wrapper for Sparse Temporal Transformer"""
+    class _TransformerTRTAdapter:
+        """TensorRT wrapper for Sparse Temporal Transformer (NO FALLBACK when force_trt=True)"""
 
-        def __init__(self, transformer_module):
+        def __init__(self, transformer_module, force_trt=False):
             self._pytorch_model = transformer_module
+            self._force_trt = force_trt
+            self._trt_ready = False
+            self._engine = None
+            self._engine_path = None
+
+            if not force_trt:
+                # TensorRT disabled, use PyTorch
+                return
+
+            # Search for transformer engine
+            engine_candidates = [
+                os.path.join(os.getcwd(), 'engines', 'transformer', 'transformer_fp16.engine'),
+                os.path.join(os.getcwd(), 'faster-propainter-main', 'engines', 'transformer', 'transformer_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), 'engines', 'transformer', 'transformer_fp16.engine'),
+                os.path.join(os.path.dirname(__file__), '..', 'engines', 'transformer', 'transformer_fp16.engine'),
+            ]
+
+            for p in engine_candidates:
+                if os.path.exists(p):
+                    self._engine_path = p
+                    break
+
+            # STRICT MODE: Fail if engine not found
+            if not self._engine_path:
+                raise RuntimeError(
+                    f"FORCE_TRT_TRANSFORMER=1 but transformer engine not found!\n"
+                    f"Searched: {engine_candidates}\n"
+                    f"Build engine first: BUILD_TRANSFORMER_ENGINE.bat"
+                )
+
+            # Load TensorRT engine
+            try:
+                # Ensure TensorRT DLLs are available
+                trt_root = os.environ.get('TENSORRT_ROOT') or os.path.join(os.getcwd(), 'TensorRT-10.13.3.9')
+                trt_lib = os.path.join(trt_root, 'lib')
+                if os.name == 'nt' and os.path.isdir(trt_lib):
+                    try:
+                        os.add_dll_directory(trt_lib)
+                    except Exception:
+                        pass
+
+                import tensorrt as trt
+                trt_logger = trt.Logger(trt.Logger.WARNING)
+                runtime = trt.Runtime(trt_logger)
+
+                with open(self._engine_path, 'rb') as f:
+                    self._engine = runtime.deserialize_cuda_engine(f.read())
+
+                if self._engine is None:
+                    raise RuntimeError(f"Failed to deserialize transformer engine: {self._engine_path}")
+
+                self._trt_ready = True
+                print(f"[TRT Transformer] Engine loaded: {self._engine_path}")
+                print(f"[TRT Transformer] Expected speedup: 5-10x (2.39s → 0.24-0.48s per segment)")
+
+            except Exception as e:
+                # STRICT MODE: NO FALLBACK!
+                raise RuntimeError(
+                    f"FORCE_TRT_TRANSFORMER=1 but engine load failed: {e}\n"
+                    f"Engine path: {self._engine_path}\n"
+                    f"Check TensorRT installation and engine compatibility"
+                )
+
+        def _get_thread_context(self):
+            """Get or create TensorRT execution context for current thread"""
+            if not hasattr(_thread_local, 'transformer_contexts'):
+                _thread_local.transformer_contexts = {}
+
+            thread_id = threading.get_ident()
+            if thread_id not in _thread_local.transformer_contexts:
+                ctx = self._engine.create_execution_context()
+                _thread_local.transformer_contexts[thread_id] = ctx
+                print(f"[TRT Transformer] Created execution context for thread {thread_id}")
+
+            return _thread_local.transformer_contexts[thread_id]
 
         def forward(self, x, fold_x_size, l_mask=None, t_dilation=2):
             """
-            Forward pass using PyTorch model
+            Forward pass (TensorRT or PyTorch based on force_trt)
 
             Args:
                 x: [B, T, H, W, C] feature tokens
-                fold_x_size: tuple (fold_h, fold_w)
-                l_mask: [B, T, H, W, 1] local mask
-                t_dilation: temporal dilation
+                fold_x_size: tuple (fold_h, fold_w) - not used in TRT
+                l_mask: [B, T, H, W, 1] local mask - not used in TRT
+                t_dilation: temporal dilation - not used in TRT
 
             Returns:
                 output: [B, T, H, W, C] transformed features
             """
-            return self._pytorch_model(x, fold_x_size, l_mask, t_dilation)
+            if self._trt_ready:
+                return self._forward_trt(x)
+            else:
+                # PyTorch path (when force_trt=False)
+                return self._pytorch_model(x, fold_x_size, l_mask, t_dilation)
+
+        def _forward_trt(self, x):
+            """TensorRT inference path"""
+            B, T, H, W, C = x.shape
+
+            # Get thread-local context
+            ctx = self._get_thread_context()
+
+            # Set dynamic shape (T dimension varies)
+            ctx.set_input_shape("input", (B, T, H, W, C))
+
+            # Allocate output
+            output = torch.empty_like(x)
+
+            # Execute
+            bindings = [x.data_ptr(), output.data_ptr()]
+            success = ctx.execute_v2(bindings)
+
+            if not success:
+                raise RuntimeError("TensorRT transformer inference failed")
+
+            return output
 
         def __call__(self, *args, **kwargs):
             return self.forward(*args, **kwargs)
@@ -987,20 +1390,15 @@ def pipeline(
         fix_flow_complete.eval()
         # NOTE: Can't use channels_last on models with Conv3d (has non-4D parameters)
 
-    # torch.compile for RFCNet (optional, enabled via USE_TORCH_COMPILE_RAFT=1)
-    if os.getenv("USE_TORCH_COMPILE_RAFT", "0") == "1" and device.type == 'cuda':
-        try:
-            print("[COMPILE] Compiling RFCNet with torch.compile (mode=reduce-overhead)...")
-            fix_flow_complete.forward = torch.compile(
-                fix_flow_complete.forward,
-                backend="inductor",
-                mode="reduce-overhead",
-                dynamic=True,
+    # torch.compile() with inductor backend (REQUIRED when RFCNET_TORCHTRT=1, no fallback)
+    if os.getenv("RFCNET_TORCHTRT", "0").lower() in ("1", "true", "yes", "on"):
+        from trt_runtime import maybe_compile_rfcnet
+        if not maybe_compile_rfcnet(fix_flow_complete, device, use_fp16=use_half):
+            raise RuntimeError(
+                "RFCNET_TORCHTRT=1 set but torch.compile(inductor) compilation failed!\n"
+                "Check CUDA availability and Visual Studio C++ compiler."
             )
-            print("[OK] RFCNet torch.compile enabled (1.5-2x speedup)")
-        except Exception as e:
-            print(f"[WARNING] RFCNet torch.compile failed: {e}")
-            print("[FALLBACK] Using PyTorch eager mode")
+        print("[OK] RFCNet accelerated via torch.compile(backend='inductor')")
 
     ##############################################
     # set up ProPainter model
@@ -1090,6 +1488,8 @@ def pipeline(
                 end_f = min(video_length, f + short_clip_len)
 
                 # Use autocast for automatic mixed precision if FP16 enabled
+                # Mark step for CUDA graphs (reduce-overhead mode)
+                torch.compiler.cudagraph_mark_step_begin()
                 if use_half:
                     with torch.cuda.amp.autocast():
                         if f == 0:
@@ -1102,14 +1502,16 @@ def pipeline(
                     else:
                         flows_f, flows_b = fix_raft(frames[:, f - 1 : end_f], iters=raft_iter)
 
-                gt_flows_f_list.append(flows_f)
-                gt_flows_b_list.append(flows_b)
+                gt_flows_f_list.append(flows_f.clone())
+                gt_flows_b_list.append(flows_b.clone())
                 # Removed empty_cache() - was forcing GPU sync barrier
 
             gt_flows_f = torch.cat(gt_flows_f_list, dim=1)
             gt_flows_b = torch.cat(gt_flows_b_list, dim=1)
             gt_flows_bi = (gt_flows_f, gt_flows_b)
         else:
+            # Mark step for CUDA graphs (reduce-overhead mode)
+            torch.compiler.cudagraph_mark_step_begin()
             if use_half:
                 with torch.cuda.amp.autocast():
                     gt_flows_bi = fix_raft(frames, iters=raft_iter)
@@ -1142,6 +1544,8 @@ def pipeline(
                 e_f = min(flow_length, f + subvideo_length + pad_len)
                 pad_len_s = max(0, f) - s_f
                 pad_len_e = e_f - min(flow_length, f + subvideo_length)
+                # Mark step for CUDA graphs (reduce-overhead mode)
+                torch.compiler.cudagraph_mark_step_begin()
                 pred_flows_bi_sub, _ = fix_flow_complete.forward_bidirect_flow(
                     (gt_flows_bi[0][:, s_f:e_f], gt_flows_bi[1][:, s_f:e_f]),
                     flow_masks[:, s_f : e_f + 1],
@@ -1153,10 +1557,10 @@ def pipeline(
                 )
 
                 pred_flows_f.append(
-                    pred_flows_bi_sub[0][:, pad_len_s : e_f - s_f - pad_len_e]
+                    pred_flows_bi_sub[0][:, pad_len_s : e_f - s_f - pad_len_e].clone()
                 )
                 pred_flows_b.append(
-                    pred_flows_bi_sub[1][:, pad_len_s : e_f - s_f - pad_len_e]
+                    pred_flows_bi_sub[1][:, pad_len_s : e_f - s_f - pad_len_e].clone()
                 )
                 # Removed empty_cache() - was forcing GPU sync barrier
 
@@ -1164,6 +1568,8 @@ def pipeline(
             pred_flows_b = torch.cat(pred_flows_b, dim=1)
             pred_flows_bi = (pred_flows_f, pred_flows_b)
         else:
+            # Mark step for CUDA graphs (reduce-overhead mode)
+            torch.compiler.cudagraph_mark_step_begin()
             pred_flows_bi, _ = fix_flow_complete.forward_bidirect_flow(
                 gt_flows_bi, flow_masks
             )
@@ -1343,76 +1749,15 @@ def pipeline(
     masked_frame_for_save = [cv2.resize(f, out_size) for f in masked_frame_for_save]
     comp_frames = [cv2.resize(f, out_size) for f in comp_frames]
 
-    # Helper function for GPU-accelerated NVENC encoding
-    def encode_nvenc(frames, output_path, fps, width, height):
-        """Encode frames using NVENC GPU encoder instead of CPU."""
-        try:
-            # Use h264_nvenc for GPU encoding
-            cmd = [
-                _FFMPEG_EXECUTABLE, '-y',  # Use detected FFmpeg path
-                '-f', 'rawvideo',
-                '-vcodec', 'rawvideo',
-                '-s', f'{width}x{height}',
-                '-pix_fmt', 'rgb24',
-                '-r', str(fps),
-                '-i', '-',  # Read from stdin
-                '-c:v', 'h264_nvenc',  # NVENC GPU encoder
-                '-preset', 'p4',  # Performance preset (p1=fastest, p7=slowest/best)
-                '-b:v', '8M',  # 8 Mbps bitrate
-                '-pix_fmt', 'yuv420p',
-                '-profile:v', 'main',
-                output_path
-            ]
-
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-
-            # Write frames to FFmpeg stdin
-            for frame in frames:
-                process.stdin.write(frame.tobytes())
-
-            process.stdin.close()
-            process.wait()
-
-            if process.returncode != 0:
-                stderr = process.stderr.read().decode()
-                print(f"[WARNING] NVENC encoding had errors: {stderr}")
-                # Fallback to imageio if NVENC fails
-                return False
-
-            return True
-
-        except Exception as e:
-            print(f"[WARNING] NVENC encoding failed: {e}, falling back to CPU imageio")
-            return False
-
-    # Try NVENC encoding, fallback to imageio if it fails
-    h, w = out_size[1], out_size[0]  # out_size is (width, height)
-
-    if not encode_nvenc(masked_frame_for_save, os.path.join(save_root, "masked_in.mp4"), fps, w, h):
-        # Fallback to CPU imageio
-        imageio.mimwrite(
-            os.path.join(save_root, "masked_in.mp4"),
-            masked_frame_for_save,
-            fps=fps,
-            quality=7,
-        )
-        print("[FALLBACK] Using CPU imageio for masked_in.mp4")
-    else:
-        print(f"[NVENC] Encoded masked_in.mp4 using GPU ({len(masked_frame_for_save)} frames @ {fps} fps)")
-
-    if not encode_nvenc(comp_frames, os.path.join(save_root, "inpaint_out.mp4"), fps, w, h):
-        # Fallback to CPU imageio
-        imageio.mimwrite(
-            os.path.join(save_root, "inpaint_out.mp4"), comp_frames, fps=fps, quality=7, ffmpeg_params=["-sws_flags", "bilinear"]
-        )
-        print("[FALLBACK] Using CPU imageio for inpaint_out.mp4")
-    else:
-        print(f"[NVENC] Encoded inpaint_out.mp4 using GPU ({len(comp_frames)} frames @ {fps} fps)")
+    imageio.mimwrite(
+        os.path.join(save_root, "masked_in.mp4"),
+        masked_frame_for_save,
+        fps=fps,
+        quality=7,
+    )
+    imageio.mimwrite(
+        os.path.join(save_root, "inpaint_out.mp4"), comp_frames, fps=fps, quality=7, ffmpeg_params=["-sws_flags", "bilinear"]
+    )
 
     torch.cuda.empty_cache()
 
