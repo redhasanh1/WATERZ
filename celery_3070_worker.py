@@ -34,12 +34,18 @@ os.environ['ENABLE_FLASH_ATTENTION'] = '0'
 os.environ['TORCH_CUDAGRAPHS'] = '0'
 os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
 
-# Disable torch.compile completely (avoids meshgrid indexing errors)
-os.environ['TORCHDYNAMO_DISABLE'] = '1'
-
-# Disable torch.compile on Windows
+# Platform-specific torch.compile settings
 if sys.platform == 'win32':
+    # Disable torch.compile on Windows (no Triton support)
     os.environ['USE_TORCH_COMPILE_RAFT'] = '0'
+    os.environ['TORCHDYNAMO_DISABLE'] = '1'
+else:
+    # Enable torch.compile on Linux/WSL2 for 2x speedup!
+    # First run: 20-40s compile warmup, subsequent runs: instant cached
+    os.environ['USE_TORCH_COMPILE_RAFT'] = '1'
+    os.environ['TORCH_COMPILE_CACHE'] = '/app/temp/.torch_cache'
+    # Use max-autotune without cudagraphs for best compatibility
+    os.environ['TORCHINDUCTOR_MAX_AUTOTUNE'] = '1'
 
 import cv2
 from celery import Celery
