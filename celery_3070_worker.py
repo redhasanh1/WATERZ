@@ -43,9 +43,10 @@ else:
     # Enable torch.compile on Linux/WSL2 for 2x speedup!
     # First run: 20-40s compile warmup, subsequent runs: instant cached
     os.environ['USE_TORCH_COMPILE_RAFT'] = '1'
-    os.environ['TORCH_COMPILE_CACHE'] = '/app/temp/.torch_cache'
-    # Use max-autotune without cudagraphs for best compatibility
-    os.environ['TORCHINDUCTOR_MAX_AUTOTUNE'] = '1'
+    # Cache directories for compiled kernels
+    os.environ['TORCHINDUCTOR_CACHE_DIR'] = '/app/temp/.torch_compile_cache'
+    os.environ['TORCHINDUCTOR_FX_GRAPH_CACHE'] = '1'
+    os.environ['TRITON_CACHE_DIR'] = '/app/temp/.triton_cache'
 
 import cv2
 from celery import Celery
