@@ -22,7 +22,11 @@ import torch
 import torch._inductor
 import platform
 from pathlib import Path
-from tkinter import Tk, filedialog
+try:
+    from tkinter import Tk, filedialog
+    HAS_TKINTER = True
+except ImportError:
+    HAS_TKINTER = False
 
 # Global CUDA graphs kill switch (RTX 3070 compatibility)
 torch._inductor.config.triton.cudagraphs = False
@@ -55,7 +59,7 @@ elif IS_WSL2 or IS_LINUX:
         os.environ['TRITON_CACHE_DIR'] = str(BASE_DIR / '.triton_cache')
         os.environ['USE_TORCH_COMPILE_RAFT'] = '0'  # Disabled - slow on RTX 3070
         os.environ['USE_TORCH_COMPILE'] = '0'  # Disabled - slow on RTX 3070
-        os.environ['ENABLE_FLASH_ATTENTION'] = '1'  # Use SDPA for faster attention
+        os.environ['ENABLE_FLASH_ATTENTION'] = '0'  # Disabled - not supported on RTX 3070
         os.environ['TORCH_CUDAGRAPHS'] = '0'
         os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
     else:
@@ -78,6 +82,16 @@ MASKS_FOLDER = BASE_DIR / "temp_sam2_masks"
 # FFmpeg
 def get_ffmpeg_executables():
     """Get FFmpeg and FFprobe paths with fallback to static-ffmpeg."""
+    import platform
+
+    # On Linux, prefer NVENC-capable ffmpeg first
+    if platform.system() == 'Linux':
+        nvenc_ffmpeg = '/tmp/ffmpeg-master-latest-linux64-gpl/bin/ffmpeg'
+        nvenc_ffprobe = '/tmp/ffmpeg-master-latest-linux64-gpl/bin/ffprobe'
+        if os.path.exists(nvenc_ffmpeg):
+            print(f"[OK] Using NVENC FFmpeg: {nvenc_ffmpeg}")
+            return nvenc_ffmpeg, nvenc_ffprobe
+
     # Try system PATH first
     ffmpeg_path = shutil.which('ffmpeg')
     ffprobe_path = shutil.which('ffprobe')
@@ -209,31 +223,80 @@ def process_sam2_local(video_path, masks_folder):
             shutil.rmtree(path)
         path.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n[1/7] Extracting frames and detecting watermarks with YOLO...")
+    print(f"\n[1/7] Extracting frames...")
 
-    # Extract all frames
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"[ERROR] Failed to open video: {video_path}")
+    # Try NVDEC hardware decoder first, fallback to CPU
+    use_nvdec = True
+    nvdec_loader = None
+    cap = None
+
+    if use_nvdec:
+        try:
+            from nvdec_video_loader import NVDECVideoLoader
+            nvdec_loader = NVDECVideoLoader(str(video_path), device_id=0)
+            props = nvdec_loader.get_properties()
+            fps = int(props['fps'])
+            total_frames = props['total_frames']
+            print(f"[OK] NVDEC hardware decoder ready ({total_frames} frames)")
+        except ImportError:
+            print("[WARNING] nvdec_video_loader not available, falling back to CPU decoder")
+            use_nvdec = False
+
+    if not use_nvdec:
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            print(f"[ERROR] Could not open video: {video_path}")
+            return None
+        fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        print(f"[OK] CPU decoder ready ({total_frames} frames)")
+
+    # Decode frames
+    import time
+    decode_start = time.time()
+
+    if use_nvdec:
+        all_frames = nvdec_loader.load_all_frames(to_numpy=True, color_format='BGR')
+        extracted_frames = len(all_frames)
+        nvdec_loader.close()
+
+        # Uniqueness check - verify frames are different
+        if extracted_frames > 1:
+            import hashlib
+            h0 = hashlib.md5(all_frames[0].tobytes()).hexdigest()[:8]
+            h1 = hashlib.md5(all_frames[-1].tobytes()).hexdigest()[:8]
+            if h0 == h1:
+                raise RuntimeError(f"[NVDEC ERROR] All frames identical (hash={h0})")
+            print(f"[OK] NVDEC frames verified unique: first={h0}, last={h1}")
+
+        # Write to disk
+        for idx, frame in enumerate(all_frames):
+            cv2.imwrite(str(frames_dir / f"{idx:04d}.png"), frame)
+
+        decode_time = time.time() - decode_start
+        print(f"[OK] NVDEC decoded {extracted_frames} frames: {decode_time:.3f}s ({decode_time/extracted_frames*1000:.2f}ms/frame)")
+    else:
+        all_frames = []  # FIX: Initialize all_frames for CPU decoder path
+        extracted_frames = 0
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            all_frames.append(frame)  # FIX: Collect frames for YOLO detection
+            cv2.imwrite(str(frames_dir / f"{extracted_frames:04d}.png"), frame)
+            extracted_frames += 1
+        cap.release()
+
+        decode_time = time.time() - decode_start
+        print(f"[OK] CPU decoded {extracted_frames} frames: {decode_time:.3f}s ({decode_time/extracted_frames*1000:.2f}ms/frame)")
+
+    if extracted_frames == 0:
+        print(f"[ERROR] No frames extracted!")
         return None
-
-    all_frames = []
-    frame_idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        all_frames.append(frame)
-        cv2.imwrite(str(frames_dir / f"{frame_idx:04d}.png"), frame)
-        frame_idx += 1
-    cap.release()
-
-    extracted_frames = len(all_frames)
-    print(f"[OK] Extracted {extracted_frames} frames")
 
     # Initialize YOLO detector
     print(f"\n[2/7] Detecting watermarks with YOLO...")
-    detector = YOLOWatermarkDetector(require_tensorrt=True)
+    detector = YOLOWatermarkDetector()
 
     # CRITICAL: Warmup TensorRT engine
     print(f"[YOLO] Warming up TensorRT engine...")
@@ -657,9 +720,14 @@ def process_sam2_local(video_path, masks_folder):
             '-i', video_path,
             '-map', '0:v:0',       # Video from processed frames
             '-map', '1:a:0',       # Audio from original
-            '-c:v', 'libx264',     # Encode video
-            '-preset', 'fast',     # Fast preset
-            '-crf', '18',
+            '-c:v', 'h264_nvenc',  # GPU encode (10-20x faster)
+            '-preset', 'p1',       # Fastest preset
+            '-tune', 'hq',         # High quality tuning
+            '-rc', 'vbr',          # Variable bitrate
+            '-cq', '19',           # Quality level
+            '-b:v', '0',           # Auto bitrate
+            '-spatial-aq', '1',    # Spatial AQ
+            '-temporal-aq', '1',   # Temporal AQ
             '-c:a', 'copy',        # DON'T re-encode audio (instant!)
             '-pix_fmt', 'yuv420p',
             '-shortest',
@@ -672,9 +740,14 @@ def process_sam2_local(video_path, masks_folder):
             str(FFMPEG_EXE), '-y',
             '-framerate', str(fps),
             '-i', str(final_frames_dir / '%04d.png'),
-            '-c:v', 'libx264',
-            '-preset', 'fast',
-            '-crf', '18',
+            '-c:v', 'h264_nvenc',  # GPU encode (10-20x faster)
+            '-preset', 'p1',       # Fastest preset
+            '-tune', 'hq',         # High quality tuning
+            '-rc', 'vbr',          # Variable bitrate
+            '-cq', '19',           # Quality level
+            '-b:v', '0',           # Auto bitrate
+            '-spatial-aq', '1',    # Spatial AQ
+            '-temporal-aq', '1',   # Temporal AQ
             '-pix_fmt', 'yuv420p',
             str(output_path)
         ]

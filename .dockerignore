@@ -1,0 +1,143 @@
+# ===========================================
+# Docker Ignore for Celery Worker Image
+# PyTorch-only mode (~10-12GB image)
+# ===========================================
+
+# ----- Git -----
+.git
+.gitignore
+.gitattributes
+.github/
+
+# ----- IDE -----
+.vscode
+.idea
+*.swp
+*.swo
+*.code-workspace
+
+# ----- Python Cache -----
+__pycache__
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+dist/
+build/
+
+# ----- Virtual Environments -----
+venv/
+venv*/
+ENV/
+env/
+.venv/
+
+# ----- Temporary/Runtime Directories -----
+temp/
+uploads/
+results/
+cache/
+pip_cache/
+temp_sam2_masks/
+temp_sam2_frames/
+temp_sam2_output/
+
+# ----- Logs -----
+*.log
+logs/
+
+# ----- OS Files -----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----- Documentation -----
+*.md
+docs/
+
+# ----- Test Files -----
+tests/
+test/
+test_*.py
+*_test.py
+
+# ----- TensorRT Engines (Using PyTorch mode) -----
+*.engine
+# *.onnx  # Commented out - NeuFlow ONNX model needed for USE_NEUFLOW=1
+engines/
+TensorRT-*/
+dcnv4_tensorrt_plugin/
+
+# ----- Training Data (Not needed for inference) -----
+videostotrain/
+NEW_SORA_TRAINING/
+yolo_training/
+runs/detect/*/images/
+runs/detect/*/labels/
+
+# ----- Unused Models/Frameworks -----
+E2FGVI/
+edgeconnect/
+mmdeploy/
+tensorrt-llm-study/
+
+# ----- Node.js -----
+node_modules/
+package*.json
+
+# ----- Windows Files (Linux container) -----
+*.bat
+*.exe
+*.dll
+*.pdb
+*.msi
+redis*.exe
+EventLog.dll
+nul
+
+# ----- Claude Code -----
+.claude/
+
+# ----- Web Frontend (Not needed for Celery worker) -----
+# web/  # Commented - Railway needs this folder!
+# static/  # Commented - Railway needs this folder!
+# templates/  # Commented - Railway needs this folder!
+
+# ----- Archives -----
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ----- Videos (test data) -----
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# ----- Python Packages (Use pip instead) -----
+python_packages/
+
+# ----- Jupyter -----
+*.ipynb
+.ipynb_checkpoints/
+
+# ----- Git histories in submodules -----
+ProPainter-main/.git/
+segment-anything-2/.git/
+ProPainter/.git/
+
+# ----- Symlinked weights (already copied from main weights/) -----
+faster-propainter-main/weights/
+
+# ----- NeuFlow models (disabled with USE_NEUFLOW=0) -----
+faster-propainter-main/models/
+
+# ----- TensorRT engines in faster-propainter -----
+faster-propainter-main/engines/
+
+# SSH keys
+hasancool
+hasancool.pub
