@@ -43,6 +43,7 @@ if sys.platform == 'win32':
 
 import cv2
 from celery import Celery
+from celery.signals import worker_process_init
 
 # Import ProPainter
 from watermark import pipeline as faster_propainter_pipeline
@@ -522,7 +523,7 @@ def health_check(self):
 # WORKER STARTUP
 # ============================================================================
 
-@celery.signals.worker_process_init.connect
+@worker_process_init.connect
 def init_worker(**kwargs):
     """Initialize worker when it starts"""
     import torch
