@@ -51,6 +51,7 @@ else:
 import cv2
 from celery import Celery
 from celery.signals import worker_process_init
+from b2sdk.v2 import B2Api, InMemoryAccountInfo
 
 # Import ProPainter
 from watermark import pipeline as faster_propainter_pipeline
@@ -91,6 +92,31 @@ if os.path.exists(tunnel_url_file):
     with open(tunnel_url_file, 'r') as f:
         RAILWAY_URL = f.read().strip()
     print(f"[OK] Loaded Railway URL: {RAILWAY_URL}")
+
+# ============================================================================
+# B2 + CLOUDFLARE CONFIGURATION
+# ============================================================================
+
+B2_KEY_ID = '00539db5c1104b50000000001'
+B2_APPLICATION_KEY = 'K005VEORbg6RcsRad3jZPr9n4Fp7jWU'
+B2_BUCKET_NAME = 'watermarkz'
+CLOUDFLARE_WORKER_URL = 'https://markz.humblewoslayer.workers.dev'
+
+# B2 API (initialized lazily)
+_b2_api = None
+_b2_bucket = None
+
+def get_b2_bucket():
+    """Get B2 bucket (lazy initialization)"""
+    global _b2_api, _b2_bucket
+    if _b2_bucket is None:
+        print("[B2] Initializing B2 API...")
+        info = InMemoryAccountInfo()
+        _b2_api = B2Api(info)
+        _b2_api.authorize_account("production", B2_KEY_ID, B2_APPLICATION_KEY)
+        _b2_bucket = _b2_api.get_bucket_by_name(B2_BUCKET_NAME)
+        print(f"[B2] Connected to bucket: {B2_BUCKET_NAME}")
+    return _b2_bucket
 
 # ============================================================================
 # CELERY SETUP
@@ -188,6 +214,51 @@ def upload_result_to_railway(video_id, segment_index, output_frames_dir):
     else:
         print(f"[3070] Upload failed: {response.status_code} - {response.text}")
         return None
+
+
+def upload_result_to_b2(video_id, segment_index, output_frames_dir):
+    """
+    Zip output frames and upload to B2.
+    Returns Cloudflare URL for download.
+    """
+    # Create zip of output frames
+    zip_filename = f"{video_id}_seg{segment_index}_result.zip"
+    zip_path = os.path.join(TEMP_DIR, zip_filename)
+
+    print(f"[B2] Creating result zip: {zip_filename}")
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for frame_file in sorted(os.listdir(output_frames_dir)):
+            if frame_file.endswith('.png'):
+                frame_path = os.path.join(output_frames_dir, frame_file)
+                zf.write(frame_path, frame_file)
+
+    zip_size = os.path.getsize(zip_path) / (1024 * 1024)
+    print(f"[B2] Result zip: {zip_size:.2f} MB")
+
+    # Upload to B2
+    bucket = get_b2_bucket()
+    b2_path = f"results/{video_id}/{zip_filename}"
+
+    print(f"[B2] Uploading to B2: {b2_path}...")
+    start_time = time.time()
+
+    bucket.upload_local_file(
+        local_file=zip_path,
+        file_name=b2_path
+    )
+
+    upload_time = time.time() - start_time
+    speed = zip_size / upload_time if upload_time > 0 else 0
+    print(f"[B2] Uploaded in {upload_time:.2f}s ({speed:.2f} MB/s)")
+
+    # Clean up local zip
+    os.remove(zip_path)
+
+    # Return Cloudflare URL
+    cloudflare_url = f"{CLOUDFLARE_WORKER_URL}/{b2_path}"
+    print(f"[B2] Result available at: {cloudflare_url}")
+    return cloudflare_url
+
 
 def download_and_extract_from_cloudflare(cloudflare_url, work_dir):
     """
@@ -456,18 +527,21 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame, 
             dst = os.path.join(result_dir, frame_file)
             shutil.copy(src, dst)
 
-        # Upload to Railway
-        railway_result_url = upload_result_to_railway(video_id, segment_index, propainter_output)
+        # Upload to B2 (Cloudflare CDN)
+        b2_result_url = upload_result_to_b2(video_id, segment_index, propainter_output)
 
         # Notify Redis that segment is complete
         redis_client.set(status_key, 'completed')
+
+        # Store result URL in Redis for reassembly
+        redis_client.hset(f'segment_results:{video_id}', segment_index, b2_result_url or '')
 
         # Publish completion event (for real-time updates)
         completion_data = {
             'video_id': video_id,
             'segment_index': segment_index,
             'output_path': result_dir,
-            'railway_result_url': railway_result_url,
+            'b2_result_url': b2_result_url,
             'num_frames': len(output_frames),
             'process_time': process_time
         }
@@ -485,7 +559,7 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame, 
             'video_id': video_id,
             'segment_index': segment_index,
             'output_path': result_dir,
-            'railway_result_url': railway_result_url,
+            'b2_result_url': b2_result_url,
             'num_frames': len(output_frames),
             'process_time': process_time,
             'ms_per_frame': ms_per_frame
@@ -493,6 +567,7 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame, 
 
         print(f"\n[3070] Segment {segment_index} complete!")
         print(f"   Output: {result_dir}")
+        print(f"   B2 URL: {b2_result_url}")
         print(f"   Frames: {len(output_frames)}")
         print(f"   Time: {process_time:.2f}s")
 

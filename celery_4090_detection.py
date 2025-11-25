@@ -27,6 +27,7 @@ sys.path.insert(0, 'python_packages')
 
 import cv2
 from celery import Celery
+from celery.signals import worker_process_init
 from b2sdk.v2 import B2Api, InMemoryAccountInfo
 
 # ============================================================================
@@ -182,6 +183,23 @@ def get_yolo_detector():
         print("[4090] YOLO ready!")
 
     return _yolo_detector
+
+
+def get_dynamic_subvideo_length(width, height):
+    """Adapt chunk size to video resolution for memory efficiency"""
+    resolution = width * height
+
+    if resolution <= 640 * 480:        # 480p
+        return 100
+    elif resolution <= 1280 * 720:     # 720p
+        return 80
+    elif resolution <= 1920 * 1080:    # 1080p
+        return 60
+    elif resolution <= 2560 * 1440:    # 1440p
+        return 40
+    else:                              # 4K+
+        return 20
+
 
 # ============================================================================
 # CELERY TASKS
@@ -340,7 +358,22 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
                 merged.append((start, end))
         segments = merged
 
-    print(f"[4090] Created {len(segments)} segments: {segments}")
+    # Split large segments into chunks for parallel processing
+    max_chunk = get_dynamic_subvideo_length(width, height)
+    split_segments = []
+
+    for start, end in segments:
+        segment_length = end - start + 1
+        if segment_length <= max_chunk:
+            split_segments.append((start, end))
+        else:
+            # Split into chunks of max_chunk size
+            for chunk_start in range(start, end + 1, max_chunk):
+                chunk_end = min(chunk_start + max_chunk - 1, end)
+                split_segments.append((chunk_start, chunk_end))
+
+    segments = split_segments
+    print(f"[4090] Split into {len(segments)} chunks (max {max_chunk} frames): {segments}")
 
     # ========================================================================
     # STEP 4: Save frames and push segment jobs to queue
@@ -486,7 +519,7 @@ def check_segment_status(self, video_id):
 # WORKER STARTUP
 # ============================================================================
 
-@celery.signals.worker_process_init.connect
+@worker_process_init.connect
 def init_worker(**kwargs):
     """Initialize detector when worker starts"""
     print("[4090 WORKER] Initializing detection worker...")
