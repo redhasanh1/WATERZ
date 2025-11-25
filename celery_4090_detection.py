@@ -18,6 +18,7 @@ import time
 import uuid
 import shutil
 import hashlib
+import zipfile
 import numpy as np
 from pathlib import Path
 
@@ -26,6 +27,7 @@ sys.path.insert(0, 'python_packages')
 
 import cv2
 from celery import Celery
+from b2sdk.v2 import B2Api, InMemoryAccountInfo
 
 # ============================================================================
 # CONFIGURATION
@@ -57,6 +59,86 @@ MASK_DIR = os.path.join(SCRIPT_DIR, 'masks')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(MASK_DIR, exist_ok=True)
+
+# ============================================================================
+# B2 + CLOUDFLARE CONFIGURATION
+# ============================================================================
+
+B2_KEY_ID = '00539db5c1104b50000000001'
+B2_APPLICATION_KEY = 'K005VEORbg6RcsRad3jZPr9n4Fp7jWU'
+B2_BUCKET_NAME = 'watermarkz'
+CLOUDFLARE_WORKER_URL = 'https://markz.humblewoslayer.workers.dev'
+
+# B2 API (initialized lazily)
+_b2_api = None
+_b2_bucket = None
+
+def get_b2_bucket():
+    """Get B2 bucket (lazy initialization)"""
+    global _b2_api, _b2_bucket
+    if _b2_bucket is None:
+        print("[B2] Initializing B2 API...")
+        info = InMemoryAccountInfo()
+        _b2_api = B2Api(info)
+        _b2_api.authorize_account("production", B2_KEY_ID, B2_APPLICATION_KEY)
+        _b2_bucket = _b2_api.get_bucket_by_name(B2_BUCKET_NAME)
+        print(f"[B2] Connected to bucket: {B2_BUCKET_NAME}")
+    return _b2_bucket
+
+def upload_segment_to_b2(video_id, segment_idx, frames_dir, masks_dir, start_frame, end_frame):
+    """
+    Zip segment frames+masks and upload to B2.
+    Returns Cloudflare URL for download.
+    """
+    # Create zip file
+    zip_filename = f"{video_id}_seg{segment_idx}.zip"
+    zip_path = os.path.join(TEMP_DIR, zip_filename)
+
+    print(f"[B2] Creating zip for segment {segment_idx}...")
+
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # Add frames for this segment
+        for frame_idx in range(start_frame, end_frame + 1):
+            frame_file = f"{frame_idx:04d}.png"
+            frame_path = os.path.join(frames_dir, frame_file)
+            if os.path.exists(frame_path):
+                # Store with local index (0000, 0001, etc.)
+                local_idx = frame_idx - start_frame
+                zf.write(frame_path, f"frames/{local_idx:04d}.png")
+
+        # Add masks for this segment
+        for frame_idx in range(start_frame, end_frame + 1):
+            mask_file = f"{frame_idx:04d}.png"
+            mask_path = os.path.join(masks_dir, mask_file)
+            if os.path.exists(mask_path):
+                local_idx = frame_idx - start_frame
+                zf.write(mask_path, f"masks/{local_idx:04d}.png")
+
+    zip_size = os.path.getsize(zip_path) / (1024 * 1024)
+    print(f"[B2] Zip created: {zip_filename} ({zip_size:.2f} MB)")
+
+    # Upload to B2
+    bucket = get_b2_bucket()
+    b2_path = f"segments/{video_id}/{zip_filename}"
+
+    print(f"[B2] Uploading to B2: {b2_path}...")
+    start_time = time.time()
+
+    bucket.upload_local_file(
+        local_file=zip_path,
+        file_name=b2_path
+    )
+
+    upload_time = time.time() - start_time
+    speed = zip_size / upload_time if upload_time > 0 else 0
+    print(f"[B2] Uploaded in {upload_time:.2f}s ({speed:.2f} MB/s)")
+
+    # Clean up local zip
+    os.remove(zip_path)
+
+    # Return Cloudflare URL
+    cloudflare_url = f"{CLOUDFLARE_WORKER_URL}/{b2_path}"
+    return cloudflare_url
 
 # ============================================================================
 # CELERY SETUP
@@ -299,25 +381,26 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
     )
 
     # Create segment processing jobs for 3070 workers
+    # Upload each segment to B2 first so remote workers can download
     job_ids = []
 
     for seg_idx, (start_frame, end_frame) in enumerate(segments):
-        job_data = {
-            'video_id': video_id,
-            'segment_index': seg_idx,
-            'start_frame': start_frame,
-            'end_frame': end_frame,
-            'total_segments': len(segments)
-        }
+        # Upload segment frames+masks to B2
+        print(f"\n[4090] Uploading segment {seg_idx} to B2...")
+        cloudflare_url = upload_segment_to_b2(
+            video_id, seg_idx, frames_dir, masks_dir, start_frame, end_frame
+        )
+        print(f"[4090] Segment {seg_idx} available at: {cloudflare_url}")
 
-        # Push to segment processing queue (use send_task to avoid circular import)
+        # Push to segment processing queue with cloudflare URL
         result = celery.send_task(
             'worker.process_segment',
             kwargs={
                 'video_id': video_id,
                 'segment_index': seg_idx,
                 'start_frame': start_frame,
-                'end_frame': end_frame
+                'end_frame': end_frame,
+                'cloudflare_url': cloudflare_url  # Worker downloads from here
             },
             queue='processing'
         )
