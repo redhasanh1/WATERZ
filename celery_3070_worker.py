@@ -34,6 +34,9 @@ os.environ['ENABLE_FLASH_ATTENTION'] = '0'
 os.environ['TORCH_CUDAGRAPHS'] = '0'
 os.environ['TORCHINDUCTOR_CUDAGRAPHS'] = '0'
 
+# Disable torch.compile completely (avoids meshgrid indexing errors)
+os.environ['TORCHDYNAMO_DISABLE'] = '1'
+
 # Disable torch.compile on Windows
 if sys.platform == 'win32':
     os.environ['USE_TORCH_COMPILE_RAFT'] = '0'
