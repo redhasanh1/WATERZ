@@ -1265,6 +1265,77 @@
             animation: pulse 2s ease-in-out infinite;
         }
 
+        /* Email Verification Banner */
+        .email-verification-banner {
+            display: none;
+            position: fixed;
+            top: 80px;
+            left: 0;
+            right: 0;
+            z-index: 999;
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.95) 0%, rgba(251, 191, 36, 0.95) 100%);
+            padding: 12px 20px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            backdrop-filter: blur(10px);
+        }
+
+        .email-verification-banner.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .email-verification-banner .banner-text {
+            color: #1a1a2e;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .email-verification-banner .banner-btn {
+            background: #1a1a2e;
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+        }
+
+        .email-verification-banner .banner-btn:hover {
+            transform: translateY(-1px);
+            opacity: 0.9;
+        }
+
+        .email-verification-banner .banner-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .email-verification-banner .banner-close {
+            background: transparent;
+            border: none;
+            color: #1a1a2e;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 4px 8px;
+            opacity: 0.7;
+            transition: opacity 0.2s ease;
+        }
+
+        .email-verification-banner .banner-close:hover {
+            opacity: 1;
+        }
+
+        /* Adjust body padding when banner is visible */
+        body.has-verification-banner {
+            padding-top: 130px;
+        }
+
     </style>
 </head>
 <body>
@@ -1347,6 +1418,13 @@
             </div>
         </div>
     </nav>
+
+    <!-- Email Verification Banner (hidden by default) -->
+    <div id="emailVerificationBanner" class="email-verification-banner">
+        <span class="banner-text">Please verify your email to access all features.</span>
+        <button class="banner-btn" id="resendVerificationBtn" onclick="resendVerificationFromBanner()">Resend Email</button>
+        <button class="banner-close" onclick="dismissVerificationBanner()" title="Dismiss">&times;</button>
+    </div>
 
     <!-- Top Banner Ad -->
     <div class="ad-banner-top">
@@ -2084,6 +2162,12 @@
 
                 const data = await parseJsonSafe(response);
 
+                // Check for email verification required
+                if (response.status === 403 && data.email_verification_required) {
+                    showEmailVerificationModal();
+                    return;
+                }
+
                 if (data.status === 'success') {
                     // Store task_id for processing
                     const videoElem = document.getElementById('previewVideo');
@@ -2471,6 +2555,12 @@
                 });
 
                 const data = await parseJsonSafe(response);
+
+                // Check for email verification required
+                if (response.status === 403 && data.email_verification_required) {
+                    showEmailVerificationModal();
+                    return;
+                }
 
                 if (data.status === 'success') {
                     const processTaskId = data.task_id;
@@ -3217,6 +3307,227 @@ function rejectCookies() {
     localStorage.setItem('cookieConsent', 'rejected');
     document.getElementById('cookieConsent').style.display = 'none';
     // Disable analytics/advertising cookies here if needed
+}
+</script>
+
+<!-- Email Verification Check -->
+<script>
+(function() {
+    // Check email verification status on page load
+    async function checkEmailVerification() {
+        // Skip if on localhost (test mode)
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            return;
+        }
+
+        // Skip if banner was dismissed this session
+        if (sessionStorage.getItem('verificationBannerDismissed')) {
+            return;
+        }
+
+        try {
+            const base = window.API_BASE_URL || '';
+            const response = await fetch(base + '/api/auth/status', {
+                method: 'GET',
+                credentials: 'include'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+
+                // Show banner if user is logged in but not verified
+                if (data.logged_in && data.email_verified === false) {
+                    showVerificationBanner();
+                }
+            }
+        } catch (error) {
+            console.log('Auth status check failed:', error);
+        }
+    }
+
+    function showVerificationBanner() {
+        const banner = document.getElementById('emailVerificationBanner');
+        if (banner) {
+            banner.classList.add('show');
+            document.body.classList.add('has-verification-banner');
+        }
+    }
+
+    // Initialize after a short delay to let API_BASE_URL be set
+    setTimeout(checkEmailVerification, 600);
+})();
+
+// Resend verification email from banner
+async function resendVerificationFromBanner() {
+    const btn = document.getElementById('resendVerificationBtn');
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+        const base = window.API_BASE_URL || '';
+        const response = await fetch(base + '/api/auth/resend-verification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            btn.textContent = 'Email Sent!';
+            btn.style.background = '#10b981';
+            // Re-enable after 60 seconds (rate limit)
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = 'Resend Email';
+                btn.style.background = '';
+            }, 60000);
+        } else {
+            btn.textContent = data.error || 'Failed';
+            btn.style.background = '#ef4444';
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = 'Resend Email';
+                btn.style.background = '';
+            }, 3000);
+        }
+    } catch (error) {
+        console.error('Resend error:', error);
+        btn.textContent = 'Error';
+        btn.style.background = '#ef4444';
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.textContent = 'Resend Email';
+            btn.style.background = '';
+        }, 3000);
+    }
+}
+
+// Dismiss verification banner
+function dismissVerificationBanner() {
+    const banner = document.getElementById('emailVerificationBanner');
+    if (banner) {
+        banner.classList.remove('show');
+        document.body.classList.remove('has-verification-banner');
+        sessionStorage.setItem('verificationBannerDismissed', 'true');
+    }
+}
+
+// Show email verification modal (called when 403 with email_verification_required)
+function showEmailVerificationModal() {
+    // Remove any existing modal
+    const existingModal = document.getElementById('emailVerificationModal');
+    if (existingModal) existingModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'emailVerificationModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        backdrop-filter: blur(5px);
+    `;
+
+    modal.innerHTML = `
+        <div style="
+            background: var(--bg-card, #1a1a2e);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 16px;
+            padding: 2rem;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        ">
+            <div style="width: 60px; height: 60px; margin: 0 auto 1rem; background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(251, 191, 36, 0.3) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                    <polyline points="22,6 12,13 2,6"></polyline>
+                </svg>
+            </div>
+            <h3 style="margin: 0 0 0.75rem; color: var(--text-primary, #fff); font-size: 1.25rem;">Email Verification Required</h3>
+            <p style="color: var(--text-secondary, #a0a0c0); margin: 0 0 1.5rem; line-height: 1.5;">
+                Please verify your email address to use this feature. Check your inbox for the verification link.
+            </p>
+            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                <button onclick="resendFromModal()" id="modalResendBtn" style="
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: #fff;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: transform 0.2s ease;
+                ">Resend Email</button>
+                <button onclick="closeVerificationModal()" style="
+                    background: transparent;
+                    color: var(--text-secondary, #a0a0c0);
+                    border: 1px solid rgba(102, 126, 234, 0.3);
+                    padding: 10px 20px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    cursor: pointer;
+                ">Close</button>
+            </div>
+            <p id="modalResendStatus" style="margin-top: 1rem; font-size: 0.9rem; min-height: 20px;"></p>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeVerificationModal();
+    });
+}
+
+function closeVerificationModal() {
+    const modal = document.getElementById('emailVerificationModal');
+    if (modal) modal.remove();
+}
+
+async function resendFromModal() {
+    const btn = document.getElementById('modalResendBtn');
+    const status = document.getElementById('modalResendStatus');
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+        const base = window.API_BASE_URL || '';
+        const response = await fetch(base + '/api/auth/resend-verification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            status.innerHTML = '<span style="color: #10b981;">Verification email sent! Check your inbox.</span>';
+            btn.textContent = 'Email Sent!';
+            btn.style.background = '#10b981';
+        } else {
+            status.innerHTML = `<span style="color: #ef4444;">${data.error || 'Failed to send. Try again later.'}</span>`;
+            btn.disabled = false;
+            btn.textContent = 'Resend Email';
+        }
+    } catch (error) {
+        status.innerHTML = '<span style="color: #ef4444;">Connection error. Please try again.</span>';
+        btn.disabled = false;
+        btn.textContent = 'Resend Email';
+    }
 }
 </script>
 </body>

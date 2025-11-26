@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Email - MarkRemoverAI</title>
+    <link rel="icon" type="image/png" href="emblem.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5a67d8;
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-card: rgba(248, 250, 252, 0.85);
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --border-color: rgba(102, 126, 234, 0.12);
+        }
+
+        html[data-theme="dark"] {
+            --bg-primary: #0b1020;
+            --bg-secondary: #121826;
+            --bg-card: rgba(26, 26, 46, 0.85);
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
+            --border-color: rgba(102, 126, 234, 0.12);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .container {
+            max-width: 450px;
+            width: 100%;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 2.5rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease;
+        }
+
+        html[data-theme="dark"] .card {
+            box-shadow: 0 20px 60px rgba(15, 15, 30, 0.45);
+        }
+
+        .logo-container {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            margin: 0 0 0.75rem;
+            font-size: 1.75rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
+        }
+
+        p {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+            text-align: center;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        .alert-success {
+            background: rgba(72, 187, 120, 0.15);
+            color: #48bb78;
+            border: 2px solid rgba(72, 187, 120, 0.3);
+        }
+
+        .alert-error {
+            background: rgba(245, 101, 101, 0.15);
+            color: #f56565;
+            border: 2px solid rgba(245, 101, 101, 0.3);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 0.95rem 1rem;
+            border-radius: 12px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.35);
+        }
+
+        .back-link {
+            display: block;
+            text-align: center;
+            margin-top: 1.5rem;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 1.5rem;
+            right: 1.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: none;
+            background: var(--gradient-primary);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(102, 126, 234, 0.2);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 2rem auto;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .success-icon {
+            width: 80px;
+            height: 80px;
+            margin: 1rem auto;
+            display: block;
+        }
+
+        .error-icon {
+            width: 80px;
+            height: 80px;
+            margin: 1rem auto;
+            display: block;
+        }
+
+        #loadingSection, #successSection, #errorSection {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <button id="themeToggle" class="theme-toggle">Dark</button>
+
+    <div class="container">
+        <div class="card">
+            <div class="logo-container">
+                <svg width="60" height="60" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                        </linearGradient>
+                    </defs>
+                    <rect width="40" height="40" rx="10" fill="url(#logoGradient)"/>
+                    <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
+                    <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
+                    <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                    <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                    <circle cx="25" cy="15" r="2" fill="#10b981"/>
+                </svg>
+            </div>
+
+            <!-- Loading Section -->
+            <div id="loadingSection">
+                <h1>Verifying Email</h1>
+                <p>Please wait while we verify your email address...</p>
+                <div class="spinner"></div>
+            </div>
+
+            <!-- Success Section -->
+            <div id="successSection" style="display: none;">
+                <svg class="success-icon" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="40" cy="40" r="38" stroke="#48bb78" stroke-width="4" fill="rgba(72, 187, 120, 0.1)"/>
+                    <path d="M24 40L35 51L56 30" stroke="#48bb78" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <h1>Email Verified!</h1>
+                <p>Your email has been successfully verified. You now have full access to all features.</p>
+                <a href="index.html" class="btn">Go to Dashboard</a>
+            </div>
+
+            <!-- Error Section -->
+            <div id="errorSection" style="display: none;">
+                <svg class="error-icon" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="40" cy="40" r="38" stroke="#f56565" stroke-width="4" fill="rgba(245, 101, 101, 0.1)"/>
+                    <path d="M28 28L52 52M52 28L28 52" stroke="#f56565" stroke-width="5" stroke-linecap="round"/>
+                </svg>
+                <h1>Verification Failed</h1>
+                <p id="errorMessage">The verification link is invalid or has expired.</p>
+                <a href="index.html" class="btn">Go to Dashboard</a>
+                <a href="#" id="resendLink" class="back-link">Resend Verification Email</a>
+            </div>
+
+            <!-- No Token Section -->
+            <div id="noTokenSection" style="display: none;">
+                <h1>No Verification Token</h1>
+                <p>It looks like you accessed this page without a verification link. Please check your email for the verification link.</p>
+                <a href="index.html" class="btn">Go to Dashboard</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/theme.js"></script>
+    <script>
+        (function() {
+            const API_BASE = window.API_BASE_URL || '';
+
+            // Get token from URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
+
+            const loadingSection = document.getElementById('loadingSection');
+            const successSection = document.getElementById('successSection');
+            const errorSection = document.getElementById('errorSection');
+            const noTokenSection = document.getElementById('noTokenSection');
+            const errorMessage = document.getElementById('errorMessage');
+
+            function showSection(section) {
+                loadingSection.style.display = 'none';
+                successSection.style.display = 'none';
+                errorSection.style.display = 'none';
+                noTokenSection.style.display = 'none';
+                section.style.display = 'block';
+            }
+
+            if (!token) {
+                showSection(noTokenSection);
+                return;
+            }
+
+            // Verify email
+            async function verifyEmail() {
+                try {
+                    const response = await fetch(`${API_BASE}/api/auth/verify-email?token=${encodeURIComponent(token)}`, {
+                        method: 'GET',
+                        credentials: 'include'
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        showSection(successSection);
+                    } else {
+                        errorMessage.textContent = data.error || 'The verification link is invalid or has expired.';
+                        showSection(errorSection);
+                    }
+                } catch (error) {
+                    console.error('Verification error:', error);
+                    errorMessage.textContent = 'An error occurred while verifying your email. Please try again.';
+                    showSection(errorSection);
+                }
+            }
+
+            // Resend verification email
+            document.getElementById('resendLink').addEventListener('click', async function(e) {
+                e.preventDefault();
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/auth/resend-verification`, {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        alert('Verification email sent! Please check your inbox.');
+                    } else {
+                        alert(data.error || 'Failed to resend verification email. Please log in first.');
+                    }
+                } catch (error) {
+                    console.error('Resend error:', error);
+                    alert('Failed to resend verification email. Please try again later.');
+                }
+            });
+
+            // Start verification
+            verifyEmail();
+        })();
+    </script>
+</body>
+</html>
