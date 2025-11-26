@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Email utilities for password reset
-from email_utils import send_reset_email
+from email_utils import send_reset_email, send_verification_email
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -523,6 +523,27 @@ def require_auth(f):
                 'signin_required': True
             }), 401
 
+        # Check email verification
+        email_verified = session.get('email_verified')
+        if email_verified is None:
+            # Fetch from database if not in session
+            try:
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    cur.execute('SELECT email_verified FROM users WHERE id = %s', (user_id,))
+                    result = cur.fetchone()
+                    email_verified = result[0] if result else False
+                    session['email_verified'] = email_verified
+            except:
+                email_verified = False
+
+        if not email_verified:
+            return jsonify({
+                'status': 'error',
+                'error': 'Please verify your email address to use this feature.',
+                'email_verification_required': True
+            }), 403
+
         return f(*args, **kwargs)
     return decorated_function
 
@@ -802,28 +823,52 @@ def auth_register():
             if cur.fetchone():
                 return jsonify({'error': 'Email already registered'}), 409
 
-            # Create user with 5 free credits
+            # Create user with 5 free credits (email_verified = FALSE)
             cur.execute(
-                'INSERT INTO users (email, password_hash, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
-                (email, password_hash, name or email.split('@')[0], 5)
+                'INSERT INTO users (email, password_hash, name, credits, email_verified) VALUES (%s, %s, %s, %s, %s) RETURNING id',
+                (email, password_hash, name or email.split('@')[0], 5, False)
             )
             user_id = cur.fetchone()[0]
 
-            # Create session
+            # Generate verification token
+            import secrets
+            from datetime import datetime, timedelta
+            verification_token = secrets.token_urlsafe(32)
+            expires_at = datetime.utcnow() + timedelta(hours=24)
+
+            # Store verification token
+            cur.execute('''
+                INSERT INTO email_verification_tokens (user_id, token, expires_at)
+                VALUES (%s, %s, %s)
+            ''', (user_id, verification_token, expires_at))
+
+            # Send verification email
+            verify_url = f"{request.host_url}verify-email.html?token={verification_token}"
+            try:
+                send_verification_email(email, verify_url)
+                print(f"[AUTH] Verification email sent to {email}")
+            except Exception as mail_err:
+                print(f"[WARNING] Verification email failed for {email}: {mail_err}")
+
+            # Create session (but mark as unverified)
             session['user_id'] = user_id
             session['email'] = email
             session['name'] = name or email.split('@')[0]
+            session['email_verified'] = False
             session.permanent = True
 
-            print(f"[AUTH] New user registered: {email} (5 free credits)")
+            print(f"[AUTH] New user registered: {email} (5 free credits, pending verification)")
 
             return jsonify({
                 'status': 'success',
+                'message': 'Registration successful. Please check your email to verify your account.',
+                'email_verification_required': True,
                 'user': {
                     'id': user_id,
                     'email': email,
                     'name': session['name'],
-                    'credits': 5
+                    'credits': 5,
+                    'email_verified': False
                 }
             })
 
@@ -855,14 +900,14 @@ def auth_login():
         with get_db() as conn:
             cur = conn.cursor()
 
-            # Get user
-            cur.execute('SELECT id, password_hash, name, credits FROM users WHERE email = %s', (email,))
+            # Get user (including email_verified)
+            cur.execute('SELECT id, password_hash, name, credits, COALESCE(email_verified, FALSE) FROM users WHERE email = %s', (email,))
             user = cur.fetchone()
 
             if not user:
                 return jsonify({'error': 'Invalid email or password'}), 401
 
-            user_id, password_hash, name, credits = user
+            user_id, password_hash, name, credits, email_verified = user
 
             # Verify password
             if not bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
@@ -872,17 +917,20 @@ def auth_login():
             session['user_id'] = user_id
             session['email'] = email
             session['name'] = name
+            session['email_verified'] = email_verified
             session.permanent = True
 
-            print(f"[AUTH] User logged in: {email}")
+            print(f"[AUTH] User logged in: {email} (verified: {email_verified})")
 
             return jsonify({
                 'status': 'success',
+                'email_verification_required': not email_verified,
                 'user': {
                     'id': user_id,
                     'email': email,
                     'name': name,
-                    'credits': credits
+                    'credits': credits,
+                    'email_verified': email_verified
                 }
             })
 
@@ -906,22 +954,25 @@ def auth_status():
         # Get current user data from database
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT email, name, credits FROM users WHERE id = %s', (user_id,))
+            cur.execute('SELECT email, name, credits, COALESCE(email_verified, FALSE) FROM users WHERE id = %s', (user_id,))
             user = cur.fetchone()
 
             if not user:
                 session.clear()
                 return jsonify({'authenticated': False})
 
-            email, name, credits = user
+            email, name, credits, email_verified = user
 
             return jsonify({
                 'authenticated': True,
+                'logged_in': True,
+                'email_verified': email_verified,
                 'user': {
                     'id': user_id,
                     'email': email,
                     'name': name,
-                    'credits': credits
+                    'credits': credits,
+                    'email_verified': email_verified
                 }
             })
 
@@ -938,6 +989,128 @@ def auth_logout():
 
     session.clear()
     return jsonify({'status': 'success'})
+
+
+@app.route('/api/auth/verify-email', methods=['GET'])
+def verify_email():
+    """Verify email with token from email link."""
+    token = request.args.get('token')
+
+    if not token:
+        return jsonify({'error': 'Verification token required'}), 400
+
+    try:
+        from datetime import datetime
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Find token and check validity
+            cur.execute('''
+                SELECT t.user_id, t.expires_at, t.used, u.email
+                FROM email_verification_tokens t
+                JOIN users u ON t.user_id = u.id
+                WHERE t.token = %s
+            ''', (token,))
+            result = cur.fetchone()
+
+            if not result:
+                return jsonify({'error': 'Invalid verification token'}), 400
+
+            user_id, expires_at, used, email = result
+
+            if used:
+                return jsonify({'error': 'This verification link has already been used'}), 400
+
+            if datetime.utcnow() > expires_at:
+                return jsonify({'error': 'Verification link has expired. Please request a new one.'}), 400
+
+            # Mark user as verified
+            cur.execute('UPDATE users SET email_verified = TRUE WHERE id = %s', (user_id,))
+
+            # Mark token as used
+            cur.execute('UPDATE email_verification_tokens SET used = TRUE WHERE token = %s', (token,))
+
+            # Update session if user is logged in
+            if session.get('user_id') == user_id:
+                session['email_verified'] = True
+
+            print(f"[AUTH] Email verified for user {email}")
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Email verified successfully! You can now use all features.'
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Email verification failed: {e}")
+        return jsonify({'error': 'Verification failed'}), 500
+
+
+@app.route('/api/auth/resend-verification', methods=['POST', 'OPTIONS'])
+def resend_verification():
+    """Resend verification email."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Please sign in first'}), 401
+
+    try:
+        from datetime import datetime, timedelta
+        import secrets
+
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Check if already verified
+            cur.execute('SELECT email, email_verified FROM users WHERE id = %s', (user_id,))
+            result = cur.fetchone()
+
+            if not result:
+                return jsonify({'error': 'User not found'}), 404
+
+            email, email_verified = result
+
+            if email_verified:
+                return jsonify({'error': 'Email already verified'}), 400
+
+            # Check rate limit - only allow one email per minute
+            cur.execute('''
+                SELECT created_at FROM email_verification_tokens
+                WHERE user_id = %s
+                ORDER BY created_at DESC LIMIT 1
+            ''', (user_id,))
+            last_token = cur.fetchone()
+
+            if last_token:
+                time_since_last = datetime.utcnow() - last_token[0]
+                if time_since_last.total_seconds() < 60:
+                    return jsonify({'error': 'Please wait 1 minute before requesting another email'}), 429
+
+            # Generate new token
+            verification_token = secrets.token_urlsafe(32)
+            expires_at = datetime.utcnow() + timedelta(hours=24)
+
+            cur.execute('''
+                INSERT INTO email_verification_tokens (user_id, token, expires_at)
+                VALUES (%s, %s, %s)
+            ''', (user_id, verification_token, expires_at))
+
+            # Send verification email
+            verify_url = f"{request.host_url}verify-email.html?token={verification_token}"
+            send_verification_email(email, verify_url)
+
+            print(f"[AUTH] Verification email resent to {email}")
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Verification email sent'
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Resend verification failed: {e}")
+        return jsonify({'error': 'Failed to send verification email'}), 500
 
 
 # ----------------------------------------------------------------------------
