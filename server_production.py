@@ -842,8 +842,9 @@ def auth_register():
                 VALUES (%s, %s, %s)
             ''', (user_id, verification_token, expires_at))
 
-            # Send verification email
-            verify_url = f"{request.host_url}verify-email.html?token={verification_token}"
+            # Send verification email (use production URL, not request.host_url which returns Railway's internal URL)
+            site_url = os.getenv('SITE_URL', 'https://markremoverai.com')
+            verify_url = f"{site_url}/verify-email.html?token={verification_token}"
             try:
                 send_verification_email(email, verify_url)
                 print(f"[AUTH] Verification email sent to {email}")
@@ -1097,8 +1098,9 @@ def resend_verification():
                 VALUES (%s, %s, %s)
             ''', (user_id, verification_token, expires_at))
 
-            # Send verification email
-            verify_url = f"{request.host_url}verify-email.html?token={verification_token}"
+            # Send verification email (use production URL, not request.host_url which returns Railway's internal URL)
+            site_url = os.getenv('SITE_URL', 'https://markremoverai.com')
+            verify_url = f"{site_url}/verify-email.html?token={verification_token}"
             send_verification_email(email, verify_url)
 
             print(f"[AUTH] Verification email resent to {email}")
