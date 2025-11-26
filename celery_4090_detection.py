@@ -86,43 +86,33 @@ def get_b2_bucket():
         print(f"[B2] Connected to bucket: {B2_BUCKET_NAME}")
     return _b2_bucket
 
-def upload_segment_to_b2(video_id, segment_idx, frames_dir, masks_dir, start_frame, end_frame):
+def upload_all_masks_to_b2(video_id, masks_dir, total_frames):
     """
-    Zip segment frames+masks and upload to B2.
-    Returns Cloudflare URL for download.
+    Upload ALL masks in ONE zip file.
+    3070 workers download once and cache for all segments.
+    Returns Cloudflare URL for all_masks download.
     """
-    # Create zip file
-    zip_filename = f"{video_id}_seg{segment_idx}.zip"
+    zip_filename = f"{video_id}_all_masks.zip"
     zip_path = os.path.join(TEMP_DIR, zip_filename)
 
-    print(f"[B2] Creating zip for segment {segment_idx}...")
+    print(f"[B2] Creating ALL-MASKS zip ({total_frames} frames)...")
 
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Add frames for this segment
-        for frame_idx in range(start_frame, end_frame + 1):
-            frame_file = f"{frame_idx:04d}.png"
-            frame_path = os.path.join(frames_dir, frame_file)
-            if os.path.exists(frame_path):
-                # Store with local index (0000, 0001, etc.)
-                local_idx = frame_idx - start_frame
-                zf.write(frame_path, f"frames/{local_idx:04d}.png")
-
-        # Add masks for this segment
-        for frame_idx in range(start_frame, end_frame + 1):
+        # Add ALL masks (not per-segment!)
+        for frame_idx in range(total_frames):
             mask_file = f"{frame_idx:04d}.png"
             mask_path = os.path.join(masks_dir, mask_file)
             if os.path.exists(mask_path):
-                local_idx = frame_idx - start_frame
-                zf.write(mask_path, f"masks/{local_idx:04d}.png")
+                zf.write(mask_path, f"masks/{frame_idx:04d}.png")
 
     zip_size = os.path.getsize(zip_path) / (1024 * 1024)
     print(f"[B2] Zip created: {zip_filename} ({zip_size:.2f} MB)")
 
     # Upload to B2
     bucket = get_b2_bucket()
-    b2_path = f"segments/{video_id}/{zip_filename}"
+    b2_path = f"masks/{video_id}/{zip_filename}"
 
-    print(f"[B2] Uploading to B2: {b2_path}...")
+    print(f"[B2] Uploading ALL masks to B2: {b2_path}...")
     start_time = time.time()
 
     bucket.upload_local_file(
@@ -139,6 +129,7 @@ def upload_segment_to_b2(video_id, segment_idx, frames_dir, masks_dir, start_fra
 
     # Return Cloudflare URL
     cloudflare_url = f"{CLOUDFLARE_WORKER_URL}/{b2_path}"
+    print(f"[B2] All masks available at: {cloudflare_url}")
     return cloudflare_url
 
 # ============================================================================
@@ -206,7 +197,7 @@ def get_dynamic_subvideo_length(width, height):
 # ============================================================================
 
 @celery.task(bind=True, name='detection.detect_video')
-def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base=None):
+def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base=None, batch_mode=False):
     """
     Main detection task - runs on 4090
 
@@ -215,6 +206,8 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
         mode: 'yolo' for automatic detection, 'sam2' for interactive
         click_points: List of click points for SAM2 mode
         api_base: Base URL for API (for workers to download)
+        batch_mode: If True (default), send ONE batch job for 2.1x speedup
+                    If False, send multiple segment jobs (old behavior)
 
     Returns:
         Dict with video_id, segments, and job IDs
@@ -376,18 +369,21 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
     print(f"[4090] Split into {len(segments)} chunks (max {max_chunk} frames): {segments}")
 
     # ========================================================================
-    # STEP 4: Save frames and push segment jobs to queue
+    # STEP 4: Upload ALL masks ONCE and push segment jobs to queue
     # ========================================================================
 
-    print(f"[4090] Saving frames and creating jobs...")
-    self.update_state(state='PROCESSING', meta={'progress': 70, 'status': 'Creating jobs'})
+    print(f"[4090] Uploading ALL masks and creating jobs...")
+    self.update_state(state='PROCESSING', meta={'progress': 70, 'status': 'Uploading masks'})
 
-    # Save original frames for workers to download
+    # Save original frames for workers to download (if needed locally)
     frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_originals")
     os.makedirs(frames_dir, exist_ok=True)
 
     for idx, frame in enumerate(all_frames):
         cv2.imwrite(os.path.join(frames_dir, f"{idx:04d}.png"), frame)
+
+    # Upload ALL masks in ONE zip (not per-segment!)
+    all_masks_url = upload_all_masks_to_b2(video_id, masks_dir, frames_loaded)
 
     # Store metadata in Redis
     redis_client = celery.backend.client
@@ -400,9 +396,11 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
         'width': width,
         'height': height,
         'total_frames': frames_loaded,
+        'total_segments': len(segments),
         'segments': segments,
         'frames_dir': frames_dir,
         'masks_dir': masks_dir,
+        'all_masks_url': all_masks_url,
         'api_base': api_base,
         'created_at': time.time()
     }
@@ -413,33 +411,59 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
         json.dumps(metadata)
     )
 
-    # Create segment processing jobs for 3070 workers
-    # Upload each segment to B2 first so remote workers can download
+    # Create processing job(s) for 3070 workers
     job_ids = []
 
-    for seg_idx, (start_frame, end_frame) in enumerate(segments):
-        # Upload segment frames+masks to B2
-        print(f"\n[4090] Uploading segment {seg_idx} to B2...")
-        cloudflare_url = upload_segment_to_b2(
-            video_id, seg_idx, frames_dir, masks_dir, start_frame, end_frame
-        )
-        print(f"[4090] Segment {seg_idx} available at: {cloudflare_url}")
+    if batch_mode:
+        # ====================================================================
+        # BATCH MODE: ONE job for ALL frames (2.1x faster!)
+        # This matches RUN_SAM2_LOCAL.py performance: ~15s vs ~32s
+        # ====================================================================
+        print(f"\n[4090] BATCH MODE: Creating ONE job for ALL {frames_loaded} frames")
+        print(f"[4090] Expected speedup: 2.1x (ONE ProPainter call vs {len(segments)} segment calls)")
 
-        # Push to segment processing queue with cloudflare URL
         result = celery.send_task(
-            'worker.process_segment',
+            'worker.process_batch',
             kwargs={
                 'video_id': video_id,
-                'segment_index': seg_idx,
-                'start_frame': start_frame,
-                'end_frame': end_frame,
-                'cloudflare_url': cloudflare_url  # Worker downloads from here
+                'video_url': video_path,  # Original video URL
+                'all_masks_url': all_masks_url,  # ALL masks
+                'total_frames': frames_loaded,
+                'fps': fps,
+                'width': width,
+                'height': height
             },
             queue='processing'
         )
 
         job_ids.append(result.id)
-        print(f"[4090] Created job {result.id} for segment {seg_idx}: frames {start_frame}-{end_frame}")
+        print(f"[4090] Created BATCH job {result.id} for ALL {frames_loaded} frames")
+
+    else:
+        # ====================================================================
+        # SEGMENT MODE: Multiple jobs (legacy, slower but parallelizable)
+        # ====================================================================
+        print(f"\n[4090] SEGMENT MODE: Creating {len(segments)} segment jobs...")
+
+        for seg_idx, (start_frame, end_frame) in enumerate(segments):
+            # Push to segment processing queue
+            # Worker downloads video + all_masks ONCE, caches for all segments
+            result = celery.send_task(
+                'worker.process_segment',
+                kwargs={
+                    'video_id': video_id,
+                    'segment_index': seg_idx,
+                    'start_frame': start_frame,
+                    'end_frame': end_frame,
+                    'total_segments': len(segments),
+                    'video_url': video_path,  # Original video URL - worker downloads this
+                    'all_masks_url': all_masks_url  # ALL masks (download once, cache!)
+                },
+                queue='processing'
+            )
+
+            job_ids.append(result.id)
+            print(f"[4090] Created job {result.id} for segment {seg_idx}: frames {start_frame}-{end_frame}")
 
     # ========================================================================
     # DONE
@@ -454,12 +478,14 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
         'segments': segments,
         'job_ids': job_ids,
         'frames_with_watermark': frames_with_watermark,
-        'metadata': metadata
+        'metadata': metadata,
+        'batch_mode': batch_mode
     }
 
     print(f"\n[4090] Detection complete!")
     print(f"   Video ID: {video_id}")
-    print(f"   Segments: {len(segments)}")
+    print(f"   Mode: {'BATCH (2.1x faster)' if batch_mode else 'SEGMENT'}")
+    print(f"   Total frames: {frames_loaded}")
     print(f"   Jobs created: {len(job_ids)}")
 
     return result
