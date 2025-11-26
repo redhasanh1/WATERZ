@@ -132,6 +132,47 @@ def upload_all_masks_to_b2(video_id, masks_dir, total_frames):
     print(f"[B2] All masks available at: {cloudflare_url}")
     return cloudflare_url
 
+
+def upload_video_to_b2(video_path):
+    """
+    Upload video to B2 if it's a local file path.
+    Returns Cloudflare URL for video download.
+    """
+    # If already a URL, return as-is
+    if video_path.startswith('http://') or video_path.startswith('https://'):
+        return video_path
+
+    # Local file - upload to B2
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    filename = os.path.basename(video_path)
+    # Add hash to prevent collisions
+    file_hash = hashlib.md5(open(video_path, 'rb').read(1024*1024)).hexdigest()[:8]
+    base, ext = os.path.splitext(filename)
+    b2_filename = f"{base}_{file_hash}{ext}"
+
+    file_size = os.path.getsize(video_path) / (1024 * 1024)
+    print(f"[B2] Uploading video: {filename} ({file_size:.2f} MB)...")
+
+    bucket = get_b2_bucket()
+    b2_path = f"uploads/{b2_filename}"
+
+    start_time = time.time()
+    bucket.upload_local_file(
+        local_file=video_path,
+        file_name=b2_path
+    )
+
+    upload_time = time.time() - start_time
+    speed = file_size / upload_time if upload_time > 0 else 0
+    print(f"[B2] Video uploaded in {upload_time:.2f}s ({speed:.2f} MB/s)")
+
+    cloudflare_url = f"{CLOUDFLARE_WORKER_URL}/{b2_path}"
+    print(f"[B2] Video available at: {cloudflare_url}")
+    return cloudflare_url
+
+
 # ============================================================================
 # CELERY SETUP
 # ============================================================================
@@ -382,6 +423,9 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
     for idx, frame in enumerate(all_frames):
         cv2.imwrite(os.path.join(frames_dir, f"{idx:04d}.png"), frame)
 
+    # Upload video to B2 if it's a local file (Docker workers need URL)
+    video_url = upload_video_to_b2(video_path)
+
     # Upload ALL masks in ONE zip (not per-segment!)
     all_masks_url = upload_all_masks_to_b2(video_id, masks_dir, frames_loaded)
 
@@ -414,10 +458,10 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
     # Create processing job(s) for 3070 workers
     job_ids = []
 
-    if batch_mode:
+    if False:  # DISABLED - segment mode is faster with mask-based bbox cropping
         # ====================================================================
-        # BATCH MODE: ONE job for ALL frames (2.1x faster!)
-        # This matches RUN_SAM2_LOCAL.py performance: ~15s vs ~32s
+        # BATCH MODE: DISABLED - combines all frames = full frame bbox = slow
+        # Segment mode uses per-segment mask bbox = small crop = fast
         # ====================================================================
         print(f"\n[4090] BATCH MODE: Creating ONE job for ALL {frames_loaded} frames")
         print(f"[4090] Expected speedup: 2.1x (ONE ProPainter call vs {len(segments)} segment calls)")
@@ -456,7 +500,7 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
                     'start_frame': start_frame,
                     'end_frame': end_frame,
                     'total_segments': len(segments),
-                    'video_url': video_path,  # Original video URL - worker downloads this
+                    'video_url': video_url,  # CDN URL - worker downloads this
                     'all_masks_url': all_masks_url  # ALL masks (download once, cache!)
                 },
                 queue='processing'
