@@ -125,12 +125,12 @@
             setTimeout(prewarm, 500);
         })();
 
-        // Auto-login for localhost testing
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            var testUser = { id: 'test-local', email: 'test@localhost', name: 'Local Tester', credits: 999 };
-            localStorage.setItem('user', JSON.stringify(testUser));
-            console.log('🔓 Localhost: Auto-logged in as test user');
-        }
+        // Auto-login for localhost testing (DISABLED for email verification testing)
+        // if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        //     var testUser = { id: 'test-local', email: 'test@localhost', name: 'Local Tester', credits: 999 };
+        //     localStorage.setItem('user', JSON.stringify(testUser));
+        //     console.log('🔓 Localhost: Auto-logged in as test user');
+        // }
     </script>
     <style>
         /* MarkRemoverAI AI - Revolutionary Vibrant Design */
@@ -3315,10 +3315,10 @@ function rejectCookies() {
 (function() {
     // Check email verification status on page load
     async function checkEmailVerification() {
-        // Skip if on localhost (test mode)
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            return;
-        }
+        // Skip if on localhost (test mode) - DISABLED for testing
+        // if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        //     return;
+        // }
 
         // Skip if banner was dismissed this session
         if (sessionStorage.getItem('verificationBannerDismissed')) {
