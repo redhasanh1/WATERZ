@@ -1,6 +1,61 @@
 import os
 import requests
 
+
+def send_verification_email(to_email: str, verify_url: str):
+    """Send email verification link via Brevo HTTP API."""
+
+    api_key = os.getenv("BREVO_API_KEY")
+    smtp_from = os.getenv("SMTP_FROM", "noreply@markremoverai.com")
+
+    print(f"[EMAIL DEBUG] Sending verification email via Brevo")
+    print(f"[EMAIL DEBUG] From: {smtp_from}")
+    print(f"[EMAIL DEBUG] To: {to_email}")
+
+    if not api_key:
+        raise ValueError("Missing BREVO_API_KEY environment variable")
+
+    url = "https://api.brevo.com/v3/smtp/email"
+
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
+    }
+
+    payload = {
+        "sender": {
+            "name": "MarkRemoverAI",
+            "email": smtp_from
+        },
+        "to": [
+            {
+                "email": to_email
+            }
+        ],
+        "subject": "Verify your MarkRemoverAI email",
+        "textContent": (
+            f"Welcome to MarkRemoverAI!\n\n"
+            f"Click the link below to verify your email address:\n\n"
+            f"{verify_url}\n\n"
+            f"This link expires in 24 hours.\n\n"
+            "If you didn't create an account, please ignore this email."
+        )
+    }
+
+    print(f"[EMAIL DEBUG] Sending verification email...")
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    if response.status_code == 201:
+        print(f"[EMAIL SUCCESS] Verification email sent to {to_email}")
+        return True
+    else:
+        error_msg = f"Brevo API error {response.status_code}: {response.text}"
+        print(f"[EMAIL ERROR] {error_msg}")
+        raise Exception(error_msg)
+
+
 def send_reset_email(to_email: str, reset_url: str):
     """Send password reset email via Brevo HTTP API."""
 
