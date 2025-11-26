@@ -29,6 +29,7 @@ import cv2
 from celery import Celery
 from celery.signals import worker_process_init
 from b2sdk.v2 import B2Api, InMemoryAccountInfo
+from segment_detector import detect_segments_from_masks, merge_adjacent_segments
 
 # ============================================================================
 # CONFIGURATION
@@ -360,39 +361,35 @@ def detect_video_task(self, video_path, mode='yolo', click_points=None, api_base
     print(f"[4090] Segmenting video for parallel processing...")
     self.update_state(state='PROCESSING', meta={'progress': 60, 'status': 'Creating segments'})
 
-    # Segment the video based on watermark presence
-    # Each segment is a contiguous range of frames
-    segments = []
-    current_start = None
+    # Use MOTION-BASED segmentation (like RUN_SAM2_LOCAL)
+    # This splits when watermark MOVES, not just when it disappears
+    # Result: smaller segments with stationary watermarks = smaller crop = FASTER
+    position_tolerance = 150  # Split when watermark moves >150px
+    min_segment_length = 60   # Minimum 60 frames (~2 sec) per segment
 
-    for frame_idx, detections in enumerate(all_detections):
-        has_watermark = bool(detections)
+    print(f"[4090] Motion-based segmentation: position_tolerance={position_tolerance}px, min_length={min_segment_length}f")
 
-        if has_watermark:
-            if current_start is None:
-                current_start = frame_idx
-        else:
-            if current_start is not None:
-                # End of watermark segment
-                segments.append((current_start, frame_idx - 1))
-                current_start = None
+    # detect_segments_from_masks returns [(start, end, bbox), ...]
+    motion_segments = detect_segments_from_masks(
+        masks_dir,
+        position_tolerance=position_tolerance,
+        min_segment_length=min_segment_length,
+        max_segments=80  # Cap to avoid too many small segments
+    )
 
-    # Don't forget last segment
-    if current_start is not None:
-        segments.append((current_start, frames_loaded - 1))
+    # Merge adjacent segments if they're close in position
+    if len(motion_segments) > 1:
+        motion_segments = merge_adjacent_segments(motion_segments, position_tolerance=position_tolerance, max_gap=60)
 
-    # Merge nearby segments (within 30 frames)
-    if segments:
-        merged = [segments[0]]
-        for start, end in segments[1:]:
-            prev_end = merged[-1][1]
-            if start - prev_end <= 30:
-                merged[-1] = (merged[-1][0], end)
-            else:
-                merged.append((start, end))
-        segments = merged
+    # Convert to (start, end) tuples for job creation (3070 will compute bbox from masks)
+    segments = [(start, end) for start, end, bbox in motion_segments]
 
-    # Split large segments into chunks for parallel processing
+    # If no segments detected (no watermarks), create a single segment covering all frames
+    if not segments:
+        print(f"[4090] No motion segments detected, using full video as single segment")
+        segments = [(0, frames_loaded - 1)]
+
+    # Split large segments into chunks for parallel processing (keep this for parallelism)
     max_chunk = get_dynamic_subvideo_length(width, height)
     split_segments = []
 
