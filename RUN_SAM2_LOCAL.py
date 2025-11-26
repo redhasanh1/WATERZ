@@ -754,10 +754,44 @@ def process_sam2_local(video_path, masks_folder):
 
     result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
-        print(f"[ERROR] FFmpeg encoding failed: {result.stderr}")
-        return None
+        # NVENC failed - fall back to libx264 (software encoding)
+        print(f"[WARN] NVENC failed, falling back to libx264 (software encoding)...")
 
-    print(f"[OK] Video encoded!")
+        if has_audio:
+            ffmpeg_cmd = [
+                str(FFMPEG_EXE), '-y',
+                '-framerate', str(fps),
+                '-i', str(final_frames_dir / '%04d.png'),
+                '-i', video_path,
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '18',
+                '-c:a', 'copy',
+                '-pix_fmt', 'yuv420p',
+                '-shortest',
+                str(output_path)
+            ]
+        else:
+            ffmpeg_cmd = [
+                str(FFMPEG_EXE), '-y',
+                '-framerate', str(fps),
+                '-i', str(final_frames_dir / '%04d.png'),
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '18',
+                '-pix_fmt', 'yuv420p',
+                str(output_path)
+            ]
+
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            print(f"[ERROR] FFmpeg encoding failed: {result.stderr}")
+            return None
+        print(f"[OK] Video encoded with libx264!")
+    else:
+        print(f"[OK] Video encoded with NVENC!")
 
     # Cleanup
     print(f"\n[CLEANUP] Removing temp files...")
