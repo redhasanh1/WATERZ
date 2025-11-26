@@ -1079,6 +1079,11 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
         ms_per_frame = (process_time / num_frames) * 1000
         print(f"[3070] ProPainter complete: {process_time:.2f}s ({ms_per_frame:.2f}ms/frame)")
 
+        # Clear GPU cache to prevent VRAM accumulation
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         # Find output frames
         propainter_output = os.path.join(seg_output_dir, os.path.basename(seg_frames_dir), "frames")
         if not os.path.exists(propainter_output):
