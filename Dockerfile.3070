@@ -17,8 +17,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ============================================================================
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-dev \
+    python3 \
+    python3-dev \
     python3-pip \
     build-essential \
     gcc \
@@ -32,8 +32,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     git \
     wget \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/bin/pip \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -92,13 +90,13 @@ RUN mkdir -p /app/runs/detect/new_sora_watermark/weights
 COPY runs/detect/new_sora_watermark/weights/best.pt /app/runs/detect/new_sora_watermark/weights/
 
 # Verify all required models exist (fail build if missing)
-RUN python -c "import os; \
+RUN python3 -c "import os; \
     models = ['ProPainter.pth', 'raft-things.pth', 'recurrent_flow_completion.pth']; \
     missing = [m for m in models if not os.path.exists(f'/app/weights/{m}')]; \
     assert not missing, f'Missing models: {missing}'"
 
 # Verify YOLO model exists
-RUN python -c "import os; assert os.path.exists('/app/runs/detect/new_sora_watermark/weights/best.pt'), 'YOLO model missing'"
+RUN python3 -c "import os; assert os.path.exists('/app/runs/detect/new_sora_watermark/weights/best.pt'), 'YOLO model missing'"
 
 # ============================================================================
 # WORKING DIRECTORIES
@@ -155,14 +153,14 @@ ENV CC=gcc
 # ============================================================================
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import torch; print('OK')" || exit 1
+    CMD python3 -c "import torch; print('OK')" || exit 1
 
 # ============================================================================
 # DEFAULT COMMAND
 # ============================================================================
 
 # Default: run as Celery worker on processing queue
-CMD ["python", "-m", "celery", "-A", "celery_3070_worker", "worker", \
+CMD ["python3", "-m", "celery", "-A", "celery_3070_worker", "worker", \
      "--queues=processing", \
      "--concurrency=1", \
      "--loglevel=info", \

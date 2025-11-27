@@ -62,7 +62,20 @@
       "Bash(cmd /c \"powershell -Command \"\"(Get-Content ''D:\\watermarkz\\entrypoint.sh'' -Raw).Replace([char]13+[char]10, [char]10) | Set-Content -NoNewline ''D:\\watermarkz\\entrypoint.sh''\"\"\")",
       "Bash(cmd /c \"findstr /M /R \"\"^\"\" D:\\watermarkz\\entrypoint.sh > nul && echo File exists\")",
       "Bash(cmd /c \"for %I in (D:\\watermarkz\\entrypoint.sh) do @echo Size: %~zI bytes\")",
-      "Bash(cmd /c \"copy D:\\watermarkz\\test_hybrid_sam2_tracking.py D:\\watermarkz\\test_local\\test_sam2_tracking.py\")"
+      "Bash(cmd /c \"copy D:\\watermarkz\\test_hybrid_sam2_tracking.py D:\\watermarkz\\test_local\\test_sam2_tracking.py\")",
+      "Bash(git -C \"D:\\watermarkz\" log --oneline -10 -- celery_3070_worker.py)",
+      "Bash(git -C \"D:\\watermarkz\" diff celery_3070_worker.py)",
+      "Bash(git -C:*)",
+      "Bash(wsl bash -c 'cd /mnt/d/watermarkz && docker compose build celery_3070 && docker compose up -d celery_3070')",
+      "Bash(wsl bash:*)",
+      "Bash(timeout /t 30 /nobreak)",
+      "Bash(docker logs:*)",
+      "Bash(timeout 120 docker logs:*)",
+      "Bash(timeout 180 docker logs:*)",
+      "Bash(docker exec:*)",
+      "Bash(cmd /c \"dir /b D:\\watermarkz\\output\\be011524_segments\")",
+      "Bash(timeout 60 docker logs:*)",
+      "Bash(timeout 300 docker logs:*)"
     ],
     "deny": [],
     "ask": []

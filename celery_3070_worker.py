@@ -24,6 +24,8 @@ from pathlib import Path
 
 # Add python_packages to path
 sys.path.insert(0, 'python_packages')
+# Add faster-propainter-main for local testing (watermark module)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'faster-propainter-main'))
 
 # ============================================================================
 # GPU OPTIMIZATIONS FOR RTX 3070
@@ -251,6 +253,35 @@ def upload_result_to_b2(video_id, segment_index, output_frames_dir):
     # Return Cloudflare URL
     cloudflare_url = f"{CLOUDFLARE_WORKER_URL}/{b2_path}"
     print(f"[B2] Result available at: {cloudflare_url}")
+    return cloudflare_url
+
+
+def upload_final_video_to_b2(video_id, video_path):
+    """
+    Upload assembled final video to B2 and return Cloudflare URL.
+    """
+    if not os.path.exists(video_path):
+        print(f"[B2] ERROR: Video file not found: {video_path}")
+        return None
+
+    file_size = os.path.getsize(video_path) / (1024 * 1024)
+    print(f"[B2] Uploading final video: {os.path.basename(video_path)} ({file_size:.2f} MB)")
+
+    bucket = get_b2_bucket()
+    b2_path = f"final/{video_id}/{os.path.basename(video_path)}"
+
+    start_time = time.time()
+    bucket.upload_local_file(
+        local_file=video_path,
+        file_name=b2_path
+    )
+
+    upload_time = time.time() - start_time
+    speed = file_size / upload_time if upload_time > 0 else 0
+    print(f"[B2] Uploaded final video in {upload_time:.2f}s ({speed:.2f} MB/s)")
+
+    cloudflare_url = f"{CLOUDFLARE_WORKER_URL}/{b2_path}"
+    print(f"[B2] Final video available at: {cloudflare_url}")
     return cloudflare_url
 
 
@@ -682,6 +713,14 @@ def assemble_final_video(video_id, total_segments, redis_client):
     """
     print(f"\n[ASSEMBLY] Starting video assembly for {video_id}...")
 
+    # Get fps from video metadata
+    fps = 30  # Default
+    metadata_json = redis_client.get(f'video_metadata:{video_id}')
+    if metadata_json:
+        metadata = json.loads(metadata_json)
+        fps = metadata.get('fps', 30)
+        print(f"[ASSEMBLY] FPS from metadata: {fps}")
+
     # Collect all frames from all segments in order
     all_frames = []
 
@@ -716,7 +755,6 @@ def assemble_final_video(video_id, total_segments, redis_client):
         return None
 
     height, width = first_frame.shape[:2]
-    fps = 30  # Default, could get from metadata
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
@@ -1165,6 +1203,46 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             'total_segments': total_segments
         }
         redis_client.publish(f'segment_complete:{video_id}', json.dumps(completion_data))
+
+        # ====================================================================
+        # CHECK IF ALL SEGMENTS COMPLETE - AUTO-ASSEMBLE + UPLOAD
+        # ====================================================================
+
+        if total_segments:
+            completed_count = redis_client.hlen(f'segment_results:{video_id}')
+            print(f"[3070] Segment completion: {completed_count}/{total_segments}")
+
+            if completed_count == total_segments:
+                print(f"\n[3070] ALL SEGMENTS COMPLETE! Starting assembly + upload...")
+
+                try:
+                    # Assemble final video
+                    final_path = assemble_final_video(video_id, total_segments, redis_client)
+
+                    if final_path and os.path.exists(final_path):
+                        # Upload to B2
+                        final_url = upload_final_video_to_b2(video_id, final_path)
+
+                        if final_url:
+                            # Store final URL in Redis
+                            redis_client.set(f'final_url:{video_id}', final_url)
+
+                            # Publish video complete event
+                            redis_client.publish(f'video_complete:{video_id}', json.dumps({
+                                'video_id': video_id,
+                                'url': final_url,
+                                'total_segments': total_segments
+                            }))
+
+                            print(f"\n[3070] FINAL VIDEO UPLOADED!")
+                            print(f"   URL: {final_url}")
+                        else:
+                            print(f"[3070] WARNING: Upload failed, video saved locally at {final_path}")
+                    else:
+                        print(f"[3070] WARNING: Assembly failed")
+
+                except Exception as assembly_error:
+                    print(f"[3070] ERROR during assembly/upload: {assembly_error}")
 
         # ====================================================================
         # DONE

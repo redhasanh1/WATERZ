@@ -582,7 +582,8 @@ def process_sam2_local(video_path, masks_folder):
                 seg_frames_dir.mkdir(exist_ok=True)
                 seg_masks_dir.mkdir(exist_ok=True)
 
-                for frame_idx in range(start_f, end_f + 1):
+                # Copy ALL frames (cropped to segment bbox) for temporal context
+                for frame_idx in range(extracted_frames):
                     frame_file = f"{frame_idx:04d}.png"
                     src_frame = cropped_dir / frame_file
                     src_mask = sam2_masks_dir / frame_file
@@ -590,7 +591,7 @@ def process_sam2_local(video_path, masks_folder):
                     if src_frame.exists():
                         frame = cv2.imread(str(src_frame))
                         seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                        cv2.imwrite(str(seg_frames_dir / f"{frame_idx-start_f:04d}.png"), seg_frame)
+                        cv2.imwrite(str(seg_frames_dir / f"{frame_idx:04d}.png"), seg_frame)
 
                     if src_mask.exists():
                         mask = cv2.imread(str(src_mask), cv2.IMREAD_GRAYSCALE)
@@ -598,7 +599,7 @@ def process_sam2_local(video_path, masks_folder):
                     else:
                         seg_mask = np.zeros((seg_crop_h, seg_crop_w), dtype=np.uint8)
 
-                    cv2.imwrite(str(seg_masks_dir / f"{frame_idx-start_f:04d}.png"), seg_mask)
+                    cv2.imwrite(str(seg_masks_dir / f"{frame_idx:04d}.png"), seg_mask)
 
                 faster_propainter_pipeline(
                     video=str(seg_frames_dir),
@@ -646,7 +647,7 @@ def process_sam2_local(video_path, masks_folder):
                     continue
 
                 for frame_idx in range(start_f, end_f + 1):
-                    src_file = seg_propainter_output / f"{frame_idx-start_f:04d}.png"
+                    src_file = seg_propainter_output / f"{frame_idx:04d}.png"
                     if not src_file.exists():
                         continue
 
