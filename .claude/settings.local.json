@@ -78,7 +78,9 @@
       "Bash(timeout 300 docker logs:*)",
       "Bash(C:/Users/has/AppData/Local/Programs/Python/Python312/Scripts/b2.exe ls \"b2://watermarkz/workers/\")",
       "Bash(curl -s \"https://markz.humblewoslayer.workers.dev/workers/celery_3070_worker.py\")",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(C:/Users/has/AppData/Local/Programs/Python/Python312/Scripts/b2.exe upload-file:*)",
+      "Bash(wsl grep -E \"profile:v|level.*4.1|-cq\")"
     ],
     "deny": [],
     "ask": []
