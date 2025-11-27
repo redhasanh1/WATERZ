@@ -746,27 +746,59 @@ def assemble_final_video(video_id, total_segments, redis_client):
 
     print(f"[ASSEMBLY] Total frames: {len(all_frames)}")
 
-    # Create output video using cv2.VideoWriter
+    # Create output video using ffmpeg for web-compatible h264 encoding
     output_path = os.path.join(RESULT_DIR, f"{video_id}_final.mp4")
 
-    first_frame = cv2.imread(all_frames[0])
-    if first_frame is None:
-        print(f"[ASSEMBLY ERROR] Could not read first frame!")
-        return None
+    # Create a temporary file listing all frames in order
+    frame_list_path = os.path.join(RESULT_DIR, f"{video_id}_frames.txt")
+    with open(frame_list_path, 'w') as f:
+        for frame_path in all_frames:
+            # ffmpeg concat demuxer format: file 'path'
+            f.write(f"file '{frame_path}'\n")
+            f.write(f"duration {1/fps}\n")
 
-    height, width = first_frame.shape[:2]
+    print(f"[ASSEMBLY] Created frame list: {frame_list_path}")
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    # Use ffmpeg to create h264 video (web-compatible)
+    ffmpeg_cmd = [
+        'ffmpeg', '-y',
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', frame_list_path,
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '18',
+        '-pix_fmt', 'yuv420p',  # Required for browser compatibility
+        '-movflags', '+faststart',  # Enables streaming
+        output_path
+    ]
 
-    for i, frame_path in enumerate(all_frames):
-        frame = cv2.imread(frame_path)
-        if frame is not None:
-            out.write(frame)
-        if (i + 1) % 100 == 0:
-            print(f"[ASSEMBLY] Written {i + 1}/{len(all_frames)} frames...")
+    print(f"[ASSEMBLY] Running ffmpeg: {' '.join(ffmpeg_cmd)}")
 
-    out.release()
+    result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f"[ASSEMBLY ERROR] ffmpeg failed: {result.stderr}")
+        # Fallback to cv2 if ffmpeg fails
+        print("[ASSEMBLY] Falling back to cv2.VideoWriter...")
+        first_frame = cv2.imread(all_frames[0])
+        if first_frame is None:
+            print(f"[ASSEMBLY ERROR] Could not read first frame!")
+            return None
+        height, width = first_frame.shape[:2]
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        for i, frame_path in enumerate(all_frames):
+            frame = cv2.imread(frame_path)
+            if frame is not None:
+                out.write(frame)
+            if (i + 1) % 100 == 0:
+                print(f"[ASSEMBLY] Written {i + 1}/{len(all_frames)} frames...")
+        out.release()
+
+    # Clean up frame list
+    if os.path.exists(frame_list_path):
+        os.remove(frame_list_path)
 
     if os.path.exists(output_path):
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
