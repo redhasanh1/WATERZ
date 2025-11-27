@@ -384,7 +384,7 @@ def download_video_and_extract_frames(video_url, work_dir, start_frame, end_fram
         '-hwaccel', 'cuda',
         '-hwaccel_output_format', 'cuda',
         '-i', video_path,
-        '-vf', f"select='between(n\\,{start_frame}\\,{end_frame})',hwdownload,format=bgr24",
+        '-vf', f"select='between(n\\,{start_frame}\\,{end_frame})',hwdownload,format=nv12",
         '-vsync', '0',
         '-start_number', '0',
         os.path.join(frames_dir, '%04d.png')
@@ -528,7 +528,7 @@ def download_video_and_extract_all_frames_cached(video_id, video_url):
         '-hwaccel', 'cuda',
         '-hwaccel_output_format', 'cuda',
         '-i', video_path,
-        '-vf', 'hwdownload,format=bgr24',
+        '-vf', 'hwdownload,format=nv12',
         '-vsync', '0',
         '-start_number', '0',
         os.path.join(frames_dir, '%04d.png')
