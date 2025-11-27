@@ -486,7 +486,12 @@ def download_video_and_extract_all_frames_cached(video_id, video_url):
 
     # Check cache first
     if video_id in _video_frames_cache:
-        cached_dir = _video_frames_cache[video_id]
+        cache_entry = _video_frames_cache[video_id]
+        # Handle both old (string) and new (dict) cache format
+        if isinstance(cache_entry, dict):
+            cached_dir = cache_entry['frames_dir']
+        else:
+            cached_dir = cache_entry
         if os.path.exists(cached_dir):
             num_frames = len([f for f in os.listdir(cached_dir) if f.endswith('.png')])
             print(f"[3070] Using CACHED frames for {video_id} ({num_frames} frames)")
@@ -541,16 +546,20 @@ def download_video_and_extract_all_frames_cached(video_id, video_url):
     # Count extracted frames
     frame_idx = len([f for f in os.listdir(frames_dir) if f.endswith('.png')])
     extract_time = time.time() - extract_start
-    fps = frame_idx / extract_time if extract_time > 0 else 0
-    print(f"[3070] NVDEC extracted {frame_idx} frames in {extract_time:.2f}s ({fps:.0f} fps)")
+    fps_rate = frame_idx / extract_time if extract_time > 0 else 0
+    print(f"[3070] NVDEC extracted {frame_idx} frames in {extract_time:.2f}s ({fps_rate:.0f} fps)")
 
-    # Keep video for potential re-use, or remove to save space
-    os.remove(video_path)
+    # KEEP video for audio extraction during assembly!
+    # Will be deleted after final video is assembled
+    print(f"[3070] Keeping video for audio: {video_path}")
 
     print(f"[3070] Cached {frame_idx} frames for video {video_id}")
 
-    # Cache for subsequent segments
-    _video_frames_cache[video_id] = frames_dir
+    # Cache for subsequent segments (include video_path for audio!)
+    _video_frames_cache[video_id] = {
+        'frames_dir': frames_dir,
+        'video_path': video_path  # Keep for audio during assembly
+    }
     return frames_dir
 
 
@@ -718,13 +727,26 @@ def assemble_final_video(video_id, total_segments, redis_client):
     """
     print(f"\n[ASSEMBLY] Starting video assembly for {video_id}...")
 
-    # Get fps from video metadata
+    # Get metadata (fps) and cached video path for audio
     fps = 30  # Default
+    original_video_path = None
+
     metadata_json = redis_client.get(f'video_metadata:{video_id}')
     if metadata_json:
         metadata = json.loads(metadata_json)
         fps = metadata.get('fps', 30)
         print(f"[ASSEMBLY] FPS from metadata: {fps}")
+
+    # Get cached video for audio (from frame extraction cache)
+    if video_id in _video_frames_cache:
+        cache_entry = _video_frames_cache[video_id]
+        if isinstance(cache_entry, dict) and 'video_path' in cache_entry:
+            original_video_path = cache_entry['video_path']
+            if os.path.exists(original_video_path):
+                print(f"[ASSEMBLY] Using cached video for audio: {original_video_path}")
+            else:
+                print(f"[ASSEMBLY] Cached video not found, no audio")
+                original_video_path = None
 
     # Collect all frames from all segments in order
     all_frames = []
@@ -764,22 +786,41 @@ def assemble_final_video(video_id, total_segments, redis_client):
 
     print(f"[ASSEMBLY] Created frame list: {frame_list_path}")
 
-    # Use ffmpeg with NVENC for GPU-accelerated h264 encoding (10-15x faster!)
+    # Use ffmpeg with NVENC + audio copy (if original video available)
     ffmpeg_cmd = [
         'ffmpeg', '-y',
         '-f', 'concat',
         '-safe', '0',
         '-i', frame_list_path,
-        '-c:v', 'h264_nvenc',     # GPU encoder (was libx264)
-        '-preset', 'p7',          # Highest quality NVENC preset
+    ]
+
+    # Add original video as audio source if available
+    if original_video_path and os.path.exists(original_video_path):
+        ffmpeg_cmd.extend(['-i', original_video_path])
+
+    ffmpeg_cmd.extend([
+        '-c:v', 'h264_nvenc',     # GPU encoder
+        '-preset', 'p1',          # FASTEST NVENC preset (was p7)
         '-profile:v', 'main',     # Browser-compatible H.264 profile
         '-level', '4.1',          # Compatible with most devices
         '-rc', 'vbr',             # Variable bitrate mode
         '-cq', '18',              # Constant quality (CRF-like)
+    ])
+
+    # Add audio copy if we have original video
+    if original_video_path and os.path.exists(original_video_path):
+        ffmpeg_cmd.extend([
+            '-c:a', 'copy',       # Copy audio without re-encoding (instant!)
+            '-map', '0:v',        # Video from first input (frames)
+            '-map', '1:a?',       # Audio from second input (original), ? = optional
+            '-shortest',          # Match shorter duration
+        ])
+
+    ffmpeg_cmd.extend([
         '-pix_fmt', 'yuv420p',    # Required for browser compatibility
         '-movflags', '+faststart',  # Enables streaming
         output_path
-    ]
+    ])
 
     print(f"[ASSEMBLY] Running ffmpeg: {' '.join(ffmpeg_cmd)}")
 
@@ -804,9 +845,24 @@ def assemble_final_video(video_id, total_segments, redis_client):
                 print(f"[ASSEMBLY] Written {i + 1}/{len(all_frames)} frames...")
         out.release()
 
-    # Clean up frame list
+    # Clean up temporary files
     if os.path.exists(frame_list_path):
         os.remove(frame_list_path)
+    if original_video_path and os.path.exists(original_video_path):
+        os.remove(original_video_path)
+        print(f"[ASSEMBLY] Cleaned up original video (audio source)")
+
+    # Clean up frame extraction cache for this video
+    if video_id in _video_frames_cache:
+        cache_entry = _video_frames_cache[video_id]
+        if isinstance(cache_entry, dict) and 'frames_dir' in cache_entry:
+            frames_dir = cache_entry['frames_dir']
+            if os.path.exists(frames_dir):
+                import shutil
+                shutil.rmtree(frames_dir, ignore_errors=True)
+                print(f"[ASSEMBLY] Cleaned up cached frames: {frames_dir}")
+        del _video_frames_cache[video_id]
+        print(f"[ASSEMBLY] Cleared frame cache for {video_id}")
 
     if os.path.exists(output_path):
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
