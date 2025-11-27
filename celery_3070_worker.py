@@ -935,37 +935,13 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             # Get cached masks (downloads once on first segment, cached for rest)
             all_masks_dir = download_all_masks_cached(video_id, all_masks_url)
 
-            # Copy just this segment's frames from the cache
-            seg_frames_dir = os.path.join(work_dir, 'frames')
-            os.makedirs(seg_frames_dir, exist_ok=True)
-
-            for frame_idx in range(start_frame, end_frame + 1):
-                # Source: original frame index in all_frames
-                src = os.path.join(all_frames_dir, f"{frame_idx:04d}.png")
-                # Dest: local index within segment
-                local_idx = frame_idx - start_frame
-                dst = os.path.join(seg_frames_dir, f"{local_idx:04d}.png")
-                if os.path.exists(src):
-                    shutil.copy(src, dst)
-                else:
-                    print(f"[3070] WARNING: Frame {frame_idx} not found in cache!")
-
-            # Copy just this segment's masks from the cache
-            seg_masks_dir = os.path.join(work_dir, 'masks')
-            os.makedirs(seg_masks_dir, exist_ok=True)
-
-            for frame_idx in range(start_frame, end_frame + 1):
-                # Source: original frame index in all_masks
-                src = os.path.join(all_masks_dir, f"{frame_idx:04d}.png")
-                # Dest: local index within segment
-                local_idx = frame_idx - start_frame
-                dst = os.path.join(seg_masks_dir, f"{local_idx:04d}.png")
-                if os.path.exists(src):
-                    shutil.copy(src, dst)
-                else:
-                    # No mask = no watermark on this frame
-                    mask = np.zeros((height, width), dtype=np.uint8)
-                    cv2.imwrite(dst, mask)
+            # OPTIMIZED: Load directly from cache instead of copying files!
+            # Set source directories and frame index offset for direct loading
+            frame_source_dir = all_frames_dir
+            mask_source_dir = all_masks_dir
+            frame_idx_offset = start_frame  # Use global indices
+            use_batch_cache = True
+            print(f"[3070] Using BATCH cache (no file copies, direct load)")
 
         # PRIORITY 2: Legacy per-segment masks (old architecture)
         elif video_url and masks_url:
@@ -981,35 +957,40 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             # Download per-segment masks
             seg_masks_dir = download_masks_only(masks_url, work_dir)
 
+            # Legacy uses local indices (0, 1, 2, ...)
+            frame_source_dir = seg_frames_dir
+            mask_source_dir = seg_masks_dir
+            frame_idx_offset = 0
+            use_batch_cache = False
+
         # PRIORITY 2: Legacy - Download from Cloudflare (frames+masks zip)
         elif cloudflare_url:
             print(f"[3070] LEGACY: Using Cloudflare URL (frames+masks): {cloudflare_url}")
             seg_frames_dir, seg_masks_dir = download_and_extract_from_cloudflare(cloudflare_url, work_dir)
 
-        # PRIORITY 3: Direct access to local files
+            # Legacy uses local indices
+            frame_source_dir = seg_frames_dir
+            mask_source_dir = seg_masks_dir
+            frame_idx_offset = 0
+            use_batch_cache = False
+
+        # PRIORITY 3: Direct access to local files (OPTIMIZED - no copy!)
         elif os.path.exists(frames_dir):
             print(f"[3070] Using local frames: {frames_dir}")
-            for frame_idx in range(start_frame, end_frame + 1):
-                src = os.path.join(frames_dir, f"{frame_idx:04d}.png")
-                dst = os.path.join(seg_frames_dir, f"{frame_idx - start_frame:04d}.png")
-                if os.path.exists(src):
-                    shutil.copy(src, dst)
-                else:
-                    print(f"[3070] WARNING: Frame not found: {src}")
-
-            # Copy masks
-            for frame_idx in range(start_frame, end_frame + 1):
-                src = os.path.join(masks_dir, f"{frame_idx:04d}.png")
-                dst = os.path.join(seg_masks_dir, f"{frame_idx - start_frame:04d}.png")
-                if os.path.exists(src):
-                    shutil.copy(src, dst)
-                else:
-                    mask = np.zeros((height, width), dtype=np.uint8)
-                    cv2.imwrite(dst, mask)
+            # Load directly from local dirs - no copying needed!
+            frame_source_dir = frames_dir
+            mask_source_dir = masks_dir
+            frame_idx_offset = start_frame  # Use global indices
+            use_batch_cache = True
 
         # PRIORITY 4: Download from API
         elif api_base:
             print(f"[3070] Using API: {api_base}")
+            seg_frames_dir = os.path.join(work_dir, 'frames')
+            seg_masks_dir = os.path.join(work_dir, 'masks')
+            os.makedirs(seg_frames_dir, exist_ok=True)
+            os.makedirs(seg_masks_dir, exist_ok=True)
+
             for frame_idx in range(start_frame, end_frame + 1):
                 url = f"{api_base}/frames/{video_id}/{frame_idx:04d}.png"
                 dst = os.path.join(seg_frames_dir, f"{frame_idx - start_frame:04d}.png")
@@ -1019,6 +1000,11 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
                 url = f"{api_base}/masks/{video_id}/{frame_idx:04d}.png"
                 dst = os.path.join(seg_masks_dir, f"{frame_idx - start_frame:04d}.png")
                 download_file(url, dst)
+
+            frame_source_dir = seg_frames_dir
+            mask_source_dir = seg_masks_dir
+            frame_idx_offset = 0
+            use_batch_cache = False
 
         else:
             raise Exception("No video_url+masks_url, no cloudflare_url, no local access, and no API base URL")
@@ -1034,21 +1020,32 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             'status': 'Loading frames into memory'
         })
 
-        # Load frames into memory for fast processing
-        print(f"[3070] Loading frames into memory...")
+        # OPTIMIZED: Load frames directly using known indices (no listdir/sort overhead!)
+        print(f"[3070] Loading {num_frames} frames from {frame_source_dir} (offset={frame_idx_offset})...")
+        load_start = time.time()
         frames_array = []
-        for f in sorted(os.listdir(seg_frames_dir)):
-            if f.endswith('.png'):
-                img = cv2.imread(os.path.join(seg_frames_dir, f))
+        for i in range(num_frames):
+            frame_path = os.path.join(frame_source_dir, f"{frame_idx_offset + i:04d}.png")
+            img = cv2.imread(frame_path)
+            if img is not None:
                 frames_array.append(np.ascontiguousarray(img))
+            else:
+                print(f"[3070] WARNING: Frame not found: {frame_path}")
 
-        # Load masks into memory
-        print(f"[3070] Loading masks into memory...")
+        # OPTIMIZED: Load masks directly, create zero masks in memory (no disk write!)
+        print(f"[3070] Loading {num_frames} masks from {mask_source_dir}...")
         masks_array = []
-        for f in sorted(os.listdir(seg_masks_dir)):
-            if f.endswith('.png'):
-                mask = cv2.imread(os.path.join(seg_masks_dir, f), cv2.IMREAD_GRAYSCALE)
+        for i in range(num_frames):
+            mask_path = os.path.join(mask_source_dir, f"{frame_idx_offset + i:04d}.png")
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            if mask is not None:
                 masks_array.append(np.ascontiguousarray(mask))
+            else:
+                # No mask = no watermark - create zero mask IN MEMORY (no disk!)
+                masks_array.append(np.zeros((height, width), dtype=np.uint8))
+
+        load_time = time.time() - load_start
+        print(f"[3070] Loaded in {load_time:.2f}s ({num_frames/load_time:.0f} frames/sec)")
 
         print(f"[3070] Loaded {len(frames_array)} frames, {len(masks_array)} masks into memory")
 
@@ -1100,13 +1097,9 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             print(f"[3070] Crop region: ({crop_x},{crop_y}) {crop_w}x{crop_h}")
             print(f"[3070] Estimated speedup: {speedup_est:.1f}x ({orig_pixels} -> {crop_pixels} pixels)")
 
-            # Crop all frames and masks
-            cropped_frames = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].copy() for f in frames_array]
-            cropped_masks = [m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].copy() for m in masks_array]
-
-            # Make contiguous for GPU
-            cropped_frames = [np.ascontiguousarray(f) for f in cropped_frames]
-            cropped_masks = [np.ascontiguousarray(m) for m in cropped_masks]
+            # OPTIMIZED: Crop + make contiguous in ONE pass (was 2 passes = double memory!)
+            cropped_frames = [np.ascontiguousarray(f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]) for f in frames_array]
+            cropped_masks = [np.ascontiguousarray(m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]) for m in masks_array]
 
             print(f"[3070] Cropped to {len(cropped_frames)} frames at {crop_w}x{crop_h}")
 
@@ -1188,15 +1181,12 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
                 if cropped_output is None:
                     continue
 
-                # Get original full frame
+                # OPTIMIZED: Modify frames_array in-place (no .copy() needed!)
                 if i < len(frames_array):
-                    full_frame = frames_array[i].copy()
-
-                    # Paste cropped output back into the crop region
-                    full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cropped_output
-
-                    # Overwrite the output file with full-resolution frame
-                    cv2.imwrite(output_path, full_frame)
+                    # Paste cropped output directly into original frame
+                    frames_array[i][crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cropped_output
+                    # Write the modified frame
+                    cv2.imwrite(output_path, frames_array[i])
 
             print(f"[3070] Merged {len(output_frames)} frames back to full resolution ({width}x{height})")
 
