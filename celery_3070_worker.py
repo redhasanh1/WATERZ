@@ -786,9 +786,18 @@ def assemble_final_video(video_id, total_segments, redis_client):
 
     print(f"[ASSEMBLY] Created frame list: {frame_list_path}")
 
+    # Get ffmpeg from static_ffmpeg (works on all platforms)
+    try:
+        from static_ffmpeg import run
+        ffmpeg_path = run.get_or_fetch_platform_executables_else_raise()['ffmpeg']
+        print(f"[ASSEMBLY] Using static_ffmpeg: {ffmpeg_path}")
+    except Exception as e:
+        print(f"[ASSEMBLY] static_ffmpeg failed ({e}), trying system ffmpeg")
+        ffmpeg_path = 'ffmpeg'
+
     # Use ffmpeg with NVENC + audio copy (if original video available)
     ffmpeg_cmd = [
-        'ffmpeg', '-y',
+        ffmpeg_path, '-y',
         '-f', 'concat',
         '-safe', '0',
         '-i', frame_list_path,
@@ -1068,62 +1077,49 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
         print(f"[3070] Loaded {num_frames} frames and masks")
 
         # ====================================================================
-        # STEP 4: Run ProPainter (IN-MEMORY for 15x speedup)
+        # STEP 4: COMPUTE CROP REGION FIRST (before loading any frames!)
+        # Scan segment masks to find watermark bbox, then load CROPPED frames
         # ====================================================================
 
         self.update_state(state='PROCESSING', meta={
             'segment': segment_index,
-            'status': 'Loading frames into memory'
+            'status': 'Computing crop region from masks'
         })
 
-        # OPTIMIZED: Load frames directly using known indices (no listdir/sort overhead!)
-        print(f"[3070] Loading {num_frames} frames from {frame_source_dir} (offset={frame_idx_offset})...")
-        load_start = time.time()
-        frames_array = []
-        for i in range(num_frames):
-            frame_path = os.path.join(frame_source_dir, f"{frame_idx_offset + i:04d}.png")
-            img = cv2.imread(frame_path)
-            if img is not None:
-                frames_array.append(np.ascontiguousarray(img))
-            else:
-                print(f"[3070] WARNING: Frame not found: {frame_path}")
+        # Get total frames count for padding calculation
+        if use_batch_cache:
+            # Count frames in cached directory
+            total_video_frames = len([f for f in os.listdir(frame_source_dir) if f.endswith('.png')])
+        else:
+            # For non-batch modes, use segment end as approximation
+            total_video_frames = end_frame + 1
 
-        # OPTIMIZED: Load masks directly, create zero masks in memory (no disk write!)
-        print(f"[3070] Loading {num_frames} masks from {mask_source_dir}...")
-        masks_array = []
-        for i in range(num_frames):
-            mask_path = os.path.join(mask_source_dir, f"{frame_idx_offset + i:04d}.png")
-            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask is not None:
-                masks_array.append(np.ascontiguousarray(mask))
-            else:
-                # No mask = no watermark - create zero mask IN MEMORY (no disk!)
-                masks_array.append(np.zeros((height, width), dtype=np.uint8))
+        # Calculate temporal padding (neighbor_length = 10)
+        NEIGHBOR_LENGTH = 10
+        pad_start = max(0, start_frame - NEIGHBOR_LENGTH)
+        pad_end = min(total_video_frames - 1, end_frame + NEIGHBOR_LENGTH)
+        padded_frame_count = pad_end - pad_start + 1
 
-        load_time = time.time() - load_start
-        print(f"[3070] Loaded in {load_time:.2f}s ({num_frames/load_time:.0f} frames/sec)")
+        # Calculate where segment starts within padded output
+        segment_offset_in_padded = start_frame - pad_start
 
-        print(f"[3070] Loaded {len(frames_array)} frames, {len(masks_array)} masks into memory")
+        print(f"[3070] TEMPORAL PADDING: frames {pad_start}-{pad_end} ({padded_frame_count} frames)")
+        print(f"[3070]   Segment {start_frame}-{end_frame} starts at offset {segment_offset_in_padded}")
 
         # ====================================================================
-        # STEP 4b: CROP TO WATERMARK REGION (MASK-BASED - 16x SPEEDUP!)
-        # Use SAM2 mask bbox directly (more precise than YOLO, no union issue!)
+        # STEP 4a: COMPUTE CROP REGION FROM SEGMENT MASKS (BEFORE loading frames!)
+        # This is the KEY FIX - we need crop bbox FIRST to load PRE-CROPPED frames
         # ====================================================================
 
-        self.update_state(state='PROCESSING', meta={
-            'segment': segment_index,
-            'status': 'Computing watermark region from masks'
-        })
-
-        # Use mask-based detection (faster and more accurate than YOLO!)
-        # YOLO samples 5 frames and gets UNION = large bbox
-        # Masks give EXACT per-frame watermark position = small bbox
-        print(f"[3070] Computing watermark region from SAM2 masks (faster than YOLO)...")
+        print(f"[3070] Computing crop region from segment masks FIRST...")
         min_x, min_y = width, height
         max_x, max_y = 0, 0
 
-        for mask in masks_array:
-            if mask.max() > 0:  # Faster than np.sum(mask > 127)
+        # Scan SEGMENT masks (not all padded masks - just enough to find bbox)
+        for frame_idx in range(start_frame, end_frame + 1):
+            mask_path = os.path.join(mask_source_dir, f"{frame_idx:04d}.png")
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            if mask is not None and mask.max() > 0:
                 coords = cv2.findNonZero(mask.astype(np.uint8))
                 if coords is not None:
                     x, y, w, h = cv2.boundingRect(coords)
@@ -1135,38 +1131,75 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
         use_cropping = (max_x > min_x and max_y > min_y)
 
         if use_cropping:
-            print(f"[3070] Mask bbox: ({min_x},{min_y})-({max_x},{max_y})")
-
-        if use_cropping:
             bbox = [min_x, min_y, max_x, max_y]
-            # Use 0.15 padding like RUN_SAM2_LOCAL (tighter crop = faster)
             crop_x, crop_y, crop_w, crop_h = calculate_crop_region(
                 bbox, width, height, padding_ratio=0.15, min_size=128
             )
+            print(f"[3070] Mask bbox: ({min_x},{min_y})-({max_x},{max_y})")
+            print(f"[3070] Crop region: ({crop_x},{crop_y}) {crop_w}x{crop_h}")
 
-            # Calculate speedup estimate
             orig_pixels = width * height
             crop_pixels = crop_w * crop_h
             speedup_est = orig_pixels / crop_pixels if crop_pixels > 0 else 1
-
-            print(f"[3070] Crop bbox: ({min_x},{min_y})-({max_x},{max_y})")
-            print(f"[3070] Crop region: ({crop_x},{crop_y}) {crop_w}x{crop_h}")
             print(f"[3070] Estimated speedup: {speedup_est:.1f}x ({orig_pixels} -> {crop_pixels} pixels)")
-
-            # OPTIMIZED: Crop + make contiguous in ONE pass (was 2 passes = double memory!)
-            cropped_frames = [np.ascontiguousarray(f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]) for f in frames_array]
-            cropped_masks = [np.ascontiguousarray(m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]) for m in masks_array]
-
-            print(f"[3070] Cropped to {len(cropped_frames)} frames at {crop_w}x{crop_h}")
-
-            # Use cropped data for processing
-            process_frames = cropped_frames
-            process_masks = cropped_masks
         else:
             print(f"[3070] No watermark region found, processing full frame")
-            process_frames = frames_array
-            process_masks = masks_array
             crop_x, crop_y, crop_w, crop_h = 0, 0, width, height
+
+        # ====================================================================
+        # STEP 4b: LOAD PRE-CROPPED PADDED FRAMES (the key optimization!)
+        # Read full frame, crop immediately, write CROPPED to disk
+        # ====================================================================
+
+        self.update_state(state='PROCESSING', meta={
+            'segment': segment_index,
+            'status': f'Loading {padded_frame_count} cropped frames'
+        })
+
+        print(f"[3070] Loading {padded_frame_count} PRE-CROPPED padded frames ({crop_w}x{crop_h})...")
+        load_start = time.time()
+
+        # Keep FULL frames in memory ONLY for paste-back later (only segment frames needed)
+        full_frames_for_paste = []
+
+        for i in range(padded_frame_count):
+            frame_idx = pad_start + i
+            frame_path = os.path.join(frame_source_dir, f"{frame_idx:04d}.png")
+            img = cv2.imread(frame_path)
+            if img is not None:
+                # Crop immediately - don't store full frame!
+                if use_cropping:
+                    cropped = img[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    cv2.imwrite(os.path.join(seg_frames_dir, f"{i:04d}.png"), cropped)
+                else:
+                    cv2.imwrite(os.path.join(seg_frames_dir, f"{i:04d}.png"), img)
+
+                # Keep full frame ONLY for paste-back (only need segment frames, not padding)
+                if segment_offset_in_padded <= i < segment_offset_in_padded + num_frames:
+                    full_frames_for_paste.append(np.ascontiguousarray(img))
+            else:
+                print(f"[3070] WARNING: Frame not found: {frame_path}")
+
+        # Load and crop masks
+        print(f"[3070] Loading {padded_frame_count} cropped masks...")
+        for i in range(padded_frame_count):
+            frame_idx = pad_start + i
+            mask_path = os.path.join(mask_source_dir, f"{frame_idx:04d}.png")
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            if mask is not None:
+                if use_cropping:
+                    cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    cv2.imwrite(os.path.join(seg_masks_dir, f"{i:04d}.png"), cropped_mask)
+                else:
+                    cv2.imwrite(os.path.join(seg_masks_dir, f"{i:04d}.png"), mask)
+            else:
+                # No mask = no watermark - create zero mask at CROP SIZE
+                zero_mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
+                cv2.imwrite(os.path.join(seg_masks_dir, f"{i:04d}.png"), zero_mask)
+
+        load_time = time.time() - load_start
+        print(f"[3070] Loaded {padded_frame_count} cropped frames in {load_time:.2f}s")
+        print(f"[3070] Kept {len(full_frames_for_paste)} full frames for paste-back")
 
         self.update_state(state='PROCESSING', meta={
             'segment': segment_index,
@@ -1181,10 +1214,12 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
         # Use FP16 on 3070 for speed
         use_fp16 = True
 
-        print(f"[3070] Running ProPainter (neighbor={neighbor_length}, ref_stride={ref_stride}, subvideo={dynamic_subvideo})")
+        print(f"[3070] Running ProPainter DISK-BASED (neighbor={neighbor_length}, ref_stride={ref_stride}, subvideo={dynamic_subvideo})")
 
         process_start = time.time()
 
+        # KEY FIX: Use disk-based approach like run_sam2_local.py!
+        # Pass frames_array=None to let ProPainter read from disk
         faster_propainter_pipeline(
             video=seg_frames_dir,
             mask=seg_masks_dir,
@@ -1198,13 +1233,13 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             mode="video_inpainting",
             save_frames=True,
             fp16=use_fp16,
-            frames_array=process_frames,  # CROPPED!
-            masks_array=process_masks     # CROPPED!
+            frames_array=None,  # DISK-BASED! ProPainter reads from seg_frames_dir
+            masks_array=None    # DISK-BASED! ProPainter reads from seg_masks_dir
         )
 
         process_time = time.time() - process_start
-        ms_per_frame = (process_time / num_frames) * 1000
-        print(f"[3070] ProPainter complete: {process_time:.2f}s ({ms_per_frame:.2f}ms/frame)")
+        ms_per_frame = (process_time / padded_frame_count) * 1000
+        print(f"[3070] ProPainter complete: {process_time:.2f}s ({ms_per_frame:.2f}ms/frame, {padded_frame_count} padded frames)")
 
         # Clear GPU cache to prevent VRAM accumulation
         import torch
@@ -1225,46 +1260,61 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
 
         # ====================================================================
         # STEP 4c: PASTE CROPPED OUTPUT BACK INTO FULL FRAMES
+        # Only paste SEGMENT frames (not padding) - that's what we saved for!
         # ====================================================================
 
         if use_cropping:
-            print(f"[3070] Pasting cropped output back into full frames...")
+            print(f"[3070] Pasting cropped output back into full frames (segment only)...")
+            segment_paste_count = 0
             for i, fname in enumerate(output_frames):
-                # Read cropped output frame
-                output_path = os.path.join(propainter_output, fname)
-                cropped_output = cv2.imread(output_path)
+                # Only paste SEGMENT frames (not padding frames)
+                # segment_offset_in_padded = where segment starts in padded output
+                if segment_offset_in_padded <= i < segment_offset_in_padded + num_frames:
+                    # Read cropped output frame
+                    output_path = os.path.join(propainter_output, fname)
+                    cropped_output = cv2.imread(output_path)
 
-                if cropped_output is None:
-                    continue
+                    if cropped_output is None:
+                        continue
 
-                # OPTIMIZED: Modify frames_array in-place (no .copy() needed!)
-                if i < len(frames_array):
-                    # Paste cropped output directly into original frame
-                    frames_array[i][crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cropped_output
-                    # Write the modified frame
-                    cv2.imwrite(output_path, frames_array[i])
+                    # Index into full_frames_for_paste (which only has segment frames)
+                    paste_idx = i - segment_offset_in_padded
+                    if paste_idx < len(full_frames_for_paste):
+                        # Paste cropped output directly into original frame
+                        full_frames_for_paste[paste_idx][crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cropped_output
+                        # Write the merged frame back
+                        cv2.imwrite(output_path, full_frames_for_paste[paste_idx])
+                        segment_paste_count += 1
 
-            print(f"[3070] Merged {len(output_frames)} frames back to full resolution ({width}x{height})")
+            print(f"[3070] Merged {segment_paste_count} segment frames back to full resolution ({width}x{height})")
 
         # ====================================================================
-        # STEP 5: Save results LOCALLY (no uploads until all done!)
+        # STEP 5: Save SEGMENT frames only (skip padding!) to results
         # ====================================================================
 
         self.update_state(state='PROCESSING', meta={
             'segment': segment_index,
-            'status': 'Saving results locally'
+            'status': 'Saving segment frames (skipping padding)'
         })
 
         # Save results to local directory ONLY (no B2 upload!)
         result_dir = os.path.join(RESULT_DIR, f"{video_id}_segments", f"segment_{segment_index}")
         os.makedirs(result_dir, exist_ok=True)
 
-        for frame_file in output_frames:
-            src = os.path.join(propainter_output, frame_file)
-            dst = os.path.join(result_dir, frame_file)
-            shutil.copy(src, dst)
+        # Only copy SEGMENT frames, skip padding frames!
+        # segment_offset_in_padded = where segment starts in padded output
+        # num_frames = number of frames in actual segment
+        segment_frames_copied = 0
+        for i, frame_file in enumerate(output_frames):
+            # Check if this frame is within the segment range (not padding)
+            if segment_offset_in_padded <= i < segment_offset_in_padded + num_frames:
+                src = os.path.join(propainter_output, frame_file)
+                # Renumber to 0000.png, 0001.png, etc for segment
+                dst = os.path.join(result_dir, f"{segment_frames_copied:04d}.png")
+                shutil.copy(src, dst)
+                segment_frames_copied += 1
 
-        print(f"[3070] Results saved locally: {result_dir}")
+        print(f"[3070] Results saved locally: {result_dir} ({segment_frames_copied} segment frames, skipped {padded_frame_count - num_frames} padding frames)")
 
         # NO B2 UPLOAD - results stay local until all segments done!
         # Windows script will assemble from local results
@@ -1284,7 +1334,7 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             'video_id': video_id,
             'segment_index': segment_index,
             'output_path': result_dir,
-            'num_frames': len(output_frames),
+            'num_frames': segment_frames_copied,  # Actual segment frames, not padded
             'process_time': process_time,
             'total_segments': total_segments
         }
@@ -1342,15 +1392,16 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             'video_id': video_id,
             'segment_index': segment_index,
             'output_path': result_dir,
-            'num_frames': len(output_frames),
+            'num_frames': segment_frames_copied,  # Actual segment frames, not padded
             'process_time': process_time,
             'ms_per_frame': ms_per_frame,
-            'total_segments': total_segments
+            'total_segments': total_segments,
+            'padded_frames': padded_frame_count  # For debugging
         }
 
         print(f"\n[3070] Segment {segment_index} complete!")
         print(f"   Output: {result_dir} (local)")
-        print(f"   Frames: {len(output_frames)}")
+        print(f"   Frames: {segment_frames_copied} (+ {padded_frame_count - num_frames} padding)")
         print(f"   Time: {process_time:.2f}s")
 
         return result
@@ -1549,12 +1600,40 @@ def process_batch_task(self, video_id, video_url, all_masks_url, total_frames, f
             use_cropping = False
 
         # ====================================================================
-        # STEP 4: ONE ProPainter call for ALL frames (THE BIG SPEEDUP!)
+        # STEP 4: Write frames/masks to DISK (like run_sam2_local.py!)
+        # ProPainter works better reading from disk than in-memory arrays
         # ====================================================================
 
         self.update_state(state='PROCESSING', meta={
-            'status': f'Running ProPainter on ALL {len(process_frames)} frames'
+            'status': f'Writing {len(process_frames)} frames to disk'
         })
+
+        # Create directories for ProPainter to read from
+        seg_frames_dir = os.path.join(work_dir, 'seg_frames')
+        seg_masks_dir = os.path.join(work_dir, 'seg_masks')
+        os.makedirs(seg_frames_dir, exist_ok=True)
+        os.makedirs(seg_masks_dir, exist_ok=True)
+
+        # Write ALL frames to disk (like run_sam2_local.py line 586)
+        print(f"[3070 BATCH] Writing {len(process_frames)} frames to disk...")
+        write_start = time.time()
+        for i, frame in enumerate(process_frames):
+            cv2.imwrite(os.path.join(seg_frames_dir, f"{i:04d}.png"), frame)
+
+        # Write ALL masks to disk
+        print(f"[3070 BATCH] Writing {len(process_masks)} masks to disk...")
+        for i, mask in enumerate(process_masks):
+            cv2.imwrite(os.path.join(seg_masks_dir, f"{i:04d}.png"), mask)
+
+        write_time = time.time() - write_start
+        print(f"[3070 BATCH] Wrote frames/masks to disk in {write_time:.2f}s")
+
+        # Free memory for cropped arrays only (need frames_array for paste-back if cropping!)
+        if use_cropping:
+            del process_frames
+            del process_masks
+            import gc
+            gc.collect()
 
         # Use optimal subvideo_length=120 for cropped regions (like RUN_SAM2_LOCAL)
         dynamic_subvideo = 120  # Optimal for cropped regions
@@ -1562,14 +1641,16 @@ def process_batch_task(self, video_id, video_url, all_masks_url, total_frames, f
         ref_stride = 10
         use_fp16 = True
 
-        print(f"[3070 BATCH] Running ProPainter (subvideo={dynamic_subvideo}, ALL {len(process_frames)} frames)")
-        print(f"[3070 BATCH] This is ONE call instead of 4 segment calls!")
+        print(f"[3070 BATCH] Running ProPainter (subvideo={dynamic_subvideo}, reading from DISK)")
+        print(f"[3070 BATCH] This matches run_sam2_local.py approach!")
 
         process_start = time.time()
 
+        # KEY FIX: Pass frames_array=None, masks_array=None
+        # Let ProPainter read from disk like run_sam2_local.py does!
         faster_propainter_pipeline(
-            video=frames_dir,  # Dummy path, we use frames_array
-            mask=work_dir,     # Dummy path, we use masks_array
+            video=seg_frames_dir,   # ProPainter reads frames from here
+            mask=seg_masks_dir,     # ProPainter reads masks from here
             output=output_dir,
             resize_ratio=1.0,
             mask_dilation=4,
@@ -1580,16 +1661,16 @@ def process_batch_task(self, video_id, video_url, all_masks_url, total_frames, f
             mode="video_inpainting",
             save_frames=True,
             fp16=use_fp16,
-            frames_array=process_frames,  # ALL frames at once!
-            masks_array=process_masks     # ALL masks at once!
+            frames_array=None,  # NOT in-memory! Let ProPainter read from disk
+            masks_array=None    # NOT in-memory! Let ProPainter read from disk
         )
 
         process_time = time.time() - process_start
-        ms_per_frame = (process_time / len(process_frames)) * 1000
+        ms_per_frame = (process_time / total_frames) * 1000
         print(f"[3070 BATCH] ProPainter complete: {process_time:.2f}s ({ms_per_frame:.2f}ms/frame)")
 
         # Find output frames
-        propainter_output = os.path.join(output_dir, os.path.basename(frames_dir), "frames")
+        propainter_output = os.path.join(output_dir, os.path.basename(seg_frames_dir), "frames")
         if not os.path.exists(propainter_output):
             propainter_output = os.path.join(output_dir, "frames")
 
@@ -1609,6 +1690,8 @@ def process_batch_task(self, video_id, video_url, all_masks_url, total_frames, f
 
         if use_cropping:
             print(f"[3070 BATCH] Pasting cropped output back into full frames...")
+            # Reload original full frames from cached frames_array
+            # (We still have frames_array in scope - it wasn't deleted, only process_frames was)
             for i, fname in enumerate(output_frames):
                 output_path = os.path.join(propainter_output, fname)
                 cropped_output = cv2.imread(output_path)
