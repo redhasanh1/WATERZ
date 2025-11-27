@@ -66,8 +66,8 @@ os.makedirs(MASK_DIR, exist_ok=True)
 # B2 + CLOUDFLARE CONFIGURATION
 # ============================================================================
 
-B2_KEY_ID = '00539db5c1104b50000000001'
-B2_APPLICATION_KEY = 'K005VEORbg6RcsRad3jZPr9n4Fp7jWU'
+B2_KEY_ID = '00539db5c1104b50000000002'
+B2_APPLICATION_KEY = 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4'
 B2_BUCKET_NAME = 'watermarkz'
 CLOUDFLARE_WORKER_URL = 'https://markz.humblewoslayer.workers.dev'
 

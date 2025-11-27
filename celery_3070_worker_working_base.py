@@ -17,7 +17,6 @@ import sys
 import json
 import time
 import shutil
-import subprocess
 import zipfile
 import requests
 import numpy as np
@@ -94,8 +93,8 @@ if os.path.exists(tunnel_url_file):
 # B2 + CLOUDFLARE CONFIGURATION
 # ============================================================================
 
-B2_KEY_ID = '00539db5c1104b50000000002'
-B2_APPLICATION_KEY = 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4'
+B2_KEY_ID = '00539db5c1104b50000000001'
+B2_APPLICATION_KEY = 'K005VEORbg6RcsRad3jZPr9n4Fp7jWU'
 B2_BUCKET_NAME = 'watermarkz'
 CLOUDFLARE_WORKER_URL = 'https://markz.humblewoslayer.workers.dev'
 
@@ -760,19 +759,16 @@ def assemble_final_video(video_id, total_segments, redis_client):
 
     print(f"[ASSEMBLY] Created frame list: {frame_list_path}")
 
-    # Use ffmpeg with NVENC for GPU-accelerated h264 encoding (10-15x faster!)
+    # Use ffmpeg to create h264 video (web-compatible)
     ffmpeg_cmd = [
         'ffmpeg', '-y',
         '-f', 'concat',
         '-safe', '0',
         '-i', frame_list_path,
-        '-c:v', 'h264_nvenc',     # GPU encoder (was libx264)
-        '-preset', 'p7',          # Highest quality NVENC preset
-        '-profile:v', 'main',     # Browser-compatible H.264 profile
-        '-level', '4.1',          # Compatible with most devices
-        '-rc', 'vbr',             # Variable bitrate mode
-        '-cq', '18',              # Constant quality (CRF-like)
-        '-pix_fmt', 'yuv420p',    # Required for browser compatibility
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '18',
+        '-pix_fmt', 'yuv420p',  # Required for browser compatibility
         '-movflags', '+faststart',  # Enables streaming
         output_path
     ]
