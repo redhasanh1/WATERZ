@@ -17,7 +17,6 @@ import sys
 import json
 import time
 import shutil
-import subprocess
 import zipfile
 import requests
 import numpy as np
@@ -94,8 +93,8 @@ if os.path.exists(tunnel_url_file):
 # B2 + CLOUDFLARE CONFIGURATION
 # ============================================================================
 
-B2_KEY_ID = '00539db5c1104b50000000002'
-B2_APPLICATION_KEY = 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4'
+B2_KEY_ID = '00539db5c1104b50000000001'
+B2_APPLICATION_KEY = 'K005VEORbg6RcsRad3jZPr9n4Fp7jWU'
 B2_BUCKET_NAME = 'watermarkz'
 CLOUDFLARE_WORKER_URL = 'https://markz.humblewoslayer.workers.dev'
 
@@ -375,29 +374,30 @@ def download_video_and_extract_frames(video_url, work_dir, start_frame, end_fram
     speed = size_mb / download_time if download_time > 0 else 0
     print(f"[3070] Downloaded video: {size_mb:.2f} MB in {download_time:.2f}s ({speed:.2f} MB/s)")
 
-    # Extract frames for this segment range using ffmpeg NVDEC (GPU-accelerated!)
-    print(f"[3070] Extracting frames {start_frame}-{end_frame} using NVDEC...")
-    extract_start = time.time()
+    # Extract frames for this segment range
+    print(f"[3070] Extracting frames {start_frame}-{end_frame} from video...")
+    cap = cv2.VideoCapture(video_path)
 
-    ffmpeg_cmd = [
-        'ffmpeg', '-y',
-        '-hwaccel', 'cuda',
-        '-hwaccel_output_format', 'cuda',
-        '-i', video_path,
-        '-vf', f"select='between(n\\,{start_frame}\\,{end_frame})',hwdownload,format=nv12",
-        '-vsync', '0',
-        '-start_number', '0',
-        os.path.join(frames_dir, '%04d.png')
-    ]
+    if not cap.isOpened():
+        raise Exception(f"Failed to open video: {video_path}")
 
-    result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise Exception(f"FFmpeg NVDEC failed: {result.stderr}")
+    # Seek to start frame
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-    frame_count = len([f for f in os.listdir(frames_dir) if f.endswith('.png')])
-    extract_time = time.time() - extract_start
-    fps = frame_count / extract_time if extract_time > 0 else 0
-    print(f"[3070] NVDEC extracted {frame_count} frames in {extract_time:.2f}s ({fps:.0f} fps)")
+    frame_count = 0
+    for frame_idx in range(start_frame, end_frame + 1):
+        ret, frame = cap.read()
+        if not ret:
+            print(f"[3070] Warning: Could not read frame {frame_idx}")
+            break
+
+        # Save frame with local index (0-based within segment)
+        local_idx = frame_idx - start_frame
+        frame_path = os.path.join(frames_dir, f"{local_idx:04d}.png")
+        cv2.imwrite(frame_path, frame)
+        frame_count += 1
+
+    cap.release()
 
     # Clean up video file to save space
     os.remove(video_path)
@@ -486,12 +486,7 @@ def download_video_and_extract_all_frames_cached(video_id, video_url):
 
     # Check cache first
     if video_id in _video_frames_cache:
-        cache_entry = _video_frames_cache[video_id]
-        # Handle both old (string) and new (dict) cache format
-        if isinstance(cache_entry, dict):
-            cached_dir = cache_entry['frames_dir']
-        else:
-            cached_dir = cache_entry
+        cached_dir = _video_frames_cache[video_id]
         if os.path.exists(cached_dir):
             num_frames = len([f for f in os.listdir(cached_dir) if f.endswith('.png')])
             print(f"[3070] Using CACHED frames for {video_id} ({num_frames} frames)")
@@ -524,42 +519,33 @@ def download_video_and_extract_all_frames_cached(video_id, video_url):
     speed = size_mb / download_time if download_time > 0 else 0
     print(f"[3070] Downloaded video: {size_mb:.2f} MB in {download_time:.2f}s ({speed:.2f} MB/s)")
 
-    # Extract ALL frames using ffmpeg NVDEC (GPU-accelerated, 5-8x faster!)
-    print(f"[3070] Extracting ALL frames using NVDEC...")
-    extract_start = time.time()
+    # Extract ALL frames
+    print(f"[3070] Extracting ALL frames from video...")
+    cap = cv2.VideoCapture(video_path)
 
-    ffmpeg_cmd = [
-        'ffmpeg', '-y',
-        '-hwaccel', 'cuda',
-        '-hwaccel_output_format', 'cuda',
-        '-i', video_path,
-        '-vf', 'hwdownload,format=nv12',
-        '-vsync', '0',
-        '-start_number', '0',
-        os.path.join(frames_dir, '%04d.png')
-    ]
+    if not cap.isOpened():
+        raise Exception(f"Failed to open video: {video_path}")
 
-    result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise Exception(f"FFmpeg NVDEC failed: {result.stderr}")
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_idx = 0
 
-    # Count extracted frames
-    frame_idx = len([f for f in os.listdir(frames_dir) if f.endswith('.png')])
-    extract_time = time.time() - extract_start
-    fps_rate = frame_idx / extract_time if extract_time > 0 else 0
-    print(f"[3070] NVDEC extracted {frame_idx} frames in {extract_time:.2f}s ({fps_rate:.0f} fps)")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame_path = os.path.join(frames_dir, f"{frame_idx:04d}.png")
+        cv2.imwrite(frame_path, frame)
+        frame_idx += 1
 
-    # KEEP video for audio extraction during assembly!
-    # Will be deleted after final video is assembled
-    print(f"[3070] Keeping video for audio: {video_path}")
+    cap.release()
+
+    # Keep video for potential re-use, or remove to save space
+    os.remove(video_path)
 
     print(f"[3070] Cached {frame_idx} frames for video {video_id}")
 
-    # Cache for subsequent segments (include video_path for audio!)
-    _video_frames_cache[video_id] = {
-        'frames_dir': frames_dir,
-        'video_path': video_path  # Keep for audio during assembly
-    }
+    # Cache for subsequent segments
+    _video_frames_cache[video_id] = frames_dir
     return frames_dir
 
 
@@ -727,26 +713,13 @@ def assemble_final_video(video_id, total_segments, redis_client):
     """
     print(f"\n[ASSEMBLY] Starting video assembly for {video_id}...")
 
-    # Get metadata (fps) and cached video path for audio
+    # Get fps from video metadata
     fps = 30  # Default
-    original_video_path = None
-
     metadata_json = redis_client.get(f'video_metadata:{video_id}')
     if metadata_json:
         metadata = json.loads(metadata_json)
         fps = metadata.get('fps', 30)
         print(f"[ASSEMBLY] FPS from metadata: {fps}")
-
-    # Get cached video for audio (from frame extraction cache)
-    if video_id in _video_frames_cache:
-        cache_entry = _video_frames_cache[video_id]
-        if isinstance(cache_entry, dict) and 'video_path' in cache_entry:
-            original_video_path = cache_entry['video_path']
-            if os.path.exists(original_video_path):
-                print(f"[ASSEMBLY] Using cached video for audio: {original_video_path}")
-            else:
-                print(f"[ASSEMBLY] Cached video not found, no audio")
-                original_video_path = None
 
     # Collect all frames from all segments in order
     all_frames = []
@@ -786,41 +759,19 @@ def assemble_final_video(video_id, total_segments, redis_client):
 
     print(f"[ASSEMBLY] Created frame list: {frame_list_path}")
 
-    # Use ffmpeg with NVENC + audio copy (if original video available)
+    # Use ffmpeg to create h264 video (web-compatible)
     ffmpeg_cmd = [
         'ffmpeg', '-y',
         '-f', 'concat',
         '-safe', '0',
         '-i', frame_list_path,
-    ]
-
-    # Add original video as audio source if available
-    if original_video_path and os.path.exists(original_video_path):
-        ffmpeg_cmd.extend(['-i', original_video_path])
-
-    ffmpeg_cmd.extend([
-        '-c:v', 'h264_nvenc',     # GPU encoder
-        '-preset', 'p1',          # FASTEST NVENC preset (was p7)
-        '-profile:v', 'main',     # Browser-compatible H.264 profile
-        '-level', '4.1',          # Compatible with most devices
-        '-rc', 'vbr',             # Variable bitrate mode
-        '-cq', '18',              # Constant quality (CRF-like)
-    ])
-
-    # Add audio copy if we have original video
-    if original_video_path and os.path.exists(original_video_path):
-        ffmpeg_cmd.extend([
-            '-c:a', 'copy',       # Copy audio without re-encoding (instant!)
-            '-map', '0:v',        # Video from first input (frames)
-            '-map', '1:a?',       # Audio from second input (original), ? = optional
-            '-shortest',          # Match shorter duration
-        ])
-
-    ffmpeg_cmd.extend([
-        '-pix_fmt', 'yuv420p',    # Required for browser compatibility
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '18',
+        '-pix_fmt', 'yuv420p',  # Required for browser compatibility
         '-movflags', '+faststart',  # Enables streaming
         output_path
-    ])
+    ]
 
     print(f"[ASSEMBLY] Running ffmpeg: {' '.join(ffmpeg_cmd)}")
 
@@ -845,24 +796,9 @@ def assemble_final_video(video_id, total_segments, redis_client):
                 print(f"[ASSEMBLY] Written {i + 1}/{len(all_frames)} frames...")
         out.release()
 
-    # Clean up temporary files
+    # Clean up frame list
     if os.path.exists(frame_list_path):
         os.remove(frame_list_path)
-    if original_video_path and os.path.exists(original_video_path):
-        os.remove(original_video_path)
-        print(f"[ASSEMBLY] Cleaned up original video (audio source)")
-
-    # Clean up frame extraction cache for this video
-    if video_id in _video_frames_cache:
-        cache_entry = _video_frames_cache[video_id]
-        if isinstance(cache_entry, dict) and 'frames_dir' in cache_entry:
-            frames_dir = cache_entry['frames_dir']
-            if os.path.exists(frames_dir):
-                import shutil
-                shutil.rmtree(frames_dir, ignore_errors=True)
-                print(f"[ASSEMBLY] Cleaned up cached frames: {frames_dir}")
-        del _video_frames_cache[video_id]
-        print(f"[ASSEMBLY] Cleared frame cache for {video_id}")
 
     if os.path.exists(output_path):
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
@@ -991,13 +927,36 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             # Get cached masks (downloads once on first segment, cached for rest)
             all_masks_dir = download_all_masks_cached(video_id, all_masks_url)
 
-            # OPTIMIZED: Load directly from cache instead of copying files!
-            # Set source directories and frame index offset for direct loading
-            frame_source_dir = all_frames_dir
-            mask_source_dir = all_masks_dir
-            frame_idx_offset = start_frame  # Use global indices
-            use_batch_cache = True
-            print(f"[3070] Using BATCH cache (no file copies, direct load)")
+            # Copy ALL frames from cache (ProPainter needs temporal context)
+            seg_frames_dir = os.path.join(work_dir, 'frames')
+            os.makedirs(seg_frames_dir, exist_ok=True)
+
+            # Get total frames count
+            total_frames = len([f for f in os.listdir(all_frames_dir) if f.endswith('.png')])
+
+            # Copy ALL frames with original numbering (not just segment)
+            for frame_idx in range(total_frames):
+                src = os.path.join(all_frames_dir, f"{frame_idx:04d}.png")
+                dst = os.path.join(seg_frames_dir, f"{frame_idx:04d}.png")  # Keep original numbering!
+                if os.path.exists(src):
+                    shutil.copy(src, dst)
+                else:
+                    print(f"[3070] WARNING: Frame {frame_idx} not found in cache!")
+
+            # Copy ALL masks from cache (ProPainter needs temporal context)
+            seg_masks_dir = os.path.join(work_dir, 'masks')
+            os.makedirs(seg_masks_dir, exist_ok=True)
+
+            # Copy ALL masks with original numbering (not just segment)
+            for frame_idx in range(total_frames):
+                src = os.path.join(all_masks_dir, f"{frame_idx:04d}.png")
+                dst = os.path.join(seg_masks_dir, f"{frame_idx:04d}.png")  # Keep original numbering!
+                if os.path.exists(src):
+                    shutil.copy(src, dst)
+                else:
+                    # No mask = no watermark on this frame
+                    mask = np.zeros((height, width), dtype=np.uint8)
+                    cv2.imwrite(dst, mask)
 
         # PRIORITY 2: Legacy per-segment masks (old architecture)
         elif video_url and masks_url:
@@ -1013,40 +972,35 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             # Download per-segment masks
             seg_masks_dir = download_masks_only(masks_url, work_dir)
 
-            # Legacy uses local indices (0, 1, 2, ...)
-            frame_source_dir = seg_frames_dir
-            mask_source_dir = seg_masks_dir
-            frame_idx_offset = 0
-            use_batch_cache = False
-
         # PRIORITY 2: Legacy - Download from Cloudflare (frames+masks zip)
         elif cloudflare_url:
             print(f"[3070] LEGACY: Using Cloudflare URL (frames+masks): {cloudflare_url}")
             seg_frames_dir, seg_masks_dir = download_and_extract_from_cloudflare(cloudflare_url, work_dir)
 
-            # Legacy uses local indices
-            frame_source_dir = seg_frames_dir
-            mask_source_dir = seg_masks_dir
-            frame_idx_offset = 0
-            use_batch_cache = False
-
-        # PRIORITY 3: Direct access to local files (OPTIMIZED - no copy!)
+        # PRIORITY 3: Direct access to local files
         elif os.path.exists(frames_dir):
             print(f"[3070] Using local frames: {frames_dir}")
-            # Load directly from local dirs - no copying needed!
-            frame_source_dir = frames_dir
-            mask_source_dir = masks_dir
-            frame_idx_offset = start_frame  # Use global indices
-            use_batch_cache = True
+            for frame_idx in range(start_frame, end_frame + 1):
+                src = os.path.join(frames_dir, f"{frame_idx:04d}.png")
+                dst = os.path.join(seg_frames_dir, f"{frame_idx - start_frame:04d}.png")
+                if os.path.exists(src):
+                    shutil.copy(src, dst)
+                else:
+                    print(f"[3070] WARNING: Frame not found: {src}")
+
+            # Copy masks
+            for frame_idx in range(start_frame, end_frame + 1):
+                src = os.path.join(masks_dir, f"{frame_idx:04d}.png")
+                dst = os.path.join(seg_masks_dir, f"{frame_idx - start_frame:04d}.png")
+                if os.path.exists(src):
+                    shutil.copy(src, dst)
+                else:
+                    mask = np.zeros((height, width), dtype=np.uint8)
+                    cv2.imwrite(dst, mask)
 
         # PRIORITY 4: Download from API
         elif api_base:
             print(f"[3070] Using API: {api_base}")
-            seg_frames_dir = os.path.join(work_dir, 'frames')
-            seg_masks_dir = os.path.join(work_dir, 'masks')
-            os.makedirs(seg_frames_dir, exist_ok=True)
-            os.makedirs(seg_masks_dir, exist_ok=True)
-
             for frame_idx in range(start_frame, end_frame + 1):
                 url = f"{api_base}/frames/{video_id}/{frame_idx:04d}.png"
                 dst = os.path.join(seg_frames_dir, f"{frame_idx - start_frame:04d}.png")
@@ -1056,11 +1010,6 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
                 url = f"{api_base}/masks/{video_id}/{frame_idx:04d}.png"
                 dst = os.path.join(seg_masks_dir, f"{frame_idx - start_frame:04d}.png")
                 download_file(url, dst)
-
-            frame_source_dir = seg_frames_dir
-            mask_source_dir = seg_masks_dir
-            frame_idx_offset = 0
-            use_batch_cache = False
 
         else:
             raise Exception("No video_url+masks_url, no cloudflare_url, no local access, and no API base URL")
@@ -1076,32 +1025,21 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             'status': 'Loading frames into memory'
         })
 
-        # OPTIMIZED: Load frames directly using known indices (no listdir/sort overhead!)
-        print(f"[3070] Loading {num_frames} frames from {frame_source_dir} (offset={frame_idx_offset})...")
-        load_start = time.time()
+        # Load frames into memory for fast processing
+        print(f"[3070] Loading frames into memory...")
         frames_array = []
-        for i in range(num_frames):
-            frame_path = os.path.join(frame_source_dir, f"{frame_idx_offset + i:04d}.png")
-            img = cv2.imread(frame_path)
-            if img is not None:
+        for f in sorted(os.listdir(seg_frames_dir)):
+            if f.endswith('.png'):
+                img = cv2.imread(os.path.join(seg_frames_dir, f))
                 frames_array.append(np.ascontiguousarray(img))
-            else:
-                print(f"[3070] WARNING: Frame not found: {frame_path}")
 
-        # OPTIMIZED: Load masks directly, create zero masks in memory (no disk write!)
-        print(f"[3070] Loading {num_frames} masks from {mask_source_dir}...")
+        # Load masks into memory
+        print(f"[3070] Loading masks into memory...")
         masks_array = []
-        for i in range(num_frames):
-            mask_path = os.path.join(mask_source_dir, f"{frame_idx_offset + i:04d}.png")
-            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask is not None:
+        for f in sorted(os.listdir(seg_masks_dir)):
+            if f.endswith('.png'):
+                mask = cv2.imread(os.path.join(seg_masks_dir, f), cv2.IMREAD_GRAYSCALE)
                 masks_array.append(np.ascontiguousarray(mask))
-            else:
-                # No mask = no watermark - create zero mask IN MEMORY (no disk!)
-                masks_array.append(np.zeros((height, width), dtype=np.uint8))
-
-        load_time = time.time() - load_start
-        print(f"[3070] Loaded in {load_time:.2f}s ({num_frames/load_time:.0f} frames/sec)")
 
         print(f"[3070] Loaded {len(frames_array)} frames, {len(masks_array)} masks into memory")
 
@@ -1153,9 +1091,13 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             print(f"[3070] Crop region: ({crop_x},{crop_y}) {crop_w}x{crop_h}")
             print(f"[3070] Estimated speedup: {speedup_est:.1f}x ({orig_pixels} -> {crop_pixels} pixels)")
 
-            # OPTIMIZED: Crop + make contiguous in ONE pass (was 2 passes = double memory!)
-            cropped_frames = [np.ascontiguousarray(f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]) for f in frames_array]
-            cropped_masks = [np.ascontiguousarray(m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]) for m in masks_array]
+            # Crop all frames and masks
+            cropped_frames = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].copy() for f in frames_array]
+            cropped_masks = [m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].copy() for m in masks_array]
+
+            # Make contiguous for GPU
+            cropped_frames = [np.ascontiguousarray(f) for f in cropped_frames]
+            cropped_masks = [np.ascontiguousarray(m) for m in cropped_masks]
 
             print(f"[3070] Cropped to {len(cropped_frames)} frames at {crop_w}x{crop_h}")
 
@@ -1237,12 +1179,15 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
                 if cropped_output is None:
                     continue
 
-                # OPTIMIZED: Modify frames_array in-place (no .copy() needed!)
+                # Get original full frame
                 if i < len(frames_array):
-                    # Paste cropped output directly into original frame
-                    frames_array[i][crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cropped_output
-                    # Write the modified frame
-                    cv2.imwrite(output_path, frames_array[i])
+                    full_frame = frames_array[i].copy()
+
+                    # Paste cropped output back into the crop region
+                    full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cropped_output
+
+                    # Overwrite the output file with full-resolution frame
+                    cv2.imwrite(output_path, full_frame)
 
             print(f"[3070] Merged {len(output_frames)} frames back to full resolution ({width}x{height})")
 
@@ -1259,10 +1204,13 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
         result_dir = os.path.join(RESULT_DIR, f"{video_id}_segments", f"segment_{segment_index}")
         os.makedirs(result_dir, exist_ok=True)
 
-        for frame_file in output_frames:
+        # Only save THIS segment's frames (start_frame to end_frame)
+        for frame_idx in range(start_frame, end_frame + 1):
+            frame_file = f"{frame_idx:04d}.png"
             src = os.path.join(propainter_output, frame_file)
-            dst = os.path.join(result_dir, frame_file)
-            shutil.copy(src, dst)
+            if os.path.exists(src):
+                dst = os.path.join(result_dir, frame_file)
+                shutil.copy(src, dst)
 
         print(f"[3070] Results saved locally: {result_dir}")
 
