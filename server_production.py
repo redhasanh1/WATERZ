@@ -696,6 +696,7 @@ def auth_register():
             return jsonify({
                 'status': 'success',
                 'message': 'Please check your email to verify your account',
+                'email_verification_required': True,
                 'user': {
                     'id': user_id,
                     'email': email,
