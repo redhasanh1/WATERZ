@@ -1084,6 +1084,15 @@
         </div>
     </nav>
 
+    <!-- Email Verification Banner (hidden by default) -->
+    <div id="emailVerificationBanner" style="display: none; background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(251, 191, 36, 0.15) 100%); border-bottom: 1px solid rgba(245, 158, 11, 0.3); padding: 0.75rem 1rem; text-align: center;">
+        <span style="color: var(--text-primary); font-size: 0.9rem;">
+            Please verify your email to secure your account.
+            <button id="resendVerificationBtn" style="background: none; border: none; color: #667eea; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0 0.25rem;">Resend verification email</button>
+        </span>
+        <span id="resendStatus" style="margin-left: 0.5rem; font-size: 0.85rem; color: #10b981; display: none;"></span>
+    </div>
+
     <!-- Top Banner Ad -->
     <div class="ad-banner-top">
         <ins class="adsbygoogle"
@@ -2820,6 +2829,57 @@
           userCreditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
         } else if (credits < 3) {
           userCreditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+        }
+      }
+
+      // Show verification banner if email not verified
+      const verificationBanner = document.getElementById('emailVerificationBanner');
+      if (verificationBanner && userData.email_verified === false) {
+        verificationBanner.style.display = 'block';
+
+        // Resend verification button
+        const resendBtn = document.getElementById('resendVerificationBtn');
+        const resendStatus = document.getElementById('resendStatus');
+        if (resendBtn) {
+          resendBtn.addEventListener('click', async function() {
+            resendBtn.disabled = true;
+            resendBtn.textContent = 'Sending...';
+
+            try {
+              const API_BASE = window.API_BASE_URL || '';
+              const response = await fetch(API_BASE + '/api/auth/resend-verification', {
+                method: 'POST',
+                credentials: 'include'
+              });
+
+              const data = await response.json();
+
+              if (response.ok) {
+                resendStatus.textContent = 'Email sent! Check your inbox.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#10b981';
+                resendBtn.style.display = 'none';
+              } else if (response.status === 429) {
+                resendStatus.textContent = 'Please wait before requesting another email.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#f59e0b';
+                resendBtn.disabled = false;
+                resendBtn.textContent = 'Resend verification email';
+              } else {
+                resendStatus.textContent = data.error || 'Failed to send email.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#ef4444';
+                resendBtn.disabled = false;
+                resendBtn.textContent = 'Resend verification email';
+              }
+            } catch (e) {
+              resendStatus.textContent = 'Connection error. Please try again.';
+              resendStatus.style.display = 'inline';
+              resendStatus.style.color = '#ef4444';
+              resendBtn.disabled = false;
+              resendBtn.textContent = 'Resend verification email';
+            }
+          });
         }
       }
 
