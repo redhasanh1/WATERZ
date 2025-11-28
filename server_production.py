@@ -434,7 +434,7 @@ SMTP_SERVER = "smtp-relay.brevo.com"
 SMTP_PORT = 587
 SMTP_USERNAME = "9c3ca4001@smtp-brevo.com"
 SMTP_PASSWORD = "xsmtpsib-798b8db725baf9ad346d32e4ccae5bdcfc64f7c03d059b5aef8e6f82fa5da30b-IB5SjcNk2AV6NZ1f"
-SMTP_FROM = "markremoverai@gmail.com"
+SMTP_FROM = os.getenv('SMTP_FROM', 'noreply@markremoverai.com')
 
 def send_verification_email(to_email, token):
     """Send email verification link to user."""
