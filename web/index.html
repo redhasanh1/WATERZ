@@ -7,7 +7,7 @@
 
     <!-- SEO Optimization -->
     <title>Remove Objects from Videos Online Free - AI Video Editor | MarkRemoverAI</title>
-    <meta name="description" content="Remove objects and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
+    <meta name="description" content="Remove watermarks, objects, and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
     <meta name="author" content="MarkRemoverAI">
     <link rel="canonical" href="https://markremoverai.com/">
 
@@ -15,14 +15,14 @@
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://markremoverai.com/">
     <meta property="og:title" content="Remove Objects from Videos Online Free - AI Video Editor">
-    <meta property="og:description" content="Remove objects and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
+    <meta property="og:description" content="Remove watermarks, objects, and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
     <meta property="og:image" content="https://markremoverai.com/emblem.png">
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image">
     <meta property="twitter:url" content="https://markremoverai.com/">
     <meta property="twitter:title" content="Remove Objects from Videos Online Free - AI Video Editor">
-    <meta property="twitter:description" content="Remove objects and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
+    <meta property="twitter:description" content="Remove watermarks, objects, and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
     <meta property="twitter:image" content="https://markremoverai.com/emblem.png">
 
     <!-- Structured Data -->
@@ -36,6 +36,11 @@
         "@type": "Offer",
         "price": "0",
         "priceCurrency": "USD"
+      },
+      "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": "4.8",
+        "ratingCount": "1250"
       },
       "description": "Professional AI-powered video object removal tool. Remove any object from videos with one click."
     }
@@ -107,30 +112,6 @@
                 }
             };
         })();
-    </script>
-    <script>
-        // Pre-warm Railway API container on page load (prevents cold start delays)
-        (function() {
-            var prewarm = function() {
-                var base = window.API_BASE_URL || '';
-                fetch(base + '/api/health', {
-                    method: 'GET',
-                    headers: { 'ngrok-skip-browser-warning': 'true' }
-                })
-                .then(function() { console.log('✅ API pre-warmed'); })
-                .catch(function() { console.log('⚠️ API warming up...'); });
-            };
-            // Try immediately, and again after API_BASE_URL might be set from tunnel_url.txt
-            prewarm();
-            setTimeout(prewarm, 500);
-        })();
-
-        // Auto-login for localhost testing (DISABLED for email verification testing)
-        // if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        //     var testUser = { id: 'test-local', email: 'test@localhost', name: 'Local Tester', credits: 999 };
-        //     localStorage.setItem('user', JSON.stringify(testUser));
-        //     console.log('🔓 Localhost: Auto-logged in as test user');
-        // }
     </script>
     <style>
         /* MarkRemoverAI AI - Revolutionary Vibrant Design */
@@ -356,7 +337,7 @@
             padding: 3rem;
             box-shadow: 0 10px 50px rgba(102, 126, 234, 0.15), 0 5px 20px rgba(240, 147, 251, 0.1);
             border: 2px solid transparent;
-            background-image: linear-gradient(var(--bg-card), var(--bg-card)), var(--gradient-rainbow);
+            background-image: linear-gradient(white, white), var(--gradient-rainbow);
             background-origin: border-box;
             background-clip: padding-box, border-box;
             margin-top: 2rem;
@@ -591,17 +572,17 @@
         .nav-container {
             max-width: 1600px;
             margin: 0 auto;
-            padding: 0 2rem;
+            padding: 0 4rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 2rem;
+            gap: 4rem;
         }
 
         .nav-left {
             display: flex;
             align-items: center;
-            gap: 2.5rem;
+            gap: 6rem;
             flex: 1;
             min-width: 0;
         }
@@ -609,24 +590,20 @@
         .nav-right {
             display: flex;
             align-items: center;
-            gap: 1.5rem;
+            gap: 3rem;
             flex-shrink: 0;
         }
 
         .nav-auth {
             display: flex;
             align-items: center;
-            gap: 1.25rem;
+            gap: 2.5rem;
         }
 
         .nav-controls {
             display: flex;
             align-items: center;
-            gap: 1rem;
-        }
-
-        .mobile-auth-controls {
-            display: none;  /* Hidden on desktop, shown on mobile */
+            gap: 1.5rem;
         }
 
         .nav-logo {
@@ -661,183 +638,14 @@
             padding: 0;
         }
 
-        /* Navigation links - comfortable spacing */
+        /* Navigation links - wide spacing */
         .nav-left .nav-menu {
-            gap: 2rem;
+            gap: 3.5rem;
         }
 
-        /* User menu - compact spacing */
+        /* User menu - comfortable spacing */
         #userNav {
-            gap: 1rem !important;
-        }
-
-        /* User dropdown menu */
-        .user-dropdown {
-            position: relative;
-        }
-
-        .user-dropdown-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
-            background: rgba(102, 126, 234, 0.08);
-            border: 1px solid rgba(102, 126, 234, 0.15);
-            cursor: pointer;
-            transition: all 0.3s ease;
-            color: var(--text-primary);
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-
-        .user-dropdown-btn:hover {
-            background: rgba(102, 126, 234, 0.15);
-            border-color: rgba(102, 126, 234, 0.3);
-            transform: translateY(-1px);
-        }
-
-        .user-dropdown-menu {
-            position: absolute;
-            top: calc(100% + 0.5rem);
-            right: 0;
-            min-width: 220px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 0.5rem;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            opacity: 0;
-            visibility: hidden;
-            transform: translateY(-10px);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 1000;
-        }
-
-        html[data-theme="dark"] .user-dropdown-menu {
-            box-shadow: 0 10px 40px rgba(15, 15, 30, 0.5);
-        }
-
-        /* Dark mode: Navigation header */
-        html[data-theme="dark"] .nav-header {
-            background: rgba(11, 16, 32, 0.98);
-            border-bottom-color: rgba(102, 126, 234, 0.2);
-        }
-
-        /* Dark mode: Mobile menu */
-        html[data-theme="dark"] .nav-left .nav-menu {
-            background: rgba(11, 16, 32, 0.98);
-            border-bottom-color: rgba(102, 126, 234, 0.2);
-        }
-
-        /* Dark mode: Feature cards */
-        html[data-theme="dark"] .feature-card {
-            background: var(--bg-card);
-            border-color: rgba(102, 126, 234, 0.15);
-        }
-
-        /* Dark mode: Info box */
-        html[data-theme="dark"] .info-box {
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(240, 147, 251, 0.12) 100%);
-        }
-
-        /* Dark mode: Upload zone */
-        html[data-theme="dark"] .upload-zone {
-            border-color: rgba(102, 126, 234, 0.4);
-        }
-
-        html[data-theme="dark"] .upload-zone:hover {
-            background: rgba(102, 126, 234, 0.1);
-        }
-
-        /* Dark mode: Points list and other inline elements */
-        html[data-theme="dark"] #pointsList {
-            background: rgba(18, 24, 38, 0.8) !important;
-        }
-
-        /* Dark mode: Demo card glow adjustment */
-        html[data-theme="dark"] .demo-card {
-            box-shadow: 0 10px 50px rgba(102, 126, 234, 0.25), 0 5px 20px rgba(240, 147, 251, 0.15);
-        }
-
-        /* Dark mode: Hero background enhancement */
-        html[data-theme="dark"] .hero-background {
-            background:
-                radial-gradient(at 20% 30%, rgba(102, 126, 234, 0.2) 0px, transparent 50%),
-                radial-gradient(at 80% 20%, rgba(240, 147, 251, 0.2) 0px, transparent 50%),
-                radial-gradient(at 50% 80%, rgba(72, 187, 120, 0.15) 0px, transparent 50%),
-                radial-gradient(at 90% 60%, rgba(246, 173, 85, 0.15) 0px, transparent 50%);
-        }
-
-        /* Dark mode: Free credits box */
-        html[data-theme="dark"] .free-credits-box {
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(240, 147, 251, 0.2) 100%);
-        }
-
-        /* Dark mode: Mobile menu item borders */
-        html[data-theme="dark"] .nav-menu li {
-            border-bottom-color: rgba(102, 126, 234, 0.1);
-        }
-
-        /* Dark mode: Cookie banner */
-        html[data-theme="dark"] #cookie-banner {
-            background: rgba(18, 24, 38, 0.95) !important;
-            border-color: rgba(102, 126, 234, 0.2) !important;
-        }
-
-        /* Dark mode: Ad containers */
-        html[data-theme="dark"] .ad-container,
-        html[data-theme="dark"] .ad-sidebar,
-        html[data-theme="dark"] .ad-banner-top,
-        html[data-theme="dark"] .ad-banner-bottom {
-            background: rgba(18, 24, 38, 0.8);
-        }
-
-        /* Dark mode: Theme toggle button */
-        html[data-theme="dark"] .theme-toggle {
-            background: rgba(102, 126, 234, 0.15);
-            border-color: rgba(102, 126, 234, 0.3);
-        }
-
-        .user-dropdown.active .user-dropdown-menu {
-            opacity: 1;
-            visibility: visible;
-            transform: translateY(0);
-        }
-
-        .user-dropdown-menu-item {
-            display: flex;
-            align-items: center;
-            padding: 0.7rem 1rem;
-            color: var(--text-primary);
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.9rem;
-            border-radius: 8px;
-            transition: all 0.2s ease;
-            cursor: pointer;
-        }
-
-        .user-dropdown-menu-item:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: var(--primary);
-        }
-
-        .user-dropdown-menu-item.user-email {
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-            cursor: default;
-            padding: 0.6rem 1rem;
-            margin-bottom: 0.25rem;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .user-dropdown-menu-item.user-email:hover {
-            background: transparent;
-            color: var(--text-secondary);
+            gap: 1.5rem !important;
         }
 
         .nav-menu a {
@@ -1003,54 +811,12 @@
                 gap: 1.5rem;
             }
 
-            /* Hide logo icon on mobile, text moves left */
-            .nav-logo svg {
-                display: none;
-            }
-
-            .nav-logo {
-                gap: 0;
-            }
-
             .nav-right {
-                gap: 0.75rem;
-                display: flex;
-                align-items: center;
-            }
-
-            /* Mobile auth controls (Sign In + Theme) - LEFT of hamburger */
-            .mobile-auth-controls {
-                display: flex !important;
-                align-items: center;
                 gap: 0.5rem;
-                order: 1;
             }
 
-            .mobile-signin-btn {
-                font-size: 0.8rem !important;
-                padding: 0.45rem 0.9rem !important;
-                white-space: nowrap;
-            }
-
-            .mobile-theme-btn {
-                font-size: 0.75rem !important;
-                padding: 0.45rem 0.7rem !important;
-            }
-
-            /* Hide desktop-only elements on mobile */
-            .desktop-only {
-                display: none !important;
-            }
-
-            /* Show mobile-only elements */
-            .mobile-only {
-                display: block !important;
-            }
-
-            /* Hamburger menu - on the RIGHT */
             .mobile-menu-toggle {
                 display: flex;
-                order: 2;
             }
 
             /* Hide desktop nav menu items on mobile */
@@ -1070,8 +836,6 @@
                 opacity: 0;
                 pointer-events: none;
                 transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-                max-height: calc(100vh - 75px);
-                overflow-y: auto;
             }
 
             .nav-left .nav-menu.active {
@@ -1093,14 +857,14 @@
                 padding: 0.5rem 0;
             }
 
-            /* Mobile user section styling in hamburger */
-            .mobile-user-section {
-                padding: 0.75rem 1rem !important;
+            /* Hide user nav on mobile, show in hamburger menu if needed */
+            .nav-auth #userNav {
+                display: none !important;
             }
 
-            .mobile-user-section span,
-            .mobile-user-section a {
-                font-size: 0.9rem;
+            .nav-auth #signInLink {
+                font-size: 0.85rem;
+                padding: 0.5rem 1rem !important;
             }
 
             /* Hide API chip on mobile */
@@ -1108,21 +872,15 @@
                 display: none !important;
             }
 
+            .theme-toggle {
+                font-size: 0.85rem;
+                padding: 0.5rem 0.75rem;
+            }
+
             .nav-cta {
                 margin: 0.5rem 1rem;
             }
-
-            /* Show hamburger-only items in mobile menu */
-            .hamburger-only {
-                display: block !important;
-            }
         }
-
-        /* Hide hamburger-only items on desktop */
-        .hamburger-only {
-            display: none;
-        }
-
         /* Ad zones */
         .ad-container {
             background: rgba(26, 26, 46, 0.5);
@@ -1265,77 +1023,6 @@
             animation: pulse 2s ease-in-out infinite;
         }
 
-        /* Email Verification Banner */
-        .email-verification-banner {
-            display: none;
-            position: fixed;
-            top: 80px;
-            left: 0;
-            right: 0;
-            z-index: 999;
-            background: linear-gradient(135deg, rgba(245, 158, 11, 0.95) 0%, rgba(251, 191, 36, 0.95) 100%);
-            padding: 12px 20px;
-            text-align: center;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(10px);
-        }
-
-        .email-verification-banner.show {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 16px;
-            flex-wrap: wrap;
-        }
-
-        .email-verification-banner .banner-text {
-            color: #1a1a2e;
-            font-weight: 600;
-            font-size: 0.95rem;
-        }
-
-        .email-verification-banner .banner-btn {
-            background: #1a1a2e;
-            color: #fff;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 0.85rem;
-            cursor: pointer;
-            transition: transform 0.2s ease, opacity 0.2s ease;
-        }
-
-        .email-verification-banner .banner-btn:hover {
-            transform: translateY(-1px);
-            opacity: 0.9;
-        }
-
-        .email-verification-banner .banner-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        .email-verification-banner .banner-close {
-            background: transparent;
-            border: none;
-            color: #1a1a2e;
-            font-size: 1.2rem;
-            cursor: pointer;
-            padding: 4px 8px;
-            opacity: 0.7;
-            transition: opacity 0.2s ease;
-        }
-
-        .email-verification-banner .banner-close:hover {
-            opacity: 1;
-        }
-
-        /* Adjust body padding when banner is visible */
-        body.has-verification-banner {
-            padding-top: 130px;
-        }
-
     </style>
 </head>
 <body>
@@ -1365,50 +1052,28 @@
                 <ul class="nav-menu" id="navMenu">
                     <li><a href="/">Home</a></li>
                     <li><a href="#how-to">How It Works</a></li>
+                    <li><a href="#comparison">Examples</a></li>
                     <li><a href="premium.html#pricing">Pricing</a></li>
-                    <li class="hamburger-only"><a href="#comparison">Examples</a></li>
-                    <!-- Mobile-only: User Navigation Items -->
-                    <li class="mobile-only mobile-user-section" id="mobileUserSection" style="display: none;">
-                        <span id="mobileUserEmail" style="color: var(--primary); font-weight: 600;"></span>
-                    </li>
-                    <li class="mobile-only mobile-user-section" id="mobileProfileSection" style="display: none;">
-                        <a href="profile.html" style="color: var(--text-secondary); text-decoration: none; font-weight: 600;">Profile</a>
-                    </li>
-                    <li class="mobile-only mobile-user-section" id="mobileBuySection" style="display: none;">
-                        <a href="premium.html#pricing" id="mobileBuyCreditsBtn" class="nav-cta" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); display: inline-block; margin: 0.5rem 0;">Buy Credits</a>
-                    </li>
                 </ul>
             </div>
 
             <!-- RIGHT: User Controls + System Controls -->
             <div class="nav-right">
-                <!-- Mobile-only: Sign In + Theme (LEFT of hamburger) -->
-                <div class="mobile-auth-controls">
-                    <a href="login.html" class="nav-cta mobile-signin-btn" id="mobileSignInLink">Sign In</a>
-                    <button id="mobileThemeToggle" class="theme-toggle mobile-theme-btn" aria-label="Toggle dark mode">Dark</button>
-                </div>
-
-                <!-- Desktop Auth Section -->
-                <div class="nav-auth desktop-only">
+                <!-- Auth Section -->
+                <div class="nav-auth">
                     <a href="login.html" class="nav-cta" id="signInLink">Sign In</a>
                     <ul class="nav-menu" id="userNav" style="display: none;">
+                        <li><span id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem;"></span></li>
                         <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
-                        <li class="user-dropdown">
-                            <button class="user-dropdown-btn" id="userDropdownBtn" aria-label="User menu">⋮</button>
-                            <div class="user-dropdown-menu">
-                                <div class="user-dropdown-menu-item user-email" id="userEmailDropdown"></div>
-                                <a href="profile.html" class="user-dropdown-menu-item">Profile</a>
-                                <a href="premium.html#pricing" class="user-dropdown-menu-item" id="buyCreditsDropdownBtn">Buy Credits</a>
-                                <a href="#" class="user-dropdown-menu-item" id="signOutDropdownBtn">Sign Out</a>
-                            </div>
-                        </li>
+                        <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta-small" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">Buy Credits</a></li>
+                        <li><a href="#" id="signOutBtn" class="nav-cta-small" style="background: rgba(239, 68, 68, 0.9);">Sign Out</a></li>
                     </ul>
                 </div>
 
                 <!-- System Controls -->
                 <div class="nav-controls">
                     <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking...</div>
-                    <button id="themeToggle" class="theme-toggle desktop-only" aria-label="Toggle dark mode">Dark</button>
+                    <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">Dark</button>
                     <div class="mobile-menu-toggle" id="mobileMenuToggle">
                         <span></span>
                         <span></span>
@@ -1420,10 +1085,12 @@
     </nav>
 
     <!-- Email Verification Banner (hidden by default) -->
-    <div id="emailVerificationBanner" class="email-verification-banner">
-        <span class="banner-text">Please verify your email to access all features.</span>
-        <button class="banner-btn" id="resendVerificationBtn" onclick="resendVerificationFromBanner()">Resend Email</button>
-        <button class="banner-close" onclick="dismissVerificationBanner()" title="Dismiss">&times;</button>
+    <div id="emailVerificationBanner" style="display: none; background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(251, 191, 36, 0.15) 100%); border-bottom: 1px solid rgba(245, 158, 11, 0.3); padding: 0.75rem 1rem; text-align: center;">
+        <span style="color: var(--text-primary); font-size: 0.9rem;">
+            Please verify your email to secure your account.
+            <button id="resendVerificationBtn" style="background: none; border: none; color: #667eea; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0 0.25rem;">Resend verification email</button>
+        </span>
+        <span id="resendStatus" style="margin-left: 0.5rem; font-size: 0.85rem; color: #10b981; display: none;"></span>
     </div>
 
     <!-- Top Banner Ad -->
@@ -1461,7 +1128,7 @@
              data-defer="true"></ins>
     </div>
 
-    <section class="hero" id="remove-objects">
+    <section class="hero" id="remove-watermark">
         <div class="hero-background"></div>
         <div class="container">
             <div class="hero-content">
@@ -1481,7 +1148,7 @@
                             🎁 Sign up now and get 5 FREE credits!
                         </p>
                         <p style="font-size: 0.95rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
-                            Start removing objects instantly • No credit card required
+                            Start removing watermarks instantly • No credit card required
                         </p>
                     </div>
                 </div>
@@ -1809,10 +1476,7 @@
     <!-- Simple Footer -->
     <footer style="padding: 2rem; text-align: center; background: rgba(102, 126, 234, 0.03); border-top: 1px solid rgba(102, 126, 234, 0.1);">
         <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">
-            © 2024 MarkRemoverAI. All rights reserved.
-        </p>
-        <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 0.5rem;">
-            Professional Video Object Removal | Contact: hello@markremoverai.com
+            MarkRemoverAI - Professional Video Object Removal
         </p>
         <p style="color: var(--text-secondary); font-size: 0.75rem;">
             <a href="terms.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Terms</a> •
@@ -2069,7 +1733,7 @@
         }
 
         function apiFetchPath(path, options) {
-            const url = `${window.API_BASE_URL || ''}${path}`;
+            const url = `${API_BASE_URL}${path}`;
             return apiFetchUrl(url, options);
         }
 
@@ -2085,7 +1749,7 @@
             // Check if user is logged in
             const user = JSON.parse(localStorage.getItem('user') || '{}');
             if (!user.id || !user.email) {
-                alert('Please sign in to use this feature. Sign up now and get 5 FREE credits!');
+                alert('Please sign in to use the watermark remover. Sign up now and get 5 FREE credits!');
                 window.location.href = 'login.html';
                 return;
             }
@@ -2156,17 +1820,10 @@
             try {
                 const response = await apiFetchPath(`/api/upload`, {
                     method: 'POST',
-                    credentials: 'include',  // Send session cookies
                     body: formData
                 });
 
                 const data = await parseJsonSafe(response);
-
-                // Check for email verification required
-                if (response.status === 403 && data.email_verification_required) {
-                    showEmailVerificationModal();
-                    return;
-                }
 
                 if (data.status === 'success') {
                     // Store task_id for processing
@@ -2222,9 +1879,17 @@
             progressDiv.style.display = 'block';
 
             try {
-                const endpoint = `${API_BASE_URL}/api/download-from-url`;
+                // Detect if it's a Sora URL and use appropriate endpoint
+                const isSoraUrl = url.includes('sora.chatgpt.com') ||
+                                  url.includes('backend/project_y') ||
+                                  url.includes('/p/s_') ||
+                                  url.startsWith('/backend');
 
-                console.log(`Using endpoint: ${endpoint} for URL: ${url}`);
+                const endpoint = isSoraUrl
+                    ? `${API_BASE_URL}/api/download-sora`
+                    : `${API_BASE_URL}/api/download-from-url`;
+
+                console.log(`Using endpoint: ${endpoint} for URL: ${url} (Sora: ${isSoraUrl})`);
 
                 // Send URL to backend for downloading
                 const response = await apiFetchUrl(endpoint, {
@@ -2550,17 +2215,10 @@
                 const response = await apiFetchPath(`/api/process`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',  // Send session cookies
                     body: JSON.stringify(payload)
                 });
 
                 const data = await parseJsonSafe(response);
-
-                // Check for email verification required
-                if (response.status === 403 && data.email_verification_required) {
-                    showEmailVerificationModal();
-                    return;
-                }
 
                 if (data.status === 'success') {
                     const processTaskId = data.task_id;
@@ -2612,32 +2270,17 @@
 
         const savedTaskId = localStorage.getItem(ACTIVE_TASK_KEY);
         if (savedTaskId) {
-            console.log('Found saved task:', savedTaskId, '- checking if still active...');
-            // Check if task is still active before resuming
-            fetch(`/api/status/${savedTaskId}`)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.status === 'completed' || data.status === 'failed') {
-                        console.log('Saved task already finished, clearing...');
-                        localStorage.removeItem(ACTIVE_TASK_KEY);
-                    } else if (data.status === 'processing' || data.status === 'pending') {
-                        console.log('Resuming active task:', savedTaskId);
-                        statusDiv.style.display = 'block';
-                        statusDiv.dataset.completed = '';
-                        statusText.textContent = 'Reconnecting to active job...';
-                        statusText.style.color = '#a0a0c0';
-                        progressBar.style.width = '0%';
-                        progressPercent.textContent = '0%';
-                        if (videoElem) {
-                            videoElem.dataset.taskId = savedTaskId;
-                        }
-                        startStatusPolling(savedTaskId);
-                    }
-                })
-                .catch(err => {
-                    console.log('Task not found, clearing saved state');
-                    localStorage.removeItem(ACTIVE_TASK_KEY);
-                });
+            console.log('Resuming active task:', savedTaskId);
+            statusDiv.style.display = 'block';
+            statusDiv.dataset.completed = '';
+            statusText.textContent = 'Reconnecting to active job...';
+            statusText.style.color = '#a0a0c0';
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+            if (videoElem) {
+                videoElem.dataset.taskId = savedTaskId;
+            }
+            startStatusPolling(savedTaskId);
         }
 
         // ==================================================
@@ -3158,12 +2801,12 @@
 })();
 </script>
 <script>
-// Check for logged-in user and show nav (desktop + mobile)
+// Check for logged-in user and show nav
 (function(){
   try {
     const userData = JSON.parse(localStorage.getItem('user') || '{}');
     if (userData && userData.id) {
-      // Desktop: Hide sign in link, show user nav
+      // Hide sign in link, show user nav
       const signInLink = document.getElementById('signInLink');
       const navMenu = document.getElementById('navMenu');
       const userNav = document.getElementById('userNav');
@@ -3171,13 +2814,13 @@
       if (signInLink) signInLink.style.display = 'none';
       if (userNav) userNav.style.display = 'flex';
 
-      // Desktop: Show user email/name in dropdown
-      const userEmailDropdownEl = document.getElementById('userEmailDropdown');
-      if (userEmailDropdownEl) {
-        userEmailDropdownEl.textContent = userData.email;
+      // Show user email/name
+      const userEmailEl = document.getElementById('userEmail');
+      if (userEmailEl) {
+        userEmailEl.textContent = userData.name || userData.email;
       }
 
-      // Desktop: Show credits
+      // Show credits
       const userCreditsEl = document.getElementById('userCredits');
       if (userCreditsEl) {
         const credits = userData.credits || 0;
@@ -3189,79 +2832,61 @@
         }
       }
 
-      // Desktop: User dropdown toggle
-      const userDropdownBtn = document.getElementById('userDropdownBtn');
-      const userDropdown = userDropdownBtn?.closest('.user-dropdown');
+      // Show verification banner if email not verified
+      const verificationBanner = document.getElementById('emailVerificationBanner');
+      if (verificationBanner && userData.email_verified === false) {
+        verificationBanner.style.display = 'block';
 
-      if (userDropdownBtn && userDropdown) {
-        // Toggle dropdown on button click
-        userDropdownBtn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          userDropdown.classList.toggle('active');
-        });
+        // Resend verification button
+        const resendBtn = document.getElementById('resendVerificationBtn');
+        const resendStatus = document.getElementById('resendStatus');
+        if (resendBtn) {
+          resendBtn.addEventListener('click', async function() {
+            resendBtn.disabled = true;
+            resendBtn.textContent = 'Sending...';
 
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(e) {
-          if (!userDropdown.contains(e.target)) {
-            userDropdown.classList.remove('active');
-          }
-        });
+            try {
+              const API_BASE = window.API_BASE_URL || '';
+              const response = await fetch(API_BASE + '/api/auth/resend-verification', {
+                method: 'POST',
+                credentials: 'include'
+              });
 
-        // Close dropdown on Esc key
-        document.addEventListener('keydown', function(e) {
-          if (e.key === 'Escape') {
-            userDropdown.classList.remove('active');
-          }
-        });
-      }
+              const data = await response.json();
 
-      // Desktop: Sign out button (in dropdown)
-      const signOutDropdownBtn = document.getElementById('signOutDropdownBtn');
-      if (signOutDropdownBtn) {
-        signOutDropdownBtn.addEventListener('click', function(e) {
-          e.preventDefault();
-          localStorage.removeItem('user');
-          window.location.href = 'login.html';
-        });
-      }
-
-      // Mobile: Hide sign in link, show user sections
-      const mobileSignInLink = document.getElementById('mobileSignInLink');
-      const mobileUserSection = document.getElementById('mobileUserSection');
-      const mobileProfileSection = document.getElementById('mobileProfileSection');
-      const mobileCreditsSection = document.getElementById('mobileCreditsSection');
-      const mobileBuySection = document.getElementById('mobileBuySection');
-      const mobileSignOutSection = document.getElementById('mobileSignOutSection');
-
-      if (mobileSignInLink) mobileSignInLink.style.display = 'none';
-      if (mobileUserSection) mobileUserSection.style.display = 'block';
-      if (mobileProfileSection) mobileProfileSection.style.display = 'block';
-      if (mobileCreditsSection) mobileCreditsSection.style.display = 'block';
-      if (mobileBuySection) mobileBuySection.style.display = 'block';
-      if (mobileSignOutSection) mobileSignOutSection.style.display = 'block';
-
-      // Mobile: Show user email/name
-      const mobileUserEmailEl = document.getElementById('mobileUserEmail');
-      if (mobileUserEmailEl) {
-        mobileUserEmailEl.textContent = userData.name || userData.email;
-      }
-
-      // Mobile: Show credits
-      const mobileUserCreditsEl = document.getElementById('mobileUserCredits');
-      if (mobileUserCreditsEl) {
-        const credits = userData.credits || 0;
-        mobileUserCreditsEl.textContent = credits + ' credit' + (credits !== 1 ? 's' : '');
-        if (credits === 0) {
-          mobileUserCreditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
-        } else if (credits < 3) {
-          mobileUserCreditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+              if (response.ok) {
+                resendStatus.textContent = 'Email sent! Check your inbox.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#10b981';
+                resendBtn.style.display = 'none';
+              } else if (response.status === 429) {
+                resendStatus.textContent = 'Please wait before requesting another email.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#f59e0b';
+                resendBtn.disabled = false;
+                resendBtn.textContent = 'Resend verification email';
+              } else {
+                resendStatus.textContent = data.error || 'Failed to send email.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#ef4444';
+                resendBtn.disabled = false;
+                resendBtn.textContent = 'Resend verification email';
+              }
+            } catch (e) {
+              resendStatus.textContent = 'Connection error. Please try again.';
+              resendStatus.style.display = 'inline';
+              resendStatus.style.color = '#ef4444';
+              resendBtn.disabled = false;
+              resendBtn.textContent = 'Resend verification email';
+            }
+          });
         }
       }
 
-      // Mobile: Sign out button
-      const mobileSignOutBtn = document.getElementById('mobileSignOutBtn');
-      if (mobileSignOutBtn) {
-        mobileSignOutBtn.addEventListener('click', function(e) {
+      // Sign out button
+      const signOutBtn = document.getElementById('signOutBtn');
+      if (signOutBtn) {
+        signOutBtn.addEventListener('click', function(e) {
           e.preventDefault();
           localStorage.removeItem('user');
           window.location.href = 'login.html';
@@ -3275,262 +2900,7 @@
 </script>
 <!-- Theme Toggle Script -->
 <script src="js/theme.js"></script>
-<script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script>
-
-<!-- Cookie Consent Banner -->
-<div id="cookieConsent" style="display: none; position: fixed; bottom: 0; left: 0; right: 0; background: rgba(26, 26, 46, 0.98); backdrop-filter: blur(10px); padding: 1.25rem 2rem; z-index: 10000; border-top: 1px solid rgba(102, 126, 234, 0.3); box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);">
-    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem;">
-        <div style="flex: 1; min-width: 300px;">
-            <p style="color: #e5e7eb; margin: 0 0 0.5rem 0; font-weight: 600;">We use cookies</p>
-            <p style="color: #9aa4b2; margin: 0; font-size: 0.9rem; line-height: 1.5;">We use cookies to improve your experience, analyze site traffic, and serve relevant ads. By clicking "Accept", you consent to our use of cookies. <a href="privacy.html" style="color: #667eea; text-decoration: underline;">Learn more</a></p>
-        </div>
-        <div style="display: flex; gap: 0.75rem; flex-shrink: 0;">
-            <button onclick="rejectCookies()" style="padding: 0.75rem 1.5rem; background: transparent; border: 2px solid rgba(102, 126, 234, 0.4); border-radius: 8px; color: #e5e7eb; font-weight: 600; cursor: pointer; transition: all 0.3s;">Reject</button>
-            <button onclick="acceptCookies()" style="padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); transition: all 0.3s;">Accept</button>
-        </div>
-    </div>
-</div>
-<script>
-(function() {
-    const consent = localStorage.getItem('cookieConsent');
-    if (!consent) {
-        document.getElementById('cookieConsent').style.display = 'block';
-    }
-})();
-
-function acceptCookies() {
-    localStorage.setItem('cookieConsent', 'accepted');
-    document.getElementById('cookieConsent').style.display = 'none';
-}
-
-function rejectCookies() {
-    localStorage.setItem('cookieConsent', 'rejected');
-    document.getElementById('cookieConsent').style.display = 'none';
-    // Disable analytics/advertising cookies here if needed
-}
-</script>
-
-<!-- Email Verification Check -->
-<script>
-(function() {
-    // Check email verification status on page load
-    async function checkEmailVerification() {
-        // Skip if on localhost (test mode) - DISABLED for testing
-        // if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        //     return;
-        // }
-
-        // Skip if banner was dismissed this session
-        if (sessionStorage.getItem('verificationBannerDismissed')) {
-            return;
-        }
-
-        try {
-            const base = window.API_BASE_URL || '';
-            const response = await fetch(base + '/api/auth/status', {
-                method: 'GET',
-                credentials: 'include'
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-
-                // Show banner if user is logged in but not verified
-                if (data.logged_in && data.email_verified === false) {
-                    showVerificationBanner();
-                }
-            }
-        } catch (error) {
-            console.log('Auth status check failed:', error);
-        }
-    }
-
-    function showVerificationBanner() {
-        const banner = document.getElementById('emailVerificationBanner');
-        if (banner) {
-            banner.classList.add('show');
-            document.body.classList.add('has-verification-banner');
-        }
-    }
-
-    // Initialize after a short delay to let API_BASE_URL be set
-    setTimeout(checkEmailVerification, 600);
-})();
-
-// Resend verification email from banner
-async function resendVerificationFromBanner() {
-    const btn = document.getElementById('resendVerificationBtn');
-    if (!btn) return;
-
-    btn.disabled = true;
-    btn.textContent = 'Sending...';
-
-    try {
-        const base = window.API_BASE_URL || '';
-        const response = await fetch(base + '/api/auth/resend-verification', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include'
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            btn.textContent = 'Email Sent!';
-            btn.style.background = '#10b981';
-            // Re-enable after 60 seconds (rate limit)
-            setTimeout(() => {
-                btn.disabled = false;
-                btn.textContent = 'Resend Email';
-                btn.style.background = '';
-            }, 60000);
-        } else {
-            btn.textContent = data.error || 'Failed';
-            btn.style.background = '#ef4444';
-            setTimeout(() => {
-                btn.disabled = false;
-                btn.textContent = 'Resend Email';
-                btn.style.background = '';
-            }, 3000);
-        }
-    } catch (error) {
-        console.error('Resend error:', error);
-        btn.textContent = 'Error';
-        btn.style.background = '#ef4444';
-        setTimeout(() => {
-            btn.disabled = false;
-            btn.textContent = 'Resend Email';
-            btn.style.background = '';
-        }, 3000);
-    }
-}
-
-// Dismiss verification banner
-function dismissVerificationBanner() {
-    const banner = document.getElementById('emailVerificationBanner');
-    if (banner) {
-        banner.classList.remove('show');
-        document.body.classList.remove('has-verification-banner');
-        sessionStorage.setItem('verificationBannerDismissed', 'true');
-    }
-}
-
-// Show email verification modal (called when 403 with email_verification_required)
-function showEmailVerificationModal() {
-    // Remove any existing modal
-    const existingModal = document.getElementById('emailVerificationModal');
-    if (existingModal) existingModal.remove();
-
-    const modal = document.createElement('div');
-    modal.id = 'emailVerificationModal';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.7);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-        backdrop-filter: blur(5px);
-    `;
-
-    modal.innerHTML = `
-        <div style="
-            background: var(--bg-card, #1a1a2e);
-            border: 1px solid rgba(102, 126, 234, 0.3);
-            border-radius: 16px;
-            padding: 2rem;
-            max-width: 400px;
-            width: 90%;
-            text-align: center;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-        ">
-            <div style="width: 60px; height: 60px; margin: 0 auto 1rem; background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(251, 191, 36, 0.3) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                    <polyline points="22,6 12,13 2,6"></polyline>
-                </svg>
-            </div>
-            <h3 style="margin: 0 0 0.75rem; color: var(--text-primary, #fff); font-size: 1.25rem;">Email Verification Required</h3>
-            <p style="color: var(--text-secondary, #a0a0c0); margin: 0 0 1.5rem; line-height: 1.5;">
-                Please verify your email address to use this feature. Check your inbox for the verification link.
-            </p>
-            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
-                <button onclick="resendFromModal()" id="modalResendBtn" style="
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: #fff;
-                    border: none;
-                    padding: 10px 20px;
-                    border-radius: 10px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: transform 0.2s ease;
-                ">Resend Email</button>
-                <button onclick="closeVerificationModal()" style="
-                    background: transparent;
-                    color: var(--text-secondary, #a0a0c0);
-                    border: 1px solid rgba(102, 126, 234, 0.3);
-                    padding: 10px 20px;
-                    border-radius: 10px;
-                    font-weight: 600;
-                    cursor: pointer;
-                ">Close</button>
-            </div>
-            <p id="modalResendStatus" style="margin-top: 1rem; font-size: 0.9rem; min-height: 20px;"></p>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    // Close on backdrop click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeVerificationModal();
-    });
-}
-
-function closeVerificationModal() {
-    const modal = document.getElementById('emailVerificationModal');
-    if (modal) modal.remove();
-}
-
-async function resendFromModal() {
-    const btn = document.getElementById('modalResendBtn');
-    const status = document.getElementById('modalResendStatus');
-    if (!btn) return;
-
-    btn.disabled = true;
-    btn.textContent = 'Sending...';
-
-    try {
-        const base = window.API_BASE_URL || '';
-        const response = await fetch(base + '/api/auth/resend-verification', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include'
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            status.innerHTML = '<span style="color: #10b981;">Verification email sent! Check your inbox.</span>';
-            btn.textContent = 'Email Sent!';
-            btn.style.background = '#10b981';
-        } else {
-            status.innerHTML = `<span style="color: #ef4444;">${data.error || 'Failed to send. Try again later.'}</span>`;
-            btn.disabled = false;
-            btn.textContent = 'Resend Email';
-        }
-    } catch (error) {
-        status.innerHTML = '<span style="color: #ef4444;">Connection error. Please try again.</span>';
-        btn.disabled = false;
-        btn.textContent = 'Resend Email';
-    }
-}
-</script>
-</body>
+<script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script></body>
 </html>
 
 

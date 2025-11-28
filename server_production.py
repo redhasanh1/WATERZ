@@ -7,8 +7,6 @@ Production Server for Watermark Removal SaaS
 - ALL FILES STAY ON D DRIVE (inside watermarkz folder)
 """
 
-# Hi!
-
 import sys
 import os
 import importlib
@@ -18,9 +16,6 @@ from pathlib import Path
 # Load environment variables from .env file (for Celery Redis configuration)
 from dotenv import load_dotenv
 load_dotenv()
-
-# Email utilities for password reset
-from email_utils import send_reset_email, send_verification_email
 
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -59,7 +54,7 @@ except ValueError:
 SEGMENT_WORKERS = max(1, _segment_workers_env)
 
 # Force parallel segmentation for multi-GPU/multi-worker distribution (only if YOLO fails)
-os.environ.setdefault('MIN_SEGMENTS', '4')  # Force-split for parallel GPU processing
+os.environ.setdefault('MIN_SEGMENTS', '5')  # Fallback split if YOLO finds 0-1 segments
 os.environ.setdefault('MIN_CHUNK_FRAMES', '60')  # Minimum frames per chunk (fallback when YOLO fails)
 
 # Create directories
@@ -158,13 +153,16 @@ import json
 import time
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import redis
 import threading
 import secrets
 import hmac
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import subprocess
+import smtplib
+import ssl
+from email.message import EmailMessage
 
 # Stripe for billing (optional - gracefully handle if not installed)
 try:
@@ -226,228 +224,17 @@ except Exception as e:
     if not GPU_AVAILABLE:
         print(f"[INFO] FFmpeg not available (API-only mode): {e}")
 
-# GPU-ONLY ENCODER CONFIG: Maximum speed with NVENC
-# NO CPU FALLBACK - full GPU extreme speed, no overhead
-ENCODER_CONFIG = {
-    'codec': 'h264_nvenc',
-    'preset': 'p1',  # Fastest NVENC preset
-    'fallback_preset': 'p4',  # Balanced fallback if p1 fails
-    'name': 'NVENC (GPU)'
-}
-
-if FFMPEG_EXE:
-    print(f"[OK] Video encoder: {ENCODER_CONFIG['name']} - EXTREME SPEED MODE")
-    print(f"[OK] No CPU fallback - pure GPU pipeline for maximum performance")
-
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
 # Stores frames/masks in RAM for instant access (no Redis, no disk!)
 FRAME_CACHE = {}
 FRAME_CACHE_LOCK = threading.Lock()
 
-# Zero-copy frame buffer for direct GPU→FFmpeg piping
-FRAME_BUFFER = {}
-FRAME_BUFFER_LOCK = threading.Lock()
-
-class FramePipeEncoder:
-    """
-    Zero-copy frame encoder that pipes frames directly to FFmpeg.
-    Eliminates disk I/O bottleneck by keeping frames in memory.
-    """
-
-    def __init__(self, video_id, total_frames, width, height, fps):
-        self.video_id = video_id
-        self.total_frames = total_frames
-        self.width = width
-        self.height = height
-        self.fps = fps
-        self.frames = [None] * total_frames  # Pre-allocate frame slots
-        self.frames_received = 0
-        self.lock = threading.Lock()
-
-    def add_frame(self, index, frame):
-        """Add a frame to the buffer at the specified index."""
-        with self.lock:
-            if 0 <= index < self.total_frames:
-                self.frames[index] = frame.copy()  # Copy to ensure persistence
-                if self.frames[index] is not None:
-                    self.frames_received += 1
-
-    def is_complete(self):
-        """Check if all frames have been received."""
-        with self.lock:
-            return self.frames_received >= self.total_frames
-
-    def get_missing_frames(self):
-        """Get list of missing frame indices."""
-        with self.lock:
-            return [i for i in range(self.total_frames) if self.frames[i] is None]
-
-    def encode_to_video(self, output_path):
-        """
-        Encode all buffered frames directly to video via FFmpeg pipe.
-        Uses rawvideo input to bypass filesystem entirely.
-        """
-        import subprocess
-
-        missing = self.get_missing_frames()
-        if missing:
-            print(f"[PIPE ENCODER WARNING] Missing {len(missing)} frames!")
-            print(f"[PIPE ENCODER WARNING] Missing indices: {missing[:20]}{'...' if len(missing) > 20 else ''}")
-            if missing:
-                print(f"[PIPE ENCODER WARNING] First missing: {missing[0]}, Last missing: {missing[-1]}")
-            # Fill missing frames with black or previous frame
-            for i in missing:
-                if i > 0 and self.frames[i-1] is not None:
-                    self.frames[i] = self.frames[i-1].copy()
-                else:
-                    self.frames[i] = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-
-        expected_duration = self.total_frames / self.fps if self.fps > 0 else 0
-        print(f"[PIPE ENCODER] Encoding {self.total_frames} frames ({self.width}x{self.height} @ {self.fps} fps)")
-        print(f"[PIPE ENCODER] Expected duration: {expected_duration:.2f}s")
-
-        # FFmpeg command for rawvideo pipe input
-        encode_cmd = [
-            FFMPEG_EXE, '-y',
-            '-f', 'rawvideo',
-            '-vcodec', 'rawvideo',
-            '-s', f'{self.width}x{self.height}',
-            '-pix_fmt', 'bgr24',
-            '-r', str(self.fps),
-            '-i', 'pipe:0',
-            '-c:v', ENCODER_CONFIG['codec'],
-            '-preset', ENCODER_CONFIG.get('preset', 'p4'),
-            '-b:v', '8M',
-            '-pix_fmt', 'yuv420p',
-            '-profile:v', 'main',
-            output_path
-        ]
-
-        print(f"[PIPE ENCODER] FFmpeg command: {' '.join(encode_cmd)}")
-
-        try:
-            # Launch FFmpeg process
-            process = subprocess.Popen(
-                encode_cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-
-            # Write all frames to stdin
-            for i, frame in enumerate(self.frames):
-                if frame is not None:
-                    process.stdin.write(frame.tobytes())
-                else:
-                    # Should not happen after filling missing frames
-                    black_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-                    process.stdin.write(black_frame.tobytes())
-
-            process.stdin.close()
-            stdout, stderr = process.communicate(timeout=300)
-
-            if process.returncode != 0:
-                print(f"[PIPE ENCODER ERROR] FFmpeg failed: {stderr.decode()}")
-                raise RuntimeError(f"FFmpeg encoding failed with code {process.returncode}")
-
-            output_size = os.path.getsize(output_path) / (1024 * 1024)
-            print(f"[PIPE ENCODER] ✓ Encoded: {output_size:.2f} MB")
-            return output_path
-
-        except subprocess.TimeoutExpired:
-            process.kill()
-            raise RuntimeError("FFmpeg encoding timed out after 300s")
-        except Exception as e:
-            print(f"[PIPE ENCODER ERROR] {e}")
-            raise
-
-    def clear(self):
-        """Clear all frames to free memory."""
-        with self.lock:
-            self.frames = [None] * self.total_frames
-            self.frames_received = 0
-
-# Cross-platform file locking utility for shared frame buffer
-import contextlib
-import platform
-import time
-
-@contextlib.contextmanager
-def file_lock(file_path, timeout=10):
-    """
-    Cross-platform file locking context manager.
-
-    Args:
-        file_path: Path to the file to lock
-        timeout: Maximum seconds to wait for lock (default 10)
-
-    Yields:
-        None (lock is held within context)
-
-    Raises:
-        TimeoutError: If lock cannot be acquired within timeout
-    """
-    lock_file = f"{file_path}.lock"
-    lock_fd = None
-    start_time = time.time()
-
-    try:
-        # Create lock file
-        lock_fd = open(lock_file, 'w')
-
-        # Platform-specific locking
-        if platform.system() == 'Windows':
-            import msvcrt
-            # Try to lock with timeout
-            while True:
-                try:
-                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
-                    break  # Lock acquired
-                except OSError:
-                    if time.time() - start_time > timeout:
-                        raise TimeoutError(f"Could not acquire lock on {file_path} within {timeout}s")
-                    time.sleep(0.01)  # 10ms retry interval
-        else:
-            import fcntl
-            # Try to lock with timeout
-            while True:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break  # Lock acquired
-                except OSError:
-                    if time.time() - start_time > timeout:
-                        raise TimeoutError(f"Could not acquire lock on {file_path} within {timeout}s")
-                    time.sleep(0.01)  # 10ms retry interval
-
-        yield  # Lock held during this block
-
-    finally:
-        # Release lock
-        if lock_fd:
-            try:
-                if platform.system() == 'Windows':
-                    import msvcrt
-                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-            except:
-                pass
-            lock_fd.close()
-
-        # Cleanup lock file
-        try:
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
-        except:
-            pass
-
 # Import faster-propainter modules for direct pipeline processing
 # Note: These imports are moved to inside functions to avoid startup errors
 # sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', 'faster-propainter-main'))
 # from watermark import pipeline as faster_propainter_pipeline
-# from mytimer import timer_decorator
+# from mytimer import timer_decorator  
 # from pre_post_process import crop_video_mask, merge_videos_with_mask
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web'))
@@ -455,7 +242,7 @@ app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath
 CORS(
     app,
     resources={r"/api/*": {"origins": "*"}},
-    supports_credentials=True,  # Enable cookies/sessions for authentication
+    supports_credentials=False,
     allow_headers=["Content-Type", "ngrok-skip-browser-warning"],
     expose_headers=["Content-Disposition"]
 )
@@ -475,8 +262,7 @@ if AUTH_ENABLED:
             db_pool = SimpleConnectionPool(
                 minconn=1,
                 maxconn=10,
-                dsn=DATABASE_URL,
-                connect_timeout=5  # 5 second timeout to prevent hanging
+                dsn=DATABASE_URL
             )
             print("[OK] Database connection pool initialized")
         else:
@@ -522,27 +308,6 @@ def require_auth(f):
                 'error': 'Authentication required. Please sign in.',
                 'signin_required': True
             }), 401
-
-        # Check email verification
-        email_verified = session.get('email_verified')
-        if email_verified is None:
-            # Fetch from database if not in session
-            try:
-                with get_db() as conn:
-                    cur = conn.cursor()
-                    cur.execute('SELECT email_verified FROM users WHERE id = %s', (user_id,))
-                    result = cur.fetchone()
-                    email_verified = result[0] if result else False
-                    session['email_verified'] = email_verified
-            except:
-                email_verified = False
-
-        if not email_verified:
-            return jsonify({
-                'status': 'error',
-                'error': 'Please verify your email address to use this feature.',
-                'email_verification_required': True
-            }), 403
 
         return f(*args, **kwargs)
     return decorated_function
@@ -659,6 +424,88 @@ def health_check():
         'status': 'ok',
         'message': 'Flask API server running - workers handle processing'
     })
+
+# ----------------------------------------------------------------------------
+# Email Verification
+# ----------------------------------------------------------------------------
+
+# Brevo SMTP configuration
+SMTP_SERVER = "smtp-relay.brevo.com"
+SMTP_PORT = 587
+SMTP_USERNAME = "9c3ca4001@smtp-brevo.com"
+SMTP_PASSWORD = "xsmtpsib-798b8db725baf9ad346d32e4ccae5bdcfc64f7c03d059b5aef8e6f82fa5da30b-IB5SjcNk2AV6NZ1f"
+SMTP_FROM = "markremoverai@gmail.com"
+
+def send_verification_email(to_email, token):
+    """Send email verification link to user."""
+    try:
+        # Build verification URL
+        base_url = os.getenv('SITE_URL', 'https://markremoverai.com')
+        verify_url = f"{base_url}/api/auth/verify?token={token}"
+
+        msg = EmailMessage()
+        msg["Subject"] = "Verify your email for MarkRemoverAI"
+        msg["From"] = SMTP_FROM
+        msg["To"] = to_email
+        msg.set_content(f"""
+Welcome to MarkRemoverAI!
+
+Please click the link below to verify your email address:
+
+{verify_url}
+
+This link will expire in 24 hours.
+
+If you didn't create an account, you can safely ignore this email.
+
+- The MarkRemoverAI Team
+""")
+
+        # Also set HTML version
+        msg.add_alternative(f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #667eea;">Welcome to MarkRemoverAI!</h2>
+        <p>Please click the button below to verify your email address:</p>
+        <p style="text-align: center; margin: 30px 0;">
+            <a href="{verify_url}"
+               style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                      padding: 14px 28px;
+                      text-decoration: none;
+                      border-radius: 8px;
+                      font-weight: bold;
+                      display: inline-block;">
+                Verify Email
+            </a>
+        </p>
+        <p style="color: #666; font-size: 14px;">
+            Or copy and paste this link into your browser:<br>
+            <a href="{verify_url}" style="color: #667eea;">{verify_url}</a>
+        </p>
+        <p style="color: #999; font-size: 12px; margin-top: 30px;">
+            This link will expire in 24 hours.<br>
+            If you didn't create an account, you can safely ignore this email.
+        </p>
+    </div>
+</body>
+</html>
+""", subtype='html')
+
+        # Send via Brevo SMTP
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls(context=ssl.create_default_context())
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(msg)
+
+        print(f"[EMAIL] Verification email sent to {to_email}")
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Failed to send verification email to {to_email}: {e}")
+        return False
 
 # ----------------------------------------------------------------------------
 # Authentication Routes (Google OAuth + Email/Password)
@@ -823,47 +670,32 @@ def auth_register():
             if cur.fetchone():
                 return jsonify({'error': 'Email already registered'}), 409
 
-            # Create user with 5 free credits (email_verified = FALSE)
+            # Generate verification token
+            verification_token = secrets.token_urlsafe(32)
+            token_expires = datetime.utcnow() + timedelta(hours=24)
+
+            # Create user with 5 free credits and verification token
             cur.execute(
-                'INSERT INTO users (email, password_hash, name, credits, email_verified) VALUES (%s, %s, %s, %s, %s) RETURNING id',
-                (email, password_hash, name or email.split('@')[0], 5, False)
+                '''INSERT INTO users (email, password_hash, name, credits, email_verified, verification_token, verification_token_expires)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id''',
+                (email, password_hash, name or email.split('@')[0], 5, False, verification_token, token_expires)
             )
             user_id = cur.fetchone()[0]
 
-            # Generate verification token
-            import secrets
-            from datetime import datetime, timedelta
-            verification_token = secrets.token_urlsafe(32)
-            expires_at = datetime.utcnow() + timedelta(hours=24)
-
-            # Store verification token
-            cur.execute('''
-                INSERT INTO email_verification_tokens (user_id, token, expires_at)
-                VALUES (%s, %s, %s)
-            ''', (user_id, verification_token, expires_at))
-
-            # Send verification email (use production URL, not request.host_url which returns Railway's internal URL)
-            site_url = os.getenv('SITE_URL', 'https://markremoverai.com')
-            verify_url = f"{site_url}/verify-email.html?token={verification_token}"
-            try:
-                send_verification_email(email, verify_url)
-                print(f"[AUTH] Verification email sent to {email}")
-            except Exception as mail_err:
-                print(f"[WARNING] Verification email failed for {email}: {mail_err}")
-
-            # Create session (but mark as unverified)
+            # Create session
             session['user_id'] = user_id
             session['email'] = email
             session['name'] = name or email.split('@')[0]
-            session['email_verified'] = False
             session.permanent = True
 
-            print(f"[AUTH] New user registered: {email} (5 free credits, pending verification)")
+            # Send verification email (async to not block response)
+            threading.Thread(target=send_verification_email, args=(email, verification_token)).start()
+
+            print(f"[AUTH] New user registered: {email} (5 free credits, verification email sent)")
 
             return jsonify({
                 'status': 'success',
-                'message': 'Registration successful. Please check your email to verify your account.',
-                'email_verification_required': True,
+                'message': 'Please check your email to verify your account',
                 'user': {
                     'id': user_id,
                     'email': email,
@@ -874,11 +706,8 @@ def auth_register():
             })
 
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
         print(f"[ERROR] Registration failed: {e}")
-        print(f"[ERROR] Full traceback:\n{error_details}")
-        return jsonify({'error': f'Registration failed: {str(e)}'}), 500
+        return jsonify({'error': 'Registration failed'}), 500
 
 
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
@@ -901,8 +730,8 @@ def auth_login():
         with get_db() as conn:
             cur = conn.cursor()
 
-            # Get user (including email_verified)
-            cur.execute('SELECT id, password_hash, name, credits, COALESCE(email_verified, FALSE) FROM users WHERE email = %s', (email,))
+            # Get user
+            cur.execute('SELECT id, password_hash, name, credits, email_verified FROM users WHERE email = %s', (email,))
             user = cur.fetchone()
 
             if not user:
@@ -918,26 +747,139 @@ def auth_login():
             session['user_id'] = user_id
             session['email'] = email
             session['name'] = name
-            session['email_verified'] = email_verified
             session.permanent = True
 
-            print(f"[AUTH] User logged in: {email} (verified: {email_verified})")
+            print(f"[AUTH] User logged in: {email}")
 
             return jsonify({
                 'status': 'success',
-                'email_verification_required': not email_verified,
                 'user': {
                     'id': user_id,
                     'email': email,
                     'name': name,
                     'credits': credits,
-                    'email_verified': email_verified
+                    'email_verified': email_verified or False
                 }
             })
 
     except Exception as e:
         print(f"[ERROR] Login failed: {e}")
         return jsonify({'error': 'Login failed'}), 500
+
+
+@app.route('/api/auth/verify', methods=['GET'])
+def auth_verify():
+    """Verify email address from verification link."""
+    token = request.args.get('token', '')
+
+    if not token:
+        return redirect('/login.html?error=missing_token')
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Find user by verification token
+            cur.execute(
+                'SELECT id, email, verification_token_expires FROM users WHERE verification_token = %s',
+                (token,)
+            )
+            user = cur.fetchone()
+
+            if not user:
+                print(f"[AUTH] Invalid verification token attempted")
+                return redirect('/login.html?error=invalid_token')
+
+            user_id, email, token_expires = user
+
+            # Check if token has expired
+            if token_expires and datetime.utcnow() > token_expires:
+                print(f"[AUTH] Expired verification token for {email}")
+                return redirect('/login.html?error=token_expired')
+
+            # Mark email as verified and clear the token
+            cur.execute(
+                '''UPDATE users
+                   SET email_verified = TRUE, verification_token = NULL, verification_token_expires = NULL
+                   WHERE id = %s''',
+                (user_id,)
+            )
+
+            # Create session so user is logged in after verification
+            session['user_id'] = user_id
+            session['email'] = email
+            session.permanent = True
+
+            print(f"[AUTH] Email verified for {email}")
+
+            # Redirect to home page
+            return redirect('/')
+
+    except Exception as e:
+        print(f"[ERROR] Email verification failed: {e}")
+        return redirect('/login.html?error=verification_failed')
+
+
+@app.route('/api/auth/resend-verification', methods=['POST', 'OPTIONS'])
+def auth_resend_verification():
+    """Resend verification email."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Not logged in'}), 401
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Get user info
+            cur.execute(
+                'SELECT email, email_verified, verification_token_expires FROM users WHERE id = %s',
+                (user_id,)
+            )
+            user = cur.fetchone()
+
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+
+            email, email_verified, last_token_expires = user
+
+            if email_verified:
+                return jsonify({'error': 'Email already verified'}), 400
+
+            # Rate limit: don't send if token was created less than 60 seconds ago
+            if last_token_expires:
+                token_created = last_token_expires - timedelta(hours=24)
+                if datetime.utcnow() < token_created + timedelta(seconds=60):
+                    return jsonify({'error': 'Please wait before requesting another email'}), 429
+
+            # Generate new token
+            verification_token = secrets.token_urlsafe(32)
+            token_expires = datetime.utcnow() + timedelta(hours=24)
+
+            cur.execute(
+                'UPDATE users SET verification_token = %s, verification_token_expires = %s WHERE id = %s',
+                (verification_token, token_expires, user_id)
+            )
+
+            # Send email
+            threading.Thread(target=send_verification_email, args=(email, verification_token)).start()
+
+            print(f"[AUTH] Resent verification email to {email}")
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Verification email sent'
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Resend verification failed: {e}")
+        return jsonify({'error': 'Failed to resend verification email'}), 500
 
 
 @app.route('/api/auth/status', methods=['GET'])
@@ -955,7 +897,7 @@ def auth_status():
         # Get current user data from database
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT email, name, credits, COALESCE(email_verified, FALSE) FROM users WHERE id = %s', (user_id,))
+            cur.execute('SELECT email, name, credits, email_verified FROM users WHERE id = %s', (user_id,))
             user = cur.fetchone()
 
             if not user:
@@ -966,14 +908,12 @@ def auth_status():
 
             return jsonify({
                 'authenticated': True,
-                'logged_in': True,
-                'email_verified': email_verified,
                 'user': {
                     'id': user_id,
                     'email': email,
                     'name': name,
                     'credits': credits,
-                    'email_verified': email_verified
+                    'email_verified': email_verified or False
                 }
             })
 
@@ -990,444 +930,6 @@ def auth_logout():
 
     session.clear()
     return jsonify({'status': 'success'})
-
-
-@app.route('/api/auth/verify-email', methods=['GET'])
-def verify_email():
-    """Verify email with token from email link."""
-    token = request.args.get('token')
-
-    if not token:
-        return jsonify({'error': 'Verification token required'}), 400
-
-    try:
-        from datetime import datetime
-        with get_db() as conn:
-            cur = conn.cursor()
-
-            # Find token and check validity
-            cur.execute('''
-                SELECT t.user_id, t.expires_at, t.used, u.email
-                FROM email_verification_tokens t
-                JOIN users u ON t.user_id = u.id
-                WHERE t.token = %s
-            ''', (token,))
-            result = cur.fetchone()
-
-            if not result:
-                return jsonify({'error': 'Invalid verification token'}), 400
-
-            user_id, expires_at, used, email = result
-
-            if used:
-                return jsonify({'error': 'This verification link has already been used'}), 400
-
-            if datetime.utcnow() > expires_at:
-                return jsonify({'error': 'Verification link has expired. Please request a new one.'}), 400
-
-            # Mark user as verified
-            cur.execute('UPDATE users SET email_verified = TRUE WHERE id = %s', (user_id,))
-
-            # Mark token as used
-            cur.execute('UPDATE email_verification_tokens SET used = TRUE WHERE token = %s', (token,))
-
-            # Update session if user is logged in
-            if session.get('user_id') == user_id:
-                session['email_verified'] = True
-
-            print(f"[AUTH] Email verified for user {email}")
-
-            return jsonify({
-                'status': 'success',
-                'message': 'Email verified successfully! You can now use all features.'
-            })
-
-    except Exception as e:
-        print(f"[ERROR] Email verification failed: {e}")
-        return jsonify({'error': 'Verification failed'}), 500
-
-
-@app.route('/api/auth/resend-verification', methods=['POST', 'OPTIONS'])
-def resend_verification():
-    """Resend verification email."""
-    if request.method == 'OPTIONS':
-        return ('', 204)
-
-    user_id = session.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'Please sign in first'}), 401
-
-    try:
-        from datetime import datetime, timedelta
-        import secrets
-
-        with get_db() as conn:
-            cur = conn.cursor()
-
-            # Check if already verified
-            cur.execute('SELECT email, email_verified FROM users WHERE id = %s', (user_id,))
-            result = cur.fetchone()
-
-            if not result:
-                return jsonify({'error': 'User not found'}), 404
-
-            email, email_verified = result
-
-            if email_verified:
-                return jsonify({'error': 'Email already verified'}), 400
-
-            # Check rate limit - only allow one email per minute
-            cur.execute('''
-                SELECT created_at FROM email_verification_tokens
-                WHERE user_id = %s
-                ORDER BY created_at DESC LIMIT 1
-            ''', (user_id,))
-            last_token = cur.fetchone()
-
-            if last_token:
-                time_since_last = datetime.utcnow() - last_token[0]
-                if time_since_last.total_seconds() < 60:
-                    return jsonify({'error': 'Please wait 1 minute before requesting another email'}), 429
-
-            # Generate new token
-            verification_token = secrets.token_urlsafe(32)
-            expires_at = datetime.utcnow() + timedelta(hours=24)
-
-            cur.execute('''
-                INSERT INTO email_verification_tokens (user_id, token, expires_at)
-                VALUES (%s, %s, %s)
-            ''', (user_id, verification_token, expires_at))
-
-            # Send verification email (use production URL, not request.host_url which returns Railway's internal URL)
-            site_url = os.getenv('SITE_URL', 'https://markremoverai.com')
-            verify_url = f"{site_url}/verify-email.html?token={verification_token}"
-            send_verification_email(email, verify_url)
-
-            print(f"[AUTH] Verification email resent to {email}")
-
-            return jsonify({
-                'status': 'success',
-                'message': 'Verification email sent'
-            })
-
-    except Exception as e:
-        print(f"[ERROR] Resend verification failed: {e}")
-        return jsonify({'error': 'Failed to send verification email'}), 500
-
-
-# ----------------------------------------------------------------------------
-# User Profile Routes
-# ----------------------------------------------------------------------------
-
-@app.route('/api/user/profile', methods=['GET', 'OPTIONS'])
-def get_user_profile():
-    """Get user profile information."""
-    if request.method == 'OPTIONS':
-        return ('', 204)
-
-    if not AUTH_ENABLED:
-        return jsonify({'error': 'Authentication disabled'}), 500
-
-    user_id = session.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'signin_required'}), 401
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT id, email, name, credits, created_at, google_id
-            FROM users
-            WHERE id = %s
-        ''', (user_id,))
-
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
-
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-
-        return jsonify({
-            'id': user[0],
-            'email': user[1],
-            'name': user[2],
-            'credits': user[3],
-            'created_at': user[4].isoformat() if user[4] else None,
-            'has_google_account': user[5] is not None
-        })
-
-    except Exception as e:
-        print(f"Error getting profile: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to get profile'}), 500
-
-
-@app.route('/api/user/profile', methods=['PUT', 'OPTIONS'])
-def update_user_profile():
-    """Update user profile (name, email)."""
-    if request.method == 'OPTIONS':
-        return ('', 204)
-
-    if not AUTH_ENABLED:
-        return jsonify({'error': 'Authentication disabled'}), 500
-
-    user_id = session.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'signin_required'}), 401
-
-    try:
-        data = request.get_json()
-        name = data.get('name', '').strip()
-
-        if not name:
-            return jsonify({'error': 'Name is required'}), 400
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            UPDATE users
-            SET name = %s
-            WHERE id = %s
-            RETURNING id, email, name, credits
-        ''', (name, user_id))
-
-        user = cursor.fetchone()
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-
-        return jsonify({
-            'id': user[0],
-            'email': user[1],
-            'name': user[2],
-            'credits': user[3]
-        })
-
-    except Exception as e:
-        print(f"Error updating profile: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to update profile'}), 500
-
-
-@app.route('/api/user/change-password', methods=['POST', 'OPTIONS'])
-def change_password():
-    """Change user password."""
-    if request.method == 'OPTIONS':
-        return ('', 204)
-
-    if not AUTH_ENABLED:
-        return jsonify({'error': 'Authentication disabled'}), 500
-
-    user_id = session.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'signin_required'}), 401
-
-    try:
-        data = request.get_json()
-        current_password = data.get('currentPassword', '')
-        new_password = data.get('newPassword', '')
-
-        if not current_password or not new_password:
-            return jsonify({'error': 'Current and new passwords are required'}), 400
-
-        if len(new_password) < 8:
-            return jsonify({'error': 'New password must be at least 8 characters'}), 400
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Get current password hash
-        cursor.execute('''
-            SELECT password_hash, google_id
-            FROM users
-            WHERE id = %s
-        ''', (user_id,))
-
-        user = cursor.fetchone()
-
-        if not user:
-            cursor.close()
-            conn.close()
-            return jsonify({'error': 'User not found'}), 404
-
-        # Check if user has Google account (no password)
-        if user[1] is not None and user[0] is None:
-            cursor.close()
-            conn.close()
-            return jsonify({'error': 'Google accounts cannot set passwords. Please use Google login.'}), 400
-
-        # Verify current password
-        if not user[0] or not bcrypt.checkpw(current_password.encode('utf-8'), user[0].encode('utf-8')):
-            cursor.close()
-            conn.close()
-            return jsonify({'error': 'Current password is incorrect'}), 401
-
-        # Hash new password
-        new_password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-        # Update password
-        cursor.execute('''
-            UPDATE users
-            SET password_hash = %s
-            WHERE id = %s
-        ''', (new_password_hash, user_id))
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-        return jsonify({'status': 'success', 'message': 'Password changed successfully'})
-
-    except Exception as e:
-        print(f"Error changing password: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to change password'}), 500
-
-
-# ----------------------------------------------------------------------------
-# Password Reset Routes
-# ----------------------------------------------------------------------------
-
-@app.route('/api/auth/forgot-password', methods=['POST', 'OPTIONS'])
-def forgot_password():
-    """Request password reset email."""
-    if request.method == 'OPTIONS':
-        return ('', 204)
-
-    if not AUTH_ENABLED:
-        return jsonify({'error': 'Authentication disabled'}), 500
-
-    try:
-        data = request.get_json()
-        email = data.get('email', '').strip().lower()
-
-        if not email:
-            return jsonify({'error': 'Email is required'}), 400
-
-        with get_db() as conn:
-            cursor = conn.cursor()
-
-            # Check if user exists
-            cursor.execute('SELECT id, name FROM users WHERE email = %s', (email,))
-            user = cursor.fetchone()
-
-            # Always return success to prevent email enumeration
-            # But only send email if user exists
-            if user:
-                import secrets
-                import datetime
-
-                # Generate reset token
-                token = secrets.token_urlsafe(32)
-                expires_at = datetime.datetime.now() + datetime.timedelta(hours=1)
-
-                # Store token in database
-                cursor.execute('''
-                    INSERT INTO password_reset_tokens (user_id, token, expires_at)
-                    VALUES (%s, %s, %s)
-                ''', (user[0], token, expires_at))
-
-                # Generate reset URL and send email
-                reset_url = f"{request.host_url}reset-password.html?token={token}"
-
-                try:
-                    send_reset_email(email, reset_url)
-                except Exception as mail_err:
-                    print(f"[WARNING] Email failed for {email}: {mail_err}")
-                    # Still return success to prevent email enumeration
-
-            cursor.close()
-
-        return jsonify({
-            'status': 'success',
-            'message': 'If an account exists with that email, a password reset link has been sent.'
-        })
-
-    except Exception as e:
-        print(f"Error in forgot password: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to process request'}), 500
-
-
-@app.route('/api/auth/reset-password', methods=['POST', 'OPTIONS'])
-def reset_password():
-    """Reset password using token."""
-    if request.method == 'OPTIONS':
-        return ('', 204)
-
-    if not AUTH_ENABLED:
-        return jsonify({'error': 'Authentication disabled'}), 500
-
-    try:
-        data = request.get_json()
-        token = data.get('token', '')
-        new_password = data.get('newPassword', '')
-
-        if not token or not new_password:
-            return jsonify({'error': 'Token and new password are required'}), 400
-
-        if len(new_password) < 8:
-            return jsonify({'error': 'Password must be at least 8 characters'}), 400
-
-        with get_db() as conn:
-            cursor = conn.cursor()
-
-            # Find valid token
-            cursor.execute('''
-                SELECT user_id, expires_at
-                FROM password_reset_tokens
-                WHERE token = %s AND used = FALSE
-            ''', (token,))
-
-            reset_token = cursor.fetchone()
-
-            if not reset_token:
-                cursor.close()
-                return jsonify({'error': 'Invalid or expired reset token'}), 400
-
-            # Check if token expired
-            import datetime
-            if reset_token[1] < datetime.datetime.now():
-                cursor.close()
-                return jsonify({'error': 'Reset token has expired'}), 400
-
-            # Hash new password
-            password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-            # Update password
-            cursor.execute('''
-                UPDATE users
-                SET password_hash = %s
-                WHERE id = %s
-            ''', (password_hash, reset_token[0]))
-
-            # Mark token as used
-            cursor.execute('''
-                UPDATE password_reset_tokens
-                SET used = TRUE
-                WHERE token = %s
-            ''', (token,))
-
-            cursor.close()
-
-        return jsonify({'status': 'success', 'message': 'Password reset successfully'})
-
-    except Exception as e:
-        print(f"Error resetting password: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to reset password'}), 500
-
 
 # ----------------------------------------------------------------------------
 # End Authentication Routes
@@ -1880,18 +1382,16 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
     seg_video_path = os.path.join(TEMP_DIR, f"{seg_prefix}.mp4")
 
     seg_label = f"{seg_idx + 1}/{total_segments}"
-    encoder_name = ENCODER_CONFIG['name'] if ENCODER_CONFIG else 'default'
-    print(f"   [ENCODE]  Encoding segment {seg_label} to video ({encoder_name})...")
+    print(f"   [ENCODE]  Encoding segment {seg_label} to video (GPU NVENC)...")
 
     try:
-        # Use detected encoder (NVENC if available, libx264 CPU fallback)
+        # Try faster preset p1 for maximum speed, fallback to p4 if fails
         encode_cmd = [
             FFMPEG_EXE, '-y',
             '-framerate', str(fps),
-            '-start_number', '0',  # Start from 0000.png
-            '-i', os.path.join(seg_cleaned_dir, '%04d.png').replace('\\', '/'),
-            '-c:v', ENCODER_CONFIG['codec'],
-            '-preset', ENCODER_CONFIG['preset'],
+            '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+            '-c:v', 'h264_nvenc',
+            '-preset', 'p1',  # Fastest NVENC preset (was p4)
             '-b:v', '8M',  # Increased bitrate for better quality at higher speed
             '-bufsize', '16M',
             '-pix_fmt', 'yuv420p',
@@ -1901,11 +1401,10 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
         result = subprocess.run(encode_cmd, capture_output=True, text=True)
 
         if result.returncode != 0:
-            # Fallback to slower preset if fast preset fails
-            print(f"   [WARNING]  {ENCODER_CONFIG['preset']} preset failed, trying {ENCODER_CONFIG['fallback_preset']}...")
-            print(f"   [DEBUG] Error: {result.stderr[:500]}")  # Show first 500 chars of error
-            encode_cmd[encode_cmd.index('-preset') + 1] = ENCODER_CONFIG['fallback_preset']
-            result = subprocess.run(encode_cmd, capture_output=True, text=True, check=True)
+            # Fallback to p4 if p1 fails
+            print(f"   [WARNING]  p1 preset failed, trying p4...")
+            encode_cmd[encode_cmd.index('-preset') + 1] = 'p4'
+            subprocess.run(encode_cmd, capture_output=True, check=True)
 
         print(f"   [OK] Segment {seg_label} encoded successfully")
         return seg_idx, seg_video_path
@@ -2047,42 +1546,25 @@ def background_encoder_worker():
         try:
             redis_client = celery.backend.client
 
-            # Configure pubsub with NO timeout (keepalive disabled for Railway proxy compatibility)
+            # Configure pubsub with NO timeout and keepalive
             pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
             pubsub.connection_pool.connection_kwargs['socket_timeout'] = None
-            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = False
+            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = True
+            pubsub.connection_pool.connection_kwargs['socket_keepalive_options'] = {
+                1: 60,   # TCP_KEEPIDLE
+                2: 10,   # TCP_KEEPINTVL
+                3: 6     # TCP_KEEPCNT
+            }
 
             pubsub.subscribe('segment_ready')
 
             print("[BACKGROUND ENCODER] Listening for segment completion signals...")
-            print("[BACKGROUND ENCODER] Socket keepalive enabled with 30s timeout!")
+            print("[BACKGROUND ENCODER] Socket keepalive enabled - NO timeout!")
             print("[BACKGROUND ENCODER] PARALLEL MODE: Up to 4 concurrent NVENC streams!")
 
             # Create thread pool for parallel encoding (4 matches SEGMENT_WORKERS)
             with ThreadPoolExecutor(max_workers=4, thread_name_prefix="EncoderThread") as executor:
-                # Use get_message with timeout instead of blocking listen()
-                # This prevents indefinite blocking and allows graceful shutdown
-                last_heartbeat = time.time()
-                heartbeat_interval = 30  # 30 second heartbeat
-
-                while True:
-                    # Get message with timeout (non-blocking with periodic wakeup)
-                    message = pubsub.get_message(timeout=5.0)
-
-                    # Heartbeat check - ensure connection is alive
-                    if time.time() - last_heartbeat > heartbeat_interval:
-                        try:
-                            # Ping Redis to verify connection
-                            redis_client.ping()
-                            last_heartbeat = time.time()
-                        except Exception as e:
-                            print(f"[BACKGROUND ENCODER] Heartbeat failed: {e}")
-                            raise  # Trigger reconnection
-
-                    if message is None:
-                        # No message - continue waiting
-                        continue
-
+                for message in pubsub.listen():
                     if message['type'] == 'message':
                         try:
                             data = json.loads(message['data'])
@@ -2141,19 +1623,9 @@ def background_encoder_worker():
         except Exception as e:
             print(f"[BACKGROUND ENCODER] Connection lost: {e}")
             traceback.print_exc()
-
-            # Cleanup pubsub connection before reconnecting
-            try:
-                if 'pubsub' in locals():
-                    print("[BACKGROUND ENCODER] Closing old pubsub connection...")
-                    pubsub.unsubscribe()
-                    pubsub.close()
-            except Exception as cleanup_error:
-                print(f"[BACKGROUND ENCODER] Cleanup error (ignoring): {cleanup_error}")
-
             print("[BACKGROUND ENCODER] Reconnecting in 2 seconds...")
             time.sleep(2)
-            # Loop continues - auto-reconnect with fresh connection!
+            # Loop continues - auto-reconnect!
 
 
 def encode_segment_background(redis_client, data):
@@ -2186,7 +1658,7 @@ def encode_segment_background(redis_client, data):
     fps = float(segment_info.get('fps', 30))
     frame_count = int(segment_info.get('frame_count', 0))
     base_name = segment_info.get('base_name', 'video')
-    # [FIX] SHARED BUFFER: Get frame range for this segment
+    # 🔥 SHARED BUFFER: Get frame range for this segment
     start_frame = int(segment_info.get('start_frame', 0))
     end_frame = int(segment_info.get('end_frame', frame_count - 1))
 
@@ -2199,41 +1671,9 @@ def encode_segment_background(redis_client, data):
     print(f"[ENCODER] Encoding segment {seg_idx}: frames {start_frame}-{end_frame} ({frame_count} frames) @ {fps} fps...")
     encode_start = time.time()
 
-    # 🔒 WAIT FOR FRAMES: Ensure all segment frames are available before encoding
-    # This prevents race condition where encoder starts before frames are written
-    expected_frames = end_frame - start_frame + 1
-    max_wait = 30  # seconds
-    wait_start = time.time()
-
-    while True:
-        missing_frames = []
-        for global_idx in range(start_frame, end_frame + 1):
-            frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
-            if not os.path.exists(frame_path):
-                missing_frames.append(global_idx)
-
-        if not missing_frames:
-            break  # All frames available
-
-        if time.time() - wait_start > max_wait:
-            print(f"[ENCODER ERROR] Timeout waiting for frames after {max_wait}s!")
-            print(f"[ENCODER ERROR] Missing {len(missing_frames)}/{expected_frames} frames: {missing_frames[:20]}...")
-            raise RuntimeError(f"Timeout: {len(missing_frames)} frames missing for segment {seg_idx}")
-
-        # Wait and retry
-        time.sleep(0.1)
-
-    print(f"[ENCODER] All {expected_frames} frames available for segment {seg_idx}")
-
-    # [FIX] SHARED BUFFER: Create file list for this segment's frames only
+    # 🔥 SHARED BUFFER: Create file list for this segment's frames only
     # (frames are named by global index in shared buffer)
     file_list_path = os.path.join(TEMP_DIR, f"encode_seg{seg_idx}_{video_id}.txt")
-    frames_added = 0
-
-    print(f"[ENCODER DEBUG] Creating file list for segment {seg_idx}")
-    print(f"[ENCODER DEBUG] Frame range: {start_frame}-{end_frame} ({expected_frames} frames expected)")
-    print(f"[ENCODER DEBUG] Source dir: {cleaned_dir}")
-
     with open(file_list_path, 'w') as f:
         for global_idx in range(start_frame, end_frame + 1):
             frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
@@ -2243,101 +1683,28 @@ def encode_segment_background(redis_client, data):
                 # Use duration 1/fps for each frame
                 f.write(f"file '{abs_path}'\n")
                 f.write(f"duration {1/fps}\n")
-                frames_added += 1
-            else:
-                print(f"[ENCODER WARNING] Frame {global_idx:04d}.png missing after wait!")
+        # Last frame needs to be repeated for proper duration
+        last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
+        if os.path.exists(last_frame_path):
+            abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
+            f.write(f"file '{abs_path}'\n")
 
-        # [FIX] FIX: Must be INSIDE 'with' block so file handle 'f' is still open!
-        if frames_added != expected_frames:
-            print(f"[ENCODER WARNING] [!] MISSING FRAMES: Only {frames_added}/{expected_frames} frames in file list!")
-            # Last frame needs to be repeated for proper duration
-            last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
-            if os.path.exists(last_frame_path):
-                abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
-                print(f"[ENCODER WARNING] Adding fallback frame: {last_frame_path}")
-                f.write(f"file '{abs_path}'\n")
-                f.write(f"duration {1/fps}\n")
-                print(f"[ENCODER WARNING] Fallback frame added with duration {1/fps:.6f}s")
-
-    print(f"[ENCODER DEBUG] File list created: {frames_added}/{expected_frames} frames added")
-
-    # Verify file list was written correctly
-    try:
-        with open(file_list_path, 'r') as verify_f:
-            lines = verify_f.readlines()
-            file_entries = [l.strip() for l in lines if l.startswith('file ')]
-            duration_entries = [l.strip() for l in lines if l.startswith('duration ')]
-            print(f"[ENCODER DEBUG] File list verification: {len(file_entries)} files, {len(duration_entries)} durations")
-            if len(file_entries) != len(duration_entries):
-                print(f"[ENCODER WARNING] [!] MISMATCH: {len(file_entries)} files but {len(duration_entries)} durations!")
-            if len(file_entries) > 0:
-                print(f"[ENCODER DEBUG] First file: {file_entries[0]}")
-                print(f"[ENCODER DEBUG] Last file: {file_entries[-1]}")
-    except Exception as e:
-        print(f"[ENCODER ERROR] Could not verify file list: {e}")
-
-    # Hash verification: ensure frames are actually different
-    import hashlib
-    frame_hashes = []
-    for global_idx in range(start_frame, min(start_frame + 5, end_frame + 1)):
-        frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
-        if os.path.exists(frame_path):
-            try:
-                with open(frame_path, 'rb') as fh:
-                    frame_hashes.append(hashlib.md5(fh.read()).hexdigest()[:8])
-            except Exception:
-                pass
-
-    if len(frame_hashes) > 1:
-        if len(set(frame_hashes)) == 1:
-            print(f"[ENCODER ERROR] [!] First {len(frame_hashes)} frames have IDENTICAL hashes: {frame_hashes}")
-            print(f"[ENCODER ERROR] This indicates all frames are the same - STUCK FRAME DETECTED!")
-        else:
-            print(f"[ENCODER DEBUG] Frame uniqueness OK: {frame_hashes}")
-
-    # Encode using detected encoder (NVENC or CPU fallback)
-    # [FIX] FIX: Use pattern input instead of concat demuxer (more reliable for sequential PNGs)
-    # [FIX] FIX: Force forward slashes for Windows (FFmpeg pattern parser is POSIX-based)
-    pattern_path = os.path.join(cleaned_dir, '%04d.png').replace('\\', '/')
+    # Encode with NVENC using file list (concat demuxer)
     encode_cmd = [
         FFMPEG_EXE, '-y',
-        '-framerate', str(fps),  # MUST be before -i
-        '-start_number', str(start_frame),  # Start from segment's first frame
-        '-i', pattern_path,  # Pattern input (more reliable than concat)
-        '-frames:v', str(expected_frames),  # Limit to exact frame count
-        '-c:v', ENCODER_CONFIG['codec'],
-        '-preset', ENCODER_CONFIG['fallback_preset'],  # Use fallback preset (more stable)
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', file_list_path,
+        '-c:v', 'h264_nvenc',
+        '-preset', 'p4',  # Balanced speed/quality
         '-b:v', '8M',
         '-pix_fmt', 'yuv420p',
         '-profile:v', 'main',
         seg_video_path
     ]
 
-    print(f"[ENCODER DEBUG] FFmpeg command: {' '.join(encode_cmd)}")
-
     try:
-        result = subprocess.run(encode_cmd, capture_output=True, text=True, timeout=300)
-
-        # Check for encoding errors and show stderr
-        if result.returncode != 0:
-            print(f"[ENCODER ERROR] FFmpeg failed with return code {result.returncode}")
-            print(f"   Command: {' '.join(encode_cmd)}")
-            print(f"   stderr: {result.stderr}")
-            # Debug: Show file list contents on failure
-            print(f"[ENCODER ERROR] File list contents ({file_list_path}):")
-            try:
-                with open(file_list_path, 'r') as debug_f:
-                    file_list_contents = debug_f.read()
-                    # Show first 50 lines or 2000 chars
-                    lines = file_list_contents.split('\n')
-                    if len(lines) > 50:
-                        print(f"   (showing first 50 of {len(lines)} lines)")
-                        print('\n'.join(lines[:50]))
-                    else:
-                        print(file_list_contents)
-            except Exception as read_err:
-                print(f"   Could not read file list: {read_err}")
-            raise subprocess.CalledProcessError(result.returncode, encode_cmd, result.stdout, result.stderr)
+        result = subprocess.run(encode_cmd, capture_output=True, check=True, text=True, timeout=300)
         encode_duration = time.time() - encode_start
 
         encoded_size_mb = os.path.getsize(seg_video_path) / (1024 * 1024)
@@ -2351,46 +1718,17 @@ def encode_segment_background(redis_client, data):
 
         # Cleanup file list and frames after successful encoding
         if os.path.exists(file_list_path):
-            try:
-                os.remove(file_list_path)
-            except PermissionError:
-                # Windows file locking - FFmpeg may still have handle open
-                # Try after small delay
-                import time
-                time.sleep(0.1)
-                try:
-                    os.remove(file_list_path)
-                except (PermissionError, OSError):
-                    # Still locked - skip cleanup (temp file, not critical)
-                    pass
+            os.remove(file_list_path)
 
         # Note: Don't cleanup shared_cleaned_dir yet - other segments may need it!
         # Final cleanup happens after all segments are encoded
 
     except subprocess.CalledProcessError as e:
         print(f"[ENCODER ERROR] Encoding failed for segment {seg_idx}!")
-        print(f"   Command: {' '.join(encode_cmd)}")
-        print(f"   Return code: {e.returncode}")
-        print(f"   stderr: {e.stderr if e.stderr else '(no stderr captured)'}")
-        print(f"   Encoder: {ENCODER_CONFIG['codec']} (preset: {ENCODER_CONFIG['fallback_preset']})")
-        # Cleanup partial file
-        if os.path.exists(seg_video_path):
-            try:
-                os.remove(seg_video_path)
-                print(f"   [CLEANUP] Removed partial video file")
-            except:
-                pass
+        print(f"   stderr: {e.stderr}")
         raise
-    except subprocess.TimeoutExpired as e:
+    except subprocess.TimeoutExpired:
         print(f"[ENCODER ERROR] Encoding timed out after 300s for segment {seg_idx}")
-        print(f"   Command: {' '.join(encode_cmd)}")
-        # Cleanup partial file
-        if os.path.exists(seg_video_path):
-            try:
-                os.remove(seg_video_path)
-                print(f"   [CLEANUP] Removed partial video file after timeout")
-            except:
-                pass
         raise
 
 
@@ -2398,13 +1736,26 @@ def trigger_finalization(redis_client, video_id, total_segments):
     """
     Concatenate all encoded segments and merge audio.
     Called automatically when all segments are encoded.
-
-    ZERO-COPY MODE: If FRAME_BUFFER is available, encode directly from memory
-    to bypass disk I/O race conditions that cause stuck frames.
     """
     import subprocess
 
     print(f"\n[FINALIZE] Starting finalization for video {video_id}")
+
+    # Collect all segment video paths from Redis (in order)
+    segment_paths = []
+    for seg_idx in range(total_segments):
+        segment_key = f"video:{video_id}:segment:{seg_idx}"
+        encoded_path_raw = redis_client.hget(segment_key, 'encoded_path')
+
+        # Decode bytes to string
+        encoded_path = encoded_path_raw.decode() if isinstance(encoded_path_raw, bytes) else encoded_path_raw
+
+        if not encoded_path or not os.path.exists(encoded_path):
+            raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
+
+        segment_paths.append(encoded_path)
+
+    print(f"[FINALIZE] Found {len(segment_paths)} encoded segments")
 
     # Get video metadata (decode bytes)
     base_name_raw = redis_client.get(f"video:{video_id}:base_name")
@@ -2413,84 +1764,27 @@ def trigger_finalization(redis_client, video_id, total_segments):
     video_path_raw = redis_client.get(f"video:{video_id}:video_path")
     video_path = video_path_raw.decode() if isinstance(video_path_raw, bytes) else video_path_raw
 
-    # Try zero-copy encoding from FRAME_BUFFER first
-    use_zero_copy = False
-    with FRAME_BUFFER_LOCK:
-        if video_id in FRAME_BUFFER:
-            buffer = FRAME_BUFFER[video_id]
-            print(f"[FINALIZE] Zero-copy mode: FRAME_BUFFER has {buffer.frames_received}/{buffer.total_frames} frames")
+    # Create concat list
+    concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
+    with open(concat_list_path, 'w') as f:
+        for seg_path in segment_paths:
+            abs_path = os.path.abspath(seg_path).replace('\\', '/')
+            f.write(f"file '{abs_path}'\n")
 
-            # Use zero-copy if we have most frames (allow some missing)
-            if buffer.frames_received >= buffer.total_frames * 0.9:
-                use_zero_copy = True
-                print(f"[FINALIZE] ✓ Using zero-copy encoding from memory buffer")
-            else:
-                print(f"[FINALIZE] [!] Buffer incomplete - falling back to segment concatenation")
+    # Concatenate with copy codec (instant - no re-encoding)
+    temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
 
-    if use_zero_copy:
-        # Encode entire video directly from memory buffer
-        temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
+    concat_cmd = [
+        FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
+        '-i', concat_list_path,
+        '-c', 'copy',  # No re-encoding - instant!
+        temp_processed
+    ]
 
-        with FRAME_BUFFER_LOCK:
-            buffer = FRAME_BUFFER[video_id]
-            print(f"[FINALIZE] Encoding {buffer.frames_received} frames from memory to {temp_processed}")
-            buffer.encode_to_video(temp_processed)
-
-        # Verify output
-        if not os.path.exists(temp_processed) or os.path.getsize(temp_processed) == 0:
-            print(f"[FINALIZE ERROR] Zero-copy encoding failed - falling back to segment concatenation")
-            use_zero_copy = False
-        else:
-            output_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
-            print(f"[FINALIZE] ✓ Zero-copy encoded: {output_size_mb:.2f} MB")
-
-        # Cleanup buffer
-        with FRAME_BUFFER_LOCK:
-            if video_id in FRAME_BUFFER:
-                del FRAME_BUFFER[video_id]
-                print(f"[FINALIZE] Cleaned up FRAME_BUFFER for {video_id}")
-
-    if not use_zero_copy:
-        # Collect all segment video paths from Redis (in order)
-        segment_paths = []
-        for seg_idx in range(total_segments):
-            segment_key = f"video:{video_id}:segment:{seg_idx}"
-            encoded_path_raw = redis_client.hget(segment_key, 'encoded_path')
-
-            # Decode bytes to string
-            encoded_path = encoded_path_raw.decode() if isinstance(encoded_path_raw, bytes) else encoded_path_raw
-
-            if not encoded_path or not os.path.exists(encoded_path):
-                raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
-
-            segment_paths.append(encoded_path)
-
-        print(f"[FINALIZE] Found {len(segment_paths)} encoded segments")
-
-        # Create concat list
-        concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
-        with open(concat_list_path, 'w') as f:
-            for seg_path in segment_paths:
-                abs_path = os.path.abspath(seg_path).replace('\\', '/')
-                f.write(f"file '{abs_path}'\n")
-
-        # Concatenate with copy codec (instant - no re-encoding)
-        temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
-
-        concat_cmd = [
-            FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
-            '-i', concat_list_path,
-            '-c', 'copy',  # No re-encoding - instant!
-            temp_processed
-        ]
-
-        print(f"[FINALIZE] Concatenating segments with copy codec...")
-        subprocess.run(concat_cmd, capture_output=True, check=True, text=True, timeout=60)
-        concat_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
-        print(f"[FINALIZE] ✓ Concatenated: {concat_size_mb:.2f} MB")
-    else:
-        segment_paths = []  # No segment cleanup needed for zero-copy
-        concat_list_path = None
+    print(f"[FINALIZE] Concatenating segments with copy codec...")
+    subprocess.run(concat_cmd, capture_output=True, check=True, text=True, timeout=60)
+    concat_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
+    print(f"[FINALIZE] ✓ Concatenated: {concat_size_mb:.2f} MB")
 
     # Merge audio from original
     final_output = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
@@ -2531,13 +1825,13 @@ def trigger_finalization(redis_client, video_id, total_segments):
         print(f"[FINALIZE] Using processed video only")
 
     # Cleanup
-    if concat_list_path and os.path.exists(concat_list_path):
+    if os.path.exists(concat_list_path):
         os.remove(concat_list_path)
     for seg_path in segment_paths:
         if os.path.exists(seg_path):
             os.remove(seg_path)
 
-    # [FIX] SHARED BUFFER: Cleanup shared frame directory after finalization
+    # 🔥 SHARED BUFFER: Cleanup shared frame directory after finalization
     # Get shared_cleaned_dir from first segment's metadata
     segment_key = f"video:{video_id}:segment:0"
     shared_cleaned_dir_raw = redis_client.hget(segment_key, 'cleaned_dir')
@@ -2550,7 +1844,7 @@ def trigger_finalization(redis_client, video_id, total_segments):
     final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
     print(f"[FINALIZE] ✓ Final video ready: {final_output} ({final_size_mb:.2f} MB)")
 
-    # [FIX] UPLOAD TO RAILWAY: If running on local worker, upload result to API server
+    # 🔥 UPLOAD TO RAILWAY: If running on local worker, upload result to API server
     uploaded_path = None
     tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
     upload_enabled = os.getenv('UPLOAD_RESULT_BACK', '1')
@@ -2558,16 +1852,16 @@ def trigger_finalization(redis_client, video_id, total_segments):
     print(f"[FINALIZE] Upload config - TUNNEL_URL: {'SET' if os.getenv('TUNNEL_URL') else 'NOT SET'}, API_BASE_URL: {'SET' if os.getenv('API_BASE_URL') else 'NOT SET'}, UPLOAD_RESULT_BACK: {upload_enabled}")
 
     if not tunnel:
-        print(f"[FINALIZE] [!]  Skipping Railway upload - TUNNEL_URL/API_BASE_URL not set")
+        print(f"[FINALIZE] ⚠️  Skipping Railway upload - TUNNEL_URL/API_BASE_URL not set")
         print(f"[FINALIZE] 💡 Set TUNNEL_URL=https://your-railway-app.railway.app to enable auto-upload")
     elif upload_enabled != '1':
-        print(f"[FINALIZE] [!]  Skipping Railway upload - UPLOAD_RESULT_BACK={upload_enabled} (set to '1' to enable)")
+        print(f"[FINALIZE] ⚠️  Skipping Railway upload - UPLOAD_RESULT_BACK={upload_enabled} (set to '1' to enable)")
 
     if tunnel and upload_enabled == '1':
         try:
             import requests
             upload_url = tunnel.rstrip('/') + '/api/upload-result'
-            print(f"[FINALIZE] [UPLOAD] Uploading result to Railway: {upload_url}")
+            print(f"[FINALIZE] 📤 Uploading result to Railway: {upload_url}")
 
             # Quick connectivity test (15 second timeout) - fail fast if server down
             requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
@@ -2583,7 +1877,7 @@ def trigger_finalization(redis_client, video_id, total_segments):
                 j = resp.json()
                 if j.get('status') == 'success' and j.get('result_url'):
                     uploaded_path = j['result_url']
-                    print(f"[FINALIZE] [OK] Result uploaded to Railway: {uploaded_path}")
+                    print(f"[FINALIZE] ✅ Result uploaded to Railway: {uploaded_path}")
                     # Update Redis with Railway path instead of local path
                     redis_client.set(f"video:{video_id}:final_path", uploaded_path)
                     redis_client.set(f"video:{video_id}:uploaded", "true")
@@ -2599,14 +1893,14 @@ def trigger_finalization(redis_client, video_id, total_segments):
         redis_client.set(f"video:{video_id}:final_path", final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
 
-    # [FIX] FIX: Update distributed tracking to mark all segments complete
+    # 🔥 FIX: Update distributed tracking to mark all segments complete
     # Status endpoint checks segments:{video_id} to see progress
     # Without this, frontend shows "Segment 0/X complete" forever
     tracking_key = f"segments:{video_id}"
     total_segments_bytes = redis_client.get(f"{tracking_key}:total")
     if total_segments_bytes:
         redis_client.set(tracking_key, int(total_segments_bytes))  # Mark all segments complete
-        print(f"[FINALIZE] [OK] Marked all {int(total_segments_bytes)} segments complete in Redis tracking")
+        print(f"[FINALIZE] ✅ Marked all {int(total_segments_bytes)} segments complete in Redis tracking")
 
 # ============================================================================
 # REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
@@ -2660,7 +1954,7 @@ def start_redis_download_poller():
                         continue
 
                     # Download video to cache
-                    print(f"[DOWNLOAD] Worker {os.getpid()}: Detected download signal for {video_id}")
+                    print(f"📥 Worker {os.getpid()}: Detected download signal for {video_id}")
                     print(f"   [DOWNLOAD]  Downloading: {download_url}")
 
                     try:
@@ -2865,7 +2159,7 @@ def _check_propainter_assets() -> bool:
 
 def get_detector():
     """
-    Lazy load the YOLO detector with torch.compile optimization.
+    Lazy load the YOLO detector (TensorRT if available).
     Note: This is used by Celery workers on cloud machines, not the local Flask server.
     """
     global detector
@@ -2876,14 +2170,15 @@ def get_detector():
         print("=" * 60)
         from yolo_detector import YOLOWatermarkDetector
         import numpy as np
-        # Load PyTorch model with torch.compile optimization
-        detector = YOLOWatermarkDetector()
+        # Force TensorRT-only mode (no fallback to .pt)
+        # Will fail if engine not found - ensures maximum speed!
+        detector = YOLOWatermarkDetector(require_tensorrt=True)
 
-        # WARMUP: Run inference to trigger torch.compile compilation
-        print("[WARMUP] Running warmup inference for torch.compile...")
+        # WARMUP: Initialize TensorRT context (eliminates cold start overhead!)
+        print("[WARMUP] Running warmup inference to initialize TensorRT context...")
         dummy_batch = [np.zeros((640, 640, 3), dtype=np.uint8) for _ in range(64)]
         _ = detector.detect_batch(dummy_batch, confidence_threshold=0.15, batch_size=64)
-        print("[OK] YOLO warmed up! torch.compile ready for inference.")
+        print("[OK] YOLO warmed up! TensorRT context ready for max speed.")
 
         print("=" * 60)
         print("[OK] YOLO detector ready!")
@@ -3028,7 +2323,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     from urllib.parse import urljoin
                     import requests
                     download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
-                    print(f"[WEB] Downloading video: {download_url}")
+                    print(f"🌐 Downloading video: {download_url}")
                     r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
                     r.raise_for_status()
                     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -3045,28 +2340,23 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
 
-        # NVDEC hardware decoder - FIXED with .clone() to prevent buffer reuse
-        # Zero-copy encoding bypasses disk I/O race conditions
-        use_nvdec = True
+        # NVDEC hardware decoder - NO FALLBACKS! (1.16x faster than CPU)
+        use_nvdec = os.getenv("ENABLE_NVDEC", "0") == "1"
         nvdec_loader = None
         cap = None
 
         if use_nvdec:
-            try:
-                from nvdec_video_loader import NVDECVideoLoader
-                nvdec_loader = NVDECVideoLoader(video_path, device_id=0)
-                props = nvdec_loader.get_properties()
-                fps = int(props['fps'])
-                width = props['width']
-                height = props['height']
-                total_frames = props['total_frames']
-                print(f"[OK] NVDEC hardware decoder: {width}x{height} @ {fps} fps ({total_frames} frames)")
-            except ImportError:
-                print("[WARNING] nvdec_video_loader not available, falling back to CPU decoder")
-                use_nvdec = False
-
-        if not use_nvdec:
-            # CPU decoder fallback
+            # NVDEC REQUIRED - NO CPU FALLBACK!
+            from nvdec_video_loader import NVDECVideoLoader
+            nvdec_loader = NVDECVideoLoader(video_path, device_id=0)
+            props = nvdec_loader.get_properties()
+            fps = int(props['fps'])
+            width = props['width']
+            height = props['height']
+            total_frames = props['total_frames']
+            print(f"[OK] NVDEC hardware decoder: {width}x{height} @ {fps} fps ({total_frames} frames)")
+        else:
+            # CPU decoder (if NVDEC disabled)
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 raise Exception(f"Failed to open video: {video_path}")
@@ -3166,28 +2456,18 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
 
             # [INIT] EXTREME SPEED: Load all frames to memory for batch processing
-            print(f"[DOWNLOAD] Loading {total_frames} frames to memory (batch processing)...")
+            print(f"📥 Loading {total_frames} frames to memory (batch processing)...")
 
             import time
             decode_start = time.time()
 
             if use_nvdec:
-                # NVDEC hardware decoder - uses optimized library conversion
+                # NVDEC hardware decoder - NO FALLBACK! (1.16x faster)
                 all_frames = nvdec_loader.load_all_frames(to_numpy=True, color_format='BGR')
-
                 frames_processed = len(all_frames)
                 decode_time = time.time() - decode_start
                 print(f"[OK] NVDEC decoded {frames_processed} frames: {decode_time:.3f}s ({decode_time/frames_processed*1000:.2f}ms/frame)")
                 nvdec_loader.close()
-
-                # Uniqueness check
-                if frames_processed > 1:
-                    import hashlib
-                    h0 = hashlib.md5(all_frames[0].tobytes()).hexdigest()[:8]
-                    h1 = hashlib.md5(all_frames[-1].tobytes()).hexdigest()[:8]
-                    if h0 == h1:
-                        raise RuntimeError(f"[NVDEC ERROR] All frames identical (hash={h0}) - clone() fix failed!")
-                    print(f"[OK] NVDEC frames verified unique: first={h0}, last={h1}")
             else:
                 # CPU decoder (only if NVDEC disabled)
                 all_frames = []
@@ -3220,7 +2500,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             print(f"[OK] Batch detection complete: {batch_duration:.3f}s ({ms_per_frame:.2f}ms per frame)")
 
             # [INIT] EXTREME SPEED: Process detections and store in Redis (in-memory!)
-            print(f"[FAST] Creating masks and storing in Redis (in-memory)...")
+            print(f"⚡ Creating masks and storing in Redis (in-memory)...")
             zero_mask = np.zeros((height, width), dtype=np.uint8)
             bboxes_per_frame = []
             frames_with_watermark = 0
@@ -3243,7 +2523,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             use_sam2 = os.getenv('USE_SAM2_TRACKING', '0') == '1'
 
             if use_sam2 and frames_with_watermark > 0:
-                print(f"[FAST] Using SAM2-Tiny for temporal mask tracking (44ms/frame)...")
+                print(f"⚡ Using SAM2-Tiny for temporal mask tracking (44ms/frame)...")
                 mask_start = time.time()
 
                 # Import SAM2 tracker
@@ -3291,7 +2571,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 mask_duration = time.time() - mask_start
                 print(f"   SAM2 tracking: {mask_duration:.3f}s ({mask_duration/frames_processed*1000:.2f}ms/frame)")
             else:
-                print(f"[FAST] Creating {frames_processed} masks (GPU batch)...")
+                print(f"⚡ Creating {frames_processed} masks (GPU batch)...")
                 mask_start = time.time()
 
                 # Compatibility: Check if GPU masks are available (older commits may not have this)
@@ -3309,24 +2589,8 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 print(f"   Mask creation: {mask_duration:.3f}s ({frames_processed/mask_duration:.1f} masks/sec)")
 
             # [INIT] EXTREME SPEED: Store in global memory (INSTANT!)
-            print(f"[FAST] Storing {frames_processed} frames/masks in memory (INSTANT!)...")
+            print(f"⚡ Storing {frames_processed} frames/masks in memory (INSTANT!)...")
             mem_start = time.time()
-
-            # Validate tensor shapes before caching (defensive check)
-            if hasattr(all_frames, 'shape'):
-                print(f"[DEBUG] Cache: all_frames is tensor with shape {all_frames.shape}")
-                if len(all_frames.shape) == 5:
-                    print(f"[WARNING] Cache: squeezing batch dim from {all_frames.shape}")
-                    all_frames = all_frames.squeeze(0)
-                    print(f"[DEBUG] Cache: after squeeze {all_frames.shape}")
-            else:
-                print(f"[DEBUG] Cache: all_frames is list with {len(all_frames)} items")
-
-            if hasattr(all_masks, 'shape'):
-                print(f"[DEBUG] Cache: all_masks is tensor with shape {all_masks.shape}")
-                if len(all_masks.shape) == 5:
-                    print(f"[WARNING] Cache: squeezing batch dim from masks {all_masks.shape}")
-                    all_masks = all_masks.squeeze(0)
 
             # Store in global FRAME_CACHE (just storing Python references - INSTANT!)
             cache_key = f"video_data:{base_name}"
@@ -3347,14 +2611,14 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             # OPTIONAL: Also write to disk for backup/remote workers
             # Disabled by default for EXTREME SPEED (memory-only)
             if os.getenv('WRITE_FRAMES_TO_DISK', '0') == '1':
-                print(f"[CACHE] Also writing to disk (backup for remote workers)...")
+                print(f"💾 Also writing to disk (backup for remote workers)...")
                 for i in range(frames_processed):
                     mask_path = os.path.join(shared_mask_dir, f"{i:04d}.png")
                     cv2.imwrite(mask_path, all_masks[i])
                     frame_path = os.path.join(shared_frames_dir, f"{i:04d}.png")
                     cv2.imwrite(frame_path, all_frames[i])
             else:
-                print(f"[FAST] Skipping disk writes (pure memory for EXTREME SPEED!)")
+                print(f"⚡ Skipping disk writes (pure memory for EXTREME SPEED!)")
 
             if frames_processed == 0:
                 raise RuntimeError("No frames processed - video may be corrupted")
@@ -3375,7 +2639,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
                 print("[INFO] No segments detected - processing entire video as one segment")
 
-            # [CACHE] Cache segment results for future duplicate requests (1 hour TTL)
+            # 💾 Cache segment results for future duplicate requests (1 hour TTL)
             try:
                 import json
                 import time
@@ -3386,7 +2650,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     'cached_at': time.time()
                 }
                 redis_client.setex(cache_key, 3600, json.dumps(cache_data))
-                print(f"[CACHE] Cached YOLO results for '{base_name}' (1 hour TTL)")
+                print(f"💾 Cached YOLO results for '{base_name}' (1 hour TTL)")
             except Exception as e:
                 print(f"[WARNING]  Failed to cache results: {e}")
         else:
@@ -3399,27 +2663,19 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             if 'frames_with_watermark' not in locals():
                 frames_with_watermark = 0  # Fallback if not in cache
 
-        # Initialize frame buffer for zero-copy encoding (now that frames_processed is known)
-        if frames_processed and frames_processed > 0:
-            with FRAME_BUFFER_LOCK:
-                FRAME_BUFFER[video_id] = FramePipeEncoder(video_id, frames_processed, width, height, fps)
-            print(f"[OK] Frame buffer initialized for {video_id}: {frames_processed} frames @ {width}x{height}")
-        else:
-            print(f"[WARNING] Cannot initialize frame buffer - frames_processed is {frames_processed}")
-
         # Optional: force time-based splitting to ensure multi-GPU distribution
         try:
             import math
-            min_segments = int(os.getenv('MIN_SEGMENTS', '4'))  # Default 4 for parallel GPU processing
+            min_segments = int(os.getenv('MIN_SEGMENTS', '0'))
             min_chunk_frames = int(os.getenv('MIN_CHUNK_FRAMES', '60'))
         except Exception:
-            min_segments = 4
+            min_segments = 0
             min_chunk_frames = 60
 
-        # Force-split for parallel GPU processing when not enough segments detected
-        # Even if YOLO found 1 segment (stationary watermark), split for multi-GPU speed
-        if min_segments and len(segments) < min_segments and frames_processed >= min_chunk_frames:
-            # Split video into time-based chunks for parallel processing
+        # Force-split ONLY when YOLO fails (0-1 segments detected)
+        # If YOLO found multiple segments, preserve them - they represent distinct watermark regions
+        if min_segments and len(segments) <= 1 and frames_processed >= min_chunk_frames:
+            # YOLO failed - split video into time-based chunks for parallel processing
             base_seg = segments[0] if segments else (0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])
             s0, e0, bb = base_seg
             duration = e0 - s0 + 1
@@ -3436,12 +2692,12 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     new_segments[-1] = (new_segments[-1][0], e0, new_segments[-1][2])
                     break
             segments = new_segments
-            print(f"🪓 Force-split for parallel GPU: {len(segments)} segments (≈{chunk} frames each) - EXTREME SPEED MODE!")
+            print(f"🪓 Force-split enabled (YOLO fallback): created {len(segments)} time chunks (chunk≈{chunk} frames)")
 
         # Provide a base URL so OTHER workers can fetch frames/masks from this host
         temp_base_url = temp_base or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
         if temp_base_url:
-            print(f"[WEB] Shared temp base set for workers: {temp_base_url.rstrip('/')}/temp/")
+            print(f"🌐 Shared temp base set for workers: {temp_base_url.rstrip('/')}/temp/")
         else:
             print("[WARNING]  No TEMP_BASE_URL/TUNNEL_URL set; only preparing worker can read local frames.")
 
@@ -3508,174 +2764,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
         # We got the lock! This worker will dispatch segments
         print(f"🔒 Lock acquired - this worker will dispatch segments")
 
-        # [FAST] OPTIMIZATION: Choose processing strategy based on SEGMENT_WORKERS
-        # SEGMENT_WORKERS=1: Use CUDA streams (thread-based, one GPU context, 27-31ms/frame)
-        # SEGMENT_WORKERS>1: Use Celery chord (process-based, multiple GPU contexts, slower)
-        segment_workers = int(os.getenv('SEGMENT_WORKERS', '1'))
-
-        if segment_workers == 1:
-            # CUDA Streams approach: Process segments in parallel using threads + CUDA streams
-            print(f"[CUDA STREAMS] Processing {len(segments)} segments in parallel with CUDA streams (thread-based)")
-            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Processing {len(segments)} segments with CUDA streams'})
-
-            # Import threading utilities
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            import torch
-
-            # Add total_segments to each segment data
-            for seg in segment_tasks_data:
-                seg['total_segments'] = len(segments)
-
-            # Process all segments in parallel using threads + CUDA streams
-            segment_results = []
-
-            # Create a mock self object for direct calls (no Celery context)
-            class MockSelf:
-                pass  # process_segment_task will detect missing request.id and skip state updates
-
-            mock_self = MockSelf()
-
-            def process_segment_with_stream(seg_data, stream_id):
-                """Process one segment on a dedicated CUDA stream"""
-                try:
-                    print(f"[STREAM {stream_id}] Starting segment {seg_data['seg_idx']+1}/{len(segments)}")
-
-                    # Create and set CUDA stream for this segment
-                    if torch.cuda.is_available():
-                        stream = torch.cuda.Stream()
-                        with torch.cuda.stream(stream):
-                            print(f"[STREAM {stream_id}] Using dedicated CUDA stream for segment {seg_data['seg_idx']+1}")
-
-                            # Call process_segment_task.run() to bypass Celery task machinery
-                            # This calls the underlying function directly
-                            result = process_segment_task.run(seg_data)
-
-                            # Synchronize this stream before returning
-                            torch.cuda.current_stream().synchronize()
-                    else:
-                        # No CUDA, run on CPU
-                        result = process_segment_task.run(seg_data)
-
-                    print(f"[STREAM {stream_id}] Completed segment {seg_data['seg_idx']+1}/{len(segments)}")
-                    return result
-                except Exception as e:
-                    print(f"[STREAM {stream_id}] ERROR in segment {seg_data['seg_idx']+1}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    raise
-
-            # Use ThreadPoolExecutor to run segments in parallel
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                # Submit all segments to thread pool
-                futures = {
-                    executor.submit(process_segment_with_stream, seg_data, i): i
-                    for i, seg_data in enumerate(segment_tasks_data)
-                }
-
-                # Collect results as they complete
-                for future in as_completed(futures):
-                    stream_id = futures[future]
-                    try:
-                        result = future.result()
-                        segment_results.append(result)
-                    except Exception as e:
-                        print(f"[ERROR] Segment {stream_id} failed: {e}")
-                        raise
-
-            print(f"[OK] All {len(segment_results)} segments processed with CUDA streams!")
-
-            # CUDA Streams mode: segments processed synchronously, now encode final video
-            print(f"[ENCODE] Encoding final video from {len(segment_results)} segments...")
-
-            # Import encoding utilities
-            import subprocess
-            shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned")
-
-            # Check if we have cleaned frames
-            if not os.path.exists(shared_cleaned_dir):
-                raise RuntimeError(f"Cleaned frames directory not found: {shared_cleaned_dir}")
-
-            # Count frames
-            cleaned_frames = sorted([f for f in os.listdir(shared_cleaned_dir) if f.endswith('.png')])
-            print(f"[ENCODE] Found {len(cleaned_frames)} cleaned frames in {shared_cleaned_dir}")
-
-            # Encode video with NVENC
-            output_video = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
-            ffmpeg_path, ffprobe_path = get_ffmpeg_executables()
-
-            encode_cmd = [
-                ffmpeg_path,
-                '-y',
-                '-framerate', str(fps),
-                '-start_number', '0',  # Start from 0000.png
-                '-i', os.path.join(shared_cleaned_dir, '%04d.png').replace('\\', '/'),
-                '-c:v', 'h264_nvenc',
-                '-preset', 'p4',
-                '-tune', 'hq',
-                '-b:v', '5M',
-                '-maxrate', '8M',
-                '-pix_fmt', 'yuv420p',
-                output_video
-            ]
-
-            print(f"[ENCODE] Encoding cleaned frames to video...")
-            result_encode = subprocess.run(encode_cmd, capture_output=True, text=True)
-            if result_encode.returncode != 0:
-                raise RuntimeError(f"FFmpeg encoding failed: {result_encode.stderr}")
-
-            print(f"[ENCODE] Video encoded: {output_video}")
-
-            # Merge audio from original
-            if os.path.exists(video_path):
-                print(f"[AUDIO] Merging audio from original video...")
-                temp_video = output_video.replace('.mp4', '_temp.mp4')
-                os.rename(output_video, temp_video)
-
-                audio_cmd = [
-                    ffmpeg_path,
-                    '-y',
-                    '-i', temp_video,
-                    '-i', video_path,
-                    '-c:v', 'copy',
-                    '-c:a', 'aac',
-                    '-map', '0:v:0',
-                    '-map', '1:a:0?',
-                    '-shortest',
-                    output_video
-                ]
-
-                result_audio = subprocess.run(audio_cmd, capture_output=True, text=True)
-                if result_audio.returncode == 0:
-                    os.remove(temp_video)
-                    print(f"[AUDIO] Audio merged successfully")
-                else:
-                    os.rename(temp_video, output_video)
-                    print(f"[AUDIO] No audio track or merge failed, using video-only")
-
-            # Cleanup
-            print(f"[CLEANUP] Removing temp frames...")
-            shutil.rmtree(shared_cleaned_dir, ignore_errors=True)
-
-            # Release processing lock
-            try:
-                redis_client = celery.backend.client
-                lock_key = f'prepare_lock:{base_name}'
-                redis_client.delete(lock_key)
-                print(f"🔓 Released processing lock for video '{base_name}'")
-            except Exception as e:
-                print(f"[WARNING]  Failed to release lock: {e}")
-
-            print(f"[OK] Video processing complete! Output: {output_video}")
-
-            return {
-                'video_id': video_id,
-                'status': 'complete',
-                'message': f'Processed {len(segments)} segments with CUDA streams',
-                'output_path': output_video,
-                'segments_processed': len(segment_results)
-            }
-
-        # [FAST] FALLBACK: Use Celery chord to dispatch segments in parallel (process-based)
+        # ⚡ OPTIMIZATION: Use Celery chord to dispatch segments in parallel
         # Chord automatically waits for ALL segments to complete, then triggers finalize
         print(f"[INIT] Creating chord: {len(segments)} segment tasks → finalize callback")
         self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
@@ -3741,7 +2830,6 @@ def process_segment_task(self, segment_data):
     - Upload cleaned frames back
 
     This task can run on ANY available worker with a GPU
-    Can also be called directly from threads (for CUDA streams mode)
     """
     try:
         seg_idx = segment_data['seg_idx']
@@ -3757,16 +2845,7 @@ def process_segment_task(self, segment_data):
         video_path = segment_data['video_path']  # For background encoder audio merge
 
         print(f"\n[SEGMENT] Worker processing segment {seg_idx+1}/{total_segments}: frames {start_frame}-{end_frame}")
-
-        # Helper function to safely update state (works in both Celery and thread modes)
-        def safe_update_state(state=None, meta=None):
-            try:
-                if hasattr(self, 'request') and self.request.id:
-                    self.update_state(state=state, meta=meta)
-            except:
-                pass  # Called from thread, skip state updates
-
-        safe_update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
 
         # Import required modules
         import subprocess
@@ -3784,7 +2863,7 @@ def process_segment_task(self, segment_data):
         seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
         seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
 
-        # [FIX] SHARED FRAME BUFFER FIX: All segments merge onto same directory
+        # 🔥 SHARED FRAME BUFFER FIX: All segments merge onto same directory
         # This allows multiple segments to cooperatively edit the same frames
         shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned")
         seg_cleaned_dir = shared_cleaned_dir  # Backwards compatibility alias
@@ -3808,7 +2887,7 @@ def process_segment_task(self, segment_data):
         if is_multi_pc:
             # Multi-PC mode: Each worker downloads video directly (faster, no tunnel congestion)
             print(f"   📦 Multi-PC mode: downloading video directly for frames {start_frame}-{end_frame}...")
-            safe_update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading video'})
+            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Downloading video'})
 
             api_base = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or origin_base
             upload_filename = segment_data.get('upload_filename')
@@ -3831,7 +2910,7 @@ def process_segment_task(self, segment_data):
                         # Save to cache for future segments
                         with open(cached_video, 'wb') as f:
                             f.write(r.content)
-                        print(f"   [CACHE] Video cached for future segments")
+                        print(f"   💾 Video cached for future segments")
                         local_video = cached_video
 
                     cap2 = cv2.VideoCapture(local_video)
@@ -3858,14 +2937,14 @@ def process_segment_task(self, segment_data):
         else:
             # Single-PC mode: Try frame sharing first
             print(f"   [DOWNLOAD]  Loading frames {start_frame}-{end_frame}...")
-            safe_update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Loading frames'})
+            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Loading frames'})
 
             # [INIT] EXTREME SPEED: Try FRAME_CACHE first (pure memory, INSTANT!)
             cache_key = f"video_data:{base_name}"
             memory_hits = 0
             segment_frames_memory = []  # Store frames in memory (skip disk!)
 
-            # [FIX] TEMPORAL CONTEXT FIX: Extract with neighbor padding for ProPainter
+            # 🔥 TEMPORAL CONTEXT FIX: Extract with neighbor padding for ProPainter
             # neighbor_length=10 means ±5 frames needed for temporal context
             neighbor_padding = 5
             padded_start = max(0, start_frame - neighbor_padding)
@@ -3873,22 +2952,10 @@ def process_segment_task(self, segment_data):
 
             if cache_key in FRAME_CACHE:
                 # INSTANT access to frames in memory!
-                print(f"   [FAST] Loading from memory cache WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
+                print(f"   ⚡ Loading from memory cache WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
                 with FRAME_CACHE_LOCK:
                     cached = FRAME_CACHE[cache_key]
                     cached_frames = cached['frames']
-
-                    # Debug: Log cache data type and shape
-                    if hasattr(cached_frames, 'shape'):
-                        print(f"   [DEBUG] Cache frames type: tensor, shape: {cached_frames.shape}")
-                        if len(cached_frames.shape) == 5:
-                            print(f"   [WARNING] Cache has 5D tensor - len() will be wrong! Squeezing...")
-                            cached_frames = cached_frames.squeeze(0)
-                            cached['frames'] = cached_frames  # Update cache
-                            print(f"   [DEBUG] After squeeze: {cached_frames.shape}")
-                    else:
-                        print(f"   [DEBUG] Cache frames type: {type(cached_frames).__name__}, len: {len(cached_frames)}")
-
                     total_frames = len(cached_frames)  # Update total_frames from cache
 
                     # Recalculate padded_end with correct total_frames
@@ -3982,9 +3049,9 @@ def process_segment_task(self, segment_data):
 
         # [INIT] EXTREME SPEED: Try FRAME_CACHE first (pure memory, INSTANT!)
         print(f"   [MASKS] Loading masks...")
-        safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Loading masks'})
+        self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Loading masks'})
 
-        # [FIX] TEMPORAL CONTEXT FIX: Load masks WITH PADDING (same range as frames)
+        # 🔥 TEMPORAL CONTEXT FIX: Load masks WITH PADDING (same range as frames)
         masks_needed = list(range(padded_start, padded_end + 1))
         masks_succeeded = 0
         memory_mask_hits = 0
@@ -3992,7 +3059,7 @@ def process_segment_task(self, segment_data):
 
         # Priority 1: Memory cache (INSTANT!)
         if cache_key in FRAME_CACHE:
-            print(f"   [FAST] Loading masks from memory WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
+            print(f"   ⚡ Loading masks from memory WITH NEIGHBOR PADDING (ZERO disk I/O!)...")
             with FRAME_CACHE_LOCK:
                 cached = FRAME_CACHE[cache_key]
                 cached_masks = cached['masks']
@@ -4040,7 +3107,7 @@ def process_segment_task(self, segment_data):
         # Try local filesystem first (same PC - FAST, direct file copy)
         if not masks_downloaded and shared_mask_dir and os.path.exists(shared_mask_dir):
             print(f"   [MASKS] Fallback: Copying masks from local shared directory...")
-            safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Copying masks'})
+            self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Copying masks'})
 
             try:
                 masks_needed = list(range(start_frame, end_frame + 1))
@@ -4070,8 +3137,8 @@ def process_segment_task(self, segment_data):
 
         # Fallback: HTTP download (different PC - SLOW but necessary for distributed workers)
         elif not masks_downloaded and origin_base and shared_mask_dir:
-            print(f"   [DOWNLOAD] Downloading masks from remote location...")
-            safe_update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
+            print(f"   📥 Downloading masks from remote location...")
+            self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Downloading masks'})
 
             try:
                 import requests
@@ -4112,7 +3179,7 @@ def process_segment_task(self, segment_data):
         detector = None
         if not masks_downloaded:
             print(f"   [REGEN] Regenerating masks with YOLO BATCH detection on {frames_copied} frames...")
-            safe_update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Detecting watermarks'})
+            self.update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Detecting watermarks'})
 
             detector = get_detector()
             last_valid_bbox = None
@@ -4205,7 +3272,7 @@ def process_segment_task(self, segment_data):
                         cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                         cv2.imwrite(mask_path, cropped_mask)
         elif using_memory_pipeline:
-            print(f"   [FAST] Skipping disk-based cropping - using in-memory pipeline (saves ~600ms!)")
+            print(f"   ⚡ Skipping disk-based cropping - using in-memory pipeline (saves ~600ms!)")
 
         print(f"   [OK] Prepared {frames_copied} frames and masks (including ±{neighbor_padding} neighbor padding)")
 
@@ -4237,16 +3304,16 @@ def process_segment_task(self, segment_data):
         # CONDITIONAL: Only run ProPainter if watermark was detected
         if not last_valid_bbox or frames_with_watermark == 0:
             print(f"   [SKIP]  No watermark detected - skipping ProPainter, encoding original frames")
-            safe_update_state(state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
+            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
 
             # Copy original frames to cleaned dir (no processing needed)
-            # [FIX] SHARED BUFFER: Use global frame indices
+            # 🔥 SHARED BUFFER: Use global frame indices
             if using_memory_pipeline:
                 # Write from memory (only core segment, skip padding)
-                # [FIX] TEMPORAL CONTEXT FIX: Calculate padding offset
+                # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
                 padding_offset = start_frame - padded_start
                 core_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
-                print(f"   [CACHE] Writing {len(core_frames)} core segment frames from memory to shared buffer (skipping {padding_offset} padding frames)...")
+                print(f"   💾 Writing {len(core_frames)} core segment frames from memory to shared buffer (skipping {padding_offset} padding frames)...")
                 for local_idx, frame in enumerate(core_frames):
                     # Use GLOBAL frame index for shared buffer
                     global_frame_idx = start_frame + local_idx
@@ -4256,11 +3323,6 @@ def process_segment_task(self, segment_data):
                     # Only write if not already written by another segment
                     if not os.path.exists(dst):
                         cv2.imwrite(dst, frame)
-
-                    # Also add to in-memory frame buffer for zero-copy encoding
-                    with FRAME_BUFFER_LOCK:
-                        if video_id in FRAME_BUFFER:
-                            FRAME_BUFFER[video_id].add_frame(global_frame_idx, frame)
             else:
                 # Copy from disk
                 for local_idx in range(frames_copied):
@@ -4274,17 +3336,10 @@ def process_segment_task(self, segment_data):
                     if os.path.exists(src) and not os.path.exists(dst):
                         shutil.copy2(src, dst)
 
-                        # Also add to in-memory frame buffer for zero-copy encoding
-                        frame = cv2.imread(src)
-                        if frame is not None:
-                            with FRAME_BUFFER_LOCK:
-                                if video_id in FRAME_BUFFER:
-                                    FRAME_BUFFER[video_id].add_frame(global_frame_idx, frame)
-
         else:
             # Run ProPainter on this segment - watermark detected!
             print(f"   [PAINT] Running ProPainter on {frames_with_watermark} watermarked frames...")
-            safe_update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
+            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Running ProPainter'})
 
             try:
                 # Use cached ProPainter pipeline (pre-loaded at worker startup)
@@ -4298,7 +3353,7 @@ def process_segment_task(self, segment_data):
                 masks_array = None
 
                 if using_memory_pipeline:
-                    print(f"   [FAST] Cropping {len(segment_frames_memory)} frames/masks in memory (ZERO disk I/O!)")
+                    print(f"   ⚡ Cropping {len(segment_frames_memory)} frames/masks in memory (ZERO disk I/O!)")
                     import time
                     crop_start = time.time()
 
@@ -4351,7 +3406,7 @@ def process_segment_task(self, segment_data):
 
             # Merge cleaned region back to full frames
             print(f"   🔗 Merging cleaned region (in-memory)...")
-            safe_update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
+            self.update_state(state='PROCESSING', meta={'progress': 80, 'status': f'Merging results'})
 
             seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
             if not os.path.exists(seg_propainter_frames):
@@ -4360,10 +3415,10 @@ def process_segment_task(self, segment_data):
             # Load all frames into memory first (faster than disk I/O in loop)
             # [INIT] EXTREME SPEED: Use in-memory frames if available (no disk reads!)
             original_frames = []
-            original_masks = []  # [FIX] MASK COMPOSITING: Need masks for alpha blending
+            original_masks = []  # 🔥 MASK COMPOSITING: Need masks for alpha blending
             cleaned_frames = []
 
-            # [FIX] TEMPORAL CONTEXT FIX: Calculate padding offset
+            # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
             # ProPainter processed frames WITH padding, we only need core segment frames
             padding_offset = start_frame - padded_start  # How many padding frames before core segment
             print(f"   [CONTEXT] ProPainter processed {len(segment_frames_memory)} frames (padding offset: {padding_offset})")
@@ -4371,7 +3426,7 @@ def process_segment_task(self, segment_data):
             if using_memory_pipeline:
                 # Use already-loaded memory frames (ZERO disk I/O!)
                 # Extract ONLY core segment frames (skip padding)
-                print(f"   [FAST] Extracting core segment frames + masks from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
+                print(f"   ⚡ Extracting core segment frames + masks from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
                 original_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
                 original_masks = segment_masks_memory[padding_offset:padding_offset + seg_duration]
             else:
@@ -4379,214 +3434,87 @@ def process_segment_task(self, segment_data):
                 print(f"   [MASKS] Loading {seg_duration} original frames + masks from disk...")
                 for frame_idx in range(seg_duration):
                     frame_file = f"{frame_idx:04d}.png"
-
-                    # Load original frame
-                    orig_path = os.path.join(seg_frames_dir, frame_file)
-                    orig = cv2.imread(orig_path)
-                    if orig is None:
-                        raise RuntimeError(f"Failed to load original frame from {orig_path}")
+                    orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
                     original_frames.append(orig)
-
                     # Load corresponding mask
-                    mask_path = os.path.join(seg_mask_dir, frame_file)
-                    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-                    if mask is None:
-                        raise RuntimeError(f"Failed to load mask from {mask_path}")
+                    mask = cv2.imread(os.path.join(seg_mask_dir, frame_file), cv2.IMREAD_GRAYSCALE)
                     original_masks.append(mask)
 
-            # Load cleaned frames from ProPainter output
-            # ProPainter outputs frames sequentially starting from 0000 (regardless of padding)
-            # So for a segment with 70 total frames (5 padding + 60 core + 5 padding),
-            # the core segment is at indices [padding_offset : padding_offset+seg_duration] = [5:65]
+            # Load cleaned frames from ProPainter output (skip padding frames)
             print(f"   [OUTPUT] Extracting core segment from ProPainter output (frames {padding_offset} to {padding_offset + seg_duration})...")
-
-            # Count available frames in ProPainter output for debugging
-            import glob
-            available_frames = sorted(glob.glob(os.path.join(seg_propainter_frames, "*.png")))
-            print(f"   [DEBUG] ProPainter output has {len(available_frames)} frames total")
-
-            for local_idx in range(seg_duration):
-                # Load frame at index from ProPainter output (skip padding frames)
-                frame_idx = padding_offset + local_idx
+            for frame_idx in range(padding_offset, padding_offset + seg_duration):
                 frame_file = f"{frame_idx:04d}.png"
-                frame_path = os.path.join(seg_propainter_frames, frame_file)
-                clean = cv2.imread(frame_path)
-                if clean is None:
-                    # Frame loading failed - this is a critical error
-                    print(f"   [ERROR] Failed to load cleaned frame {frame_file}!")
-                    print(f"   [DEBUG] Expected path: {frame_path}")
-                    print(f"   [DEBUG] Path exists: {os.path.exists(frame_path)}")
-                    print(f"   [DEBUG] ProPainter output dir: {seg_propainter_frames}")
-                    print(f"   [DEBUG] Available frames: {[os.path.basename(f) for f in available_frames[:10]]}")
-                    print(f"   [DEBUG] Padding offset: {padding_offset}, Segment duration: {seg_duration}")
-                    raise RuntimeError(
-                        f"Failed to load cleaned frame {frame_file} from ProPainter output. "
-                        f"Expected {len(available_frames)} frames, trying to load index {frame_idx}. "
-                        f"This indicates a frame index mismatch between ProPainter output and expected indices."
-                    )
+                clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
                 cleaned_frames.append(clean)
 
-            # 🔍 DEBUG: Verify frames are unique (not all the same)
-            import hashlib
-            if len(cleaned_frames) > 0:
-                frame_hashes = []
-                frame_sizes = []
-                for i, frame in enumerate(cleaned_frames[:5]):  # Check first 5 frames
-                    h = hashlib.md5(frame.tobytes()).hexdigest()[:8]
-                    frame_hashes.append(h)
-                    frame_sizes.append(frame.shape)
-                print(f"   [DEBUG] First 5 cleaned frame hashes: {frame_hashes}")
-                print(f"   [DEBUG] Frame shapes: {frame_sizes}")
-                if len(set(frame_hashes)) == 1:
-                    print(f"   [WARNING] [!] ALL FRAMES HAVE SAME HASH - THEY ARE IDENTICAL!")
-                else:
-                    print(f"   [OK] Frames are unique ({len(set(frame_hashes))} different hashes)")
-
-                # Also check last few frames
-                if len(cleaned_frames) > 5:
-                    last_hashes = [hashlib.md5(f.tobytes()).hexdigest()[:8] for f in cleaned_frames[-3:]]
-                    print(f"   [DEBUG] Last 3 cleaned frame hashes: {last_hashes}")
-
-            # [FIX] SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
+            # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
             # This allows multiple segments to cooperatively edit the same frames
-            print(f"   🔗 Merging to shared frame buffer with mask compositing + file locking...")
+            print(f"   🔗 Merging to shared frame buffer with mask-based alpha compositing...")
             for local_idx, (original, cleaned_crop, segment_mask) in enumerate(zip(original_frames, cleaned_frames, original_masks)):
                 # Use GLOBAL frame index for shared buffer
                 global_frame_idx = start_frame + local_idx
                 frame_file = f"{global_frame_idx:04d}.png"
                 shared_frame_path = os.path.join(shared_cleaned_dir, frame_file)
 
-                # 🔒 FILE LOCK: Prevent race conditions when multiple segments edit same frame
-                # This ensures atomic read-modify-write operations
-                with file_lock(shared_frame_path, timeout=5):
-                    # Load existing state (may have edits from other segments) or original
-                    if os.path.exists(shared_frame_path):
-                        # Another segment already edited this frame - load current state
-                        result_frame = cv2.imread(shared_frame_path)
-                        if result_frame is None:
-                            result_frame = original.copy() if original is not None else np.zeros((height, width, 3), dtype=np.uint8)
-                    elif original is not None:
-                        result_frame = original.copy()
-                    else:
-                        continue
+                # Load existing state (may have edits from other segments) or original
+                if os.path.exists(shared_frame_path):
+                    # Another segment already edited this frame - load current state
+                    result_frame = cv2.imread(shared_frame_path)
+                    if result_frame is None:
+                        result_frame = original.copy() if original is not None else np.zeros((height, width, 3), dtype=np.uint8)
+                elif original is not None:
+                    result_frame = original.copy()
+                else:
+                    continue
 
-                    # [FIX] MASK COMPOSITING: Alpha blend cleaned region with mask for smooth edges
-                    if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
-                        # ProPainter output is already cropped to watermark region
-                        # Segment mask is also already cropped (from cropping step earlier)
-                        # So we DON'T double-crop the mask here!
+                # 🔥 MASK COMPOSITING: Use mask to blend only the inpainted region
+                # This preserves other segments' work in non-masked areas
+                if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
+                    # Crop mask to ROI
+                    cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
 
-                        # Crop the mask to match the watermark region IF it's full-size
-                        # (Check dimensions to determine if already cropped)
-                        if segment_mask.shape[:2] == (height, width):
-                            # Mask is full-frame, crop it to watermark region
-                            cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                        else:
-                            # Mask is already cropped, use as-is
-                            cropped_mask = segment_mask
-
-                        # Alpha blending for smooth compositing
-                        # Convert mask to 3-channel float [0, 1]
+                    # Convert mask to 3-channel float [0, 1] for alpha blending
+                    if len(cropped_mask.shape) == 2:
+                        # Grayscale mask - convert to 3 channels
                         mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
+                    else:
+                        mask_3ch = cropped_mask.astype(float) / 255.0
 
-                        # Get the region of interest (ROI) from result frame
-                        roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
+                    # Alpha composite: blend cleaned region using mask as alpha
+                    roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
+                    cleaned_crop_float = cleaned_crop.astype(float)
+                    blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
 
-                        # Blend: where mask=1 (watermark), use cleaned; where mask=0, use original
-                        cleaned_crop_float = cleaned_crop.astype(float)
-                        blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+                    # Paste blended result back
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
 
-                        # Paste blended result back
-                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
-                    elif cleaned_crop is not None and result_frame is not None:
-                        # No mask available - fall back to direct paste
-                        print(f"   [WARNING] No mask for frame {global_frame_idx} - using direct paste")
-                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
-
-                    # Save back to shared buffer (within lock - atomic operation)
-                    cv2.imwrite(shared_frame_path, result_frame)
-
-                    # Also add to in-memory frame buffer for zero-copy encoding
-                    with FRAME_BUFFER_LOCK:
-                        if video_id in FRAME_BUFFER:
-                            FRAME_BUFFER[video_id].add_frame(global_frame_idx, result_frame)
+                # Save back to shared buffer
+                cv2.imwrite(shared_frame_path, result_frame)
 
             print(f"   [OK] Merged {len(cleaned_frames)} frames to shared buffer: {shared_cleaned_dir}")
 
-            # Report buffer status
-            with FRAME_BUFFER_LOCK:
-                if video_id in FRAME_BUFFER:
-                    buffer = FRAME_BUFFER[video_id]
-                    print(f"   [BUFFER] Frame buffer has {buffer.frames_received}/{buffer.total_frames} frames")
-
-            # 🔍 DEBUG: Verify written files are unique
-            written_files = sorted([f for f in os.listdir(shared_cleaned_dir) if f.endswith('.png')])
-            print(f"   [DEBUG] Written {len(written_files)} files to shared buffer")
-            if len(written_files) > 0:
-                # Check file sizes of first and last few files
-                first_files = written_files[:3]
-                last_files = written_files[-3:] if len(written_files) > 3 else []
-
-                print(f"   [DEBUG] First 3 files: {first_files}")
-                first_sizes = [os.path.getsize(os.path.join(shared_cleaned_dir, f)) for f in first_files]
-                print(f"   [DEBUG] First 3 file sizes: {first_sizes} bytes")
-
-                if last_files:
-                    print(f"   [DEBUG] Last 3 files: {last_files}")
-                    last_sizes = [os.path.getsize(os.path.join(shared_cleaned_dir, f)) for f in last_files]
-                    print(f"   [DEBUG] Last 3 file sizes: {last_sizes} bytes")
-
-                # Hash check on disk files
-                import hashlib
-                disk_hashes = []
-                for f in first_files:
-                    with open(os.path.join(shared_cleaned_dir, f), 'rb') as fh:
-                        disk_hashes.append(hashlib.md5(fh.read()).hexdigest()[:8])
-                print(f"   [DEBUG] First 3 disk file hashes: {disk_hashes}")
-                if len(set(disk_hashes)) == 1:
-                    print(f"   [WARNING] [!] DISK FILES HAVE SAME HASH - POSSIBLE WRITE ISSUE!")
-                else:
-                    print(f"   [OK] Disk files are unique")
-
-        # [FAST] PARALLEL ENCODING: Encode segment MP4 immediately (Blackwell NVENC!)
+        # ⚡ PARALLEL ENCODING: Encode segment MP4 immediately (Blackwell NVENC!)
         print(f"   [OK] Cleaned frames ready in: {seg_cleaned_dir}")
-        # [FAST] BACKGROUND ENCODING OPTIMIZATION: Signal encoder thread instead of blocking!
+        # ⚡ BACKGROUND ENCODING OPTIMIZATION: Signal encoder thread instead of blocking!
         # Worker returns immediately and starts next segment while encoding happens in background
-        safe_update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
+        self.update_state(state='PROCESSING', meta={'progress': 85, 'status': f'Segment complete - signaling encoder'})
 
-        # Count segment's frames (not total in shared buffer)
-        segment_frame_count = end_frame - start_frame + 1
-        total_buffer_frames = len([f for f in os.listdir(seg_cleaned_dir) if f.endswith('.png')])
-        if total_buffer_frames == 0:
+        # Count cleaned frames
+        cleaned_frame_count = len([f for f in os.listdir(seg_cleaned_dir) if f.endswith('.png')])
+        if cleaned_frame_count == 0:
             raise RuntimeError(f"No cleaned frames found in {seg_cleaned_dir}")
 
-        # 🔍 DEBUG: Verify segment frame range exists in buffer
-        print(f"   [DEBUG] Segment range: frames {start_frame}-{end_frame} ({segment_frame_count} frames)")
-        print(f"   [DEBUG] Total frames in shared buffer: {total_buffer_frames}")
-
-        # Check if this segment's frames actually exist
-        segment_frames_exist = 0
-        for frame_idx in range(start_frame, end_frame + 1):
-            frame_path = os.path.join(seg_cleaned_dir, f"{frame_idx:04d}.png")
-            if os.path.exists(frame_path):
-                segment_frames_exist += 1
-
-        if segment_frames_exist != segment_frame_count:
-            print(f"   [WARNING] [!] Only {segment_frames_exist}/{segment_frame_count} segment frames exist in buffer!")
-        else:
-            print(f"   [OK] All {segment_frame_count} segment frames verified in buffer")
-
-        print(f"   [OK] {total_buffer_frames} cleaned frames ready - signaling background encoder!")
+        print(f"   [OK] {cleaned_frame_count} cleaned frames ready - signaling background encoder!")
 
         # Store segment metadata in Redis for background encoder
         redis_client = celery.backend.client
         segment_key = f"video:{video_id}:segment:{seg_idx}"
         redis_client.hset(segment_key, 'cleaned_dir', seg_cleaned_dir)
         redis_client.hset(segment_key, 'fps', str(fps))
-        redis_client.hset(segment_key, 'frame_count', str(segment_frame_count))
+        redis_client.hset(segment_key, 'frame_count', str(cleaned_frame_count))
         redis_client.hset(segment_key, 'base_name', base_name)
         redis_client.hset(segment_key, 'status', 'ready_for_encoding')
-        # [FIX] SHARED BUFFER: Store frame range for encoder
+        # 🔥 SHARED BUFFER: Store frame range for encoder
         redis_client.hset(segment_key, 'start_frame', str(start_frame))
         redis_client.hset(segment_key, 'end_frame', str(end_frame))
 
@@ -4618,7 +3546,7 @@ def process_segment_task(self, segment_data):
 
         print(f"[OK] Segment {seg_idx+1}/{total_segments} complete - worker free to process next segment!")
 
-        # Note: Don't call safe_update_state(state='SUCCESS') - it overrides the return value!
+        # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
         # Celery automatically sets state to SUCCESS when the task returns normally
         # Chord will automatically trigger finalize when all segments complete
 
@@ -4803,7 +3731,7 @@ def process_video_distributed_task(self, video_path, api_base=None, temp_base=No
         total_segments = len(segments)
 
         print(f"[OK] Video prepared: {total_segments} segments ready for distributed processing")
-        print(f"[WEB] Distributing segments across all available workers...")
+        print(f"🌐 Distributing segments across all available workers...")
 
         self.update_state(
             state='PROCESSING',
@@ -4894,7 +3822,7 @@ def process_image_task(self, image_path):
                     base_name = os.path.basename(image_path.replace('\\', '/'))
 
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
-                print(f"[WEB] Image not found locally. Downloading from: {download_url}")
+                print(f"🌐 Image not found locally. Downloading from: {download_url}")
                 try:
                     r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
                     r.raise_for_status()
@@ -5105,7 +4033,7 @@ def process_video_task(self, video_path):
                     base_name = os.path.basename(video_path.replace('\\', '/'))
 
                 download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
-                print(f"[WEB] Video not found locally. Downloading from: {download_url}")
+                print(f"🌐 Video not found locally. Downloading from: {download_url}")
                 try:
                     r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=30)
                     r.raise_for_status()
@@ -5237,7 +4165,7 @@ def process_video_task(self, video_path):
                 FFMPEG_EXE, '-i', video_path,
                 '-qscale:v', '2',
                 '-start_number', '0',  # Start numbering at 0 to match frame indices
-                os.path.join(original_frames_dir, '%04d.png').replace('\\', '/')
+                os.path.join(original_frames_dir, '%04d.png')
             ]
             subprocess.run(extract_cmd, capture_output=True, check=True)
 
@@ -5637,30 +4565,13 @@ def tunnel_url():
 @app.route('/')
 def index():
     """Serve landing page"""
-    return send_file(os.path.join(app.static_folder, 'index.html'))
-
-@app.route('/index.html')
-def index_html():
-    """Serve index.html explicitly"""
-    return send_file(os.path.join(app.static_folder, 'index.html'))
+    return send_file('web/index.html')
 
 
 @app.route('/login.html')
 def login_page():
     """Serve login page"""
     return send_file('web/login.html')
-
-
-@app.route('/profile.html')
-def profile_page():
-    """Serve profile page"""
-    return send_file('web/profile.html')
-
-
-@app.route('/reset-password.html')
-def reset_password_page():
-    """Serve password reset page"""
-    return send_file('web/reset-password.html')
 
 
 @app.route('/web/<path:path>')
@@ -5821,7 +4732,7 @@ def get_status(task_id):
                                 filename = os.path.basename(final_path)
                                 result_url = f'/results/{filename}'
 
-                            print(f"[STATUS] [OK] Encoding complete for {video_id}! Returning: {result_url}")
+                            print(f"[STATUS] ✅ Encoding complete for {video_id}! Returning: {result_url}")
                             return jsonify({
                                 'state': 'SUCCESS',
                                 'result': {'result_url': result_url},
@@ -6082,7 +4993,7 @@ def download_from_url():
                 });
             """)
 
-            print(f"[WEB] Navigating to: {url}")
+            print(f"🌐 Navigating to: {url}")
             page.goto(url, wait_until='domcontentloaded', timeout=30000)
 
             time.sleep(2)
@@ -6263,7 +5174,7 @@ def download_sora():
                 });
             """)
 
-            print(f"[WEB] Navigating to: {url}")
+            print(f"🌐 Navigating to: {url}")
             page.goto(url, wait_until='domcontentloaded', timeout=30000)
 
             time.sleep(2)
@@ -6609,7 +5520,7 @@ def process_video():
             return jsonify({'status': 'error', 'message': 'Media not found'}), 404
 
         # Queue processing task via Celery and return the real task id
-        print(f"[UPLOAD] Queuing processing task for: {video_path}")
+        print(f"📤 Queuing processing task for: {video_path}")
 
         try:
             # Decide pipeline based on extension
@@ -6839,7 +5750,7 @@ def serve_result(filename):
         return jsonify({'error': 'File not found'}), 404
 
     # Send file with as_attachment to trigger download
-    print(f"[SERVE-RESULT] [OK] Serving file: {filename}")
+    print(f"[SERVE-RESULT] ✅ Serving file: {filename}")
     response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
 
     # Schedule file deletion after response is sent
@@ -6919,7 +5830,7 @@ def upload_result():
         up.save(dest)
         file_size_mb = os.path.getsize(dest) / (1024 * 1024)
 
-        print(f"[UPLOAD-RESULT] [OK] Saved {safe_name} ({file_size_mb:.2f} MB) to {dest}")
+        print(f"[UPLOAD-RESULT] ✅ Saved {safe_name} ({file_size_mb:.2f} MB) to {dest}")
         print(f"[UPLOAD-RESULT] File exists check: {os.path.exists(dest)}")
         print(f"[UPLOAD-RESULT] RESULT_DIR contents: {os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else 'DIR NOT FOUND'}")
 
@@ -7048,6 +5959,7 @@ def get_stats():
 
 
 @app.route('/api/sam2/select-object', methods=['POST'])
+@require_auth
 def sam2_select_object():
     """Interactive SAM2 object selection - uses local worker via Redis pub/sub"""
     try:
@@ -7087,12 +5999,12 @@ def sam2_select_object():
             'video_height': video_height
         }
 
-        print(f"[SAM2] Pushing request {request_id} to list: sam2:selection:request")
+        print(f"[SAM2] Publishing request {request_id} to channel: sam2:selection:request")
         print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
-        redis_client.lpush('sam2:selection:request', json.dumps(request_data))
+        redis_client.publish('sam2:selection:request', json.dumps(request_data))
 
-        # Wait for response (timeout: 30 seconds for high load scenarios)
-        timeout = 30.0
+        # Wait for response (timeout: 5 seconds)
+        timeout = 5.0
         start_time = time.time()
 
         print(f"[SAM2] Waiting for response on: {response_channel}")
@@ -7292,7 +6204,7 @@ def stripe_webhook():
                             result = cur.fetchone()
                             if result:
                                 new_balance = result[0]
-                                print(f"[BILLING] [OK] Credits added successfully. User {user_id} new balance: {new_balance}")
+                                print(f"[BILLING] ✅ Credits added successfully. User {user_id} new balance: {new_balance}")
                             else:
                                 print(f"[BILLING] ❌ User {user_id} not found in database")
                     except Exception as e:
