@@ -169,13 +169,34 @@
             transform: translateY(-7.5px) rotate(-45deg);
         }
 
+        .mobile-theme-controls {
+            display: none;
+        }
+
+        .desktop-only {
+            display: initial;
+        }
+
         @media (max-width: 768px) {
             .nav-container {
                 padding: 0 1.5rem;
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+            }
+
+            .desktop-only {
+                display: none !important;
+            }
+
+            .mobile-theme-controls {
+                display: flex !important;
+                order: 1;
             }
 
             .mobile-menu-toggle {
                 display: flex;
+                order: 2;
             }
 
             .nav-menu {
@@ -377,8 +398,12 @@
                 <li><a href="index.html#remove-watermark">Remove Objects</a></li>
                 <li><a href="premium.html#pricing">Pricing</a></li>
                 <li><a href="index.html#comparison">Results</a></li>
-                <li><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;" aria-label="Toggle theme">Dark</button></li>
+                <li class="desktop-only"><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;" aria-label="Toggle theme">Dark</button></li>
             </ul>
+
+            <div class="mobile-theme-controls" style="display: none;">
+                <button id="mobileThemeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.45rem 0.85rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" aria-label="Toggle theme">Dark</button>
+            </div>
 
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
                 <span></span>
@@ -420,6 +445,10 @@
 
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+
+                <div style="text-align: right; margin-top: 0.5rem;">
+                    <a href="reset-password.html" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; font-weight: 600;">Forgot your password?</a>
+                </div>
 
                 <button type="submit" class="btn">Sign in</button>
             </form>
@@ -481,33 +510,6 @@
 
         const params = new URLSearchParams(window.location.search);
         const googleStatus = params.get('google');
-        const errorType = params.get('error');
-
-        // Handle verification errors
-        if (errorType && messageEl) {
-            messageEl.classList.remove('success', 'error');
-            messageEl.classList.add('error');
-            messageEl.removeAttribute('hidden');
-            messageEl.style.display = 'block';
-
-            switch(errorType) {
-                case 'invalid_token':
-                    messageEl.textContent = 'Invalid verification link. Please request a new one.';
-                    break;
-                case 'token_expired':
-                    messageEl.textContent = 'Verification link has expired. Please request a new one.';
-                    break;
-                case 'missing_token':
-                    messageEl.textContent = 'Missing verification token. Please use the link from your email.';
-                    break;
-                case 'verification_failed':
-                    messageEl.textContent = 'Verification failed. Please try again or request a new link.';
-                    break;
-                default:
-                    messageEl.textContent = 'An error occurred. Please try again.';
-            }
-        }
-
         if (googleStatus && messageEl) {
             const messageText = params.get('message');
             const email = params.get('email');
@@ -566,7 +568,7 @@
                 return;
             }
 
-            await performLogin(email, password);
+            await emailLogin(email, password);
         });
 
         // Email + password signup (create account)
@@ -591,82 +593,57 @@
                 return;
             }
 
-            await performSignup(email, password, name);
+            await emailLogin(email, password, name);
         });
 
-        // Login function (existing users)
-        async function performLogin(email, password) {
-            showMessage('Signing in...', '');
+        // Email + password login function (handles both signin and signup)
+        async function emailLogin(email, password, name = null) {
+            const messageEl = document.getElementById('authMessage');
+            showMessage('Processing...', '');
 
             try {
-                const apiUrl = API_BASE ? `${API_BASE}/api/auth/login` : '/api/auth/login';
+                // Use /login endpoint if no name (sign in), /register if name provided (sign up)
+                const endpoint = name ? '/api/auth/register' : '/api/auth/login';
+                const apiUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+
+                const payload = { email, password };
+                if (name) {
+                    payload.name = name;
+                }
 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    credentials: 'include',
-                    body: JSON.stringify({ email, password })
+                    credentials: 'include',  // Send cookies for session management
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await response.json();
 
                 if (response.ok) {
-                    // Store user in localStorage
-                    localStorage.setItem('user', JSON.stringify(data.user));
+                    // Store user in localStorage (extract user object from response)
+                    localStorage.setItem('user', JSON.stringify(data.user || data));
 
-                    showMessage('Success! Redirecting...', 'success');
+                    // Check if email verification is required (new signup)
+                    if (data.email_verification_required) {
+                        showMessage('Account created! Please check your email to verify your account.', 'success');
+                        showVerificationPendingUI(email);
+                        return;  // Don't redirect - user needs to verify email first
+                    }
+
+                    showMessage(data.message || 'Success! Redirecting...', 'success');
 
                     // Redirect to main app
                     setTimeout(() => {
                         window.location.href = 'index.html';
                     }, 1000);
                 } else {
-                    showMessage(data.error || 'Invalid email or password.', 'error');
+                    showMessage(data.error || 'Login failed. Please try again.', 'error');
                 }
             } catch (error) {
                 console.error('Login error:', error);
-                showMessage('Connection error. Please try again.', 'error');
-            }
-        }
-
-        // Signup function (new users)
-        async function performSignup(email, password, name) {
-            showMessage('Creating account...', '');
-
-            try {
-                const apiUrl = API_BASE ? `${API_BASE}/api/auth/register` : '/api/auth/register';
-
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify({ email, password, name })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    // Store user in localStorage
-                    localStorage.setItem('user', JSON.stringify(data.user));
-
-                    // Show verification message
-                    showMessage('Account created! Please check your email to verify your account.', 'success');
-
-                    // Redirect to main app after a longer delay so they see the message
-                    setTimeout(() => {
-                        window.location.href = 'index.html';
-                    }, 3000);
-                } else if (response.status === 409) {
-                    showMessage('Email already registered. Please sign in instead.', 'error');
-                } else {
-                    showMessage(data.error || 'Signup failed. Please try again.', 'error');
-                }
-            } catch (error) {
-                console.error('Signup error:', error);
                 showMessage('Connection error. Please try again.', 'error');
             }
         }
@@ -681,6 +658,90 @@
             messageEl.textContent = text;
             messageEl.style.display = 'block';
             messageEl.removeAttribute('hidden');
+        }
+
+        // Show verification pending UI after signup
+        function showVerificationPendingUI(email) {
+            const card = document.querySelector('.card');
+            if (!card) return;
+
+            card.innerHTML = `
+                <div style="text-align: center; padding: 1rem 0;">
+                    <div style="width: 80px; height: 80px; margin: 0 auto 1.5rem; background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.25) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                    </div>
+                    <h1 style="margin-bottom: 0.75rem;">Check Your Email</h1>
+                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                        We've sent a verification link to:<br>
+                        <strong style="color: var(--primary);">${email}</strong>
+                    </p>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                        Click the link in the email to verify your account.<br>
+                        The link expires in 24 hours.
+                    </p>
+                    <div id="resendContainer">
+                        <button type="button" class="btn" style="background: transparent; border: 2px solid var(--primary); color: var(--primary);" onclick="resendVerificationEmail('${email}')">
+                            Resend Verification Email
+                        </button>
+                    </div>
+                    <div id="resendStatus" style="margin-top: 1rem; font-size: 0.9rem;"></div>
+                    <div class="footer-links" style="margin-top: 2rem;">
+                        <p><a href="index.html">Go to Dashboard</a> (limited access until verified)</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Resend verification email
+        async function resendVerificationEmail(email) {
+            const resendStatus = document.getElementById('resendStatus');
+            const resendBtn = document.querySelector('#resendContainer button');
+
+            if (resendBtn) {
+                resendBtn.disabled = true;
+                resendBtn.textContent = 'Sending...';
+            }
+
+            try {
+                const endpoint = '/api/auth/resend-verification';
+                const apiUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resendStatus.innerHTML = '<span style="color: #10b981;">Verification email sent! Check your inbox.</span>';
+                    if (resendBtn) {
+                        resendBtn.textContent = 'Email Sent';
+                        // Re-enable after 60 seconds (rate limit)
+                        setTimeout(() => {
+                            resendBtn.disabled = false;
+                            resendBtn.textContent = 'Resend Verification Email';
+                        }, 60000);
+                    }
+                } else {
+                    resendStatus.innerHTML = `<span style="color: #ef4444;">${data.error || 'Failed to send email. Try again later.'}</span>`;
+                    if (resendBtn) {
+                        resendBtn.disabled = false;
+                        resendBtn.textContent = 'Resend Verification Email';
+                    }
+                }
+            } catch (error) {
+                console.error('Resend error:', error);
+                resendStatus.innerHTML = '<span style="color: #ef4444;">Connection error. Please try again.</span>';
+                if (resendBtn) {
+                    resendBtn.disabled = false;
+                    resendBtn.textContent = 'Resend Verification Email';
+                }
+            }
         }
     </script>
 
