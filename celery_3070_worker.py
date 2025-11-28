@@ -1147,8 +1147,8 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             crop_x, crop_y, crop_w, crop_h = 0, 0, width, height
 
         # ====================================================================
-        # STEP 4b: LOAD PRE-CROPPED PADDED FRAMES (the key optimization!)
-        # Read full frame, crop immediately, write CROPPED to disk
+        # STEP 4b: LOAD PRE-CROPPED PADDED FRAMES IN MEMORY (FAST!)
+        # Read full frame, crop immediately, keep in memory - NO DISK I/O!
         # ====================================================================
 
         self.update_state(state='PROCESSING', meta={
@@ -1156,23 +1156,27 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             'status': f'Loading {padded_frame_count} cropped frames'
         })
 
-        print(f"[3070] Loading {padded_frame_count} PRE-CROPPED padded frames ({crop_w}x{crop_h})...")
+        print(f"[3070] Loading {padded_frame_count} PRE-CROPPED padded frames IN MEMORY ({crop_w}x{crop_h})...")
         load_start = time.time()
 
         # Keep FULL frames in memory ONLY for paste-back later (only segment frames needed)
         full_frames_for_paste = []
+
+        # IN-MEMORY arrays for ProPainter (FAST - no disk I/O!)
+        process_frames = []  # Cropped frames for ProPainter
+        process_masks = []   # Cropped masks for ProPainter
 
         for i in range(padded_frame_count):
             frame_idx = pad_start + i
             frame_path = os.path.join(frame_source_dir, f"{frame_idx:04d}.png")
             img = cv2.imread(frame_path)
             if img is not None:
-                # Crop immediately - don't store full frame!
+                # Crop immediately and keep in memory
                 if use_cropping:
                     cropped = img[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                    cv2.imwrite(os.path.join(seg_frames_dir, f"{i:04d}.png"), cropped)
+                    process_frames.append(np.ascontiguousarray(cropped))
                 else:
-                    cv2.imwrite(os.path.join(seg_frames_dir, f"{i:04d}.png"), img)
+                    process_frames.append(np.ascontiguousarray(img))
 
                 # Keep full frame ONLY for paste-back (only need segment frames, not padding)
                 if segment_offset_in_padded <= i < segment_offset_in_padded + num_frames:
@@ -1180,8 +1184,8 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             else:
                 print(f"[3070] WARNING: Frame not found: {frame_path}")
 
-        # Load and crop masks
-        print(f"[3070] Loading {padded_frame_count} cropped masks...")
+        # Load and crop masks IN MEMORY
+        print(f"[3070] Loading {padded_frame_count} cropped masks IN MEMORY...")
         for i in range(padded_frame_count):
             frame_idx = pad_start + i
             mask_path = os.path.join(mask_source_dir, f"{frame_idx:04d}.png")
@@ -1189,16 +1193,16 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             if mask is not None:
                 if use_cropping:
                     cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                    cv2.imwrite(os.path.join(seg_masks_dir, f"{i:04d}.png"), cropped_mask)
+                    process_masks.append(np.ascontiguousarray(cropped_mask))
                 else:
-                    cv2.imwrite(os.path.join(seg_masks_dir, f"{i:04d}.png"), mask)
+                    process_masks.append(np.ascontiguousarray(mask))
             else:
                 # No mask = no watermark - create zero mask at CROP SIZE
                 zero_mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
-                cv2.imwrite(os.path.join(seg_masks_dir, f"{i:04d}.png"), zero_mask)
+                process_masks.append(zero_mask)
 
         load_time = time.time() - load_start
-        print(f"[3070] Loaded {padded_frame_count} cropped frames in {load_time:.2f}s")
+        print(f"[3070] Loaded {len(process_frames)} cropped frames IN MEMORY in {load_time:.2f}s")
         print(f"[3070] Kept {len(full_frames_for_paste)} full frames for paste-back")
 
         self.update_state(state='PROCESSING', meta={
@@ -1209,20 +1213,19 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
         # Calculate optimal parameters
         neighbor_length = 10
         ref_stride = 10
-        dynamic_subvideo = get_dynamic_subvideo_length(crop_w, crop_h)  # Use cropped dimensions!
+        dynamic_subvideo = 120  # Fixed for cropped regions (run_sam2_local.py uses this - 1.5-2x faster)
 
         # Use FP16 on 3070 for speed
         use_fp16 = True
 
-        print(f"[3070] Running ProPainter DISK-BASED (neighbor={neighbor_length}, ref_stride={ref_stride}, subvideo={dynamic_subvideo})")
+        print(f"[3070] Running ProPainter IN-MEMORY (neighbor={neighbor_length}, ref_stride={ref_stride}, subvideo={dynamic_subvideo})")
 
         process_start = time.time()
 
-        # KEY FIX: Use disk-based approach like run_sam2_local.py!
-        # Pass frames_array=None to let ProPainter read from disk
+        # IN-MEMORY processing for speed (like 612c45d0 commit)
         faster_propainter_pipeline(
-            video=seg_frames_dir,
-            mask=seg_masks_dir,
+            video=seg_frames_dir,  # Still needed for output path
+            mask=seg_masks_dir,    # Still needed for output path
             output=seg_output_dir,
             resize_ratio=1.0,
             mask_dilation=4,
@@ -1233,8 +1236,8 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
             mode="video_inpainting",
             save_frames=True,
             fp16=use_fp16,
-            frames_array=None,  # DISK-BASED! ProPainter reads from seg_frames_dir
-            masks_array=None    # DISK-BASED! ProPainter reads from seg_masks_dir
+            frames_array=process_frames,  # IN-MEMORY! Much faster!
+            masks_array=process_masks     # IN-MEMORY! Much faster!
         )
 
         process_time = time.time() - process_start
