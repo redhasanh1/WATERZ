@@ -1,0 +1,44 @@
+# Railway Web Frontend - CPU only (no GPU/CUDA/TensorRT)
+# GPU processing happens on local PC via Celery workers
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (web-only, no torch/CUDA)
+RUN pip install --no-cache-dir \
+    flask \
+    flask-cors \
+    celery[redis] \
+    redis \
+    python-dotenv \
+    waitress \
+    gunicorn \
+    static-ffmpeg \
+    numpy \
+    opencv-python-headless \
+    pillow
+
+# Copy only web-related files
+COPY server_production.py .
+COPY web ./web
+
+# Create necessary directories
+RUN mkdir -p temp uploads results cache
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8
+
+# Expose port (Railway uses PORT env var)
+EXPOSE 8080
+
+# Run with gunicorn (Railway sets PORT automatically)
+CMD gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 120 server_production:app
