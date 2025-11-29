@@ -1,3 +1,16 @@
-# Lightweight dependencies for Railway static server
-# Only serves HTML/CSS/JS frontend + tunnel URL endpoint
+# Dependencies for Railway deployment (API server + auth)
 flask==3.0.0
+gunicorn==23.0.0
+celery
+redis
+requests
+python-dotenv
+static-ffmpeg
+numpy
+opencv-python
+flask-cors
+google-auth
+google-auth-oauthlib
+bcrypt
+psycopg2-binary
+stripe
