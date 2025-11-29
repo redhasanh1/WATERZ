@@ -4642,6 +4642,83 @@ def get_stats():
     })
 
 
+# ============================================================================
+# SAM2 Object Selection Endpoint
+# ============================================================================
+
+@app.route('/api/sam2/select-object', methods=['POST'])
+def sam2_select_object():
+    """Interactive SAM2 object selection - uses local worker via Redis"""
+    try:
+        data = request.json
+        frame_base64 = data.get('frame_data')
+        points = data.get('points', [])
+        video_width = data.get('video_width')
+        video_height = data.get('video_height')
+
+        if not frame_base64 or not points:
+            return jsonify({'status': 'error', 'message': 'Missing frame data or points'}), 400
+
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
+
+        REDIS_URL = os.environ.get('REDIS_URL')
+        if not REDIS_URL:
+            return jsonify({'status': 'error', 'message': 'Redis not configured'}), 500
+
+        print(f"[SAM2] Using Redis: {REDIS_URL[:50]}...")
+        redis_client = redis.from_url(REDIS_URL, decode_responses=False)
+
+        # Subscribe to response channel BEFORE pushing request
+        response_channel = f'sam2:selection:response:{request_id}'
+        pubsub = redis_client.pubsub()
+        pubsub.subscribe(response_channel)
+
+        # Push request to list (worker uses BRPOP)
+        request_data = {
+            'request_id': request_id,
+            'frame_data': frame_base64,
+            'points': points,
+            'video_width': video_width,
+            'video_height': video_height
+        }
+        print(f"[SAM2] Pushing request {request_id} to list: sam2:selection:request")
+        print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
+        redis_client.lpush('sam2:selection:request', json.dumps(request_data))
+
+        # Wait for response (timeout: 5 seconds)
+        timeout = 5.0
+        start_time = time.time()
+
+        print(f"[SAM2] Waiting for response on: {response_channel}")
+        while time.time() - start_time < timeout:
+            message = pubsub.get_message(timeout=0.1)
+            if message and message['type'] == 'message':
+                response_data = json.loads(message['data'])
+                pubsub.unsubscribe()
+                pubsub.close()
+                if response_data.get('status') == 'success':
+                    return jsonify({
+                        'status': 'success',
+                        'mask': response_data['mask'],
+                        'score': response_data.get('score')
+                    })
+                else:
+                    return jsonify({
+                        'status': 'error',
+                        'message': response_data.get('error', 'Unknown error')
+                    }), 500
+
+        pubsub.unsubscribe()
+        pubsub.close()
+        return jsonify({
+            'status': 'error',
+            'message': 'Local worker timeout - is SAM2 worker running?'
+        }), 504
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 # ============================================================================
