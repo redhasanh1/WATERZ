@@ -35,6 +35,7 @@ class SAM2Selector {
         this.displayScale = 1.0;
         this.offsetX = 0;
         this.offsetY = 0;
+        this.canvasInitialized = false;
 
         this.init();
     }
@@ -107,23 +108,31 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Set canvas internal resolution to native video resolution
-        this.canvas.width = this.videoWidth;
-        this.canvas.height = this.videoHeight;
-
-        // Canvas display size is handled by CSS (100% width/height of parent)
-        // No need to set style.width/height - it auto-resizes responsively
-
-        // Get current display dimensions for scale calculation
+        // Get current display dimensions
         const canvasRect = this.canvas.getBoundingClientRect();
         const displayWidth = canvasRect.width;
         const displayHeight = canvasRect.height;
 
-        // Calculate scale for coordinate conversion
+        // Only set canvas size once (on first call) or if display size changed significantly
+        // This prevents the stretch issue when clicking
+        if (!this.canvasInitialized ||
+            Math.abs(this.canvas.width - displayWidth) > 10 ||
+            Math.abs(this.canvas.height - displayHeight) > 10) {
+
+            // Set canvas internal resolution to DISPLAY size (not video native)
+            // This keeps canvas 1:1 with CSS display and prevents stretching
+            this.canvas.width = displayWidth;
+            this.canvas.height = displayHeight;
+            this.canvasInitialized = true;
+
+            console.log(`[SAM2Selector] Canvas initialized: ${this.canvas.width}x${this.canvas.height}`);
+        }
+
+        // Calculate scale for coordinate conversion (display to video native)
         this.displayScaleX = displayWidth / this.videoWidth;
         this.displayScaleY = displayHeight / this.videoHeight;
 
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth}x${displayHeight}`);
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Video: ${this.videoWidth}x${this.videoHeight}`);
 
         // Calculate video render bounds for letterbox compensation
         this.calculateVideoRenderBounds();
