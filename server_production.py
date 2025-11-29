@@ -163,6 +163,7 @@ import subprocess
 import smtplib
 import ssl
 from email.message import EmailMessage
+from contextlib import contextmanager
 
 # Stripe for billing (optional - gracefully handle if not installed)
 try:
@@ -182,7 +183,6 @@ try:
     import bcrypt
     import psycopg2
     from psycopg2.pool import SimpleConnectionPool
-    from contextlib import contextmanager
     AUTH_ENABLED = True
     print("[OK] Authentication modules loaded")
 except ImportError as e:
