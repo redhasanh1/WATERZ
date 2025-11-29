@@ -5973,7 +5973,6 @@ def sam2_get_result(request_id):
 
 
 @app.route('/api/sam2/select-object', methods=['POST'])
-@require_auth
 def sam2_select_object():
     """Initiates an interactive SAM2 object selection task."""
     try:
