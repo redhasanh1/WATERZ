@@ -361,6 +361,16 @@ def require_credits(min_credits=1):
     return decorator
 
 # ----------------------------------------------------------------------------
+# Redis URL Definition (needed for Session and Celery)
+# ----------------------------------------------------------------------------
+REDIS_URL = os.getenv('REDIS_URL')
+if not REDIS_URL:
+    print("[WARNING] REDIS_URL not found in environment. Session and Celery may fail.")
+else:
+    print(f"[OK] Using REDIS_URL from environment for Session config: {REDIS_URL}")
+
+
+# ----------------------------------------------------------------------------
 # Flask Session Configuration (using Redis for multi-worker stability)
 # ----------------------------------------------------------------------------
 from flask_session import Session
