@@ -11,21 +11,9 @@ RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies (web-only, no torch/CUDA)
-RUN pip install --no-cache-dir \
-    flask \
-    flask-cors \
-    celery[redis] \
-    redis \
-    python-dotenv \
-    waitress \
-    gunicorn \
-    static-ffmpeg \
-    numpy \
-    opencv-python-headless \
-    pillow \
-    sib-api-v3-sdk \
-    requests
+# Install Python dependencies from requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy only web-related files
 COPY server_production.py .
