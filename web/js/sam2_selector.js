@@ -162,19 +162,40 @@ class SAM2Selector {
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
+        // FRESH calculation at click time - don't use cached values that may be stale
+        const containerWidth = rect.width;
+        const containerHeight = rect.height;
+        const videoAspect = this.video.videoWidth / this.video.videoHeight;
+        const containerAspect = containerWidth / containerHeight;
+
+        let renderWidth, renderHeight, offsetX, offsetY;
+        if (videoAspect > containerAspect) {
+            // Video is wider - letterbox top/bottom
+            renderWidth = containerWidth;
+            renderHeight = containerWidth / videoAspect;
+            offsetX = 0;
+            offsetY = (containerHeight - renderHeight) / 2;
+        } else {
+            // Video is taller - pillarbox left/right
+            renderHeight = containerHeight;
+            renderWidth = containerHeight * videoAspect;
+            offsetX = (containerWidth - renderWidth) / 2;
+            offsetY = 0;
+        }
+
         // Subtract letterbox offset to get position relative to rendered video
-        const relativeX = clickX - this.offsetX;
-        const relativeY = clickY - this.offsetY;
+        const relativeX = clickX - offsetX;
+        const relativeY = clickY - offsetY;
 
         // Check if click is outside the rendered video area (in letterbox)
-        if (relativeX < 0 || relativeY < 0 || relativeX > this.renderWidth || relativeY > this.renderHeight) {
+        if (relativeX < 0 || relativeY < 0 || relativeX > renderWidth || relativeY > renderHeight) {
             console.log('[SAM2Selector] Click outside video area (in letterbox), ignoring');
             return null;
         }
 
         // Convert to canvas coordinates using actual rendered video dimensions
-        const videoX = Math.floor((relativeX / this.renderWidth) * this.canvas.width);
-        const videoY = Math.floor((relativeY / this.renderHeight) * this.canvas.height);
+        const videoX = Math.floor((relativeX / renderWidth) * this.canvas.width);
+        const videoY = Math.floor((relativeY / renderHeight) * this.canvas.height);
 
         // Clamp to video bounds
         return {
