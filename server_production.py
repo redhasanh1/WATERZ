@@ -106,7 +106,7 @@ def _ensure_cuda_torch():
 if not os.environ.get('RAILWAY'):
     _ensure_cuda_torch()
 
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, send_from_directory, jsonify
 from flask_cors import CORS
 from celery import Celery, chord
 import cv2
