@@ -5992,7 +5992,7 @@ def sam2_select_object():
         request_channel = 'sam2:selection:request'
         payload = {
             'request_id': request_id,
-            'frame_base64': frame_base64,
+            'frame_data': frame_base64,
             'points': points,
             'video_width': video_width,
             'video_height': video_height
