@@ -375,7 +375,7 @@ else:
 # ----------------------------------------------------------------------------
 from flask_session import Session
 
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = True
 app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
@@ -1026,9 +1026,6 @@ def add_security_headers(response):
 # Configuration - ALL ON D DRIVE
 # ============================================================================
 
-# Security - Generate secret key for session encryption
-SECRET_KEY = os.getenv('SECRET_KEY', secrets.token_hex(32))
-app.config['SECRET_KEY'] = SECRET_KEY
 
 # Redis configuration (for queue + caching) - NO LOCALHOST FALLBACK
 # Priority: 1) redis_url.txt (local dev), 2) REDIS_URL env var (Railway)
