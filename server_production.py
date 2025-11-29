@@ -242,7 +242,7 @@ app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath
 CORS(
     app,
     resources={r"/api/*": {"origins": "*"}},
-    supports_credentials=False,
+    supports_credentials=True,
     allow_headers=["Content-Type", "ngrok-skip-browser-warning"],
     expose_headers=["Content-Disposition"]
 )

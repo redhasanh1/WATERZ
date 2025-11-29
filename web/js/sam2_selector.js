@@ -237,6 +237,7 @@ class SAM2Selector {
             const initResponse = await fetch('/api/sam2/select-object', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
+                credentials: 'include', // Send cookies with the request
                 body: JSON.stringify({
                     frame_data: frameData,
                     points: points,
