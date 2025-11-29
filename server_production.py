@@ -2300,7 +2300,7 @@ def broadcast_video_download(self, video_id, video_url, upload_filename):
         return {'status': 'failed', 'error': str(e)}
 
 
-@celery.task(bind=True, name='watermark.prepare_video')
+@celery.task(bind=True, name='prepare_video')
 def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id=None):
     """
     Phase 1: Prepare video for distributed processing
