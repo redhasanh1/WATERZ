@@ -1,0 +1,62 @@
+@echo off
+cd /d "%~dp0"
+REM ===================================================================
+REM SAM2 Selection Worker Launcher
+REM Starts the local worker that polls Railway for SAM2 selection jobs
+REM ===================================================================
+
+echo.
+echo ===================================================================
+echo SAM2 SELECTION WORKER
+echo ===================================================================
+echo.
+
+REM Use Python 3.12 (TensorRT requires Python 3.12, not 3.13!)
+set PYTHON=C:\Users\has\AppData\Local\Programs\Python\Python312\python.exe
+
+REM Set environment
+set PYTHONPATH=%CD%
+
+REM Check if .env file exists
+if not exist .env (
+    echo [ERROR] .env file not found!
+    echo Please create .env with DATABASE_URL
+    pause
+    exit /b 1
+)
+
+REM Activate Python environment (if using venv)
+if exist venv\Scripts\activate.bat (
+    echo [INFO] Activating virtual environment...
+    call venv\Scripts\activate.bat
+)
+
+REM SAM2 worker doesn't need DATABASE_URL, only REDIS_URL (set below at line 66)
+
+REM Check dependencies
+echo [INFO] Checking dependencies...
+%PYTHON% -c "import flask" 2>nul
+if errorlevel 1 (
+    echo [WARN] flask not installed, installing...
+    %PYTHON% -m pip install flask
+)
+
+%PYTHON% -c "import dotenv" 2>nul
+if errorlevel 1 (
+    echo [WARN] python-dotenv not installed, installing...
+    %PYTHON% -m pip install python-dotenv
+)
+
+echo.
+echo [INFO] Starting SAM2 Selection Worker...
+echo [INFO] Dashboard will be available at http://localhost:5555
+echo [INFO] Press Ctrl+C to stop
+echo.
+
+REM Set Railway Redis URL explicitly (so worker connects to same Redis as Railway backend)
+set REDIS_URL=redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930
+
+REM Start worker
+%PYTHON% start_object_server.py
+
+pause

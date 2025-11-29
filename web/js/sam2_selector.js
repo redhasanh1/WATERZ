@@ -54,11 +54,19 @@ class SAM2Selector {
         // Update on window resize
         window.addEventListener('resize', () => this.updateCanvasSize());
 
+        // Use ResizeObserver for robust resize handling (DevTools dock/undock, etc.)
+        if (window.ResizeObserver) {
+            const wrapper = this.video.parentElement;
+            new ResizeObserver(() => {
+                requestAnimationFrame(() => this.updateCanvasSize());
+            }).observe(wrapper);
+        }
+
         console.log('[SAM2Selector] Initialized');
     }
 
     /**
-     * Update canvas size to match video element
+     * Update canvas size to match video element's actual rendered rect
      */
     updateCanvasSize() {
         if (!this.video.videoWidth) return;
@@ -66,23 +74,22 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
+        // Get video's ACTUAL rendered dimensions (not container!)
+        const videoRect = this.video.getBoundingClientRect();
+
+        // Set canvas display size to match video exactly
+        this.canvas.style.width = `${videoRect.width}px`;
+        this.canvas.style.height = `${videoRect.height}px`;
+
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        // Canvas display size is handled by CSS (100% width/height of parent)
-        // No need to set style.width/height - it auto-resizes responsively
-
-        // Get current display dimensions for scale calculation
-        const canvasRect = this.canvas.getBoundingClientRect();
-        const displayWidth = canvasRect.width;
-        const displayHeight = canvasRect.height;
-
         // Calculate scale for coordinate conversion
-        this.displayScaleX = displayWidth / this.videoWidth;
-        this.displayScaleY = displayHeight / this.videoHeight;
+        this.displayScaleX = videoRect.width / this.videoWidth;
+        this.displayScaleY = videoRect.height / this.videoHeight;
 
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth}x${displayHeight}`);
+        console.log(`[SAM2Selector] Video rect: ${Math.round(videoRect.width)}x${Math.round(videoRect.height)}, Canvas internal: ${this.canvas.width}x${this.canvas.height}`);
 
         // Redraw with current mask
         this.draw();

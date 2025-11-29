@@ -1116,7 +1116,7 @@ def process_segment_task(self, video_id, segment_index, start_frame, end_frame,
         })
 
         # Calculate optimal parameters
-        neighbor_length = 10
+        neighbor_length = 1  # Testing with 1 for quality check
         ref_stride = 10
         dynamic_subvideo = get_dynamic_subvideo_length(crop_w, crop_h)  # Use cropped dimensions!
 
@@ -1506,7 +1506,7 @@ def process_batch_task(self, video_id, video_url, all_masks_url, total_frames, f
 
         # Use optimal subvideo_length=120 for cropped regions (like RUN_SAM2_LOCAL)
         dynamic_subvideo = 120  # Optimal for cropped regions
-        neighbor_length = 10
+        neighbor_length = 1  # Testing with 1 for quality check
         ref_stride = 10
         use_fp16 = True
 
