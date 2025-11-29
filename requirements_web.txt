@@ -1,0 +1,15 @@
+# Minimal requirements for the Flask web service (API-only)
+
+flask==3.0.0
+gunicorn==23.0.0
+celery
+redis
+requests
+python-dotenv
+flask-cors
+google-auth
+google-auth-oauthlib
+bcrypt
+psycopg2-binary
+stripe
+Flask-Session

@@ -5,15 +5,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install minimal system dependencies (web-only, no ffmpeg needed - workers do processing)
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+# System dependencies are no longer needed for the lightweight web-only container.
+# The worker service handles all processing that requires ffmpeg, etc.
 
-# Install Python dependencies from requirements.txt
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy and install the minimal web-only requirements
+COPY requirements_web.txt .
+RUN pip install --no-cache-dir -r requirements_web.txt
 
 # Copy only web-related files
 COPY server_production.py .
