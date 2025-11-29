@@ -6047,6 +6047,91 @@ def sam2_select_object():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/sam2/process-video', methods=['POST'])
+def sam2_process_video():
+    """
+    Trigger SAM2 video processing with user-selected points.
+    Points are stored in Redis, then SAM2 worker generates masks and runs ProPainter.
+    """
+    try:
+        data = request.json
+        task_id = data.get('task_id')
+        points = data.get('points', [])
+        video_width = data.get('video_width')
+        video_height = data.get('video_height')
+        frame_index = data.get('frame_index', 0)
+
+        if not task_id:
+            return jsonify({'status': 'error', 'message': 'Missing task_id'}), 400
+
+        if not points or len(points) == 0:
+            return jsonify({'status': 'error', 'message': 'No points selected'}), 400
+
+        # Get video path from task_id
+        video_path = os.path.join(UPLOAD_DIR, f"{task_id}.mp4")
+        if not os.path.exists(video_path):
+            # Try with original extension
+            for ext in ['.mp4', '.mov', '.avi', '.webm']:
+                test_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
+                if os.path.exists(test_path):
+                    video_path = test_path
+                    break
+
+        if not os.path.exists(video_path):
+            return jsonify({'status': 'error', 'message': f'Video not found for task {task_id}'}), 404
+
+        # Store selection data in Redis for the worker to use
+        REDIS_URL = os.environ.get('REDIS_URL')
+        if REDIS_URL:
+            redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+            selection_data = {
+                'points': points,
+                'video_width': video_width,
+                'video_height': video_height,
+                'frame_index': frame_index
+            }
+            redis_client.set(f'sam2:selection:{task_id}', json.dumps(selection_data), ex=3600)  # 1 hour expiry
+
+        # Create a unique job ID for this SAM2 processing request
+        job_id = f"sam2_{task_id}_{uuid.uuid4().hex[:8]}"
+
+        # Create temp masks folder path (worker will generate masks here)
+        masks_folder = os.path.join(TEMP_DIR, f"sam2_masks_{task_id}")
+        os.makedirs(masks_folder, exist_ok=True)
+
+        # Store points as JSON file for the worker
+        points_file = os.path.join(masks_folder, 'points.json')
+        with open(points_file, 'w') as f:
+            json.dump({
+                'points': points,
+                'video_width': video_width,
+                'video_height': video_height,
+                'frame_index': frame_index,
+                'task_id': task_id
+            }, f)
+
+        # Send task to SAM2 worker queue
+        result = celery.send_task(
+            'watermark.process_sam2_interactive',
+            args=[video_path, masks_folder, task_id],
+            task_id=job_id
+        )
+
+        print(f"[SAM2] Started processing job {job_id} for video {task_id}")
+        print(f"[SAM2] Points: {len(points)}, Video: {video_width}x{video_height}")
+
+        return jsonify({
+            'status': 'success',
+            'job_id': job_id,
+            'task_id': job_id,  # For compatibility
+            'message': 'SAM2 processing started'
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 # ============================================================================
 # Run Server
