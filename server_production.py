@@ -4587,7 +4587,10 @@ def serve_config():
 
 @app.route('/js/<path:path>')
 def serve_js(path):
-    return send_file(os.path.join(app.static_folder, 'js', path), mimetype='application/javascript')
+    file_path = os.path.join(app.static_folder, 'js', path)
+    if not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'}), 404
+    return send_file(file_path, mimetype='application/javascript')
 
 @app.route('/css/<path:path>')
 def serve_css(path):
