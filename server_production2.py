@@ -88,17 +88,16 @@ def clear_gpu_memory():
 #============================================================================
 
 @celery.task(bind=True, name='watermark.process_sam2_interactive')
-def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None):
+def process_sam2_interactive_task(self, video_path, video_id=None):
     """
     SAM2 Interactive Mode: Process video with user-provided SAM2 masks
     - Skip YOLO detection completely
-    - Load SAM2 masks from provided folder
+    - Load SAM2 masks from a locally constructed path
     - Run ProPainter with full optimizations
     - Return processed video
 
     Args:
         video_path: Path to input video
-        masks_folder: Path to folder containing SAM2 masks (PNG files, numbered)
         video_id: Optional video ID for tracking
     """
     try:
@@ -116,8 +115,11 @@ def process_sam2_interactive_task(self, video_path, masks_folder, video_id=None)
         if not video_id:
             video_id = os.path.basename(video_path).split('.')[0][:8]
 
+        # === FIX: Construct the masks_folder path locally ===
+        masks_folder = os.path.join(TEMP_DIR, f"sam2_masks_{video_id}")
+
         print(f"\n[SAM2 INTERACTIVE] Processing video: {video_path}")
-        print(f"[SAM2 INTERACTIVE] Loading masks from: {masks_folder}")
+        print(f"[SAM2 INTERACTIVE] Constructed local masks path: {masks_folder}")
 
         # Check if masks folder exists
         if not os.path.exists(masks_folder):

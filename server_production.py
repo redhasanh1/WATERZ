@@ -6118,7 +6118,7 @@ def sam2_process_video():
         # Send task to SAM2 worker queue
         result = celery.send_task(
             'watermark.process_sam2_interactive',
-            args=[video_path, masks_folder, task_id],
+            args=[video_path, task_id],
             task_id=job_id
         )
 
