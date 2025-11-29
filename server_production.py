@@ -102,7 +102,9 @@ def _ensure_cuda_torch():
     sys.modules['torch'] = torch_cuda
 
 
-_ensure_cuda_torch()
+# Only initialize CUDA/torch on local GPU machines, not on Railway (which is web-only)
+if not os.environ.get('RAILWAY'):
+    _ensure_cuda_torch()
 
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
