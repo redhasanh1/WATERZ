@@ -23,7 +23,9 @@ RUN pip install --no-cache-dir \
     static-ffmpeg \
     numpy \
     opencv-python-headless \
-    pillow
+    pillow \
+    sib-api-v3-sdk \
+    requests
 
 # Copy only web-related files
 COPY server_production.py .
