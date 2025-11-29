@@ -5894,7 +5894,6 @@ def get_stats():
 
 
 @app.route('/api/sam2/select-object', methods=['POST'])
-@require_auth
 def sam2_select_object():
     """Interactive SAM2 object selection - uses local worker via Redis pub/sub"""
     try:
@@ -5934,9 +5933,9 @@ def sam2_select_object():
             'video_height': video_height
         }
 
-        print(f"[SAM2] Publishing request {request_id} to channel: sam2:selection:request")
+        print(f"[SAM2] Pushing request {request_id} to list: sam2:selection:request")
         print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
-        redis_client.publish('sam2:selection:request', json.dumps(request_data))
+        redis_client.lpush('sam2:selection:request', json.dumps(request_data))
 
         # Wait for response (timeout: 5 seconds)
         timeout = 5.0
