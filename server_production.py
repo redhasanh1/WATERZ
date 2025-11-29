@@ -13,12 +13,34 @@ import importlib
 import shutil
 from pathlib import Path
 
+# Load environment variables from .env file (for Celery Redis configuration)
+from dotenv import load_dotenv
+load_dotenv()
+
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
-CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
-UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
-RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
+
+# Detect Railway environment
+IS_RAILWAY = os.getenv('RAILWAY_ENVIRONMENT_NAME') is not None or os.getenv('RAILWAY') is not None
+
+# Use Railway volume (/data) for persistent storage in production
+if IS_RAILWAY:
+    DATA_DIR = '/data'
+    TEMP_DIR = os.path.join(DATA_DIR, 'temp')
+    CACHE_DIR = os.path.join(DATA_DIR, 'cache')
+    UPLOAD_DIR = os.path.join(DATA_DIR, 'uploads')
+    RESULT_DIR = os.path.join(DATA_DIR, 'results')
+    STATIC_VIDEOS_DIR = os.path.join(DATA_DIR, 'static_videos')
+    TRAINING_VIDEOS_DIR = os.path.join(DATA_DIR, 'training_videos')
+else:
+    DATA_DIR = SCRIPT_DIR
+    TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
+    CACHE_DIR = os.path.join(SCRIPT_DIR, 'cache')
+    UPLOAD_DIR = os.path.join(SCRIPT_DIR, 'uploads')
+    RESULT_DIR = os.path.join(SCRIPT_DIR, 'results')
+    STATIC_VIDEOS_DIR = os.path.join(SCRIPT_DIR, 'web')
+    TRAINING_VIDEOS_DIR = os.path.join(SCRIPT_DIR, 'videostotrain')
+
 DEBUG_DIR = os.path.join(RESULT_DIR, 'debug_masks')
 PYTHON_PACKAGES_DIR = os.path.join(SCRIPT_DIR, 'python_packages')
 PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter.py')
@@ -102,27 +124,71 @@ def _ensure_cuda_torch():
     sys.modules['torch'] = torch_cuda
 
 
-# Only initialize CUDA/torch on local GPU machines, not on Railway (which is web-only)
-if not os.environ.get('RAILWAY'):
+# Try to initialize CUDA/torch (local workers only)
+# Railway deployment runs API-only mode (no GPU needed)
+GPU_AVAILABLE = False
+try:
     _ensure_cuda_torch()
+    GPU_AVAILABLE = True
+    print("[OK] GPU/CUDA initialized successfully - worker mode enabled")
+except Exception as e:
+    print(f"[INFO] Running in API-only mode (no GPU): {e}")
+    print("[INFO] This is normal for Railway deployment - local workers handle GPU processing")
 
 from flask import Flask, request, send_file, send_from_directory, jsonify
 from flask_cors import CORS
 from celery import Celery, chord
-import cv2
+
+# Conditional imports for GPU processing (only needed on local workers)
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+    if not GPU_AVAILABLE:
+        print("[INFO] cv2 not available (API-only mode)")
+
 import numpy as np
 import io
 import json
 import time
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import redis
 import threading
 import secrets
 import hmac
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import subprocess
+import smtplib
+import ssl
+from email.message import EmailMessage
+
+# Stripe for billing (optional - gracefully handle if not installed)
+try:
+    import stripe
+    STRIPE_ENABLED = True
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY', '')
+except ImportError:
+    STRIPE_ENABLED = False
+    print("[WARNING] Stripe not installed - billing endpoints disabled")
+
+# Authentication and session management
+from flask import session, redirect, url_for
+try:
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
+    from google_auth_oauthlib.flow import Flow
+    import bcrypt
+    import psycopg2
+    from psycopg2.pool import SimpleConnectionPool
+    from contextlib import contextmanager
+    AUTH_ENABLED = True
+    print("[OK] Authentication modules loaded")
+except ImportError as e:
+    AUTH_ENABLED = False
+    print(f"[WARNING] Authentication disabled - missing dependencies: {e}")
+    print("[INFO] Install with: pip install google-auth google-auth-oauthlib bcrypt psycopg2-binary")
 
 # [INIT] FFmpeg/FFprobe path detection with fallback
 def get_ffmpeg_executables():
@@ -150,7 +216,13 @@ def get_ffmpeg_executables():
         raise RuntimeError(f"FFmpeg/FFprobe initialization failed: {e}")
 
 # Initialize FFmpeg paths at module level (before Celery workers start)
-FFMPEG_EXE, FFPROBE_EXE = get_ffmpeg_executables()
+# FFmpeg only needed on local workers (video processing), not on Railway API
+try:
+    FFMPEG_EXE, FFPROBE_EXE = get_ffmpeg_executables()
+except Exception as e:
+    FFMPEG_EXE, FFPROBE_EXE = None, None
+    if not GPU_AVAILABLE:
+        print(f"[INFO] FFmpeg not available (API-only mode): {e}")
 
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
@@ -165,7 +237,7 @@ FRAME_CACHE_LOCK = threading.Lock()
 # from mytimer import timer_decorator  
 # from pre_post_process import crop_video_mask, merge_videos_with_mask
 
-app = Flask(__name__, static_folder='web')
+app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web'))
 # CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
 CORS(
     app,
@@ -174,6 +246,135 @@ CORS(
     allow_headers=["Content-Type", "ngrok-skip-browser-warning"],
     expose_headers=["Content-Disposition"]
 )
+
+# ----------------------------------------------------------------------------
+# Database Connection Pool (for user authentication)
+# ----------------------------------------------------------------------------
+db_pool = None
+if AUTH_ENABLED:
+    try:
+        DATABASE_URL = os.getenv('DATABASE_URL')
+        if DATABASE_URL:
+            # Railway provides postgres:// but psycopg2 needs postgresql://
+            if DATABASE_URL.startswith('postgres://'):
+                DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+            db_pool = SimpleConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=DATABASE_URL
+            )
+            print("[OK] Database connection pool initialized")
+        else:
+            print("[WARNING] DATABASE_URL not set - authentication will not work")
+            AUTH_ENABLED = False
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize database pool: {e}")
+        AUTH_ENABLED = False
+
+@contextmanager
+def get_db():
+    """Get database connection from pool."""
+    if not db_pool:
+        raise RuntimeError("Database pool not initialized")
+
+    conn = db_pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_pool.putconn(conn)
+
+# ----------------------------------------------------------------------------
+# Authentication Decorators
+# ----------------------------------------------------------------------------
+from functools import wraps
+
+def require_auth(f):
+    """Decorator to require authentication for endpoint."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not AUTH_ENABLED:
+            # If auth is disabled, allow access (for development)
+            return f(*args, **kwargs)
+
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({
+                'status': 'error',
+                'error': 'Authentication required. Please sign in.',
+                'signin_required': True
+            }), 401
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_credits(min_credits=1):
+    """Decorator to check if user has sufficient credits."""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not AUTH_ENABLED:
+                # If auth is disabled, allow access (for development)
+                return f(*args, **kwargs)
+
+            user_id = session.get('user_id')
+            if not user_id:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'Authentication required',
+                    'signin_required': True
+                }), 401
+
+            # Check credit balance
+            try:
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    cur.execute('SELECT credits FROM users WHERE id = %s', (user_id,))
+                    result = cur.fetchone()
+
+                    if not result:
+                        return jsonify({
+                            'status': 'error',
+                            'error': 'User not found'
+                        }), 404
+
+                    credits = result[0]
+                    if credits < min_credits:
+                        return jsonify({
+                            'status': 'error',
+                            'error': 'Insufficient credits',
+                            'required': min_credits,
+                            'available': credits,
+                            'message': f'You need {min_credits} credit(s) but only have {credits}. Please purchase more credits.'
+                        }), 402  # Payment Required
+            except Exception as e:
+                print(f"[ERROR] Credit check failed: {e}")
+                # Allow processing to continue if database check fails (graceful degradation)
+                pass
+
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+# ----------------------------------------------------------------------------
+# Flask Session Configuration (for authentication)
+# ----------------------------------------------------------------------------
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_PERMANENT'] = True
+app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # No JavaScript access
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 30  # 30 days
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
 
 # ----------------------------------------------------------------------------
 # Simple access logging (Waitress doesn't emit per‑request access logs by default)
@@ -224,6 +425,571 @@ def health_check():
         'message': 'Flask API server running - workers handle processing'
     })
 
+# ----------------------------------------------------------------------------
+# Email Verification
+# ----------------------------------------------------------------------------
+
+# Brevo SMTP configuration
+SMTP_SERVER = "smtp-relay.brevo.com"
+SMTP_PORT = 587
+SMTP_USERNAME = "9c3ca4001@smtp-brevo.com"
+SMTP_PASSWORD = "xsmtpsib-798b8db725baf9ad346d32e4ccae5bdcfc64f7c03d059b5aef8e6f82fa5da30b-IB5SjcNk2AV6NZ1f"
+SMTP_FROM = "markremoverai@gmail.com"
+
+def send_verification_email(to_email, token):
+    """Send email verification link to user."""
+    try:
+        # Build verification URL
+        base_url = os.getenv('SITE_URL', 'https://markremoverai.com')
+        verify_url = f"{base_url}/api/auth/verify?token={token}"
+
+        msg = EmailMessage()
+        msg["Subject"] = "Verify your email for MarkRemoverAI"
+        msg["From"] = SMTP_FROM
+        msg["To"] = to_email
+        msg.set_content(f"""
+Welcome to MarkRemoverAI!
+
+Please click the link below to verify your email address:
+
+{verify_url}
+
+This link will expire in 24 hours.
+
+If you didn't create an account, you can safely ignore this email.
+
+- The MarkRemoverAI Team
+""")
+
+        # Also set HTML version
+        msg.add_alternative(f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #667eea;">Welcome to MarkRemoverAI!</h2>
+        <p>Please click the button below to verify your email address:</p>
+        <p style="text-align: center; margin: 30px 0;">
+            <a href="{verify_url}"
+               style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                      padding: 14px 28px;
+                      text-decoration: none;
+                      border-radius: 8px;
+                      font-weight: bold;
+                      display: inline-block;">
+                Verify Email
+            </a>
+        </p>
+        <p style="color: #666; font-size: 14px;">
+            Or copy and paste this link into your browser:<br>
+            <a href="{verify_url}" style="color: #667eea;">{verify_url}</a>
+        </p>
+        <p style="color: #999; font-size: 12px; margin-top: 30px;">
+            This link will expire in 24 hours.<br>
+            If you didn't create an account, you can safely ignore this email.
+        </p>
+    </div>
+</body>
+</html>
+""", subtype='html')
+
+        # Send via Brevo SMTP
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls(context=ssl.create_default_context())
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(msg)
+
+        print(f"[EMAIL] Verification email sent to {to_email}")
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Failed to send verification email to {to_email}: {e}")
+        return False
+
+# ----------------------------------------------------------------------------
+# Authentication Routes (Google OAuth + Email/Password)
+# ----------------------------------------------------------------------------
+
+@app.route('/auth/google')
+def auth_google():
+    """Initiate Google OAuth flow."""
+    if not AUTH_ENABLED or not GOOGLE_CLIENT_ID:
+        return jsonify({'error': 'Google OAuth not configured'}), 503
+
+    try:
+        # Create flow instance
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [f"{request.host_url}auth/google/callback"]
+                }
+            },
+            scopes=['openid', 'email', 'profile']
+        )
+
+        # Use the actual callback URL from request
+        flow.redirect_uri = f"{request.host_url}auth/google/callback"
+
+        # Generate authorization URL with state token (CSRF protection)
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='select_account'
+        )
+
+        # Store state in session for verification
+        session['oauth_state'] = state
+
+        return redirect(authorization_url)
+
+    except Exception as e:
+        print(f"[ERROR] Google OAuth initiation failed: {e}")
+        return jsonify({'error': 'Failed to initiate Google login'}), 500
+
+
+@app.route('/auth/google/callback')
+def auth_google_callback():
+    """Handle Google OAuth callback."""
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        # Verify state token (CSRF protection)
+        state = session.get('oauth_state')
+        if not state or state != request.args.get('state'):
+            return jsonify({'error': 'Invalid state parameter'}), 400
+
+        # Create flow instance with same config
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [f"{request.host_url}auth/google/callback"]
+                }
+            },
+            scopes=['openid', 'email', 'profile'],
+            state=state
+        )
+
+        flow.redirect_uri = f"{request.host_url}auth/google/callback"
+
+        # Exchange authorization code for tokens
+        flow.fetch_token(authorization_response=request.url)
+
+        # Get user info from ID token
+        credentials = flow.credentials
+        id_info = id_token.verify_oauth2_token(
+            credentials.id_token,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+
+        # Extract user information
+        google_id = id_info['sub']
+        email = id_info['email']
+        name = id_info.get('name', email.split('@')[0])
+
+        # Store or update user in database
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Check if user exists
+            cur.execute('SELECT id, credits FROM users WHERE google_id = %s', (google_id,))
+            user = cur.fetchone()
+
+            if user:
+                user_id, credits = user
+                print(f"[AUTH] Existing user logged in: {email}")
+            else:
+                # New user - give 5 free credits
+                cur.execute(
+                    'INSERT INTO users (google_id, email, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
+                    (google_id, email, name, 5)
+                )
+                user_id = cur.fetchone()[0]
+                credits = 5
+                print(f"[AUTH] New user registered via Google: {email} (5 free credits)")
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name
+            session.permanent = True
+
+        # Redirect to main page
+        return redirect('/')
+
+    except Exception as e:
+        print(f"[ERROR] Google OAuth callback failed: {e}")
+        return jsonify({'error': 'Authentication failed'}), 500
+
+
+@app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+def auth_register():
+    """Register new user with email/password."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        name = data.get('name', '').strip()
+
+        # Validation
+        if not email or not password:
+            return jsonify({'error': 'Email and password required'}), 400
+
+        if len(password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+        # Basic email validation
+        if '@' not in email or '.' not in email.split('@')[1]:
+            return jsonify({'error': 'Invalid email address'}), 400
+
+        # Hash password
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+        # Store user in database
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Check if email already exists
+            cur.execute('SELECT id FROM users WHERE email = %s', (email,))
+            if cur.fetchone():
+                return jsonify({'error': 'Email already registered'}), 409
+
+            # Generate verification token
+            verification_token = secrets.token_urlsafe(32)
+            token_expires = datetime.utcnow() + timedelta(hours=24)
+
+            # Create user with 5 free credits and verification token
+            cur.execute(
+                '''INSERT INTO users (email, password_hash, name, credits, email_verified, verification_token, verification_token_expires)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id''',
+                (email, password_hash, name or email.split('@')[0], 5, False, verification_token, token_expires)
+            )
+            user_id = cur.fetchone()[0]
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name or email.split('@')[0]
+            session.permanent = True
+
+            # Send verification email (async to not block response)
+            threading.Thread(target=send_verification_email, args=(email, verification_token)).start()
+
+            print(f"[AUTH] New user registered: {email} (5 free credits, verification email sent)")
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Please check your email to verify your account',
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': session['name'],
+                    'credits': 5,
+                    'email_verified': False
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Registration failed: {e}")
+        return jsonify({'error': 'Registration failed'}), 500
+
+
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+def auth_login():
+    """Login with email/password."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+
+        if not email or not password:
+            return jsonify({'error': 'Email and password required'}), 400
+
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Get user
+            cur.execute('SELECT id, password_hash, name, credits, email_verified FROM users WHERE email = %s', (email,))
+            user = cur.fetchone()
+
+            if not user:
+                return jsonify({'error': 'Invalid email or password'}), 401
+
+            user_id, password_hash, name, credits, email_verified = user
+
+            # Verify password
+            if not bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
+                return jsonify({'error': 'Invalid email or password'}), 401
+
+            # Create session
+            session['user_id'] = user_id
+            session['email'] = email
+            session['name'] = name
+            session.permanent = True
+
+            print(f"[AUTH] User logged in: {email}")
+
+            return jsonify({
+                'status': 'success',
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': name,
+                    'credits': credits,
+                    'email_verified': email_verified or False
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Login failed: {e}")
+        return jsonify({'error': 'Login failed'}), 500
+
+
+@app.route('/api/auth/verify', methods=['GET'])
+def auth_verify():
+    """Verify email address from verification link."""
+    token = request.args.get('token', '')
+
+    if not token:
+        return redirect('/login.html?error=missing_token')
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Find user by verification token
+            cur.execute(
+                'SELECT id, email, verification_token_expires FROM users WHERE verification_token = %s',
+                (token,)
+            )
+            user = cur.fetchone()
+
+            if not user:
+                print(f"[AUTH] Invalid verification token attempted")
+                return redirect('/login.html?error=invalid_token')
+
+            user_id, email, token_expires = user
+
+            # Check if token has expired
+            if token_expires and datetime.utcnow() > token_expires:
+                print(f"[AUTH] Expired verification token for {email}")
+                return redirect('/login.html?error=token_expired')
+
+            # Mark email as verified and clear the token
+            cur.execute(
+                '''UPDATE users
+                   SET email_verified = TRUE, verification_token = NULL, verification_token_expires = NULL
+                   WHERE id = %s''',
+                (user_id,)
+            )
+
+            # Create session so user is logged in after verification
+            session['user_id'] = user_id
+            session['email'] = email
+            session.permanent = True
+
+            print(f"[AUTH] Email verified for {email}")
+
+            # Redirect to home page
+            return redirect('/')
+
+    except Exception as e:
+        print(f"[ERROR] Email verification failed: {e}")
+        return redirect('/login.html?error=verification_failed')
+
+
+@app.route('/api/auth/resend-verification', methods=['POST', 'OPTIONS'])
+def auth_resend_verification():
+    """Resend verification email."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Not logged in'}), 401
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Get user info
+            cur.execute(
+                'SELECT email, email_verified, verification_token_expires FROM users WHERE id = %s',
+                (user_id,)
+            )
+            user = cur.fetchone()
+
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+
+            email, email_verified, last_token_expires = user
+
+            if email_verified:
+                return jsonify({'error': 'Email already verified'}), 400
+
+            # Rate limit: don't send if token was created less than 60 seconds ago
+            if last_token_expires:
+                token_created = last_token_expires - timedelta(hours=24)
+                if datetime.utcnow() < token_created + timedelta(seconds=60):
+                    return jsonify({'error': 'Please wait before requesting another email'}), 429
+
+            # Generate new token
+            verification_token = secrets.token_urlsafe(32)
+            token_expires = datetime.utcnow() + timedelta(hours=24)
+
+            cur.execute(
+                'UPDATE users SET verification_token = %s, verification_token_expires = %s WHERE id = %s',
+                (verification_token, token_expires, user_id)
+            )
+
+            # Send email
+            threading.Thread(target=send_verification_email, args=(email, verification_token)).start()
+
+            print(f"[AUTH] Resent verification email to {email}")
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Verification email sent'
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Resend verification failed: {e}")
+        return jsonify({'error': 'Failed to resend verification email'}), 500
+
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status():
+    """Check if user is logged in and get user info."""
+    if not AUTH_ENABLED:
+        return jsonify({'authenticated': False})
+
+    try:
+        user_id = session.get('user_id')
+
+        if not user_id:
+            return jsonify({'authenticated': False})
+
+        # Get current user data from database
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT email, name, credits, email_verified FROM users WHERE id = %s', (user_id,))
+            user = cur.fetchone()
+
+            if not user:
+                session.clear()
+                return jsonify({'authenticated': False})
+
+            email, name, credits, email_verified = user
+
+            return jsonify({
+                'authenticated': True,
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': name,
+                    'credits': credits,
+                    'email_verified': email_verified or False
+                }
+            })
+
+    except Exception as e:
+        print(f"[ERROR] Auth status check failed: {e}")
+        return jsonify({'authenticated': False})
+
+
+@app.route('/api/auth/logout', methods=['POST', 'OPTIONS'])
+def auth_logout():
+    """Logout user."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    session.clear()
+    return jsonify({'status': 'success'})
+
+# ----------------------------------------------------------------------------
+# End Authentication Routes
+# ----------------------------------------------------------------------------
+
+@app.route('/api/debug/files', methods=['GET'])
+def debug_files():
+    """Debug endpoint to check what files exist in web/ folder"""
+    try:
+        import glob
+        web_files = []
+        static_folder = app.static_folder
+
+        # List files in web/ directory
+        if os.path.exists(static_folder):
+            for root, dirs, files in os.walk(static_folder):
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), static_folder)
+                    web_files.append(rel_path)
+
+        return jsonify({
+            'static_folder': static_folder,
+            'static_folder_exists': os.path.exists(static_folder),
+            'cwd': os.getcwd(),
+            'script_dir': os.path.dirname(os.path.abspath(__file__)),
+            'web_files_count': len(web_files),
+            'web_files': web_files[:50],  # First 50 files
+            'config_exists': os.path.exists(os.path.join(static_folder, 'config.js')),
+            'index_exists': os.path.exists(os.path.join(static_folder, 'index.html')),
+            'emblem_exists': os.path.exists(os.path.join(static_folder, 'emblem.png'))
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/debug/celery', methods=['GET'])
+def debug_celery():
+    """Debug endpoint to check Celery/Redis configuration"""
+    try:
+        # Mask sensitive passwords in URLs
+        def mask_url(url):
+            if not url:
+                return None
+            import re
+            return re.sub(r'(redis://[^:]+:)([^@]+)(@)', r'\1****\3', url)
+
+        return jsonify({
+            'redis_url_from_file': mask_url(REDIS_URL),
+            'celery_broker_env': mask_url(os.getenv('CELERY_BROKER_URL')),
+            'celery_backend_env': mask_url(os.getenv('CELERY_RESULT_BACKEND')),
+            'celery_broker_config': mask_url(app.config.get('broker_url')),
+            'celery_backend_config': mask_url(app.config.get('result_backend')),
+            'celery_broker_actual': mask_url(celery.conf.broker_url),
+            'celery_backend_actual': mask_url(celery.conf.result_backend),
+            'redis_url_file_exists': os.path.exists(os.path.join(SCRIPT_DIR, 'redis_url.txt')),
+            'env_file_exists': os.path.exists(os.path.join(SCRIPT_DIR, '.env'))
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 # Security headers middleware
 @app.after_request
 def add_security_headers(response):
@@ -236,8 +1002,8 @@ def add_security_headers(response):
     response.headers['X-XSS-Protection'] = '1; mode=block'
     # Referrer policy
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    # Content Security Policy
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https:; frame-src https://pagead2.googlesyndication.com;"
+    # Content Security Policy (allow Cloudflare, Google Ads, Fonts, data URIs for videos)
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com https://static.cloudflareinsights.com https://ep2.adtrafficquality.google; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; media-src 'self' data:; connect-src 'self' https:; frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://ep2.adtrafficquality.google https://www.google.com;"
     # Remove server header
     response.headers.pop('Server', None)
     return response
@@ -250,24 +1016,27 @@ def add_security_headers(response):
 SECRET_KEY = os.getenv('SECRET_KEY', secrets.token_hex(32))
 app.config['SECRET_KEY'] = SECRET_KEY
 
-# Redis configuration (for queue + caching) - AUTO-LOADED from ngrok
-# Read from redis_url.txt (auto-generated by START_ALL.bat from ngrok API)
+# Redis configuration (for queue + caching) - NO LOCALHOST FALLBACK
+# Priority: 1) redis_url.txt (local dev), 2) REDIS_URL env var (Railway)
 REDIS_URL = None
 # SCRIPT_DIR is already defined above as os.path.dirname(os.path.abspath(__file__))
-redis_url_file = os.path.join(os.path.dirname(SCRIPT_DIR), 'redis_url.txt')
+redis_url_file = os.path.join(SCRIPT_DIR, 'redis_url.txt')
 if os.path.exists(redis_url_file):
     with open(redis_url_file, 'r') as f:
         REDIS_URL = f.read().strip()
     print(f"[OK] Auto-loaded Redis URL from {redis_url_file}")
     print(f"   Using: {REDIS_URL}")
 else:
-    # Fallback to environment variable only if file doesn't exist
-    REDIS_URL = os.getenv('REDIS_URL', 'redis://:watermarkz_secure_2024@localhost:6379/0')
-    print(f"[WARNING] WARNING: redis_url.txt not found at {redis_url_file}")
-    if REDIS_URL == 'redis://:watermarkz_secure_2024@localhost:6379/0':
-        print("   Using localhost Redis - run START_ALL.bat to use ngrok tunnel!")
+    # Fallback to environment variable (Railway deployment)
+    REDIS_URL = os.getenv('REDIS_URL')
+    if REDIS_URL:
+        print(f"[OK] Using REDIS_URL from environment")
+        print(f"   Using: {REDIS_URL}")
     else:
-        print(f"   Using REDIS_URL from environment: {REDIS_URL}")
+        print(f"[ERROR] No Redis URL found!")
+        print(f"   - redis_url.txt not found at {redis_url_file}")
+        print(f"   - REDIS_URL environment variable not set")
+        print(f"   Redis connection will fail - set REDIS_URL in Railway or create redis_url.txt")
 
 app.config['broker_url'] = REDIS_URL
 app.config['result_backend'] = REDIS_URL  # Store results in Redis
@@ -684,8 +1453,20 @@ def save_detection_debug(image, mask, detections, prefix):
         print(f"[WARNING]  Failed to save detection debug image: {exc}")
         return None
 
-# Initialize Celery
-celery = Celery(app.name, broker=app.config['broker_url'], backend=app.config['result_backend'])
+# Initialize Celery - NO LOCALHOST FALLBACK
+# Priority: CELERY_BROKER_URL env var -> REDIS_URL env var -> redis_url.txt (already loaded into REDIS_URL)
+broker = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL") or REDIS_URL
+backend = os.getenv("CELERY_RESULT_BACKEND") or broker
+
+if not broker:
+    print("[ERROR] No Celery broker URL configured!")
+    print("   Set CELERY_BROKER_URL or REDIS_URL environment variable")
+    raise ValueError("Celery broker URL is required - no localhost fallback allowed")
+
+print(f"[DEBUG] Celery Broker = {broker}")
+print(f"[DEBUG] Celery Backend = {backend}")
+
+celery = Celery(app.name, broker=broker, backend=backend)
 celery.conf.update(app.config)
 
 # Celery configuration for production
@@ -877,6 +1658,9 @@ def encode_segment_background(redis_client, data):
     fps = float(segment_info.get('fps', 30))
     frame_count = int(segment_info.get('frame_count', 0))
     base_name = segment_info.get('base_name', 'video')
+    # 🔥 SHARED BUFFER: Get frame range for this segment
+    start_frame = int(segment_info.get('start_frame', 0))
+    end_frame = int(segment_info.get('end_frame', frame_count - 1))
 
     if not cleaned_dir or not os.path.exists(cleaned_dir):
         raise RuntimeError(f"Cleaned frames directory not found: {cleaned_dir}")
@@ -884,14 +1668,33 @@ def encode_segment_background(redis_client, data):
     # Create output path
     seg_video_path = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_seg{seg_idx}.mp4")
 
-    print(f"[ENCODER] Encoding {frame_count} frames @ {fps} fps...")
+    print(f"[ENCODER] Encoding segment {seg_idx}: frames {start_frame}-{end_frame} ({frame_count} frames) @ {fps} fps...")
     encode_start = time.time()
 
-    # Encode with NVENC (GPU accelerated - same as inline encoding)
+    # 🔥 SHARED BUFFER: Create file list for this segment's frames only
+    # (frames are named by global index in shared buffer)
+    file_list_path = os.path.join(TEMP_DIR, f"encode_seg{seg_idx}_{video_id}.txt")
+    with open(file_list_path, 'w') as f:
+        for global_idx in range(start_frame, end_frame + 1):
+            frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
+            if os.path.exists(frame_path):
+                # Write absolute path for ffmpeg concat
+                abs_path = os.path.abspath(frame_path).replace('\\', '/')
+                # Use duration 1/fps for each frame
+                f.write(f"file '{abs_path}'\n")
+                f.write(f"duration {1/fps}\n")
+        # Last frame needs to be repeated for proper duration
+        last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
+        if os.path.exists(last_frame_path):
+            abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
+            f.write(f"file '{abs_path}'\n")
+
+    # Encode with NVENC using file list (concat demuxer)
     encode_cmd = [
         FFMPEG_EXE, '-y',
-        '-framerate', str(fps),
-        '-i', os.path.join(cleaned_dir, '%04d.png'),
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', file_list_path,
         '-c:v', 'h264_nvenc',
         '-preset', 'p4',  # Balanced speed/quality
         '-b:v', '8M',
@@ -913,8 +1716,12 @@ def encode_segment_background(redis_client, data):
         redis_client.hset(segment_key, 'encoded_path', seg_video_path)
         redis_client.hset(segment_key, 'status', 'encoded')
 
-        # Cleanup frames after successful encoding
-        shutil.rmtree(cleaned_dir, ignore_errors=True)
+        # Cleanup file list and frames after successful encoding
+        if os.path.exists(file_list_path):
+            os.remove(file_list_path)
+
+        # Note: Don't cleanup shared_cleaned_dir yet - other segments may need it!
+        # Final cleanup happens after all segments are encoded
 
     except subprocess.CalledProcessError as e:
         print(f"[ENCODER ERROR] Encoding failed for segment {seg_idx}!")
@@ -1024,12 +1831,76 @@ def trigger_finalization(redis_client, video_id, total_segments):
         if os.path.exists(seg_path):
             os.remove(seg_path)
 
+    # 🔥 SHARED BUFFER: Cleanup shared frame directory after finalization
+    # Get shared_cleaned_dir from first segment's metadata
+    segment_key = f"video:{video_id}:segment:0"
+    shared_cleaned_dir_raw = redis_client.hget(segment_key, 'cleaned_dir')
+    if shared_cleaned_dir_raw:
+        shared_cleaned_dir = shared_cleaned_dir_raw.decode() if isinstance(shared_cleaned_dir_raw, bytes) else shared_cleaned_dir_raw
+        if shared_cleaned_dir and os.path.exists(shared_cleaned_dir):
+            print(f"[FINALIZE] Cleaning up shared frame buffer: {shared_cleaned_dir}")
+            shutil.rmtree(shared_cleaned_dir, ignore_errors=True)
+
     final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
     print(f"[FINALIZE] ✓ Final video ready: {final_output} ({final_size_mb:.2f} MB)")
 
-    # Store final result in Redis
-    redis_client.set(f"video:{video_id}:final_path", final_output)
+    # 🔥 UPLOAD TO RAILWAY: If running on local worker, upload result to API server
+    uploaded_path = None
+    tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
+    upload_enabled = os.getenv('UPLOAD_RESULT_BACK', '1')
+
+    print(f"[FINALIZE] Upload config - TUNNEL_URL: {'SET' if os.getenv('TUNNEL_URL') else 'NOT SET'}, API_BASE_URL: {'SET' if os.getenv('API_BASE_URL') else 'NOT SET'}, UPLOAD_RESULT_BACK: {upload_enabled}")
+
+    if not tunnel:
+        print(f"[FINALIZE] ⚠️  Skipping Railway upload - TUNNEL_URL/API_BASE_URL not set")
+        print(f"[FINALIZE] 💡 Set TUNNEL_URL=https://your-railway-app.railway.app to enable auto-upload")
+    elif upload_enabled != '1':
+        print(f"[FINALIZE] ⚠️  Skipping Railway upload - UPLOAD_RESULT_BACK={upload_enabled} (set to '1' to enable)")
+
+    if tunnel and upload_enabled == '1':
+        try:
+            import requests
+            upload_url = tunnel.rstrip('/') + '/api/upload-result'
+            print(f"[FINALIZE] 📤 Uploading result to Railway: {upload_url}")
+
+            # Quick connectivity test (15 second timeout) - fail fast if server down
+            requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
+
+            with open(final_output, 'rb') as fp:
+                resp = requests.post(
+                    upload_url,
+                    headers={'ngrok-skip-browser-warning': 'true'},
+                    files={'file': (os.path.basename(final_output), fp, 'video/mp4')},
+                    timeout=300  # 5 minutes for large videos
+                )
+            if resp.ok:
+                j = resp.json()
+                if j.get('status') == 'success' and j.get('result_url'):
+                    uploaded_path = j['result_url']
+                    print(f"[FINALIZE] ✅ Result uploaded to Railway: {uploaded_path}")
+                    # Update Redis with Railway path instead of local path
+                    redis_client.set(f"video:{video_id}:final_path", uploaded_path)
+                    redis_client.set(f"video:{video_id}:uploaded", "true")
+            else:
+                print(f"[FINALIZE WARNING] Upload to Railway failed: HTTP {resp.status_code}")
+        except Exception as up_err:
+            print(f"[FINALIZE WARNING] Upload to Railway error: {up_err}")
+            import traceback
+            traceback.print_exc()
+
+    # Store final result in Redis (local path if upload failed, Railway path if uploaded)
+    if not uploaded_path:
+        redis_client.set(f"video:{video_id}:final_path", final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
+
+    # 🔥 FIX: Update distributed tracking to mark all segments complete
+    # Status endpoint checks segments:{video_id} to see progress
+    # Without this, frontend shows "Segment 0/X complete" forever
+    tracking_key = f"segments:{video_id}"
+    total_segments_bytes = redis_client.get(f"{tracking_key}:total")
+    if total_segments_bytes:
+        redis_client.set(tracking_key, int(total_segments_bytes))  # Mark all segments complete
+        print(f"[FINALIZE] ✅ Marked all {int(total_segments_bytes)} segments complete in Redis tracking")
 
 # ============================================================================
 # REDIS VIDEO DOWNLOAD POLLING (for multi-PC parallel downloads)
@@ -1991,7 +2862,11 @@ def process_segment_task(self, segment_data):
         seg_cropped_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cropped")
         seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
         seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
-        seg_cleaned_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cleaned")
+
+        # 🔥 SHARED FRAME BUFFER FIX: All segments merge onto same directory
+        # This allows multiple segments to cooperatively edit the same frames
+        shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames_cleaned")
+        seg_cleaned_dir = shared_cleaned_dir  # Backwards compatibility alias
 
         for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
             os.makedirs(path, exist_ok=True)
@@ -2432,22 +3307,33 @@ def process_segment_task(self, segment_data):
             self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'No watermark - encoding original'})
 
             # Copy original frames to cleaned dir (no processing needed)
+            # 🔥 SHARED BUFFER: Use global frame indices
             if using_memory_pipeline:
                 # Write from memory (only core segment, skip padding)
                 # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
                 padding_offset = start_frame - padded_start
                 core_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
-                print(f"   💾 Writing {len(core_frames)} core segment frames from memory to cleaned dir (skipping {padding_offset} padding frames)...")
-                for frame_idx, frame in enumerate(core_frames):
-                    dst = os.path.join(seg_cleaned_dir, f"{frame_idx:04d}.png")
-                    cv2.imwrite(dst, frame)
+                print(f"   💾 Writing {len(core_frames)} core segment frames from memory to shared buffer (skipping {padding_offset} padding frames)...")
+                for local_idx, frame in enumerate(core_frames):
+                    # Use GLOBAL frame index for shared buffer
+                    global_frame_idx = start_frame + local_idx
+                    frame_file = f"{global_frame_idx:04d}.png"
+                    dst = os.path.join(shared_cleaned_dir, frame_file)
+
+                    # Only write if not already written by another segment
+                    if not os.path.exists(dst):
+                        cv2.imwrite(dst, frame)
             else:
                 # Copy from disk
-                for frame_idx in range(frames_copied):
-                    frame_file = f"{frame_idx:04d}.png"
-                    src = os.path.join(seg_frames_dir, frame_file)
-                    dst = os.path.join(seg_cleaned_dir, frame_file)
-                    if os.path.exists(src):
+                for local_idx in range(frames_copied):
+                    # Use GLOBAL frame index for shared buffer
+                    global_frame_idx = start_frame + local_idx
+                    frame_file = f"{global_frame_idx:04d}.png"
+                    src = os.path.join(seg_frames_dir, f"{local_idx:04d}.png")  # Local source
+                    dst = os.path.join(shared_cleaned_dir, frame_file)  # Global destination
+
+                    # Only write if not already written by another segment
+                    if os.path.exists(src) and not os.path.exists(dst):
                         shutil.copy2(src, dst)
 
         else:
@@ -2529,6 +3415,7 @@ def process_segment_task(self, segment_data):
             # Load all frames into memory first (faster than disk I/O in loop)
             # [INIT] EXTREME SPEED: Use in-memory frames if available (no disk reads!)
             original_frames = []
+            original_masks = []  # 🔥 MASK COMPOSITING: Need masks for alpha blending
             cleaned_frames = []
 
             # 🔥 TEMPORAL CONTEXT FIX: Calculate padding offset
@@ -2539,15 +3426,19 @@ def process_segment_task(self, segment_data):
             if using_memory_pipeline:
                 # Use already-loaded memory frames (ZERO disk I/O!)
                 # Extract ONLY core segment frames (skip padding)
-                print(f"   ⚡ Extracting core segment frames from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
+                print(f"   ⚡ Extracting core segment frames + masks from memory (frames {padding_offset} to {padding_offset + seg_duration})...")
                 original_frames = segment_frames_memory[padding_offset:padding_offset + seg_duration]
+                original_masks = segment_masks_memory[padding_offset:padding_offset + seg_duration]
             else:
                 # Disk-based fallback
-                print(f"   [MASKS] Loading {seg_duration} original frames from disk...")
+                print(f"   [MASKS] Loading {seg_duration} original frames + masks from disk...")
                 for frame_idx in range(seg_duration):
                     frame_file = f"{frame_idx:04d}.png"
                     orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
                     original_frames.append(orig)
+                    # Load corresponding mask
+                    mask = cv2.imread(os.path.join(seg_mask_dir, frame_file), cv2.IMREAD_GRAYSCALE)
+                    original_masks.append(mask)
 
             # Load cleaned frames from ProPainter output (skip padding frames)
             print(f"   [OUTPUT] Extracting core segment from ProPainter output (frames {padding_offset} to {padding_offset + seg_duration})...")
@@ -2556,15 +3447,51 @@ def process_segment_task(self, segment_data):
                 clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
                 cleaned_frames.append(clean)
 
-            # Merge in memory and write in one pass
-            for frame_idx, (original, cleaned_crop) in enumerate(zip(original_frames, cleaned_frames)):
-                frame_file = f"{frame_idx:04d}.png"
-                if cleaned_crop is not None and original is not None:
-                    result_frame = original.copy()
-                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
-                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+            # 🔥 SHARED BUFFER MERGE: Load existing frame state, apply this segment's edit, save back
+            # This allows multiple segments to cooperatively edit the same frames
+            print(f"   🔗 Merging to shared frame buffer with mask-based alpha compositing...")
+            for local_idx, (original, cleaned_crop, segment_mask) in enumerate(zip(original_frames, cleaned_frames, original_masks)):
+                # Use GLOBAL frame index for shared buffer
+                global_frame_idx = start_frame + local_idx
+                frame_file = f"{global_frame_idx:04d}.png"
+                shared_frame_path = os.path.join(shared_cleaned_dir, frame_file)
+
+                # Load existing state (may have edits from other segments) or original
+                if os.path.exists(shared_frame_path):
+                    # Another segment already edited this frame - load current state
+                    result_frame = cv2.imread(shared_frame_path)
+                    if result_frame is None:
+                        result_frame = original.copy() if original is not None else np.zeros((height, width, 3), dtype=np.uint8)
                 elif original is not None:
-                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), original)
+                    result_frame = original.copy()
+                else:
+                    continue
+
+                # 🔥 MASK COMPOSITING: Use mask to blend only the inpainted region
+                # This preserves other segments' work in non-masked areas
+                if cleaned_crop is not None and result_frame is not None and segment_mask is not None:
+                    # Crop mask to ROI
+                    cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+
+                    # Convert mask to 3-channel float [0, 1] for alpha blending
+                    if len(cropped_mask.shape) == 2:
+                        # Grayscale mask - convert to 3 channels
+                        mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
+                    else:
+                        mask_3ch = cropped_mask.astype(float) / 255.0
+
+                    # Alpha composite: blend cleaned region using mask as alpha
+                    roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
+                    cleaned_crop_float = cleaned_crop.astype(float)
+                    blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+
+                    # Paste blended result back
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
+
+                # Save back to shared buffer
+                cv2.imwrite(shared_frame_path, result_frame)
+
+            print(f"   [OK] Merged {len(cleaned_frames)} frames to shared buffer: {shared_cleaned_dir}")
 
         # ⚡ PARALLEL ENCODING: Encode segment MP4 immediately (Blackwell NVENC!)
         print(f"   [OK] Cleaned frames ready in: {seg_cleaned_dir}")
@@ -2587,6 +3514,9 @@ def process_segment_task(self, segment_data):
         redis_client.hset(segment_key, 'frame_count', str(cleaned_frame_count))
         redis_client.hset(segment_key, 'base_name', base_name)
         redis_client.hset(segment_key, 'status', 'ready_for_encoding')
+        # 🔥 SHARED BUFFER: Store frame range for encoder
+        redis_client.hset(segment_key, 'start_frame', str(start_frame))
+        redis_client.hset(segment_key, 'end_frame', str(end_frame))
 
         # Set video-level metadata (idempotent - safe to set multiple times)
         redis_client.set(f"video:{video_id}:total_segments", total_segments)
@@ -3638,11 +4568,38 @@ def index():
     return send_file('web/index.html')
 
 
+@app.route('/login.html')
+def login_page():
+    """Serve login page"""
+    return send_file('web/login.html')
+
+
 @app.route('/web/<path:path>')
 def serve_web(path):
-    """Serve static files"""
+    """Serve static files from /web/ prefix"""
     return send_file(f'web/{path}')
 
+
+# Serve static files from root (for Railway deployment)
+@app.route('/config.js')
+def serve_config():
+    return send_file(os.path.join(app.static_folder, 'config.js'), mimetype='application/javascript')
+
+@app.route('/js/<path:path>')
+def serve_js(path):
+    return send_file(os.path.join(app.static_folder, 'js', path), mimetype='application/javascript')
+
+@app.route('/css/<path:path>')
+def serve_css(path):
+    return send_file(os.path.join(app.static_folder, 'css', path), mimetype='text/css')
+
+@app.route('/emblem.png')
+def serve_emblem():
+    return send_file(os.path.join(app.static_folder, 'emblem.png'), mimetype='image/png')
+
+@app.route('/demos/<path:path>')
+def serve_demos(path):
+    return send_file(os.path.join(app.static_folder, 'demos', path))
 
 
 @app.route('/api/remove-watermark', methods=['POST'])
@@ -3758,28 +4715,46 @@ def get_status(task_id):
                     'info': {'progress': progress, 'status': f'Segment {completed}/{total} complete'}
                 })
             else:
-                # All segments done, finalize should be complete or completing
-                # Get base_name from prepare_result to construct correct filename
-                import json
-                prepare_result_json = celery.backend.get(f"{tracking_key}:prepare_result")
-                if prepare_result_json:
-                    # Decode bytes to string if needed
-                    if isinstance(prepare_result_json, bytes):
-                        prepare_result_json = prepare_result_json.decode()
-                    prepare_result = json.loads(prepare_result_json)
-                    base_name = prepare_result.get('base_name', video_id)
-                    result_filename = f"{base_name}_propainter.mp4"
-                    print(f"[STATUS] Using base_name from prepare_result: {base_name}")
-                else:
-                    # Fallback if prepare_result not found
-                    result_filename = f"{video_id}_propainter.mp4"
-                    print(f"[STATUS WARNING] prepare_result not found, using video_id fallback: {result_filename}")
+                # All segments done - check if finalization/encoding complete
+                try:
+                    redis_client = celery.backend.client
+                    encoding_status = redis_client.get(f"video:{video_id}:status")
 
-                return jsonify({
-                    'state': 'SUCCESS',
-                    'result': {'result_url': f'/results/{result_filename}'},
-                    'metadata': {'total_segments': total}
-                })
+                    if encoding_status and encoding_status.decode() == "complete":
+                        # Encoding is DONE! Get the final path
+                        final_path_raw = redis_client.get(f"video:{video_id}:final_path")
+                        if final_path_raw:
+                            final_path = final_path_raw.decode()
+                            # Check if path is web path or local path
+                            if final_path.startswith('/results/'):
+                                result_url = final_path
+                            else:
+                                filename = os.path.basename(final_path)
+                                result_url = f'/results/{filename}'
+
+                            print(f"[STATUS] ✅ Encoding complete for {video_id}! Returning: {result_url}")
+                            return jsonify({
+                                'state': 'SUCCESS',
+                                'result': {'result_url': result_url},
+                                'metadata': {'total_segments': total}
+                            })
+
+                    # Encoding still in progress
+                    print(f"[STATUS] Segments complete ({completed}/{total}), encoding in progress for {video_id}")
+                    return jsonify({
+                        'state': 'PROCESSING',
+                        'progress': 'Finalizing video (encoding in progress)...',
+                        'info': {'progress': 95, 'status': 'Video encoding in background (almost done!)'}
+                    })
+
+                except Exception as e:
+                    print(f"[ERROR] Failed to check finalization status: {e}")
+                    # Fallback - keep showing encoding in progress
+                    return jsonify({
+                        'state': 'PROCESSING',
+                        'progress': 'Finalizing video...',
+                        'info': {'progress': 95, 'status': 'Background encoding'}
+                    })
 
         # Regular Celery task handling
         from celery.result import AsyncResult
@@ -3825,10 +4800,16 @@ def get_status(task_id):
                             final_path_raw = redis_client.get(f"video:{video_id}:final_path")
                             if final_path_raw:
                                 final_path = final_path_raw.decode()
-                                filename = os.path.basename(final_path)
-                                print(f"[POLL] Background encoding COMPLETE for {video_id}! Returning result_url")
+                                # Check if path is already a web path (from Railway upload)
+                                if final_path.startswith('/results/'):
+                                    result_url = final_path
+                                else:
+                                    # Local path - extract filename
+                                    filename = os.path.basename(final_path)
+                                    result_url = f'/results/{filename}'
+                                print(f"[POLL] Background encoding COMPLETE for {video_id}! Returning result_url: {result_url}")
                                 response['result'] = {
-                                    'result_url': f'/results/{filename}'
+                                    'result_url': result_url
                                 }
                                 if 'metadata' in result_data:
                                     response['metadata'] = result_data['metadata']
@@ -3944,6 +4925,7 @@ def get_result(task_id):
 
 
 @app.route('/api/download-from-url', methods=['POST', 'OPTIONS'])
+@require_auth
 def download_from_url():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -4327,6 +5309,7 @@ def check_rate_limit(ip):
         return True
 
 @app.route('/api/upload', methods=['POST', 'OPTIONS'])
+@require_auth
 def upload_file():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -4373,7 +5356,134 @@ def upload_file():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/extract-frames/<task_id>', methods=['GET', 'OPTIONS'])
+def extract_frames(task_id):
+    """
+    Extract frame thumbnails from uploaded video for timeline UI
+
+    Returns: { "status": "success", "frames": [{frame_number, timestamp, thumbnail_url}], "total_frames", "fps", "duration" }
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        # Find the uploaded video
+        video_path = None
+        for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+            test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+            if os.path.exists(test_path):
+                video_path = test_path
+                break
+
+        if not video_path:
+            return jsonify({'status': 'error', 'message': 'Video not found'}), 404
+
+        # Check if frames are already cached
+        cache_key = f'frames_{task_id}'
+        with FRAME_CACHE_LOCK:
+            if cache_key in FRAME_CACHE:
+                return jsonify(FRAME_CACHE[cache_key])
+
+        # Get video metadata using ffprobe
+        probe_cmd = [
+            FFPROBE_EXE, '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=r_frame_rate,nb_frames,duration',
+            '-of', 'json',
+            video_path
+        ]
+
+        import subprocess
+        import json as json_module
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+        probe_data = json_module.loads(probe_result.stdout)
+
+        # Extract metadata
+        stream = probe_data['streams'][0]
+        fps_str = stream.get('r_frame_rate', '30/1')
+        fps_num, fps_den = map(int, fps_str.split('/'))
+        fps = fps_num / fps_den if fps_den != 0 else 30
+
+        duration = float(stream.get('duration', 0))
+        total_frames = int(stream.get('nb_frames', int(duration * fps)))
+
+        # Extract thumbnails at 1-second intervals (or max 60 thumbnails for long videos)
+        max_thumbnails = 60
+        interval_seconds = max(1, int(duration / max_thumbnails))
+
+        # Create thumbnails directory for this task
+        thumbnails_dir = os.path.join(CACHE_DIR, 'thumbnails', task_id)
+        os.makedirs(thumbnails_dir, exist_ok=True)
+
+        frames_data = []
+
+        # Extract thumbnails using ffmpeg
+        for i in range(0, int(duration), interval_seconds):
+            thumbnail_path = os.path.join(thumbnails_dir, f'frame_{i:04d}.jpg')
+
+            # Skip if already exists
+            if not os.path.exists(thumbnail_path):
+                ffmpeg_cmd = [
+                    FFMPEG_EXE, '-y',
+                    '-ss', str(i),  # Seek to timestamp
+                    '-i', video_path,
+                    '-vframes', '1',  # Extract 1 frame
+                    '-vf', 'scale=120:-1',  # Scale to 120px width (maintain aspect ratio)
+                    '-q:v', '5',  # Quality (lower = better, 2-5 is good)
+                    thumbnail_path
+                ]
+                subprocess.run(ffmpeg_cmd, capture_output=True, timeout=5)
+
+            if os.path.exists(thumbnail_path):
+                frame_number = int(i * fps)
+                frames_data.append({
+                    'frame_number': frame_number,
+                    'timestamp': i,
+                    'thumbnail_url': f'/api/thumbnail/{task_id}/frame_{i:04d}.jpg'
+                })
+
+        result = {
+            'status': 'success',
+            'frames': frames_data,
+            'total_frames': total_frames,
+            'fps': fps,
+            'duration': duration
+        }
+
+        # Cache the result
+        with FRAME_CACHE_LOCK:
+            FRAME_CACHE[cache_key] = result
+
+        return jsonify(result)
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'status': 'error', 'message': 'Frame extraction timeout'}), 500
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/thumbnail/<task_id>/<filename>', methods=['GET'])
+def serve_thumbnail(task_id, filename):
+    """
+    Serve thumbnail images for timeline
+    """
+    try:
+        thumbnails_dir = os.path.join(CACHE_DIR, 'thumbnails', task_id)
+        thumbnail_path = os.path.join(thumbnails_dir, filename)
+
+        if not os.path.exists(thumbnail_path):
+            return jsonify({'status': 'error', 'message': 'Thumbnail not found'}), 404
+
+        from flask import send_file
+        return send_file(thumbnail_path, mimetype='image/jpeg')
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/api/process', methods=['POST', 'OPTIONS'])
+@require_auth
+@require_credits(min_credits=1)
 def process_video():
     if request.method == 'OPTIONS':
         return ('', 204)
@@ -4444,6 +5554,27 @@ def process_video():
                     kwargs={'api_base': base, 'temp_base': base}
                 )
             print(f"[OK] Task queued with ID: {result.id}")
+
+            # Deduct 1 credit from user's balance after successful task creation
+            user_id = session.get('user_id')
+            if user_id and AUTH_ENABLED:
+                try:
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        cur.execute(
+                            'UPDATE users SET credits = credits - 1 WHERE id = %s AND credits >= 1 RETURNING credits',
+                            (user_id,)
+                        )
+                        deduct_result = cur.fetchone()
+                        if deduct_result:
+                            new_balance = deduct_result[0]
+                            print(f"[CREDITS] User {user_id} processed video. Task: {result.id}, New balance: {new_balance}")
+                        else:
+                            print(f"[WARNING] Credit deduction failed for user {user_id} - insufficient credits")
+                except Exception as e:
+                    print(f"[ERROR] Failed to deduct credit: {e}")
+                    # Don't fail the request if credit deduction fails - task already queued
+
             return jsonify({'status': 'success', 'task_id': result.id})
 
         except Exception as e:
@@ -4470,18 +5601,156 @@ def serve_upload(filename):
     return send_file(file_path)
 
 
+@app.route('/cool.mp4')
+def serve_cool_video():
+    """Serve showcase video (cool.mp4)"""
+    video_path = os.path.join(STATIC_VIDEOS_DIR, 'cool.mp4')
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': 'Showcase video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
+@app.route('/s2.mp4')
+def serve_s2_video():
+    """Serve s2 before video"""
+    video_path = os.path.join(STATIC_VIDEOS_DIR, 's2.mp4')
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': 's2 video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
+@app.route('/s2removed.mp4')
+def serve_s2removed_video():
+    """Serve s2removed after video"""
+    video_path = os.path.join(STATIC_VIDEOS_DIR, 's2removed.mp4')
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': 's2removed video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
+@app.route('/training/<filename>')
+def serve_training_video(filename):
+    """Serve training videos from volume"""
+    # Sanitize filename to prevent path traversal
+    filename = sanitize_filename(filename)
+
+    # Only allow .mp4 files
+    if not filename.endswith('.mp4'):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    video_path = os.path.join(TRAINING_VIDEOS_DIR, filename)
+
+    # Verify file exists and is within training directory
+    if not os.path.exists(video_path) or not os.path.abspath(video_path).startswith(os.path.abspath(TRAINING_VIDEOS_DIR)):
+        return jsonify({'error': 'Training video not found'}), 404
+
+    return send_file(video_path, mimetype='video/mp4')
+
+
+@app.route('/admin/list-videos', methods=['GET'])
+def admin_list_videos():
+    """Admin endpoint to list videos in Railway volume"""
+    admin_secret = os.getenv('ADMIN_SECRET', 'dev-secret-123')
+
+    if request.args.get('secret') != admin_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        static_videos = []
+        training_videos = []
+
+        if os.path.exists(STATIC_VIDEOS_DIR):
+            static_videos = os.listdir(STATIC_VIDEOS_DIR)
+
+        if os.path.exists(TRAINING_VIDEOS_DIR):
+            training_videos = os.listdir(TRAINING_VIDEOS_DIR)
+
+        return jsonify({
+            'static_videos_dir': STATIC_VIDEOS_DIR,
+            'static_videos': static_videos,
+            'training_videos_dir': TRAINING_VIDEOS_DIR,
+            'training_videos': training_videos,
+            'is_railway': IS_RAILWAY,
+            'data_dir': DATA_DIR if IS_RAILWAY else 'N/A'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/upload-video', methods=['POST'])
+def admin_upload_video():
+    """Admin endpoint to upload videos to Railway volume"""
+    # Simple secret key auth - replace 'your-admin-secret' with a real secret
+    admin_secret = os.getenv('ADMIN_SECRET', 'dev-secret-123')
+
+    if request.headers.get('X-Admin-Secret') != admin_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+    video_type = request.form.get('type', 'static')  # 'static' or 'training'
+
+    if video.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    # Sanitize filename
+    filename = sanitize_filename(video.filename)
+
+    # Only allow .mp4 files
+    if not filename.endswith('.mp4'):
+        return jsonify({'error': 'Only .mp4 files allowed'}), 400
+
+    # Determine destination directory
+    if video_type == 'training':
+        dest_dir = TRAINING_VIDEOS_DIR
+    else:
+        dest_dir = STATIC_VIDEOS_DIR
+
+    # Create directory if it doesn't exist
+    os.makedirs(dest_dir, exist_ok=True)
+
+    # Save file
+    file_path = os.path.join(dest_dir, filename)
+    video.save(file_path)
+
+    return jsonify({
+        'success': True,
+        'filename': filename,
+        'type': video_type,
+        'path': file_path,
+        'url': f'/training/{filename}' if video_type == 'training' else f'/{filename}'
+    })
+
+
 @app.route('/results/<filename>')
 def serve_result(filename):
     """Serve processed result files and delete after sending"""
+    print(f"[SERVE-RESULT] Request for file: {filename} from {request.remote_addr}")
+
     # Sanitize filename to prevent path traversal
     filename = sanitize_filename(filename)
     file_path = os.path.join(RESULT_DIR, filename)
 
+    print(f"[SERVE-RESULT] Looking for file at: {file_path}")
+    print(f"[SERVE-RESULT] RESULT_DIR: {RESULT_DIR}")
+    print(f"[SERVE-RESULT] File exists: {os.path.exists(file_path)}")
+    print(f"[SERVE-RESULT] RESULT_DIR contents: {os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else 'DIR NOT FOUND'}")
+
     # Verify file exists and is within result directory
     if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(RESULT_DIR)):
+        print(f"[SERVE-RESULT] ❌ File not found: {file_path}")
         return jsonify({'error': 'File not found'}), 404
 
     # Send file with as_attachment to trigger download
+    print(f"[SERVE-RESULT] ✅ Serving file: {filename}")
     response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
 
     # Schedule file deletion after response is sent
@@ -4506,6 +5775,30 @@ def serve_result(filename):
     return response
 
 
+@app.route('/demo_videos/<filename>')
+def serve_demo_video(filename):
+    """Serve demo/example videos from /data/demo_videos/ directory"""
+    print(f"[DEMO-VIDEO] Request for: {filename}")
+
+    # Sanitize filename
+    filename = sanitize_filename(filename)
+    demo_dir = os.path.join(DATA_DIR, 'demo_videos')
+    file_path = os.path.join(demo_dir, filename)
+
+    print(f"[DEMO-VIDEO] Serving from: {file_path}")
+
+    if not os.path.exists(file_path):
+        print(f"[DEMO-VIDEO] File not found: {file_path}")
+        abort(404)
+
+    # Verify file is within demo directory (security)
+    if not os.path.abspath(file_path).startswith(os.path.abspath(demo_dir)):
+        print(f"[DEMO-VIDEO] Path traversal attempt blocked")
+        abort(403)
+
+    return send_file(file_path, mimetype='video/mp4')
+
+
 @app.route('/api/upload-result', methods=['POST', 'OPTIONS'])
 def upload_result():
     if request.method == 'OPTIONS':
@@ -4516,17 +5809,31 @@ def upload_result():
     Response: { "status": "success", "result_url": "/results/<filename>" }
     """
     try:
+        print(f"[UPLOAD-RESULT] Received upload request from {request.remote_addr}")
+
         if 'file' not in request.files:
+            print(f"[UPLOAD-RESULT ERROR] No file in request")
             return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+
         up = request.files['file']
         if up.filename == '':
+            print(f"[UPLOAD-RESULT ERROR] Empty filename")
             return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
 
         req_filename = request.form.get('filename') or up.filename
         safe_name = sanitize_filename(req_filename)
+
+        print(f"[UPLOAD-RESULT] Saving file: {safe_name} to {RESULT_DIR}")
         os.makedirs(RESULT_DIR, exist_ok=True)
         dest = os.path.join(RESULT_DIR, safe_name)
+
         up.save(dest)
+        file_size_mb = os.path.getsize(dest) / (1024 * 1024)
+
+        print(f"[UPLOAD-RESULT] ✅ Saved {safe_name} ({file_size_mb:.2f} MB) to {dest}")
+        print(f"[UPLOAD-RESULT] File exists check: {os.path.exists(dest)}")
+        print(f"[UPLOAD-RESULT] RESULT_DIR contents: {os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else 'DIR NOT FOUND'}")
+
         return jsonify({'status': 'success', 'result_url': f'/results/{safe_name}'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -4615,6 +5922,13 @@ def terms_of_service():
     return send_file(os.path.join(app.static_folder, 'terms.html'))
 
 
+@app.route('/premium')
+@app.route('/premium.html')
+def premium_page():
+    """Serve Premium/Pricing page"""
+    return send_file(os.path.join(app.static_folder, 'premium.html'))
+
+
 @app.route('/<path:filename>')
 def serve_static_files(filename):
     """Serve HTML and other static files from web folder"""
@@ -4652,15 +5966,14 @@ def get_stats():
     })
 
 
-# ============================================================================
-# SAM2 Object Selection Endpoint
-# ============================================================================
-
 @app.route('/api/sam2/select-object', methods=['POST'])
+@require_auth
 def sam2_select_object():
-    """Interactive SAM2 object selection - uses local worker via Redis"""
+    """Interactive SAM2 object selection - uses local worker via Redis pub/sub"""
     try:
         data = request.json
+
+        # Get frame data and points
         frame_base64 = data.get('frame_data')
         points = data.get('points', [])
         video_width = data.get('video_width')
@@ -4669,8 +5982,10 @@ def sam2_select_object():
         if not frame_base64 or not points:
             return jsonify({'status': 'error', 'message': 'Missing frame data or points'}), 400
 
+        # Generate unique request ID
         request_id = f"req_{uuid.uuid4().hex[:12]}"
 
+        # Connect to Redis
         REDIS_URL = os.environ.get('REDIS_URL')
         if not REDIS_URL:
             return jsonify({'status': 'error', 'message': 'Redis not configured'}), 500
@@ -4678,12 +5993,12 @@ def sam2_select_object():
         print(f"[SAM2] Using Redis: {REDIS_URL[:50]}...")
         redis_client = redis.from_url(REDIS_URL, decode_responses=False)
 
-        # Subscribe to response channel BEFORE pushing request
+        # Subscribe to response channel BEFORE publishing request
         response_channel = f'sam2:selection:response:{request_id}'
         pubsub = redis_client.pubsub()
         pubsub.subscribe(response_channel)
 
-        # Push request to list (worker uses BRPOP)
+        # Publish request to local worker
         request_data = {
             'request_id': request_id,
             'frame_data': frame_base64,
@@ -4691,9 +6006,10 @@ def sam2_select_object():
             'video_width': video_width,
             'video_height': video_height
         }
-        print(f"[SAM2] Pushing request {request_id} to list: sam2:selection:request")
+
+        print(f"[SAM2] Publishing request {request_id} to channel: sam2:selection:request")
         print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
-        redis_client.lpush('sam2:selection:request', json.dumps(request_data))
+        redis_client.publish('sam2:selection:request', json.dumps(request_data))
 
         # Wait for response (timeout: 5 seconds)
         timeout = 5.0
@@ -4702,10 +6018,13 @@ def sam2_select_object():
         print(f"[SAM2] Waiting for response on: {response_channel}")
         while time.time() - start_time < timeout:
             message = pubsub.get_message(timeout=0.1)
+
             if message and message['type'] == 'message':
                 response_data = json.loads(message['data'])
+
                 pubsub.unsubscribe()
                 pubsub.close()
+
                 if response_data.get('status') == 'success':
                     return jsonify({
                         'status': 'success',
@@ -4718,8 +6037,10 @@ def sam2_select_object():
                         'message': response_data.get('error', 'Unknown error')
                     }), 500
 
+        # Timeout
         pubsub.unsubscribe()
         pubsub.close()
+
         return jsonify({
             'status': 'error',
             'message': 'Local worker timeout - is SAM2 worker running?'
@@ -4729,6 +6050,7 @@ def sam2_select_object():
         import traceback
         traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 
 # ============================================================================
@@ -4756,6 +6078,203 @@ if __name__ == '__main__':
         debug=False,  # Set to False for production
         threaded=True
     )
+
+# ===================================
+# BILLING ENDPOINTS (Stripe)
+# ===================================
+
+# Stripe Price IDs for credit packages (set in environment)
+STRIPE_PRICE_IDS = {
+    'credits_10': os.getenv('STRIPE_PRICE_ID_CREDITS_10', ''),
+    'credits_25': os.getenv('STRIPE_PRICE_ID_CREDITS_25', ''),
+    'credits_100': os.getenv('STRIPE_PRICE_ID_CREDITS_100', ''),
+    'credits_250': os.getenv('STRIPE_PRICE_ID_CREDITS_250', ''),
+    'credits_500': os.getenv('STRIPE_PRICE_ID_CREDITS_500', ''),
+    'starter': os.getenv('STRIPE_PRICE_ID_STARTER', ''),
+    'pro': os.getenv('STRIPE_PRICE_ID_PRO', ''),
+    'enterprise': os.getenv('STRIPE_PRICE_ID_ENTERPRISE', '')
+}
+
+# Credit amounts for each package
+CREDIT_AMOUNTS = {
+    'credits_10': 10,
+    'credits_25': 25,
+    'credits_100': 100,
+    'credits_250': 250,
+    'credits_500': 500,
+    'starter': 20,
+    'pro': 50,
+    'enterprise': 300
+}
+
+@app.route('/api/billing/create-checkout-session', methods=['POST', 'OPTIONS'])
+def create_checkout_session():
+    """Create a Stripe checkout session for subscriptions or one-time credit purchases"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not STRIPE_ENABLED:
+        return jsonify({'error': 'Billing is not enabled on this server'}), 503
+
+    try:
+        data = request.get_json() or {}
+        plan = data.get('plan')
+        package = data.get('package')
+        user_id = data.get('user_id')
+        mode = data.get('mode', 'subscription')  # 'subscription' or 'payment'
+
+        # Determine which price ID to use
+        price_key = package if package else plan
+        price_id = STRIPE_PRICE_IDS.get(price_key)
+
+        if not price_id:
+            return jsonify({'error': f'Invalid plan/package: {price_key}'}), 400
+
+        if not user_id:
+            return jsonify({'error': 'user_id is required'}), 400
+
+        # Get base URL for success/cancel redirects
+        base_url = request.host_url.rstrip('/')
+
+        # Create checkout session
+        checkout_params = {
+            'payment_method_types': ['card'],
+            'line_items': [{
+                'price': price_id,
+                'quantity': 1,
+            }],
+            'mode': mode,
+            'success_url': f'{base_url}/success.html?session_id={{CHECKOUT_SESSION_ID}}',
+            'cancel_url': f'{base_url}/premium.html',
+            'client_reference_id': user_id,
+            'metadata': {
+                'user_id': user_id,
+                'plan': plan if plan else '',
+                'package': package if package else '',
+            }
+        }
+
+        session = stripe.checkout.Session.create(**checkout_params)
+
+        return jsonify({'url': session.url})
+
+    except Exception as e:
+        print(f"[BILLING-ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/billing/webhook', methods=['POST'])
+@app.route('/api/stripe/webhook', methods=['POST'])
+def stripe_webhook():
+    """Handle Stripe webhooks for payment events"""
+    if not STRIPE_ENABLED:
+        return jsonify({'error': 'Billing is not enabled'}), 503
+
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+    webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+
+    try:
+        # Verify webhook signature if secret is configured
+        if webhook_secret:
+            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        else:
+            event = json.loads(payload)
+            print("[WARNING] Stripe webhook signature verification disabled (no STRIPE_WEBHOOK_SECRET)")
+
+        event_type = event['type']
+        data_object = event['data']['object']
+
+        print(f"[STRIPE-WEBHOOK] Received: {event_type}")
+
+        # Handle successful checkout (one-time or subscription)
+        if event_type == 'checkout.session.completed':
+            user_id = data_object.get('client_reference_id')
+            metadata = data_object.get('metadata', {})
+            package = metadata.get('package')
+            plan = metadata.get('plan')
+
+            # Determine credit amount
+            key = package if package else plan
+            credits_to_add = CREDIT_AMOUNTS.get(key, 0)
+
+            if credits_to_add > 0 and user_id:
+                # Award credits to user
+                print(f"[BILLING] User {user_id} purchased {key}: +{credits_to_add} credits")
+                if AUTH_ENABLED:
+                    try:
+                        with get_db() as conn:
+                            cur = conn.cursor()
+                            cur.execute(
+                                'UPDATE users SET credits = credits + %s WHERE id = %s RETURNING credits',
+                                (credits_to_add, user_id)
+                            )
+                            result = cur.fetchone()
+                            if result:
+                                new_balance = result[0]
+                                print(f"[BILLING] ✅ Credits added successfully. User {user_id} new balance: {new_balance}")
+                            else:
+                                print(f"[BILLING] ❌ User {user_id} not found in database")
+                    except Exception as e:
+                        print(f"[BILLING] ❌ Failed to add credits for user {user_id}: {e}")
+                        import traceback; traceback.print_exc()
+
+        # Handle subscription renewals
+        elif event_type == 'invoice.payment_succeeded':
+            customer_id = data_object.get('customer')
+            subscription_id = data_object.get('subscription')
+
+            if subscription_id:
+                # TODO: Award renewal credits based on subscription plan
+                print(f"[BILLING] Subscription {subscription_id} renewed for customer {customer_id}")
+
+        # Handle subscription updates/cancellations
+        elif event_type in ['customer.subscription.updated', 'customer.subscription.deleted']:
+            subscription = data_object
+            customer_id = subscription.get('customer')
+            status = subscription.get('status')
+
+            print(f"[BILLING] Subscription for customer {customer_id} is now: {status}")
+
+        return jsonify({'status': 'success'})
+
+    except Exception as e:
+        print(f"[WEBHOOK-ERROR] {e}")
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/billing/create-portal-session', methods=['POST', 'OPTIONS'])
+def create_portal_session():
+    """Create a Stripe billing portal session for subscription management"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not STRIPE_ENABLED:
+        return jsonify({'error': 'Billing is not enabled'}), 503
+
+    try:
+        data = request.get_json() or {}
+        customer_id = data.get('customer_id')
+
+        if not customer_id:
+            return jsonify({'error': 'customer_id is required'}), 400
+
+        # Get base URL for return redirect
+        base_url = request.host_url.rstrip('/')
+
+        # Create portal session
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=f'{base_url}/premium.html',
+        )
+
+        return jsonify({'url': session.url})
+
+    except Exception as e:
+        print(f"[BILLING-PORTAL-ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # Explicit CORS preflight catch-all for /api/* (helps when proxies strip headers)
 @app.route('/api/<path:subpath>', methods=['OPTIONS'])
 def cors_preflight(subpath):

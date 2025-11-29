@@ -3,28 +3,249 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WatermarkAI Sign In</title>
+    <title>Sign In - MarkRemoverAI</title>
     <link rel="icon" type="image/png" href="emblem.png">
-    <link rel="stylesheet" href="css/main.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            /* Primary Colors */
+            --primary: #667eea;
+            --primary-dark: #5a67d8;
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+            /* Light Mode (Default) */
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-card: rgba(248, 250, 252, 0.85);
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --border-color: rgba(102, 126, 234, 0.12);
+        }
+
+        /* Dark Mode Override */
+        html[data-theme="dark"] {
+            --bg-primary: #0b1020;
+            --bg-secondary: #121826;
+            --bg-card: rgba(26, 26, 46, 0.85);
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
+            --border-color: rgba(102, 126, 234, 0.12);
+        }
+
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #0f0f1e;
-            color: #e0e0e0;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             margin: 0;
             min-height: 100vh;
+            padding-top: 80px;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .login-container {
             display: flex;
             align-items: center;
             justify-content: center;
+            min-height: calc(100vh - 80px);
             padding: 2rem;
+        }
+
+        /* Navigation Header */
+        .nav-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            z-index: 1000;
+            padding: 1.25rem 0;
+            transition: background-color 0.3s ease;
+        }
+
+        html[data-theme="dark"] .nav-header {
+            background: rgba(11, 16, 32, 0.98);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1.5rem;
+            transition: transform 0.2s ease;
+        }
+
+        .nav-logo:hover {
+            transform: translateY(-1px);
+        }
+
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 2.25rem;
+            list-style: none;
+        }
+
+        .nav-menu a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+            position: relative;
+            letter-spacing: -0.01em;
+        }
+
+        .nav-menu a:hover {
+            color: var(--primary);
+        }
+
+        .nav-menu a::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 0;
+            width: 0;
+            height: 2.5px;
+            background: var(--gradient-primary);
+            border-radius: 2px;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .nav-menu a:hover::after {
+            width: 100%;
+        }
+
+        .mobile-menu-toggle {
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            cursor: pointer;
+            padding: 10px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            transition: background 0.3s ease;
+        }
+
+        .mobile-menu-toggle:hover {
+            background: rgba(102, 126, 234, 0.12);
+        }
+
+        .mobile-menu-toggle span {
+            width: 26px;
+            height: 2.5px;
+            background: var(--text-primary);
+            border-radius: 3px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .mobile-menu-toggle.active span:nth-child(1) {
+            transform: translateY(7.5px) rotate(45deg);
+        }
+
+        .mobile-menu-toggle.active span:nth-child(2) {
+            opacity: 0;
+        }
+
+        .mobile-menu-toggle.active span:nth-child(3) {
+            transform: translateY(-7.5px) rotate(-45deg);
+        }
+
+        .mobile-theme-controls {
+            display: none;
+        }
+
+        .desktop-only {
+            display: initial;
+        }
+
+        @media (max-width: 768px) {
+            .nav-container {
+                padding: 0 1.5rem;
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+            }
+
+            .desktop-only {
+                display: none !important;
+            }
+
+            .mobile-theme-controls {
+                display: flex !important;
+                order: 1;
+            }
+
+            .mobile-menu-toggle {
+                display: flex;
+                order: 2;
+            }
+
+            .nav-menu {
+                position: fixed;
+                top: 75px;
+                left: 0;
+                right: 0;
+                flex-direction: column;
+                gap: 0;
+                background: rgba(15, 15, 30, 0.98);
+                backdrop-filter: blur(20px);
+                padding: 1.5rem 0;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.12);
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+                transform: translateY(-100%);
+                opacity: 0;
+                pointer-events: none;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .nav-menu.active {
+                transform: translateY(0);
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+            .nav-menu li {
+                width: 100%;
+                text-align: center;
+                padding: 1rem 0;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.08);
+            }
+
+            .nav-menu li:last-child {
+                border-bottom: none;
+            }
         }
         .card {
             max-width: 420px;
             width: 100%;
-            background: rgba(26, 26, 46, 0.85);
-            border: 1px solid rgba(102, 126, 234, 0.25);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
             border-radius: 18px;
             padding: 2.5rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease;
+        }
+
+        html[data-theme="dark"] .card {
             box-shadow: 0 20px 60px rgba(15, 15, 30, 0.45);
         }
         .tab-group {
@@ -152,8 +373,59 @@
     </style>
 </head>
 <body>
+    <!-- Navigation Header -->
+    <nav class="nav-header">
+        <div class="nav-container">
+            <a href="index.html" class="nav-logo">
+                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                        </linearGradient>
+                    </defs>
+                    <rect width="40" height="40" rx="10" fill="url(#logoGradient)"/>
+                    <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
+                    <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
+                    <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                    <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                    <circle cx="25" cy="15" r="2" fill="#10b981"/>
+                </svg>
+                <span>MarkRemoverAI</span>
+            </a>
+
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="index.html#remove-watermark">Remove Objects</a></li>
+                <li><a href="premium.html#pricing">Pricing</a></li>
+                <li><a href="index.html#comparison">Results</a></li>
+                <li class="desktop-only"><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;" aria-label="Toggle theme">Dark</button></li>
+            </ul>
+
+            <div class="mobile-theme-controls" style="display: none;">
+                <button id="mobileThemeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.45rem 0.85rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" aria-label="Toggle theme">Dark</button>
+            </div>
+
+            <div class="mobile-menu-toggle" id="mobileMenuToggle">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="login-container">
         <div class="card">
-        <h1>Welcome to WatermarkAI</h1>
+        <!-- Free Credits Banner -->
+        <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%); border: 2px solid rgba(102, 126, 234, 0.3); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: center;">
+            <p style="font-size: 1.3rem; font-weight: 700; margin: 0; background: linear-gradient(135deg, #667eea 0%, #f093fb 30%, #f6ad55 60%, #48bb78 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                🎁 Get 5 FREE Credits When You Sign Up!
+            </p>
+            <p style="font-size: 0.95rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                Start removing watermarks immediately • No credit card required
+            </p>
+        </div>
+
+        <h1>Welcome to MarkRemoverAI</h1>
         <p>Existing customers—from solo creators to full studios—can sign in, and new users can create accounts instantly.</p>
         <div id="authMessage" class="alert" hidden></div>
 
@@ -173,6 +445,10 @@
 
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+
+                <div style="text-align: right; margin-top: 0.5rem;">
+                    <a href="reset-password.html" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; font-weight: 600;">Forgot your password?</a>
+                </div>
 
                 <button type="submit" class="btn">Sign in</button>
             </form>
@@ -201,9 +477,32 @@
             <p>Need pricing info first? <a href="premium.html#pricing">Explore plans</a></p>
         </div>
     </div>
-    
+    </div>
+
     <script>
-        const API_BASE = window.API_BASE_URL || '';
+        // Mobile Menu Toggle
+        const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+        const navMenu = document.getElementById('navMenu');
+
+        if (mobileMenuToggle && navMenu) {
+            mobileMenuToggle.addEventListener('click', () => {
+                navMenu.classList.toggle('active');
+                mobileMenuToggle.classList.toggle('active');
+            });
+
+            // Close mobile menu when clicking a link
+            document.querySelectorAll('.nav-menu a').forEach(link => {
+                link.addEventListener('click', () => {
+                    navMenu.classList.remove('active');
+                    mobileMenuToggle.classList.remove('active');
+                });
+            });
+        }
+    </script>
+
+    <script>
+        // Auto-detect API base URL (works on Railway deployment)
+        const API_BASE = window.API_BASE_URL || window.location.origin;
 
         const tabButtons = document.querySelectorAll('.tab-button');
         const panels = document.querySelectorAll('.tab-panel');
@@ -253,16 +552,200 @@
             window.location.href = target;
         });
 
-        document.getElementById('loginForm').addEventListener('submit', function (event) {
+        // Email + password login (sign in)
+        document.getElementById('loginForm').addEventListener('submit', async function (event) {
             event.preventDefault();
-            alert('Sign-in is handled by the hosted WatermarkAI service. Please connect this form to your authentication backend or contact support for access.');
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!email) {
+                showMessage('Please enter your email', 'error');
+                return;
+            }
+
+            if (!password) {
+                showMessage('Please enter your password', 'error');
+                return;
+            }
+
+            await emailLogin(email, password);
         });
 
-        document.getElementById('signupForm').addEventListener('submit', function (event) {
+        // Email + password signup (create account)
+        document.getElementById('signupForm').addEventListener('submit', async function (event) {
             event.preventDefault();
-            alert('Account creation is handled by the hosted WatermarkAI service. Connect this form to your signup endpoint or reach out to support for onboarding.');
+            const name = document.getElementById('signupName').value.trim();
+            const email = document.getElementById('signupEmail').value.trim();
+            const password = document.getElementById('signupPassword').value;
+
+            if (!name) {
+                showMessage('Please enter your name', 'error');
+                return;
+            }
+
+            if (!email) {
+                showMessage('Please enter your email', 'error');
+                return;
+            }
+
+            if (!password) {
+                showMessage('Please enter your password', 'error');
+                return;
+            }
+
+            await emailLogin(email, password, name);
         });
+
+        // Email + password login function (handles both signin and signup)
+        async function emailLogin(email, password, name = null) {
+            const messageEl = document.getElementById('authMessage');
+            showMessage('Processing...', '');
+
+            try {
+                // Use /login endpoint if no name (sign in), /register if name provided (sign up)
+                const endpoint = name ? '/api/auth/register' : '/api/auth/login';
+                const apiUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+
+                const payload = { email, password };
+                if (name) {
+                    payload.name = name;
+                }
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',  // Send cookies for session management
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Store user in localStorage (extract user object from response)
+                    localStorage.setItem('user', JSON.stringify(data.user || data));
+
+                    // Check if email verification is required (new signup)
+                    if (data.email_verification_required) {
+                        showMessage('Account created! Please check your email to verify your account.', 'success');
+                        showVerificationPendingUI(email);
+                        return;  // Don't redirect - user needs to verify email first
+                    }
+
+                    showMessage(data.message || 'Success! Redirecting...', 'success');
+
+                    // Redirect to main app
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 1000);
+                } else {
+                    showMessage(data.error || 'Login failed. Please try again.', 'error');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showMessage('Connection error. Please try again.', 'error');
+            }
+        }
+
+        // Show message helper
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('authMessage');
+            if (!messageEl) return;
+
+            messageEl.classList.remove('success', 'error');
+            if (type) messageEl.classList.add(type);
+            messageEl.textContent = text;
+            messageEl.style.display = 'block';
+            messageEl.removeAttribute('hidden');
+        }
+
+        // Show verification pending UI after signup
+        function showVerificationPendingUI(email) {
+            const card = document.querySelector('.card');
+            if (!card) return;
+
+            card.innerHTML = `
+                <div style="text-align: center; padding: 1rem 0;">
+                    <div style="width: 80px; height: 80px; margin: 0 auto 1.5rem; background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.25) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                    </div>
+                    <h1 style="margin-bottom: 0.75rem;">Check Your Email</h1>
+                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                        We've sent a verification link to:<br>
+                        <strong style="color: var(--primary);">${email}</strong>
+                    </p>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                        Click the link in the email to verify your account.<br>
+                        The link expires in 24 hours.
+                    </p>
+                    <div id="resendContainer">
+                        <button type="button" class="btn" style="background: transparent; border: 2px solid var(--primary); color: var(--primary);" onclick="resendVerificationEmail('${email}')">
+                            Resend Verification Email
+                        </button>
+                    </div>
+                    <div id="resendStatus" style="margin-top: 1rem; font-size: 0.9rem;"></div>
+                    <div class="footer-links" style="margin-top: 2rem;">
+                        <p><a href="index.html">Go to Dashboard</a> (limited access until verified)</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Resend verification email
+        async function resendVerificationEmail(email) {
+            const resendStatus = document.getElementById('resendStatus');
+            const resendBtn = document.querySelector('#resendContainer button');
+
+            if (resendBtn) {
+                resendBtn.disabled = true;
+                resendBtn.textContent = 'Sending...';
+            }
+
+            try {
+                const endpoint = '/api/auth/resend-verification';
+                const apiUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resendStatus.innerHTML = '<span style="color: #10b981;">Verification email sent! Check your inbox.</span>';
+                    if (resendBtn) {
+                        resendBtn.textContent = 'Email Sent';
+                        // Re-enable after 60 seconds (rate limit)
+                        setTimeout(() => {
+                            resendBtn.disabled = false;
+                            resendBtn.textContent = 'Resend Verification Email';
+                        }, 60000);
+                    }
+                } else {
+                    resendStatus.innerHTML = `<span style="color: #ef4444;">${data.error || 'Failed to send email. Try again later.'}</span>`;
+                    if (resendBtn) {
+                        resendBtn.disabled = false;
+                        resendBtn.textContent = 'Resend Verification Email';
+                    }
+                }
+            } catch (error) {
+                console.error('Resend error:', error);
+                resendStatus.innerHTML = '<span style="color: #ef4444;">Connection error. Please try again.</span>';
+                if (resendBtn) {
+                    resendBtn.disabled = false;
+                    resendBtn.textContent = 'Resend Verification Email';
+                }
+            }
+        }
     </script>
 
+    <!-- Theme Toggle Script -->
+    <script src="js/theme.js"></script>
 </body>
 </html>
