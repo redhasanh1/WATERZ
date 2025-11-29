@@ -6,6 +6,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies (no libgl1-mesa-glx needed - using opencv-python-headless)
+# Set the frontend to noninteractive to avoid installation prompts
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libglib2.0-0 \
