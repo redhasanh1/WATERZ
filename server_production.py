@@ -21,7 +21,7 @@ load_dotenv()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Detect Railway environment
-IS_RAILWAY = os.getenv('RAILWAY_ENVIRONMENT_NAME') is not None
+IS_RAILWAY = os.getenv('RAILWAY_ENVIRONMENT_NAME') is not None or os.getenv('RAILWAY') is not None
 
 # Use Railway volume (/data) for persistent storage in production
 if IS_RAILWAY:
@@ -135,7 +135,7 @@ except Exception as e:
     print(f"[INFO] Running in API-only mode (no GPU): {e}")
     print("[INFO] This is normal for Railway deployment - local workers handle GPU processing")
 
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, send_from_directory
 from flask_cors import CORS
 from celery import Celery, chord
 
@@ -5927,6 +5927,14 @@ def terms_of_service():
 def premium_page():
     """Serve Premium/Pricing page"""
     return send_file(os.path.join(app.static_folder, 'premium.html'))
+
+
+@app.route('/<path:filename>')
+def serve_static_files(filename):
+    """Serve HTML and other static files from web folder"""
+    if filename.endswith('.html'):
+        return send_file(os.path.join(app.static_folder, filename))
+    return send_from_directory(app.static_folder, filename)
 
 
 @app.route('/api/stats', methods=['GET'])
