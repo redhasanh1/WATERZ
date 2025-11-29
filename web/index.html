@@ -1,10 +1,50 @@
-
+﻿
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WatermarkAI - Responsible Cleanup Demo</title>
+
+    <!-- SEO Optimization -->
+    <title>Remove Objects from Videos Online Free - AI Video Editor | MarkRemoverAI</title>
+    <meta name="description" content="Remove watermarks, objects, and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
+    <meta name="author" content="MarkRemoverAI">
+    <link rel="canonical" href="https://markremoverai.com/">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://markremoverai.com/">
+    <meta property="og:title" content="Remove Objects from Videos Online Free - AI Video Editor">
+    <meta property="og:description" content="Remove watermarks, objects, and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
+    <meta property="og:image" content="https://markremoverai.com/emblem.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://markremoverai.com/">
+    <meta property="twitter:title" content="Remove Objects from Videos Online Free - AI Video Editor">
+    <meta property="twitter:description" content="Remove watermarks, objects, and unwanted elements from videos with AI. Free online tool - just click and remove. No editing skills needed.">
+    <meta property="twitter:image" content="https://markremoverai.com/emblem.png">
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "MarkRemoverAI AI Video Object Remover",
+      "applicationCategory": "MultimediaApplication",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": "4.8",
+        "ratingCount": "1250"
+      },
+      "description": "Professional AI-powered video object removal tool. Remove any object from videos with one click."
+    }
+    </script>
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="emblem.png">
@@ -19,26 +59,44 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <script>
-        // API base detection and override support.
-        // - Defaults to same-origin ('').
-        // - Reads a persisted override from localStorage if present.
-        // - Best-effort fetch of /tunnel_url.txt to auto-fill when front and API are split.
+        // API base detection and override (safe)
+        // Defaults to same-origin (''). Only allows overrides for same host or localhost.
         (function () {
-            var url = '';
+            function allow(u) {
+                if (!u) return false;
+                try {
+                    var parsed = new URL(u, window.location.origin);
+                    var host = (parsed.hostname || '').toLowerCase();
+                    var allowed = [window.location.hostname.toLowerCase(), 'localhost', '127.0.0.1'];
+                    return allowed.indexOf(host) !== -1;
+                } catch (e) { return false; }
+            }
+
+            var base = '';
             try {
-                url = window.API_BASE_URL || localStorage.getItem('api_base_url_override') || '';
+                // Optional query override (?api=...)
+                var qp = new URLSearchParams(window.location.search).get('api');
+                if (qp && allow(qp)) base = qp;
+
+                // Stored override (only if allowed)
+                if (!base) {
+                    var stored = '';
+                    try { stored = localStorage.getItem('api_base_url_override') || ''; } catch (e) {}
+                    if (allow(stored)) base = stored; else if (stored) { try { localStorage.removeItem('api_base_url_override'); } catch (e) {} }
+                }
             } catch (e) { /* ignore */ }
 
-            window.API_BASE_URL = url || '';
+            window.API_BASE_URL = base || '';
 
-            if (!url) {
+            // Optional: load /tunnel_url.txt (same-origin only) for dev hints, but ignore cross-origin
+            if (!base) {
                 try {
                     fetch('/tunnel_url.txt', { headers: { 'ngrok-skip-browser-warning': 'true' } })
                         .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
                         .then(function (txt) {
                             if (!txt) return;
-                            txt = txt.trim();
-                            if (/^https?:\/\//i.test(txt)) {
+                            txt = (txt || '').trim();
+                            if (allow(txt)) {
                                 window.API_BASE_URL = txt;
                                 try { localStorage.setItem('api_base_url_override', txt); } catch (e) { }
                             }
@@ -48,24 +106,92 @@
             }
 
             window.setApiBaseUrl = function (newUrl, persist) {
-                window.API_BASE_URL = newUrl || '';
-                try { if (persist) localStorage.setItem('api_base_url_override', window.API_BASE_URL); } catch (e) { }
+                if (allow(newUrl)) {
+                    window.API_BASE_URL = newUrl || '';
+                    try { if (persist) localStorage.setItem('api_base_url_override', window.API_BASE_URL); } catch (e) { }
+                }
             };
         })();
     </script>
     <style>
-        /* AI Watermark Remover - Standalone Demo */
+        /* MarkRemoverAI AI - Revolutionary Vibrant Design */
         :root {
-            --primary: #667eea;
-            --primary-dark: #5568d3;
-            --secondary: #764ba2;
-            --accent: #a78bfa;
-            --bg-dark: #0f0f1e;
-            --bg-card: #1a1a2e;
-            --bg-glass: rgba(26, 26, 46, 0.7);
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0c0;
+            --primary: #667eea;         /* Vibrant Purple */
+            --primary-dark: #5a67d8;    /* Deep Purple */
+            --secondary: #48bb78;       /* Fresh Green */
+            --accent: #ed64a6;          /* Hot Pink */
+            --accent-orange: #f6ad55;   /* Warm Orange */
+            --cyan: #0bc5ea;            /* Electric Cyan */
+            --bg-light: #ffffff;        /* Pure White */
+            --bg-card: #f8fafc;         /* Light card */
+            --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --bg-gradient-2: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --bg-gradient-3: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --bg-gradient-4: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            --text-primary: #2d3748;    /* Charcoal */
+            --text-secondary: #718096;  /* Gray */
             --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-rainbow: linear-gradient(135deg, #667eea 0%, #f093fb 30%, #f6ad55 60%, #48bb78 100%);
+        }
+
+        /* Dark theme overrides */
+        html[data-theme="dark"] {
+            --bg-light: #0b1020;
+            --bg-card: #121826;
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
+        }
+
+        /* Comparison Section Styling */
+        .comparison-section {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%);
+        }
+
+        html[data-theme="dark"] .comparison-section {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%);
+        }
+
+        /* Timeline Scrubber Styling */
+        .timeline-scrubber {
+            background: #ffffff;
+        }
+
+        html[data-theme="dark"] .timeline-scrubber {
+            background: #e5e7eb;
+        }
+
+        /* Professional Video Controls */
+        #fullscreenBtn:hover {
+            background: rgba(255, 255, 255, 0.2) !important;
+            transform: scale(1.05);
+        }
+
+        #playPauseBtn:hover {
+            transform: scale(1.1);
+        }
+
+        /* Timeline Thumbnail Styling */
+        #professionalTimeline {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(102, 126, 234, 0.5) rgba(26, 26, 46, 0.3);
+        }
+
+        #professionalTimeline::-webkit-scrollbar {
+            height: 8px;
+        }
+
+        #professionalTimeline::-webkit-scrollbar-track {
+            background: rgba(26, 26, 46, 0.3);
+            border-radius: 4px;
+        }
+
+        #professionalTimeline::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.5);
+            border-radius: 4px;
+        }
+
+        #professionalTimeline::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.7);
         }
 
         * {
@@ -76,7 +202,7 @@
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg-dark);
+            background: var(--bg-light);
             color: var(--text-primary);
             line-height: 1.6;
             overflow-x: hidden;
@@ -96,7 +222,8 @@
             align-items: center;
             justify-content: center;
             overflow: hidden;
-            padding: 100px 0 80px;
+            padding: 120px 0 80px;
+            margin-top: 0;
         }
 
         .hero-background {
@@ -105,11 +232,18 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: radial-gradient(at 40% 20%, rgba(102, 126, 234, 0.3) 0px, transparent 50%),
-                        radial-gradient(at 80% 0%, rgba(118, 75, 162, 0.2) 0px, transparent 50%),
-                        radial-gradient(at 0% 50%, rgba(167, 139, 250, 0.2) 0px, transparent 50%);
-            opacity: 0.5;
+            background:
+                radial-gradient(at 20% 30%, rgba(102, 126, 234, 0.15) 0px, transparent 50%),
+                radial-gradient(at 80% 20%, rgba(240, 147, 251, 0.15) 0px, transparent 50%),
+                radial-gradient(at 50% 80%, rgba(72, 187, 120, 0.12) 0px, transparent 50%),
+                radial-gradient(at 90% 60%, rgba(246, 173, 85, 0.12) 0px, transparent 50%);
             z-index: 0;
+            animation: float-bg 20s ease-in-out infinite;
+        }
+
+        @keyframes float-bg {
+            0%, 100% { transform: translateY(0) scale(1); }
+            50% { transform: translateY(-20px) scale(1.05); }
         }
 
         .hero-content {
@@ -118,6 +252,18 @@
             text-align: center;
             max-width: 900px;
             margin: 0 auto;
+        }
+
+        /* Theme toggle button */
+        .theme-toggle {
+            margin-left: 12px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(102,126,234,0.25);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-weight: 600;
         }
 
         .hero-title {
@@ -189,11 +335,34 @@
             background: var(--bg-card);
             border-radius: 24px;
             padding: 3rem;
-            box-shadow: 0 0 40px rgba(102, 126, 234, 0.3);
-            border: 1px solid rgba(102, 126, 234, 0.1);
-            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 50px rgba(102, 126, 234, 0.15), 0 5px 20px rgba(240, 147, 251, 0.1);
+            border: 2px solid transparent;
+            background-image: linear-gradient(white, white), var(--gradient-rainbow);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
             margin-top: 2rem;
             animation: fadeInUp 0.8s ease-out 0.4s backwards;
+            position: relative;
+            overflow: hidden;
+            max-width: 1400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .demo-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: conic-gradient(from 0deg, transparent, rgba(102, 126, 234, 0.05), transparent 30%);
+            animation: rotate 20s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes rotate {
+            100% { transform: rotate(1turn); }
         }
 
         .upload-zone {
@@ -261,22 +430,54 @@
 
         .preview-image {
             max-width: 100%;
-            max-height: 500px;
+            max-height: 700px;
             border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+        }
+
+        #previewVideo {
+            width: auto;
+            max-width: 90%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
         }
 
         .info-box {
-            background: rgba(102, 126, 234, 0.1);
-            border-left: 4px solid var(--primary);
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%);
+            border-left: 4px solid transparent;
+            border-image: var(--gradient-rainbow) 1;
             padding: 1.5rem;
             border-radius: 8px;
             margin-top: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .info-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(67, 233, 123, 0.03) 0%, rgba(56, 249, 215, 0.03) 100%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+
+        .info-box:hover::before {
+            opacity: 1;
         }
 
         .info-box h3 {
-            color: var(--accent);
+            background: var(--gradient-rainbow);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
             margin-bottom: 0.5rem;
+            font-weight: 700;
         }
 
         .feature-grid {
@@ -303,13 +504,36 @@
             width: 60px;
             height: 60px;
             margin: 0 auto 1.5rem;
-            background: var(--gradient-primary);
+            background: var(--gradient-rainbow);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 1.5rem;
             font-weight: 700;
+            color: white;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            animation: float 3s ease-in-out infinite;
+        }
+
+        .feature-card:nth-child(1) .feature-number {
+            background: var(--bg-gradient);
+            animation-delay: 0s;
+        }
+
+        .feature-card:nth-child(2) .feature-number {
+            background: var(--bg-gradient-2);
+            animation-delay: 0.3s;
+        }
+
+        .feature-card:nth-child(3) .feature-number {
+            background: var(--bg-gradient-3);
+            animation-delay: 0.6s;
+        }
+
+        .feature-card:nth-child(4) .feature-number {
+            background: var(--bg-gradient-4);
+            animation-delay: 0.9s;
         }
 
         .btn-primary {
@@ -337,52 +561,101 @@
             top: 0;
             left: 0;
             right: 0;
-            background: rgba(15, 15, 30, 0.95);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.12);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
             z-index: 1000;
-            padding: 1rem 0;
+            padding: 1.25rem 0;
         }
 
         .nav-container {
-            max-width: 1200px;
+            max-width: 1600px;
             margin: 0 auto;
-            padding: 0 20px;
+            padding: 0 4rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 4rem;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 6rem;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 3rem;
+            flex-shrink: 0;
+        }
+
+        .nav-auth {
+            display: flex;
+            align-items: center;
+            gap: 2.5rem;
+        }
+
+        .nav-controls {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
         }
 
         .nav-logo {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
+            gap: 0.85rem;
             text-decoration: none;
             color: var(--text-primary);
             font-weight: 700;
-            font-size: 1.25rem;
+            font-size: 1.5rem;
+            transition: transform 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .nav-logo:hover {
+            transform: translateY(-1px);
         }
 
         .nav-logo img {
-            width: 32px;
-            height: 32px;
-            border-radius: 8px;
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            filter: drop-shadow(0 2px 8px rgba(102, 126, 234, 0.25));
         }
 
         .nav-menu {
             display: flex;
             align-items: center;
-            gap: 2rem;
+            gap: 2.5rem;
             list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Navigation links - wide spacing */
+        .nav-left .nav-menu {
+            gap: 3.5rem;
+        }
+
+        /* User menu - comfortable spacing */
+        #userNav {
+            gap: 1.5rem !important;
         }
 
         .nav-menu a {
             color: var(--text-secondary);
             text-decoration: none;
-            font-weight: 500;
+            font-weight: 600;
             font-size: 0.95rem;
             transition: all 0.3s ease;
             position: relative;
+            letter-spacing: -0.01em;
         }
 
         .nav-menu a:hover {
@@ -392,12 +665,13 @@
         .nav-menu a::after {
             content: '';
             position: absolute;
-            bottom: -4px;
+            bottom: -6px;
             left: 0;
             width: 0;
-            height: 2px;
+            height: 2.5px;
             background: var(--gradient-primary);
-            transition: width 0.3s ease;
+            border-radius: 2px;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .nav-menu a:hover::after {
@@ -405,37 +679,84 @@
         }
 
         .nav-cta {
-            padding: 0.6rem 1.5rem;
-            background: var(--gradient-primary);
-            border-radius: 8px;
+            padding: 0.75rem 1.85rem !important;
+            background: var(--gradient-primary) !important;
+            border-radius: 10px !important;
             color: white !important;
-            font-weight: 600;
-            transition: all 0.3s ease;
+            font-weight: 600 !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25) !important;
+            text-decoration: none !important;
+            white-space: nowrap;
         }
 
         .nav-cta:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4) !important;
         }
 
         .nav-cta::after {
-            display: none;
+            display: none !important;
+        }
+
+        .nav-cta-small {
+            padding: 0.5rem 1rem !important;
+            background: var(--gradient-primary) !important;
+            border-radius: 8px !important;
+            color: white !important;
+            font-weight: 600 !important;
+            font-size: 0.85rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 2px 6px rgba(102, 126, 234, 0.2) !important;
+            text-decoration: none !important;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .nav-cta-small:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35) !important;
+        }
+
+        .nav-cta-small::after {
+            display: none !important;
         }
 
         .mobile-menu-toggle {
             display: none;
             flex-direction: column;
-            gap: 4px;
+            gap: 5px;
             cursor: pointer;
-            padding: 8px;
+            padding: 10px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            transition: background 0.3s ease;
+        }
+
+        .mobile-menu-toggle:hover {
+            background: rgba(102, 126, 234, 0.08);
         }
 
         .mobile-menu-toggle span {
-            width: 24px;
-            height: 2px;
+            width: 26px;
+            height: 2.5px;
             background: var(--text-primary);
-            border-radius: 2px;
-            transition: all 0.3s ease;
+            border-radius: 3px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .mobile-menu-toggle.active span:nth-child(1) {
+            transform: translateY(7.5px) rotate(45deg);
+        }
+
+        .mobile-menu-toggle.active span:nth-child(2) {
+            opacity: 0;
+        }
+
+        .mobile-menu-toggle.active span:nth-child(3) {
+            transform: translateY(-7.5px) rotate(-45deg);
         }
 
         /* API status chip */
@@ -450,7 +771,8 @@
             border: 1px solid rgba(255,255,255,0.12);
             background: rgba(26,26,46,0.6);
             color: var(--text-secondary);
-            margin-left: 12px;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
         @media (min-width: 769px) {
             .api-chip { display: inline-flex; }
@@ -458,6 +780,12 @@
         .api-chip.ok { color: #22c55e; border-color: rgba(34,197,94,0.35); }
         .api-chip.err { color: #ef4444; border-color: rgba(239,68,68,0.35); }
         .api-chip.checking { color: #f59e0b; border-color: rgba(245,158,11,0.35); }
+
+        /* Theme Toggle */
+        .theme-toggle {
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
 
         @media (max-width: 768px) {
             .hero {
@@ -474,28 +802,43 @@
                 min-height: 250px;
             }
 
+            .nav-container {
+                padding: 0 1.5rem;
+                gap: 1rem;
+            }
+
+            .nav-left {
+                gap: 1.5rem;
+            }
+
+            .nav-right {
+                gap: 0.5rem;
+            }
+
             .mobile-menu-toggle {
                 display: flex;
             }
 
-            .nav-menu {
+            /* Hide desktop nav menu items on mobile */
+            .nav-left .nav-menu {
                 position: fixed;
-                top: 65px;
+                top: 75px;
                 left: 0;
                 right: 0;
                 flex-direction: column;
                 gap: 0;
-                background: rgba(15, 15, 30, 0.98);
+                background: rgba(255, 255, 255, 0.98);
                 backdrop-filter: blur(20px);
-                padding: 1rem 0;
-                border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+                padding: 1.5rem 0;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.12);
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
                 transform: translateY(-100%);
                 opacity: 0;
                 pointer-events: none;
-                transition: all 0.3s ease;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             }
 
-            .nav-menu.active {
+            .nav-left .nav-menu.active {
                 transform: translateY(0);
                 opacity: 1;
                 pointer-events: auto;
@@ -514,6 +857,26 @@
                 padding: 0.5rem 0;
             }
 
+            /* Hide user nav on mobile, show in hamburger menu if needed */
+            .nav-auth #userNav {
+                display: none !important;
+            }
+
+            .nav-auth #signInLink {
+                font-size: 0.85rem;
+                padding: 0.5rem 1rem !important;
+            }
+
+            /* Hide API chip on mobile */
+            .api-chip {
+                display: none !important;
+            }
+
+            .theme-toggle {
+                font-size: 0.85rem;
+                padding: 0.5rem 0.75rem;
+            }
+
             .nav-cta {
                 margin: 0.5rem 1rem;
             }
@@ -530,6 +893,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            width: 100%;
         }
 
         .ad-sidebar {
@@ -564,6 +928,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            width: 100%;
         }
 
         .ad-banner-bottom {
@@ -576,6 +941,7 @@
             align-items: center;
             justify-content: center;
             margin-top: 2rem;
+            width: 100%;
         }
 
         .ad-placeholder {
@@ -663,33 +1029,68 @@
     <!-- Navigation Header -->
     <nav class="nav-header">
         <div class="nav-container">
-            <a href="index.html" class="nav-logo">
-                <img src="emblem.png" alt="Logo">
-                <span>WatermarkAI</span>
-            </a>
+            <!-- LEFT: Logo + Main Navigation -->
+            <div class="nav-left">
+                <a href="/" class="nav-logo">
+                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                            </linearGradient>
+                        </defs>
+                        <rect width="40" height="40" rx="10" fill="url(#logoGradient)"/>
+                        <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
+                        <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
+                        <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                        <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                        <circle cx="25" cy="15" r="2" fill="#10b981"/>
+                    </svg>
+                    <span>MarkRemoverAI</span>
+                </a>
 
-            <ul class="nav-menu" id="navMenu">
-                <li><a href="#remove-watermark">Restore Content</a></li>
-                <li><a href="#pricing">Plans</a></li>
-                <li><a href="#comparison">Results</a></li>
-                <li><a href="login.html" class="nav-cta">Sign In</a></li>
-            </ul>
+                <ul class="nav-menu" id="navMenu">
+                    <li><a href="/">Home</a></li>
+                    <li><a href="#how-to">How It Works</a></li>
+                    <li><a href="#comparison">Examples</a></li>
+                    <li><a href="premium.html#pricing">Pricing</a></li>
+                </ul>
+            </div>
 
-            <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking…</div>
+            <!-- RIGHT: User Controls + System Controls -->
+            <div class="nav-right">
+                <!-- Auth Section -->
+                <div class="nav-auth">
+                    <a href="login.html" class="nav-cta" id="signInLink">Sign In</a>
+                    <ul class="nav-menu" id="userNav" style="display: none;">
+                        <li><span id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem;"></span></li>
+                        <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
+                        <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta-small" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">Buy Credits</a></li>
+                        <li><a href="#" id="signOutBtn" class="nav-cta-small" style="background: rgba(239, 68, 68, 0.9);">Sign Out</a></li>
+                    </ul>
+                </div>
 
-            <div class="mobile-menu-toggle" id="mobileMenuToggle">
-                <span></span>
-                <span></span>
-                <span></span>
+                <!-- System Controls -->
+                <div class="nav-controls">
+                    <div id="apiStatusChip" class="api-chip checking" title="Checking API...">API: Checking...</div>
+                    <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">Dark</button>
+                    <div class="mobile-menu-toggle" id="mobileMenuToggle">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
             </div>
         </div>
     </nav>
 
-    <!-- Maintenance Banner -->
-    <div class="maintenance-banner">
-        <span class="badge">Heads up</span>
-        <span class="msg">Temporarily unavailable — we’re making it even better 🙂</span>
-        <span class="sparkle">✨</span>
+    <!-- Email Verification Banner (hidden by default) -->
+    <div id="emailVerificationBanner" style="display: none; background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(251, 191, 36, 0.15) 100%); border-bottom: 1px solid rgba(245, 158, 11, 0.3); padding: 0.75rem 1rem; text-align: center;">
+        <span style="color: var(--text-primary); font-size: 0.9rem;">
+            Please verify your email to secure your account.
+            <button id="resendVerificationBtn" style="background: none; border: none; color: #667eea; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0 0.25rem;">Resend verification email</button>
+        </span>
+        <span id="resendStatus" style="margin-left: 0.5rem; font-size: 0.85rem; color: #10b981; display: none;"></span>
     </div>
 
     <!-- Top Banner Ad -->
@@ -732,27 +1133,29 @@
         <div class="container">
             <div class="hero-content">
                 <h1 class="hero-title">
-                    Restore <span class="gradient-text">Authorized</span>
-                    <br>Content with AI
+                    Remove Any Object from Videos
+                    <br><span class="gradient-text">With One Click</span>
                 </h1>
                 <p class="hero-subtitle">
-                    Built for lawful watermark cleanup on media you own or have permission to edit.
-                    <br>Refresh archives, deliver polished client work, and stay brand-safe in seconds.
+                    Remove unwanted objects and people from your videos in seconds.
+                    <br>No video editing skills required - just click and it's gone. 100% free to try.
                 </p>
 
-                <div class="demo-card">
-                    <!-- Terms Agreement - Minimal -->
-                    <div id="termsAgreement" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(102, 126, 234, 0.2); border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem;">
-                        <label style="display: flex; align-items: center; cursor: pointer; gap: 0.75rem;">
-                            <input type="checkbox" id="agreeTerms" style="width: 22px; height: 22px; cursor: pointer; accent-color: #667eea; flex-shrink: 0;">
-                            <span style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.4;">
-                                I confirm I control the rights to this content or have written permission to modify it. I agree to the <a href="terms.html" style="color: #667eea; text-decoration: none;">Terms</a> and <a href="privacy.html" style="color: #667eea; text-decoration: none;">Privacy Policy</a>.
-                            </span>
-                        </label>
+                <!-- Free Credits Incentive -->
+                <div style="text-align: center; margin: 2rem auto; max-width: 600px;">
+                    <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%); border: 2px solid rgba(102, 126, 234, 0.3); border-radius: 16px; padding: 1.5rem; box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2);">
+                        <p style="font-size: 1.2rem; font-weight: 700; margin: 0; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                            🎁 Sign up now and get 5 FREE credits!
+                        </p>
+                        <p style="font-size: 0.95rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                            Start removing watermarks instantly • No credit card required
+                        </p>
                     </div>
+                </div>
 
-                    <div id="uploadSection" style="opacity: 0.5; pointer-events: none; transition: opacity 0.3s ease;">
-                        <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Paste Video URL (owned or licensed)</h3>
+                <div class="demo-card">
+                    <div id="uploadSection">
+                        <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Upload Your Video or Paste URL</h3>
 
                         <div style="text-align: center; margin-bottom: 2rem;">
                             <input type="text" id="videoUrl" placeholder="Paste video link here"
@@ -779,35 +1182,88 @@
                         <p class="upload-description">or click to browse</p>
                     </div>
 
-                    <div class="preview-container" id="previewContainer" style="text-align: left;">
-                        <img id="previewImage" class="preview-image" style="display: none;">
-                        <div style="position: relative; display: inline-block;">
-                            <video id="previewVideo" class="preview-image" controls style="display: none;"></video>
-                            <!-- Arrow pointing to download menu -->
-                            <svg id="downloadHint" style="display: none; position: absolute; top: 0; right: -240px; width: 250px; height: 100%; pointer-events: none; z-index: 10;" viewBox="0 0 250 400" preserveAspectRatio="none">
-                                <defs>
-                                    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
-                                        <polygon points="0 0, 10 5, 0 10" fill="#667eea" />
-                                    </marker>
-                                    <linearGradient id="arrowGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                                        <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-                                        <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
-                                    </linearGradient>
-                                </defs>
-                                <path d="M 60 20 Q 140 150, 60 340" stroke="url(#arrowGradient)" stroke-width="4" fill="none" marker-end="url(#arrowhead)" stroke-linecap="round"></path>
-                            </svg>
-                            <!-- Text label at top right next to video -->
-                            <div id="downloadText" style="display: none; position: absolute; top: 5px; right: -190px; background: rgba(102, 126, 234, 0.95); color: white; padding: 0.7rem 1rem; border-radius: 8px; font-weight: 600; font-size: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); white-space: nowrap; z-index: 10;">
-                                Click ⋮ to Download
+                    <div id="creditEstimate" style="display:none; text-align:center; margin: 10px 0 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 700; padding: 0.75rem 1.5rem; border-radius: 12px; font-size: 1.1rem; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);"></div>
+
+                    <div class="preview-container" id="previewContainer" style="text-align: center;">
+                        <img id="previewImage" class="preview-image" alt="Video preview showing selected objects to remove" style="display: none; max-width: 100%; max-height: 900px;">
+                        <div id="videoContainer" style="position: relative; display: inline-block; max-width: 100%; overflow: hidden;">
+                            <div style="text-align:left; color: var(--text-secondary); font-weight: 600; margin: 0 0 6px 2px;">Preview</div>
+
+                            <!-- Professional Video Player Container -->
+                            <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5); max-height: 900px;">
+                                <div style="position: relative;">
+                                    <video id="previewVideo" style="width: 100%; max-height: 900px; display: block; background: #000; object-fit: contain;">
+                                    </video>
+
+                                    <!-- Canvas overlay for mask selection - MUST be inside position:relative container -->
+                                    <canvas id="maskCanvas" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; pointer-events: none;"></canvas>
+
+                                    <!-- Custom Video Controls Overlay -->
+                                    <div id="videoControls" style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%); padding: 1.5rem 1rem 1rem; transition: opacity 0.3s;">
+                                        <!-- Timeline Scrubber -->
+                                        <div style="margin-bottom: 1rem;">
+                                            <div id="timelineTrack" style="position: relative; height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; cursor: pointer;">
+                                                <div id="timelineProgress" style="position: absolute; height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); border-radius: 3px; width: 0%;"></div>
+                                                <div id="timelineScrubber" class="timeline-scrubber" style="position: absolute; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: grab; left: 0%;"></div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Control Buttons & Time Display -->
+                                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                                            <div style="display: flex; align-items: center; gap: 1rem;">
+                                                <button id="playPauseBtn" style="background: none; border: none; color: #fff; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+                                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                                        <path d="M8 5v14l11-7z"/>
+                                                    </svg>
+                                                </button>
+                                                <div id="timeDisplay" style="color: #fff; font-size: 0.9rem; font-weight: 500; font-family: monospace; min-width: 100px;">
+                                                    0:00 / 0:00
+                                                </div>
+                                            </div>
+
+                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                <button id="fullscreenBtn" title="Fullscreen" style="background: rgba(255, 255, 255, 0.1); border: none; color: #fff; cursor: pointer; padding: 0.5rem; border-radius: 6px; transition: all 0.2s; display: flex; align-items: center; justify-content: center;">
+                                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
+                        <!-- Mask Selection Controls -->
+                        <div id="maskSelectionControls" style="display: none; margin-top: 2rem; padding: 2rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%); border-radius: 16px; border: 2px solid rgba(102, 126, 234, 0.2);">
+                            <h3 style="text-align: center; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.4rem; font-weight: 700;">
+                                Click on Objects to Remove
+                            </h3>
+                            <p style="text-align: center; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                                Click anywhere on the video to mark objects for removal. Green dots show your selections.
+                            </p>
+
+                            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem;">
+                                <button id="enableSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); transition: all 0.3s ease;">
+                                    Enable Selection Mode
+                                </button>
+                                <button id="resetSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--bg-gradient-3); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3); transition: all 0.3s ease;" disabled>
+                                    Reset (R)
+                                </button>
+                            </div>
+
+                            <div id="pointsList" style="display: none; text-align: center; padding: 1rem; background: rgba(255, 255, 255, 0.5); border-radius: 8px; margin-top: 1rem;">
+                                <p style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">Selected Points: <span id="pointCount">0</span></p>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary);">Click on the video to add more points</p>
+                            </div>
+                        </div>
+
                         <!-- Scroll Hint Below Video -->
                         <div id="scrollHint" style="display: none; text-align: center; margin-top: 1.5rem; padding: 1rem; background: rgba(102, 126, 234, 0.15); border-left: 4px solid #667eea; border-radius: 8px;">
                             <p style="font-size: 1.1rem; font-weight: 600; color: #667eea; margin-bottom: 0.3rem;">
-                                Next Step: Start Cleanup
+                                Next Step: Start Removal
                             </p>
                             <p style="font-size: 0.9rem; color: var(--text-secondary);">
-                                Click the button below to begin authorized processing
+                                Click the button below to remove selected objects
                             </p>
                         </div>
                         <!-- Ad Before Process Button (deferred init) -->
@@ -821,7 +1277,7 @@
                                  data-defer="true"></ins>
                         </div>
 
-                        <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Start Cleanup</button>
+                        <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Start Object Removal</button>
                         <div id="processingStatus" style="display: none; margin-top: 1rem; padding: 1.5rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px; text-align: center;">
                             <p id="statusText" style="margin-bottom: 1rem; font-weight: 600;">Processing...</p>
                             <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden;">
@@ -842,17 +1298,6 @@
                         </div>
                     </div> <!-- End uploadSection -->
                 </div> <!-- End demo-card -->
-
-                    <div class="info-box">
-                        <h3>AI Cleanup for Owned Media</h3>
-                        <p><strong>Perfect for:</strong> Updating branded assets • Refreshing licensed stock • Removing legacy bugs</p>
-                        <p style="margin-top: 0.5rem;"><strong>Processing:</strong> Real-time progress updates • High-quality restoration • Fast turnaround</p>
-                    </div>
-                    <div class="info-box" style="margin-top: 1.5rem;">
-                        <h3>Responsible Use Commitment</h3>
-                        <p style="color: var(--text-secondary);">WatermarkAI supports agencies, studios, and creators with documented rights. Do not upload pirated, confidential, or unauthorized material. We may suspend access for misuse.</p>
-                        <p style="color: var(--text-secondary); margin-top: 0.5rem;">Need guidance? Review the <a href="terms.html" style="color: #667eea; text-decoration: none;">Terms</a> for accepted use cases before you begin.</p>
-                    </div>
                 </div>
 
                 <!-- Ad Between Sections -->
@@ -868,29 +1313,74 @@
                     </script>
                 </div>
 
+                <!-- AI Inpainting Showcase Section -->
+                <section id="showcase" style="padding: 4rem 0; margin: 3rem 0; background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%); border-top: 1px solid rgba(102, 126, 234, 0.1); border-bottom: 1px solid rgba(102, 126, 234, 0.1); border-radius: 24px;">
+                    <div class="container">
+                        <div style="text-align: center; max-width: 900px; margin: 0 auto 3rem;">
+                            <h2 style="font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-family: 'Space Grotesk', sans-serif;">
+                                See Our AI in Action
+                            </h2>
+                            <p style="color: var(--text-secondary); font-size: 1.2rem; line-height: 1.7;">
+                                Watch how our advanced AI inpainting technology removes objects seamlessly from videos. Professional results in seconds.
+                            </p>
+                        </div>
+
+                        <!-- Video Showcase Container -->
+                        <div style="max-width: 1100px; margin: 0 auto;">
+                            <div style="background: var(--bg-card); border-radius: 24px; padding: 2rem; box-shadow: 0 20px 60px rgba(102, 126, 234, 0.2); border: 2px solid transparent; background-image: linear-gradient(var(--bg-card), var(--bg-card)), var(--gradient-rainbow); background-origin: border-box; background-clip: padding-box, border-box; overflow: hidden;">
+                                <video
+                                    id="showcaseVideo"
+                                    style="width: 100%; height: auto; border-radius: 16px; display: block; box-shadow: 0 10px 40px rgba(0,0,0,0.3);"
+                                    controls
+                                    preload="metadata"
+                                    playsinline
+                                    aria-label="AI inpainting demonstration video"
+                                >
+                                    <source src="/cool.mp4" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                </video>
+
+                                <!-- Caption below video -->
+                                <div style="margin-top: 1.5rem; text-align: center; padding: 1rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%); border-radius: 12px;">
+                                    <p style="color: var(--text-primary); font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem;">
+                                        Real-time object removal powered by state-of-the-art AI
+                                    </p>
+                                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0;">
+                                        No manual editing required • One-click solution • Professional quality
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <h2 style="text-align: center; font-size: 2.25rem; font-weight: 700; margin: 3rem 0 2rem; color: var(--text-primary);">How It Works - 3 Simple Steps</h2>
                 <div class="feature-grid" id="how-to">
                     <div class="feature-card">
                         <div class="feature-number">1</div>
-                        <h3>Upload File</h3>
-                        <p style="color: var(--text-secondary);">Drag and drop owned or licensed footage, or click to browse securely</p>
+                        <h3>Upload Video</h3>
+                        <p style="color: var(--text-secondary);">Drag and drop your video or paste a URL. Quick and easy.</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-number">2</div>
-                        <h3>AI Detection</h3>
-                        <p style="color: var(--text-secondary);">AI highlights logos, bugs, or timestamps you have permission to remove</p>
+                        <h3>Click Object</h3>
+                        <p style="color: var(--text-secondary);">Click on any object you want to remove. Smart detection highlights it instantly.</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-number">3</div>
-                        <h3>Run Cleanup</h3>
-                        <p style="color: var(--text-secondary);">Click the button below to start rights-respecting AI processing</p>
+                        <h3>Watch it Disappear</h3>
+                        <p style="color: var(--text-secondary);">Our AI removes the object seamlessly in seconds.</p>
                         <button id="removeWatermarkBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; display: none;">
-                            Start Cleanup
+                            Remove Object - Free (5 min wait)
+                        </button>
+                        <button id="removeWatermarkCreditsBtn" style="margin-top: 1rem; margin-left: 0.5rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; cursor: pointer; font-size: 1rem; font-weight: 700; display: none;">
+                            Remove Object - Instant (1 credit)
                         </button>
                     </div>
                     <div class="feature-card">
                         <div class="feature-number">4</div>
-                        <h3>Download Result</h3>
-                        <p style="color: var(--text-secondary);">Download a refreshed version of your approved content</p>
+                        <h3>Download Clean Video</h3>
+                        <p style="color: var(--text-secondary);">Get your professionally edited video in high quality.</p>
                     </div>
                 </div>
 
@@ -910,92 +1400,28 @@
         </div>
     </section>
 
-    <!-- Pricing Section -->
-    <section id="pricing" style="padding: 4rem 2rem; background: var(--bg-dark);">
-        <div class="container">
-            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                Choose Your Plan
-            </h2>
-            <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 3rem;">
-                Upfront pricing on the homepage, with the full breakdown one click away.
-            </p>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2.5rem; max-width: 1000px; margin: 0 auto;">
-                <!-- Free Plan -->
-                <div style="background: var(--bg-card); border: 1px solid rgba(102, 126, 234, 0.15); border-radius: 16px; padding: 2.5rem; text-align: center;">
-                    <h3 style="font-size: 1.6rem; margin-bottom: 1rem; font-weight: 700;">Free</h3>
-                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$0<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 1.75rem; font-size: 0.95rem;">Ideal for validating watermark cleanup on a rights-cleared pilot project.</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
-                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>10 images & 2 short videos each month</span>
-                        </li>
-                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Shared queue with standard turnaround</span>
-                        </li>
-                        <li style="padding: 0.7rem 0; color: var(--text-secondary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>720p output and email support</span>
-                        </li>
-                    </ul>
-                    <a href="#remove-watermark" style="display: block; padding: 1rem 2rem; background: rgba(102, 126, 234, 0.18); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Start for Free</a>
-                </div>
-
-                <!-- Pro Plan -->
-                <div style="background: var(--bg-card); border: 2px solid var(--primary); border-radius: 16px; padding: 2.5rem; text-align: center; position: relative; box-shadow: 0 0 40px rgba(102, 126, 234, 0.3);">
-                    <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gradient-primary); padding: 0.35rem 1.1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">MOST POPULAR</div>
-                    <h3 style="font-size: 1.6rem; margin-bottom: 1rem; font-weight: 700;">Pro</h3>
-                    <div style="font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">$29<span style="font-size: 1rem; color: var(--text-secondary); font-weight: 400;">/month</span></div>
-                    <p style="color: var(--text-secondary); margin-bottom: 1.75rem; font-size: 0.95rem;">For independent creators, platforms, and agency teams handling licensed assets every week.</p>
-                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem; text-align: left;">
-                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>500 images & 50 videos (≤10 min) every month</span>
-                        </li>
-                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Priority cleanup lane with 4K output</span>
-                        </li>
-                        <li style="padding: 0.7rem 0; color: var(--text-primary); display: flex; align-items: flex-start;">
-                            <span style="color: var(--primary); margin-right: 0.5rem;">•</span>
-                            <span>Batch uploads, API (1,000 calls), priority inbox support</span>
-                        </li>
-                    </ul>
-                    <a href="premium.html#pricing" style="display: block; padding: 1rem 2rem; background: var(--gradient-primary); border-radius: 8px; color: white; text-decoration: none; font-weight: 600; transition: all 0.3s ease;">Upgrade to Pro</a>
-                </div>
-
-            </div>
-
-            <p style="text-align: center; color: var(--text-secondary); font-size: 0.95rem; margin-top: 2.5rem;">
-                Need feature-by-feature comparisons, usage calculators, or compliance add-ons? Explore the full <a href="premium.html#pricing" style="color: #667eea; text-decoration: none;">pricing breakdown</a>.
-            </p>
-        </div>
-    </section>
-
     <!-- Before/After Comparison Section -->
-    <section id="comparison" style="background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(17, 17, 35, 0.98) 100%); padding: 4rem 2rem; margin: 2rem 0;">
+<section id="comparison" class="comparison-section" style="padding: 4rem 2rem; margin: 2rem 0;">
         <div class="container">
-            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                See Authorized Cleanup Results
+            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                See the Difference
             </h2>
             <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 3rem;">
-                Drag the slider to compare rights-cleared demo footage before and after cleanup
+                Drag the slider to compare before and after. Objects disappear seamlessly.
             </p>
 
-            <div style="max-width: 300px; margin: 0 auto;">
+            <div style="max-width: 1000px; margin: 0 auto;">
                 <!-- Video Comparison Container -->
                 <div id="comparison-container" style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-                    <!-- Before Video (Background - WITH watermark) -->
-                    <video id="before-video" style="width: 100%; display: block;" muted loop playsinline>
-                        <source src="demos/before.mp4" type="video/mp4">
+                    <!-- Before Video (Background - original with watermark) -->
+    <video id="before-video" style="width: 100%; display: block;" muted loop playsinline autoplay preload="metadata" controlslist="nodownload nofullscreen noremoteplayback" disablepictureinpicture aria-label="Before video showing object to be removed">
+        <source src="/s2.mp4" type="video/mp4">
                     </video>
 
-                    <!-- After Video (Overlay - WITHOUT watermark, clipped by slider) -->
-                    <div id="after-container" style="position: absolute; top: 0; right: 0; width: 50%; height: 100%; overflow: hidden;">
-                        <video id="after-video" style="position: absolute; top: 0; right: 0; width: 300px; height: 100%; object-fit: cover;" muted loop playsinline>
-                            <source src="demos/after.mp4" type="video/mp4">
+                    <!-- After Video (Overlay - cleaned version, clipped by slider) -->
+    <div id="after-container" style="position: absolute; top: 0; right: 0; width: 50%; height: 100%; overflow: hidden;">
+        <video id="after-video" style="position: absolute; top: 0; right: 0; width: 100%; height: 100%; object-fit: cover;" muted loop playsinline autoplay preload="metadata" controlslist="nodownload nofullscreen noremoteplayback" disablepictureinpicture aria-label="After video with object removed">
+            <source src="/s2removed.mp4" type="video/mp4">
                         </video>
                     </div>
 
@@ -1034,28 +1460,6 @@
         </div>
     </section>
 
-    <section style="padding: 3rem 2rem; background: rgba(15, 15, 30, 0.9); border-top: 1px solid rgba(102, 126, 234, 0.1); border-bottom: 1px solid rgba(102, 126, 234, 0.1);">
-        <div class="container" style="max-width: 900px;">
-            <h2 style="text-align: center; font-size: 2rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                Built to Respect Creators and Rights Holders
-            </h2>
-            <p style="color: var(--text-secondary); text-align: center; margin-bottom: 2rem;">
-                WatermarkAI exists to help you modernize assets you already own, from updating brand kits to repurposing licensed stock. We actively reject piracy and unauthorized use.
-            </p>
-            <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem;">
-                <li style="background: rgba(26, 26, 46, 0.6); border-radius: 12px; padding: 1.25rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
-                    <strong style="color: var(--text-primary);">Rights First:</strong> Upload content you created, commissioned, licensed, or that is in the public domain.
-                </li>
-                <li style="background: rgba(26, 26, 46, 0.6); border-radius: 12px; padding: 1.25rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
-                    <strong style="color: var(--text-primary);">Policy Compliant:</strong> We follow Google Ads and major platform policies. Misuse may result in account termination and reporting.
-                </li>
-                <li style="background: rgba(26, 26, 46, 0.6); border-radius: 12px; padding: 1.25rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
-                    <strong style="color: var(--text-primary);">Privacy by Design:</strong> Files are automatically purged after processing. Review the revised <a href="privacy.html" style="color: #667eea; text-decoration: none;">Privacy Policy</a> for details.
-                </li>
-            </ul>
-        </div>
-    </section>
-
     <!-- Bottom Banner Ad -->
     <div class="ad-banner-bottom">
         <ins class="adsbygoogle"
@@ -1069,8 +1473,21 @@
         </script>
     </div>
 
+    <!-- Simple Footer -->
+    <footer style="padding: 2rem; text-align: center; background: rgba(102, 126, 234, 0.03); border-top: 1px solid rgba(102, 126, 234, 0.1);">
+        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem;">
+            MarkRemoverAI - Professional Video Object Removal
+        </p>
+        <p style="color: var(--text-secondary); font-size: 0.75rem;">
+            <a href="terms.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Terms</a> •
+            <a href="privacy.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Privacy</a> •
+            <a href="premium.html" style="color: var(--primary); text-decoration: none; margin: 0 0.5rem;">Pricing</a>
+        </p>
+    </footer>
+
     <script src="config.js"></script>
     <script src="js/billing.js"></script>
+    
     <script>
         // Mobile Menu Toggle
         const mobileMenuToggle = document.getElementById('mobileMenuToggle');
@@ -1078,12 +1495,14 @@
 
         mobileMenuToggle.addEventListener('click', () => {
             navMenu.classList.toggle('active');
+            mobileMenuToggle.classList.toggle('active');
         });
 
         // Close mobile menu when clicking a link
         document.querySelectorAll('.nav-menu a').forEach(link => {
             link.addEventListener('click', () => {
                 navMenu.classList.remove('active');
+                mobileMenuToggle.classList.remove('active');
             });
         });
 
@@ -1118,6 +1537,16 @@
 
             let isDragging = false;
             let isPlaying = false;
+
+            // Attempt to autoplay silently; fall back to user gesture
+            function tryAutoplay() {
+                beforeVideo.muted = true; afterVideo.muted = true;
+                beforeVideo.play().catch(() => {});
+                afterVideo.play().catch(() => {});
+            }
+            document.addEventListener('DOMContentLoaded', tryAutoplay);
+            setTimeout(tryAutoplay, 300);
+            window.addEventListener('pointerdown', tryAutoplay, { once: true });
 
             // Sync videos
             function syncVideos() {
@@ -1275,95 +1704,23 @@
         async function updateApiChip() {
             var chip = document.getElementById('apiStatusChip');
             if (!chip) return;
-            chip.textContent = 'API: Checking…';
-            chip.classList.remove('ok','err');
+            chip.classList.remove('ok','error');
             chip.classList.add('checking');
+            chip.textContent = 'API: Checking...';
+            var base = window.API_BASE_URL || '';
             try {
-                // Use a simple GET without custom headers to avoid CORS preflight on some setups
-                const res = await fetchWithTimeout(`${API_BASE_URL}/api/health`, { timeout: 5000 });
-                const data = await res.json().catch(() => ({}));
-                if (res.ok && data && (data.status === 'ok' || data.detector_loaded !== undefined)) {
-                    chip.textContent = 'API: Online';
-                    chip.classList.remove('checking','err');
-                    chip.classList.add('ok');
-                } else {
-                    chip.textContent = 'API: Offline';
-                    chip.classList.remove('checking','ok');
-                    chip.classList.add('err');
-                }
+                const res = await fetchWithTimeout(`${base}/api/health`, { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                await res.json().catch(function(){ return {}; });
+                chip.classList.remove('checking');
+                chip.classList.add('ok');
+                chip.textContent = 'API: online';
+                chip.title = base ? `Using ${base}` : 'Using same origin';
             } catch (e) {
-                chip.textContent = 'API: Offline';
-                chip.classList.remove('checking','ok');
-                chip.classList.add('err');
-            }
-        }
-
-        window.addEventListener('load', updateApiChip);
-        window.addEventListener('focus', updateApiChip);
-
-        const fileInput = document.getElementById('fileInput');
-        const uploadZone = document.getElementById('uploadZone');
-        const previewContainer = document.getElementById('previewContainer');
-        const previewImage = document.getElementById('previewImage');
-
-        // Terms agreement handling
-        const agreeTerms = document.getElementById('agreeTerms');
-        const uploadSection = document.getElementById('uploadSection');
-
-        agreeTerms.addEventListener('change', function() {
-            if (this.checked) {
-                uploadSection.style.opacity = '1';
-                uploadSection.style.pointerEvents = 'auto';
-            } else {
-                uploadSection.style.opacity = '0.5';
-                uploadSection.style.pointerEvents = 'none';
-            }
-        });
-
-
-
-        // Drag and drop
-        uploadZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadZone.style.borderColor = 'var(--accent)';
-            uploadZone.style.background = 'rgba(167, 139, 250, 0.1)';
-        });
-
-        uploadZone.addEventListener('dragleave', () => {
-            uploadZone.style.borderColor = 'rgba(102, 126, 234, 0.3)';
-            uploadZone.style.background = 'transparent';
-        });
-
-        uploadZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadZone.style.borderColor = 'rgba(102, 126, 234, 0.3)';
-            uploadZone.style.background = 'transparent';
-
-            const file = e.dataTransfer.files[0];
-            if (file && (file.type.startsWith('image/') || file.type.startsWith('video/'))) {
-                uploadFile(file);
-            }
-        });
-
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                uploadFile(file);
-            }
-        });
-
-        async function parseJsonSafe(response) {
-            try {
-                // Try JSON first
-                return await response.clone().json();
-            } catch (e) {
-                // Fallback to text for clearer diagnostics
-                const text = await response.text();
-                let msg = text && text.trim().slice(0, 300);
-                if (msg && /^\s*<!doctype|^\s*<html/i.test(msg)) {
-                    msg = 'Received HTML instead of JSON (likely wrong API host or tunnel banner).';
-                }
-                return { status: 'error', message: `Non-JSON response (${response.status}): ${msg || 'no body'}` };
+                chip.classList.remove('checking');
+                chip.classList.add('error');
+                chip.textContent = 'API: Error';
+                chip.title = (e && e.message ? e.message : 'Request failed') + (base ? ` (base ${base})` : '');
             }
         }
 
@@ -1380,7 +1737,23 @@
             return apiFetchUrl(url, options);
         }
 
+        async function parseJsonSafe(response) {
+            try {
+                return await response.json();
+            } catch (e) {
+                return { status: 'error', message: 'Invalid JSON response' };
+            }
+        }
+
         async function uploadFile(file) {
+            // Check if user is logged in
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            if (!user.id || !user.email) {
+                alert('Please sign in to use the watermark remover. Sign up now and get 5 FREE credits!');
+                window.location.href = 'login.html';
+                return;
+            }
+
             // Show preview immediately
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -1388,15 +1761,51 @@
                     previewImage.src = e.target.result;
                     previewImage.style.display = 'block';
                     document.getElementById('previewVideo').style.display = 'none';
-                    document.getElementById('downloadHint').style.display = 'none';
-                    document.getElementById('downloadText').style.display = 'none';
+                    if (creditEstimate) { creditEstimate.style.display = 'none'; }
                 } else if (file.type.startsWith('video/')) {
                     const videoElem = document.getElementById('previewVideo');
                     videoElem.src = e.target.result;
-                    videoElem.style.display = 'block';
+                    try { window.beforeSrc = e.target.result; } catch (err) {}
+
+                    // Show professional player
+                    document.getElementById('professionalPlayer').style.display = 'block';
                     previewImage.style.display = 'none';
-                    document.getElementById('downloadHint').style.display = 'block';
-                    document.getElementById('downloadText').style.display = 'block';
+
+                    // Initialize professional video controls
+                    initProfessionalPlayer(videoElem);
+                    // Calculate credit cost based on video specs
+                    videoElem.onloadedmetadata = () => {
+                        try {
+                            const width = videoElem.videoWidth || 1280;
+                            const height = videoElem.videoHeight || 720;
+                            const duration = videoElem.duration || 10;
+
+                            // Baseline: 720p (1280x720), 10 seconds = 1 credit
+                            const basePixels = 1280 * 720;
+                            const baseDuration = 10;
+
+                            const videoPixels = width * height;
+                            const durationFactor = duration / baseDuration;
+                            const resolutionFactor = Math.sqrt(videoPixels / basePixels);
+
+                            // Weighted formula: 70% duration, 30% resolution (less aggressive)
+                            const estimatedCredits = Math.max(1, Math.ceil((durationFactor * 0.7) + (resolutionFactor * 0.3)));
+
+                            // Store for backend processing
+                            videoElem.dataset.estimatedCredits = estimatedCredits;
+
+                            if (creditEstimate) {
+                                creditEstimate.textContent = `Estimated: ${estimatedCredits} credit${estimatedCredits !== 1 ? 's' : ''} (${Math.round(duration)}s @ ${width}x${height})`;
+                                creditEstimate.style.display = 'block';
+                            }
+                        } catch (err) {
+                            console.error('[Credit Estimation Error]', err);
+                            if (creditEstimate) {
+                                creditEstimate.textContent = 'Estimated: 1 credit';
+                                creditEstimate.style.display = 'block';
+                            }
+                        }
+                    };
                 }
                 previewContainer.classList.add('active');
                 // Initialize deferred ad slots now that the container is visible
@@ -1421,6 +1830,11 @@
                     const videoElem = document.getElementById('previewVideo');
                     videoElem.dataset.taskId = data.task_id;
 
+                    // Initialize professional timeline for videos
+                    if (file.type.startsWith('video/')) {
+// initializeTimeline(data.task_id, videoElem); // Removed - using inline VideoTimeline in loadedmetadata
+                    }
+
                     // Show process button
                     const processBtn = document.getElementById('processBtn');
                     processBtn.style.display = 'block';
@@ -1440,6 +1854,14 @@
                 alert('Upload error: ' + error.message);
             }
         }
+
+        // File input change handler
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                uploadFile(file);
+            }
+        });
 
         // URL loading functionality
         document.getElementById('loadUrlBtn').addEventListener('click', async () => {
@@ -1485,9 +1907,15 @@
                     // Show preview for processing
                     const videoElem = document.getElementById('previewVideo');
                     videoElem.src = videoUrl;
-                    videoElem.style.display = 'block';
+                    try { window.beforeSrc = videoUrl; } catch (err) {}
                     videoElem.dataset.taskId = data.task_id;
+
+                    // Show professional player
+                    document.getElementById('professionalPlayer').style.display = 'block';
                     document.getElementById('previewImage').style.display = 'none';
+
+                    // Initialize professional video controls
+                    initProfessionalPlayer(videoElem);
                     previewContainer.classList.add('active');
                     // Initialize deferred ad slots now that the container is visible
                     initDeferredAdsIn(previewContainer);
@@ -1503,9 +1931,6 @@
                     document.getElementById('removeWatermarkBtn').style.display = 'block';
 
                     // Show download hint
-                    document.getElementById('downloadHint').style.display = 'block';
-                    document.getElementById('downloadText').style.display = 'block';
-
                     // Auto-scroll to button after a brief delay
                     setTimeout(() => {
                         processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1612,17 +2037,9 @@
         const startStatusPolling = (processTaskId) => {
             localStorage.setItem(ACTIVE_TASK_KEY, processTaskId);
 
-            // Detect SAM2 jobs by prefix and use appropriate status endpoint
-            const isSAM2Job = processTaskId.startsWith('sam2_');
-            const statusEndpoint = isSAM2Job
-                ? `/api/sam2/status/${processTaskId}`
-                : `/api/status/${processTaskId}`;
-
-            console.log(`[Status] Polling ${isSAM2Job ? 'SAM2' : 'YOLO'} job: ${processTaskId}`);
-
             const pollStatus = async () => {
                 try {
-                    const statusResponse = await apiFetchPath(statusEndpoint);
+                    const statusResponse = await apiFetchPath(`/api/status/${processTaskId}`);
 
                     // Handle HTTP 410 EXPIRED - task no longer exists
                     if (statusResponse.status === 410) {
@@ -1652,7 +2069,7 @@
                     if (statusData.state === 'SUCCESS') {
                         progressBar.style.width = '100%';
                         progressPercent.textContent = '100%';
-                        statusText.textContent = 'Processing complete · Preparing download...';
+                        statusText.textContent = 'Preparing download...';
                         statusText.style.color = '#10b981';
 
                         const resultData = statusData.result || {};
@@ -1671,11 +2088,11 @@
                                 previewSource = prepared.downloadLink.href;
                                 autoDownload = prepared.autoDownload;
 
-                                statusText.textContent = 'Processing complete · Download ready';
+                                statusText.textContent = 'Download ready';
                             } catch (downloadError) {
                                 console.error('Error preparing download link:', downloadError);
                                 downloadLinkElement = buildDownloadLinkElement(resultUrl, 'cleaned_video.mp4', false);
-                                statusText.textContent = 'Processing complete · Click the download button to save your video';
+                                statusText.textContent = 'Click the menu to download';
                             }
 
                             if (downloadLinkElement) {
@@ -1690,8 +2107,18 @@
                             } else if (videoElem) {
                                 // Video was uploaded - show cleaned video
                                 videoElem.src = previewSource;
-                                document.getElementById('downloadHint').style.display = 'block';
-                                document.getElementById('downloadText').style.display = 'block';
+                                // Also wire the comparison demo to use the new videos
+                                try {
+                                    const beforeV = document.getElementById('before-video');
+                                    const afterV = document.getElementById('after-video');
+                                    if (beforeV && afterV) {
+                                        if (window.beforeSrc) beforeV.src = window.beforeSrc;
+                                        afterV.src = previewSource;
+                                        try { beforeV.load(); afterV.load(); } catch (_) {}
+                                        const comp = document.getElementById('comparison');
+                                        if (comp && comp.style.display === 'none') comp.style.display = 'block';
+                                    }
+                                } catch (_) {}
                             }
 
                             if (autoDownload && statusDiv.dataset.completed !== 'true') {
@@ -1719,8 +2146,16 @@
 
                     if (statusData.info) {
                         const info = statusData.info;
-                        const percent = Math.max(0, Math.min(100, info.progress || 0));
-                        const status = info.status || 'Processing...';
+                        let percent = Math.max(0, Math.min(100, info.progress || 0));
+                        let status = info.status || 'Processing...';
+
+                        // Show better message when encoding is complete/almost done
+                        if (percent >= 95 && status.includes('Video encoding')) {
+                            status = 'Finalizing video...';
+                        } else if (status.includes('Segment') && status.includes('complete')) {
+                            status = 'Processing complete · Finalizing...';
+                            percent = 100;  // Show 100% when segments are done
+                        }
 
                         progressBar.style.width = percent + '%';
                         progressPercent.textContent = percent + '%';
@@ -1740,58 +2175,6 @@
             pollStatus();
         };
 
-        // SAM2 Video Processing - calls /api/sam2/process-video
-        const processSAM2Video = async (taskId) => {
-            console.log('[SAM2] Processing with selected objects...');
-            const points = window.sam2Selector.getAllPoints();
-            const frameIndex = window.currentFrame || 0;
-
-            statusText.textContent = 'Starting SAM2 object removal...';
-
-            const response = await apiFetchPath('/api/sam2/process-video', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    task_id: taskId,
-                    points: points,
-                    video_width: window.sam2Selector.videoWidth,
-                    video_height: window.sam2Selector.videoHeight,
-                    frame_index: frameIndex
-                })
-            });
-
-            const data = await parseJsonSafe(response);
-
-            if (data.status === 'success') {
-                const processTaskId = data.task_id || data.job_id;
-                console.log('[SAM2] Job started:', processTaskId);
-                startStatusPolling(processTaskId);
-            } else {
-                throw new Error(data.message || 'SAM2 processing failed');
-            }
-        };
-
-        // YOLO Video Processing - calls /api/process (automatic detection)
-        const processYOLOVideo = async (taskId) => {
-            console.log('[YOLO] Processing with automatic detection...');
-            statusText.textContent = 'Starting automatic watermark detection...';
-
-            const response = await apiFetchPath(`/api/process`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ task_id: taskId })
-            });
-
-            const data = await parseJsonSafe(response);
-
-            if (data.status === 'success') {
-                const processTaskId = data.task_id;
-                startStatusPolling(processTaskId);
-            } else {
-                throw new Error(data.message || 'Failed to start processing');
-            }
-        };
-
         const processVideo = async () => {
             console.log('Start Cleanup button clicked');
             if (!videoElem) {
@@ -1808,12 +2191,7 @@
                 return;
             }
 
-            // CHECK: Does user have SAM2 points selected?
-            const hasSAM2Selection = window.sam2Selector &&
-                                     window.sam2Selector.selections &&
-                                     window.sam2Selector.selections.length > 0;
-
-            console.log('Processing mode:', hasSAM2Selection ? 'SAM2 (click-selected objects)' : 'YOLO (automatic detection)');
+            console.log('Starting processing for task:', taskId);
 
             if (processBtnElem) {
                 processBtnElem.style.display = 'none';
@@ -1827,15 +2205,48 @@
             progressPercent.textContent = '0%';
 
             try {
-                if (hasSAM2Selection) {
-                    // SAM2 mode - use user-selected points
-                    await processSAM2Video(taskId);
+                // Get user info from localStorage
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                const payload = { task_id: taskId };
+                if (user.id) {
+                    payload.user_id = user.id;
+                }
+
+                const response = await apiFetchPath(`/api/process`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await parseJsonSafe(response);
+
+                if (data.status === 'success') {
+                    const processTaskId = data.task_id;
+                    startStatusPolling(processTaskId);
+
+                    // Update credits display
+                    if (user.id && user.credits !== undefined) {
+                        user.credits = Math.max(0, user.credits - 1);
+                        localStorage.setItem('user', JSON.stringify(user));
+                        const creditsEl = document.getElementById('userCredits');
+                        if (creditsEl) {
+                            creditsEl.textContent = user.credits + ' credit' + (user.credits !== 1 ? 's' : '');
+                            if (user.credits === 0) {
+                                creditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
+                            } else if (user.credits < 3) {
+                                creditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+                            }
+                        }
+                    }
                 } else {
-                    // YOLO mode - automatic watermark detection
-                    await processYOLOVideo(taskId);
+                    statusText.textContent = 'âŒ Error: ' + (data.message || 'Failed to start processing');
+                    statusText.style.color = '#ef4444';
+                    if (processBtnElem) {
+                        processBtnElem.style.display = 'block';
+                    }
                 }
             } catch (error) {
-                statusText.textContent = 'Error: ' + error.message;
+                statusText.textContent = 'âŒ Error: ' + error.message;
                 statusText.style.color = '#ef4444';
                 if (processBtnElem) {
                     processBtnElem.style.display = 'block';
@@ -1845,16 +2256,16 @@
 
         if (processBtnElem) {
             processBtnElem.addEventListener('click', processVideo);
-            console.log('✅ Event listener attached to processBtn');
+            console.log('âœ… Event listener attached to processBtn');
         } else {
-            console.error('❌ processBtn not found!');
+            console.error('âŒ processBtn not found!');
         }
 
         if (removeWatermarkBtnElem) {
             removeWatermarkBtnElem.addEventListener('click', processVideo);
-            console.log('✅ Event listener attached to removeWatermarkBtn');
+            console.log('âœ… Event listener attached to removeWatermarkBtn');
         } else {
-            console.error('❌ removeWatermarkBtn not found!');
+            console.error('âŒ removeWatermarkBtn not found!');
         }
 
         const savedTaskId = localStorage.getItem(ACTIVE_TASK_KEY);
@@ -1871,6 +2282,636 @@
             }
             startStatusPolling(savedTaskId);
         }
+
+        // ==================================================
+        // Professional Video Timeline (Frame Thumbnails)
+        // ==================================================
+        let videoTimeline = null;
+
+//         async function initializeTimeline(taskId, videoElem) {
+//             try {
+//                 // Wait for video metadata to be loaded
+//                 if (videoElem.readyState < 1) {
+//                     await new Promise(resolve => {
+//                         videoElem.addEventListener('loadedmetadata', resolve, { once: true });
+//                     });
+//                 }
+// 
+//                 // Create timeline instance
+//                 videoTimeline = new VideoTimeline(videoElem, {
+//                     onFrameChange: (frameNumber) => {
+//                         console.log(`[Timeline] Jumped to frame ${frameNumber}`);
+//                         // Store current frame for mask tracking
+//                         window.currentFrame = frameNumber;
+//                     }
+//                 });
+// 
+//                 // Initialize timeline with task ID
+//                 await videoTimeline.init(taskId);
+// 
+//                 // Get timeline container and insert it
+//                 const timelineContainer = videoTimeline.getContainer();
+//                 const professionalTimelineDiv = document.getElementById('professionalTimeline');
+// 
+//                 if (timelineContainer && professionalTimelineDiv) {
+//                     professionalTimelineDiv.innerHTML = '';
+//                     professionalTimelineDiv.appendChild(timelineContainer);
+//                     professionalTimelineDiv.style.display = 'block';
+// 
+//                     console.log('[Timeline] Professional timeline initialized successfully');
+//                 }
+//             } catch (error) {
+//                 console.error('[Timeline] Failed to initialize:', error);
+//             }
+//         }
+
+        // ==================================================
+        // Professional Video Player Controls
+        // ==================================================
+        function initProfessionalPlayer(videoElem) {
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            const timelineTrack = document.getElementById('timelineTrack');
+            const timelineProgress = document.getElementById('timelineProgress');
+            const timelineScrubber = document.getElementById('timelineScrubber');
+            const timeDisplay = document.getElementById('timeDisplay');
+            const fullscreenBtn = document.getElementById('fullscreenBtn');
+            const videoControls = document.getElementById('videoControls');
+
+            let isDragging = false;
+
+            // Format time helper
+            function formatTime(seconds) {
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            // Update timeline and time display
+            function updateTimeline() {
+                const progress = (videoElem.currentTime / videoElem.duration) * 100;
+                timelineProgress.style.width = progress + '%';
+                timelineScrubber.style.left = progress + '%';
+                timeDisplay.textContent = `${formatTime(videoElem.currentTime)} / ${formatTime(videoElem.duration)}`;
+            }
+
+            // Play/Pause button
+            playPauseBtn.addEventListener('click', () => {
+                if (videoElem.paused) {
+                    videoElem.play();
+                    playPauseBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>';
+                } else {
+                    videoElem.pause();
+                    playPauseBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+                }
+            });
+
+            // Timeline scrubbing
+            function seek(clientX) {
+                const rect = timelineTrack.getBoundingClientRect();
+                const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                videoElem.currentTime = percent * videoElem.duration;
+            }
+
+            timelineTrack.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                seek(e.clientX);
+                timelineScrubber.style.cursor = 'grabbing';
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    seek(e.clientX);
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+                timelineScrubber.style.cursor = 'grab';
+            });
+
+            // Fullscreen toggle
+            fullscreenBtn.addEventListener('click', () => {
+                const playerContainer = document.getElementById('professionalPlayer');
+
+                if (!document.fullscreenElement) {
+                    playerContainer.requestFullscreen().catch(err => {
+                        console.error('Fullscreen error:', err);
+                    });
+                    fullscreenBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>';
+                } else {
+                    document.exitFullscreen();
+                    fullscreenBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+                }
+            });
+
+            // Update SAM2 canvas when exiting fullscreen (fixes mask visibility bug)
+            document.addEventListener('fullscreenchange', () => {
+                // Wait for transition to complete, then update canvas
+                setTimeout(() => {
+                    const sam2Selector = window.sam2Selector;
+                    if (sam2Selector && typeof sam2Selector.updateCanvasSize === 'function') {
+                        sam2Selector.updateCanvasSize();
+                    }
+                }, 100);
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                switch(e.key.toLowerCase()) {
+                    case ' ':
+                        e.preventDefault();
+                        playPauseBtn.click();
+                        break;
+                    case 'f':
+                        e.preventDefault();
+                        fullscreenBtn.click();
+                        break;
+                    case 'r':
+                        e.preventDefault();
+                        const resetBtn = document.getElementById('resetSelectionBtn');
+                        if (resetBtn && !resetBtn.disabled) {
+                            resetBtn.click();
+                        }
+                        break;
+                }
+            });
+
+            // Update timeline as video plays
+            videoElem.addEventListener('timeupdate', updateTimeline);
+
+            // Initialize on metadata loaded
+            videoElem.addEventListener('loadedmetadata', () => {
+                timeDisplay.textContent = `0:00 / ${formatTime(videoElem.duration)}`;
+            });
+
+            // Auto-hide controls on mouse leave
+            const playerContainer = document.getElementById('professionalPlayer');
+            let hideTimeout;
+
+            playerContainer.addEventListener('mousemove', () => {
+                videoControls.style.opacity = '1';
+                clearTimeout(hideTimeout);
+                hideTimeout = setTimeout(() => {
+                    if (!videoElem.paused) {
+                        videoControls.style.opacity = '0.3';
+                    }
+                }, 2000);
+            });
+
+            playerContainer.addEventListener('mouseleave', () => {
+                if (!videoElem.paused) {
+                    videoControls.style.opacity = '0.3';
+                }
+            });
+        }
     </script>
-</body>
+
+    <!-- SAM2 Timeline and Selection Scripts -->
+    
+    <script src="js/sam2_selector.js"></script>
+
+    <script>
+      // Video Timeline - Using built-in scrubber in video controls (no frame thumbnails)
+    </script>
+
+    <script>
+      // Interactive Mask Selection (SAM2 Integration)
+      (function () {
+        const videoContainer = document.getElementById('videoContainer');
+        const video = document.getElementById('previewVideo');
+        const canvas = document.getElementById('maskCanvas');
+        const maskControls = document.getElementById('maskSelectionControls');
+        const enableBtn = document.getElementById('enableSelectionBtn');
+        const resetBtn = document.getElementById('resetSelectionBtn');
+        const pointsList = document.getElementById('pointsList');
+        const pointCount = document.getElementById('pointCount');
+        const scrollHint = document.getElementById('scrollHint');
+        const processBtn = document.getElementById('processBtn');
+
+        if (!video || !canvas || !videoContainer) return;
+
+        let selectionMode = false;
+        let points = [];
+        let ctx = null;
+        let sam2Selector = null;
+        let videoTimeline = null;
+
+        // Initialize canvas and timeline when video loads
+        video.addEventListener('loadedmetadata', async function() {
+            // Set canvas internal resolution to match video native resolution
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            // Canvas display size is handled by CSS (100% width/height)
+            canvas.style.display = 'block';
+            ctx = canvas.getContext('2d');
+
+            // Show mask selection controls
+            maskControls.style.display = 'block';
+
+            // Video already has professional scrubber in controls (no thumbnail timeline needed)
+
+            // Initialize SAM2Selector
+            if (!sam2Selector) {
+                console.log('[SAM2] Initializing SAM2Selector...');
+                sam2Selector = window.sam2Selector = new SAM2Selector(video, canvas, {
+                    onMaskUpdate: (maskData) => {
+                        console.log('[SAM2] Mask received:', maskData);
+                        if (!window.sam2Masks) window.sam2Masks = [];
+                        window.sam2Masks.push(maskData);
+                        if (sam2Selector && sam2Selector.points) {
+                            points = sam2Selector.points;
+                            updatePointCount();
+                        }
+                        // Force redraw to ensure mask is visible immediately
+                        if (sam2Selector && typeof sam2Selector.draw === 'function') {
+                            setTimeout(() => sam2Selector.draw(), 50);
+                        }
+                    },
+                    onPointsChange: () => {
+                        // Re-enable reset button when points are added
+                        if (resetBtn && sam2Selector && sam2Selector.selections && sam2Selector.selections.length > 0) {
+                            resetBtn.disabled = false;
+                        }
+                    },
+                    onError: (error) => {
+                        console.error('[SAM2] Error:', error);
+                        alert('SAM2 Error: ' + error);
+                    }
+                });
+            }
+        });
+
+        // Window resize handler to recalculate video render bounds for letterbox compensation
+        window.addEventListener('resize', () => {
+            if (sam2Selector && typeof sam2Selector.calculateVideoRenderBounds === 'function') {
+                sam2Selector.calculateVideoRenderBounds();
+                sam2Selector.draw();
+                console.log('[SAM2] Recalculated render bounds on resize');
+            }
+        });
+
+        // Enable/disable selection mode with SAM2
+        enableBtn.addEventListener('click', function() {
+            selectionMode = !selectionMode;
+            if (selectionMode) {
+                enableBtn.textContent = 'Selection Mode: ON (Click video!)';
+                enableBtn.style.background = 'var(--bg-gradient-4)';
+                canvas.style.pointerEvents = 'auto';
+                resetBtn.disabled = false;
+                video.pause(); // Pause video during selection
+                pointsList.style.display = 'block';
+
+                // Enable SAM2 selector
+                if (sam2Selector) {
+                    sam2Selector.enabled = true;
+                    console.log('[SAM2] Selection mode enabled');
+                }
+
+                // Show test button
+                const testBtn = document.getElementById('testSAM2Btn');
+                if (testBtn) testBtn.style.display = 'inline-block';
+            } else {
+                enableBtn.textContent = 'Enable Selection Mode';
+                enableBtn.style.background = 'var(--gradient-primary)';
+                canvas.style.pointerEvents = 'none';
+
+                // Disable SAM2 selector
+                if (sam2Selector) {
+                    sam2Selector.enabled = false;
+                    console.log('[SAM2] Selection mode disabled');
+                }
+
+                // Hide test button
+                const testBtn2 = document.getElementById('testSAM2Btn');
+                if (testBtn2) testBtn2.style.display = 'none';
+            }
+        });
+
+        // Test SAM2 connection button handler
+        const testSAM2Btn = document.getElementById('testSAM2Btn');
+        if (testSAM2Btn) {
+            testSAM2Btn.addEventListener('click', async function() {
+                console.log('[TEST] 🧪 Sending test request to SAM2 worker...');
+
+                // Create 100x100 test frame (white square)
+                const testCanvas = document.createElement('canvas');
+                testCanvas.width = 100;
+                testCanvas.height = 100;
+                const testCtx = testCanvas.getContext('2d');
+                testCtx.fillStyle = 'white';
+                testCtx.fillRect(0, 0, 100, 100);
+                const testFrame = testCanvas.toDataURL('image/png').split(',')[1];
+
+                console.log('[TEST] 📤 Sending to /api/sam2/select-object');
+
+                try {
+                    const response = await fetch('/api/sam2/select-object', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            frame_data: testFrame,
+                            points: [{x: 50, y: 50, label: 1}],
+                            video_width: 100,
+                            video_height: 100
+                        })
+                    });
+
+                    const data = await response.json();
+                    console.log('[TEST] 📥 Response:', data);
+
+                    if (data.status === 'success') {
+                        alert('✅ SAM2 worker connected!\n\nMask received successfully!');
+                    } else {
+                        alert('❌ SAM2 worker failed:\n\n' + data.message);
+                    }
+                } catch (error) {
+                    console.error('[TEST] ❌ Error:', error);
+                    alert('❌ Network error:\n\n' + error.message);
+                }
+            });
+        }
+
+        // Reset all points and masks
+        resetBtn.addEventListener('click', function() {
+            points = [];
+            if (ctx) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+            if (sam2Selector) {
+                sam2Selector.reset();
+            }
+            updatePointCount();
+            resetBtn.disabled = true;
+            scrollHint.style.display = 'none';
+
+            // Clear mask indicators from timeline
+            if (window.videoTimeline) {
+                window.videoTimeline.clearMaskIndicators();
+            }
+        });
+
+        // Draw a green dot on canvas
+        // Point and mask rendering handled by SAM2Selector class (no duplicate system needed)
+
+        function updatePointCount() {
+            pointCount.textContent = points.length;
+            if (points.length === 0) {
+                scrollHint.style.display = 'none';
+            }
+        }
+
+        // Window resize - redraw points
+        window.addEventListener('resize', function() {
+            if (points.length > 0 && video.videoWidth > 0) {
+                redrawAllPoints();
+            }
+        });
+
+        // Intercept /api/process to send points
+        const originalFetch = window.fetch;
+        window.fetch = function (resource, init) {
+          try {
+            const url = (typeof resource === 'string') ? resource : (resource && resource.url) || '';
+            if (url.endsWith('/api/process') && init && String(init.method || 'GET').toUpperCase() === 'POST') {
+              if (typeof init.body === 'string' && points && points.length) {
+                try {
+                  const obj = JSON.parse(init.body) || {};
+                  obj.selection_points = points;
+                  obj.selection_mode = 'remove';
+                  init = Object.assign({}, init, { body: JSON.stringify(obj) });
+                  console.log('[Mask Selection] Sending points to backend:', points);
+                } catch (e) {
+                    console.error('[Mask Selection] Error adding points to request:', e);
+                }
+              }
+            }
+          } catch (e) {
+              console.error('[Mask Selection] Fetch intercept error:', e);
+          }
+          return originalFetch.call(this, resource, init);
+        };
+      })();
+</script>
+    <script>
+      (function() {
+        const API = window.API_BASE_URL || '';
+        const creditsBtn = document.getElementById('removeWatermarkCreditsBtn');
+        const queueBtn = document.getElementById('removeWatermarkBtn');
+        const statusDiv = document.getElementById('processingStatus');
+        const statusText = document.getElementById('statusText');
+        const progressBar = document.getElementById('progressBar');
+        const progressPercent = document.getElementById('progressPercent');
+
+        function maybeShowCreditsBtn() {
+          if (creditsBtn && queueBtn && queueBtn.style.display !== 'none') {
+            creditsBtn.style.display = 'inline-block';
+          }
+        }
+        try {
+          maybeShowCreditsBtn();
+          if (window.MutationObserver && queueBtn) {
+            const ob = new MutationObserver(maybeShowCreditsBtn);
+            ob.observe(queueBtn, { attributes: true, attributeFilter: ['style','class'] });
+          }
+        } catch (_) {}
+
+        async function processWithCredits() {
+          const input = document.getElementById('fileInput');
+          const picked = input && input.files && input.files[0];
+          if (!picked) {
+            alert('Please choose an image or video first.');
+            return;
+          }
+          try {
+            statusDiv.style.display = 'block';
+            statusDiv.dataset.completed = '';
+            statusText.textContent = 'Uploading and processing (credits will be used)...';
+            statusText.style.color = '#a0a0c0';
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+
+            const fd = new FormData();
+            fd.append('file', picked);
+            const resp = await fetch(`${API}/api/remove-watermark`, { method: 'POST', body: fd });
+            if (!resp.ok) {
+              try {
+                const data = await resp.clone().json();
+                if (data && data.error === 'signin_required') {
+                  alert('Please sign in to process videos. Redirecting to login...');
+                  window.location.href = 'login.html';
+                  return;
+                }
+                if (data && data.error === 'insufficient_credits') {
+                  const req = data.required_credits != null ? data.required_credits : '?';
+                  const have = data.credits != null ? data.credits : 0;
+                  alert(`Not enough credits. Required: ${req}. You have: ${have}.`);
+                  return;
+                }
+                throw new Error(data && data.message ? data.message : 'Processing failed');
+              } catch (e) {
+                const text = await resp.text();
+                throw new Error(text || 'Processing failed');
+              }
+            }
+
+            const used = resp.headers.get('X-Credits-Used');
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const isVideo = picked.type && picked.type.startsWith('video/');
+            a.download = isVideo ? 'video_removed.mp4' : 'image_removed.png';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            statusText.textContent = used ? "Credits used: " + used : 'Done.';
+            statusText.style.color = '#22c55e';
+            progressBar.style.width = '100%';
+            progressPercent.textContent = '100%';
+          } catch (err) {
+            console.error('Credit processing error:', err);
+            statusText.textContent = 'Error: ' + (err && err.message ? err.message : 'Processing failed');
+            statusText.style.color = '#ef4444';
+          }
+        }
+
+        if (creditsBtn) {
+          creditsBtn.addEventListener('click', processWithCredits);
+        }
+      })();
+    </script><script>
+(function(){
+  const vid = document.getElementById('previewVideo');
+  const slider = document.getElementById('timelineSlider');
+  if (!vid || !slider) return;
+  function showSlider(){ slider.style.display = 'block'; }
+  vid.addEventListener('loadedmetadata', () => {
+    try { slider.max = Math.max(1, vid.duration || 1).toString(); showSlider(); } catch(_) { showSlider(); }
+  });
+  vid.addEventListener('timeupdate', () => {
+    if (!isNaN(vid.currentTime)) slider.value = vid.currentTime;
+  });
+  slider.addEventListener('input', () => {
+    try { vid.currentTime = parseFloat(slider.value || '0'); } catch(_) {}
+  });
+})();
+</script>
+<script>
+// Check for logged-in user and show nav
+(function(){
+  try {
+    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+    if (userData && userData.id) {
+      // Hide sign in link, show user nav
+      const signInLink = document.getElementById('signInLink');
+      const navMenu = document.getElementById('navMenu');
+      const userNav = document.getElementById('userNav');
+
+      if (signInLink) signInLink.style.display = 'none';
+      if (userNav) userNav.style.display = 'flex';
+
+      // Show user email/name
+      const userEmailEl = document.getElementById('userEmail');
+      if (userEmailEl) {
+        userEmailEl.textContent = userData.name || userData.email;
+      }
+
+      // Show credits
+      const userCreditsEl = document.getElementById('userCredits');
+      if (userCreditsEl) {
+        const credits = userData.credits || 0;
+        userCreditsEl.textContent = credits + ' credit' + (credits !== 1 ? 's' : '');
+        if (credits === 0) {
+          userCreditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
+        } else if (credits < 3) {
+          userCreditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+        }
+      }
+
+      // Show verification banner if email not verified
+      const verificationBanner = document.getElementById('emailVerificationBanner');
+      if (verificationBanner && userData.email_verified === false) {
+        verificationBanner.style.display = 'block';
+
+        // Resend verification button
+        const resendBtn = document.getElementById('resendVerificationBtn');
+        const resendStatus = document.getElementById('resendStatus');
+        if (resendBtn) {
+          resendBtn.addEventListener('click', async function() {
+            resendBtn.disabled = true;
+            resendBtn.textContent = 'Sending...';
+
+            try {
+              const API_BASE = window.API_BASE_URL || '';
+              const response = await fetch(API_BASE + '/api/auth/resend-verification', {
+                method: 'POST',
+                credentials: 'include'
+              });
+
+              const data = await response.json();
+
+              if (response.ok) {
+                resendStatus.textContent = 'Email sent! Check your inbox.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#10b981';
+                resendBtn.style.display = 'none';
+              } else if (response.status === 429) {
+                resendStatus.textContent = 'Please wait before requesting another email.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#f59e0b';
+                resendBtn.disabled = false;
+                resendBtn.textContent = 'Resend verification email';
+              } else {
+                resendStatus.textContent = data.error || 'Failed to send email.';
+                resendStatus.style.display = 'inline';
+                resendStatus.style.color = '#ef4444';
+                resendBtn.disabled = false;
+                resendBtn.textContent = 'Resend verification email';
+              }
+            } catch (e) {
+              resendStatus.textContent = 'Connection error. Please try again.';
+              resendStatus.style.display = 'inline';
+              resendStatus.style.color = '#ef4444';
+              resendBtn.disabled = false;
+              resendBtn.textContent = 'Resend verification email';
+            }
+          });
+        }
+      }
+
+      // Sign out button
+      const signOutBtn = document.getElementById('signOutBtn');
+      if (signOutBtn) {
+        signOutBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          localStorage.removeItem('user');
+          window.location.href = 'login.html';
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[Auth Check]', e);
+  }
+})();
+</script>
+<!-- Theme Toggle Script -->
+<script src="js/theme.js"></script>
+<script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script></body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
