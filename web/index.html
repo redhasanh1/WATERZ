@@ -2037,9 +2037,15 @@
         const startStatusPolling = (processTaskId) => {
             localStorage.setItem(ACTIVE_TASK_KEY, processTaskId);
 
+            // Detect SAM2 jobs by prefix
+            const isSAM2Job = processTaskId.startsWith('sam2_');
+            const statusEndpoint = isSAM2Job
+                ? `/api/sam2/status/${processTaskId}`
+                : `/api/status/${processTaskId}`;
+
             const pollStatus = async () => {
                 try {
-                    const statusResponse = await apiFetchPath(`/api/status/${processTaskId}`);
+                    const statusResponse = await apiFetchPath(statusEndpoint);
 
                     // Handle HTTP 410 EXPIRED - task no longer exists
                     if (statusResponse.status === 410) {
@@ -2066,6 +2072,71 @@
 
                     const statusData = await statusResponse.json();
 
+                    // Handle SAM2 job status format (different from Celery)
+                    if (isSAM2Job) {
+                        if (statusData.status === 'completed') {
+                            progressBar.style.width = '100%';
+                            progressPercent.textContent = '100%';
+                            statusText.textContent = 'Preparing download...';
+                            statusText.style.color = '#10b981';
+
+                            if (statusData.result_url) {
+                                const resultUrl = `${API_BASE_URL}${statusData.result_url}`;
+                                removeExistingDownloadLink();
+
+                                let downloadLinkElement = null;
+                                let previewSource = resultUrl;
+
+                                try {
+                                    const prepared = await prepareDownloadLink(resultUrl);
+                                    downloadLinkElement = prepared.downloadLink;
+                                    previewSource = prepared.downloadLink.href;
+                                    statusText.textContent = 'Download ready';
+                                } catch (downloadError) {
+                                    console.error('Error preparing download link:', downloadError);
+                                    downloadLinkElement = buildDownloadLinkElement(resultUrl, 'cleaned_video.mp4', false);
+                                    statusText.textContent = 'Click the menu to download';
+                                }
+
+                                if (downloadLinkElement) {
+                                    statusDiv.appendChild(downloadLinkElement);
+                                }
+
+                                if (videoElem) {
+                                    videoElem.src = previewSource;
+                                }
+                            }
+
+                            statusDiv.dataset.completed = 'true';
+                            localStorage.removeItem(ACTIVE_TASK_KEY);
+                            if (videoElem) {
+                                videoElem.dataset.taskId = '';
+                            }
+                            return;
+                        } else if (statusData.status === 'failed') {
+                            statusText.textContent = 'Error: ' + (statusData.error || 'SAM2 processing failed');
+                            statusText.style.color = '#ef4444';
+                            if (processBtnElem) {
+                                processBtnElem.style.display = 'block';
+                            }
+                            localStorage.removeItem(ACTIVE_TASK_KEY);
+                            return;
+                        } else if (statusData.status === 'processing') {
+                            statusText.textContent = 'SAM2 removing selected objects...';
+                            statusText.style.color = '#a0a0c0';
+                            progressBar.style.width = '50%';
+                            progressPercent.textContent = '50%';
+                        } else {
+                            // pending or other status
+                            statusText.textContent = 'Waiting for SAM2 worker...';
+                            statusText.style.color = '#a0a0c0';
+                        }
+
+                        setTimeout(pollStatus, 1500);
+                        return;
+                    }
+
+                    // Standard Celery job status handling
                     if (statusData.state === 'SUCCESS') {
                         progressBar.style.width = '100%';
                         progressPercent.textContent = '100%';
@@ -2175,6 +2246,37 @@
             pollStatus();
         };
 
+        // SAM2 Mode: Process video using click-selected objects
+        const processSAM2Video = async (taskId) => {
+            console.log('[SAM2] Processing with selected objects...');
+            const points = window.sam2Selector.getAllPoints();
+            const frameIndex = window.currentFrame || 0;
+
+            statusText.textContent = 'Starting SAM2 object removal...';
+
+            const response = await apiFetchPath('/api/sam2/process-video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: taskId,
+                    points: points,
+                    video_width: window.sam2Selector.videoWidth,
+                    video_height: window.sam2Selector.videoHeight,
+                    frame_index: frameIndex
+                })
+            });
+
+            const data = await parseJsonSafe(response);
+
+            if (data.status === 'success') {
+                const processTaskId = data.task_id || data.job_id;
+                console.log('[SAM2] Job started:', processTaskId);
+                startStatusPolling(processTaskId);
+            } else {
+                throw new Error(data.message || 'SAM2 processing failed');
+            }
+        };
+
         const processVideo = async () => {
             console.log('Start Cleanup button clicked');
             if (!videoElem) {
@@ -2191,7 +2293,12 @@
                 return;
             }
 
-            console.log('Starting processing for task:', taskId);
+            // CHECK: Does user have SAM2 points selected?
+            const hasSAM2Selection = window.sam2Selector &&
+                                     window.sam2Selector.selections &&
+                                     window.sam2Selector.selections.length > 0;
+
+            console.log('Processing mode:', hasSAM2Selection ? 'SAM2 (click-selected objects)' : 'YOLO (automatic detection)');
 
             if (processBtnElem) {
                 processBtnElem.style.display = 'none';
@@ -2205,7 +2312,13 @@
             progressPercent.textContent = '0%';
 
             try {
-                // Get user info from localStorage
+                if (hasSAM2Selection) {
+                    // SAM2 MODE: Use click-based removal
+                    await processSAM2Video(taskId);
+                } else {
+                    // YOLO MODE: Use automatic watermark detection
+                    statusText.textContent = 'Starting AI processing...';
+                    // Get user info from localStorage
                 const user = JSON.parse(localStorage.getItem('user') || '{}');
                 const payload = { task_id: taskId };
                 if (user.id) {
@@ -2239,14 +2352,11 @@
                         }
                     }
                 } else {
-                    statusText.textContent = 'âŒ Error: ' + (data.message || 'Failed to start processing');
-                    statusText.style.color = '#ef4444';
-                    if (processBtnElem) {
-                        processBtnElem.style.display = 'block';
-                    }
+                    throw new Error(data.message || 'Failed to start processing');
                 }
+                } // end YOLO else block
             } catch (error) {
-                statusText.textContent = 'âŒ Error: ' + error.message;
+                statusText.textContent = 'Error: ' + error.message;
                 statusText.style.color = '#ef4444';
                 if (processBtnElem) {
                     processBtnElem.style.display = 'block';
@@ -2534,6 +2644,15 @@
                         if (resetBtn && sam2Selector && sam2Selector.selections && sam2Selector.selections.length > 0) {
                             resetBtn.disabled = false;
                         }
+                        // Update button text based on selection state
+                        const processBtn = document.getElementById('processBtn');
+                        if (processBtn) {
+                            if (sam2Selector && sam2Selector.selections && sam2Selector.selections.length > 0) {
+                                processBtn.textContent = 'Remove Selected Objects (SAM2)';
+                            } else {
+                                processBtn.textContent = 'Start Object Removal';
+                            }
+                        }
                     },
                     onError: (error) => {
                         console.error('[SAM2] Error:', error);
@@ -2627,7 +2746,7 @@
                         alert('❌ SAM2 worker failed:\n\n' + data.message);
                     }
                 } catch (error) {
-                    console.error('[TEST] ❌ Error:', error);
+                statusText.textContent = 'Error: ' + error.message;
                     alert('❌ Network error:\n\n' + error.message);
                 }
             });
