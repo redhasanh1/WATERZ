@@ -34,7 +34,8 @@ RUN mkdir -p temp uploads results cache
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONIOENCODING=utf-8
+    PYTHONIOENCODING=utf-8 \
+    RAILWAY=1
 
 # Expose port (Railway uses PORT env var)
 EXPOSE 8080
