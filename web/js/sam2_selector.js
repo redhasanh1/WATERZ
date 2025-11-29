@@ -35,7 +35,6 @@ class SAM2Selector {
         this.displayScale = 1.0;
         this.offsetX = 0;
         this.offsetY = 0;
-        this.canvasInitialized = false;
 
         this.init();
     }
@@ -108,31 +107,23 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Get current display dimensions
+        // Set canvas internal resolution to native video resolution
+        this.canvas.width = this.videoWidth;
+        this.canvas.height = this.videoHeight;
+
+        // Canvas display size is handled by CSS (100% width/height of parent)
+        // No need to set style.width/height - it auto-resizes responsively
+
+        // Get current display dimensions for scale calculation
         const canvasRect = this.canvas.getBoundingClientRect();
         const displayWidth = canvasRect.width;
         const displayHeight = canvasRect.height;
 
-        // Only set canvas size once (on first call) or if display size changed significantly
-        // This prevents the stretch issue when clicking
-        if (!this.canvasInitialized ||
-            Math.abs(this.canvas.width - displayWidth) > 10 ||
-            Math.abs(this.canvas.height - displayHeight) > 10) {
-
-            // Set canvas internal resolution to DISPLAY size (not video native)
-            // This keeps canvas 1:1 with CSS display and prevents stretching
-            this.canvas.width = displayWidth;
-            this.canvas.height = displayHeight;
-            this.canvasInitialized = true;
-
-            console.log(`[SAM2Selector] Canvas initialized: ${this.canvas.width}x${this.canvas.height}`);
-        }
-
-        // Calculate scale for coordinate conversion (display to video native)
+        // Calculate scale for coordinate conversion
         this.displayScaleX = displayWidth / this.videoWidth;
         this.displayScaleY = displayHeight / this.videoHeight;
 
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Video: ${this.videoWidth}x${this.videoHeight}`);
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth}x${displayHeight}`);
 
         // Calculate video render bounds for letterbox compensation
         this.calculateVideoRenderBounds();
@@ -310,14 +301,20 @@ class SAM2Selector {
     }
 
     /**
-     * Draw current state (mask overlay + points on transparent canvas)
-     * Note: Video is shown by the <video> element underneath, NOT drawn here
+     * Draw current state (video frame + mask overlay + points)
      */
     draw() {
         if (!this.videoWidth) return;
 
-        // Clear canvas (transparent - video shows through from underneath)
+        // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Draw video frame (scaled)
+        this.ctx.drawImage(
+            this.video,
+            0, 0, this.videoWidth, this.videoHeight,
+            0, 0, this.canvas.width, this.canvas.height
+        );
 
         // Draw all mask overlays
         this.drawAllMasks();
