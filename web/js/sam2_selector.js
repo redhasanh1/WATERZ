@@ -227,40 +227,72 @@ class SAM2Selector {
         }
 
         this.isLoading = true;
+        this.draw(); // Redraw to show loading indicator
 
         try {
             // Get current frame as base64
             const frameData = this.captureCurrentFrame();
 
-            // Send to server
-            const response = await fetch('/api/sam2/select-object', {
+            // 1. Initiate the task and get a request_id
+            const initResponse = await fetch('/api/sam2/select-object', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     frame_data: frameData,
-                    frame_index: this.currentFrameIndex,
                     points: points,
                     video_width: this.videoWidth,
                     video_height: this.videoHeight
                 })
             });
 
-            const data = await response.json();
+            const initData = await initResponse.json();
 
-            if (data.status === 'success' && data.mask) {
-                // Decode mask from base64
-                const mask = await this.decodeMask(data.mask);
-                console.log(`[SAM2Selector] Mask received (${mask.width}x${mask.height})`);
-                return mask;
-            } else {
-                console.error('[SAM2Selector] Failed to get mask:', data.message);
-                return null;
+            if (initData.status !== 'processing' || !initData.request_id) {
+                throw new Error(initData.message || 'Failed to start selection task.');
             }
+
+            const requestId = initData.request_id;
+            console.log(`[SAM2Selector] Task started with request_id: ${requestId}`);
+
+            // 2. Poll for the result
+            const pollTimeout = 30000; // 30 seconds
+            const pollInterval = 500;   // 0.5 seconds
+            const startTime = Date.now();
+
+            while (Date.now() - startTime < pollTimeout) {
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+                const resultResponse = await fetch(`/api/sam2/result/${requestId}`);
+                if (resultResponse.status === 202) {
+                    // Status 202 Accepted means 'pending'
+                    console.log(`[SAM2Selector] Polling...`);
+                    continue;
+                }
+
+                if (!resultResponse.ok) {
+                    throw new Error(`Polling failed with status: ${resultResponse.status}`);
+                }
+
+                const resultData = await resultResponse.json();
+
+                if (resultData.status === 'success' && resultData.mask) {
+                    // 3. Decode mask and return
+                    const mask = await this.decodeMask(resultData.mask);
+                    console.log(`[SAM2Selector] Mask received for ${requestId} (${mask.width}x${mask.height})`);
+                    return mask;
+                } else if (resultData.status === 'error') {
+                    throw new Error(resultData.message || 'Worker failed to generate mask.');
+                }
+            }
+
+            throw new Error('Mask generation timed out after 30 seconds.');
+
         } catch (error) {
             console.error('[SAM2Selector] Mask request failed:', error);
             return null;
         } finally {
             this.isLoading = false;
+            this.draw(); // Redraw to remove loading indicator
         }
     }
 
