@@ -5987,8 +5987,8 @@ def sam2_select_object():
             'video_width': video_width,
             'video_height': video_height
         }
-        redis_client.publish(request_channel, json.dumps(payload))
-        print(f"[SAM2] Published request {request_id} to {request_channel}")
+        redis_client.lpush(request_channel, json.dumps(payload))
+        print(f"[SAM2] Pushed request {request_id} to Redis list {request_channel}")
 
         # Immediately return the request_id for polling
         return jsonify({'status': 'processing', 'request_id': request_id})
