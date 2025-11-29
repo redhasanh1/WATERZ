@@ -4574,35 +4574,7 @@ def login_page():
     return send_file('web/login.html')
 
 
-@app.route('/web/<path:path>')
-def serve_web(path):
-    """Serve static files from /web/ prefix"""
-    return send_file(f'web/{path}')
 
-
-# Serve static files from root (for Railway deployment)
-@app.route('/config.js')
-def serve_config():
-    return send_file(os.path.join(app.static_folder, 'config.js'), mimetype='application/javascript')
-
-@app.route('/js/<path:path>')
-def serve_js(path):
-    file_path = os.path.join(app.static_folder, 'js', path)
-    if not os.path.exists(file_path):
-        return jsonify({'error': 'File not found'}), 404
-    return send_file(file_path, mimetype='application/javascript')
-
-@app.route('/css/<path:path>')
-def serve_css(path):
-    return send_file(os.path.join(app.static_folder, 'css', path), mimetype='text/css')
-
-@app.route('/emblem.png')
-def serve_emblem():
-    return send_file(os.path.join(app.static_folder, 'emblem.png'), mimetype='image/png')
-
-@app.route('/demos/<path:path>')
-def serve_demos(path):
-    return send_file(os.path.join(app.static_folder, 'demos', path))
 
 
 @app.route('/api/remove-watermark', methods=['POST'])
