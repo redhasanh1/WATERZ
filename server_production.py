@@ -361,15 +361,19 @@ def require_credits(min_credits=1):
     return decorator
 
 # ----------------------------------------------------------------------------
-# Flask Session Configuration (for authentication)
+# Flask Session Configuration (using Redis for multi-worker stability)
 # ----------------------------------------------------------------------------
+from flask_session import Session
+
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
-app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = True
-app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
-app.config['SESSION_COOKIE_HTTPONLY'] = True  # No JavaScript access
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 30  # 30 days
+app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
+app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+
+# Initialize the session extension
+Session(app)
 
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
