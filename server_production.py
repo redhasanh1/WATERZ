@@ -147,7 +147,12 @@ except ImportError:
     if not GPU_AVAILABLE:
         print("[INFO] cv2 not available (API-only mode)")
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
+    if not GPU_AVAILABLE:
+        print("[INFO] numpy not available (API-only mode)")
 import io
 import json
 import time
