@@ -1612,9 +1612,17 @@
         const startStatusPolling = (processTaskId) => {
             localStorage.setItem(ACTIVE_TASK_KEY, processTaskId);
 
+            // Detect SAM2 jobs by prefix and use appropriate status endpoint
+            const isSAM2Job = processTaskId.startsWith('sam2_');
+            const statusEndpoint = isSAM2Job
+                ? `/api/sam2/status/${processTaskId}`
+                : `/api/status/${processTaskId}`;
+
+            console.log(`[Status] Polling ${isSAM2Job ? 'SAM2' : 'YOLO'} job: ${processTaskId}`);
+
             const pollStatus = async () => {
                 try {
-                    const statusResponse = await apiFetchPath(`/api/status/${processTaskId}`);
+                    const statusResponse = await apiFetchPath(statusEndpoint);
 
                     // Handle HTTP 410 EXPIRED - task no longer exists
                     if (statusResponse.status === 410) {
@@ -1732,6 +1740,58 @@
             pollStatus();
         };
 
+        // SAM2 Video Processing - calls /api/sam2/process-video
+        const processSAM2Video = async (taskId) => {
+            console.log('[SAM2] Processing with selected objects...');
+            const points = window.sam2Selector.getAllPoints();
+            const frameIndex = window.currentFrame || 0;
+
+            statusText.textContent = 'Starting SAM2 object removal...';
+
+            const response = await apiFetchPath('/api/sam2/process-video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: taskId,
+                    points: points,
+                    video_width: window.sam2Selector.videoWidth,
+                    video_height: window.sam2Selector.videoHeight,
+                    frame_index: frameIndex
+                })
+            });
+
+            const data = await parseJsonSafe(response);
+
+            if (data.status === 'success') {
+                const processTaskId = data.task_id || data.job_id;
+                console.log('[SAM2] Job started:', processTaskId);
+                startStatusPolling(processTaskId);
+            } else {
+                throw new Error(data.message || 'SAM2 processing failed');
+            }
+        };
+
+        // YOLO Video Processing - calls /api/process (automatic detection)
+        const processYOLOVideo = async (taskId) => {
+            console.log('[YOLO] Processing with automatic detection...');
+            statusText.textContent = 'Starting automatic watermark detection...';
+
+            const response = await apiFetchPath(`/api/process`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId })
+            });
+
+            const data = await parseJsonSafe(response);
+
+            if (data.status === 'success') {
+                const processTaskId = data.task_id;
+                startStatusPolling(processTaskId);
+            } else {
+                throw new Error(data.message || 'Failed to start processing');
+            }
+        };
+
         const processVideo = async () => {
             console.log('Start Cleanup button clicked');
             if (!videoElem) {
@@ -1748,7 +1808,12 @@
                 return;
             }
 
-            console.log('Starting processing for task:', taskId);
+            // CHECK: Does user have SAM2 points selected?
+            const hasSAM2Selection = window.sam2Selector &&
+                                     window.sam2Selector.selections &&
+                                     window.sam2Selector.selections.length > 0;
+
+            console.log('Processing mode:', hasSAM2Selection ? 'SAM2 (click-selected objects)' : 'YOLO (automatic detection)');
 
             if (processBtnElem) {
                 processBtnElem.style.display = 'none';
@@ -1762,26 +1827,15 @@
             progressPercent.textContent = '0%';
 
             try {
-                const response = await apiFetchPath(`/api/process`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ task_id: taskId })
-                });
-
-                const data = await parseJsonSafe(response);
-
-                if (data.status === 'success') {
-                    const processTaskId = data.task_id;
-                    startStatusPolling(processTaskId);
+                if (hasSAM2Selection) {
+                    // SAM2 mode - use user-selected points
+                    await processSAM2Video(taskId);
                 } else {
-                    statusText.textContent = '❌ Error: ' + (data.message || 'Failed to start processing');
-                    statusText.style.color = '#ef4444';
-                    if (processBtnElem) {
-                        processBtnElem.style.display = 'block';
-                    }
+                    // YOLO mode - automatic watermark detection
+                    await processYOLOVideo(taskId);
                 }
             } catch (error) {
-                statusText.textContent = '❌ Error: ' + error.message;
+                statusText.textContent = 'Error: ' + error.message;
                 statusText.style.color = '#ef4444';
                 if (processBtnElem) {
                     processBtnElem.style.display = 'block';
