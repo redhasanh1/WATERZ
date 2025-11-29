@@ -159,6 +159,7 @@
             border-radius: 8px;
             overflow: hidden;
             margin-bottom: 1.5rem;
+            aspect-ratio: var(--video-ar, 9/16);
         }
 
         #video-player {
@@ -561,6 +562,9 @@
                 const height = videoPlayer.videoHeight;
                 const duration = videoPlayer.duration;
                 const fps = 30; // Estimate, will be corrected by backend
+
+                // Set container aspect ratio to match video
+                document.getElementById('video-container').style.setProperty('--video-ar', `${width}/${height}`);
 
                 document.getElementById('video-metadata').textContent =
                     `${width}x${height} • ${fps}fps • ${duration.toFixed(1)}s`;

@@ -38,8 +38,11 @@ class SAM2Selector {
      * Initialize canvas and event listeners
      */
     init() {
-        // Set canvas size to match container
-        this.updateCanvasSize();
+        // Set canvas size when video metadata is ready
+        if (this.video.videoWidth) {
+            this.updateCanvasSize();
+        }
+        this.video.addEventListener('loadedmetadata', () => this.updateCanvasSize());
 
         // Attach mouse event listeners
         this.canvas.addEventListener('click', (e) => this.handleClick(e));
