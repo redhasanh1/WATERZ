@@ -13,6 +13,20 @@ import importlib
 import shutil
 from pathlib import Path
 
+# =============================================================================
+# RAILWAY DETECTION - Skip GPU/CUDA on Railway (CPU-only web frontend)
+# Railway provides these env vars automatically: RAILWAY_ENVIRONMENT_NAME,
+# RAILWAY_PROJECT_ID, RAILWAY_SERVICE_ID
+# =============================================================================
+IS_RAILWAY = bool(
+    os.environ.get('RAILWAY_ENVIRONMENT_NAME') or
+    os.environ.get('RAILWAY_PROJECT_ID') or
+    os.environ.get('RAILWAY')  # Manual override
+)
+
+if IS_RAILWAY:
+    print("[RAILWAY] Running on Railway - skipping GPU/CUDA initialization")
+
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
@@ -102,7 +116,9 @@ def _ensure_cuda_torch():
     sys.modules['torch'] = torch_cuda
 
 
-_ensure_cuda_torch()
+# Only initialize CUDA/torch on local GPU machines, not on Railway
+if not IS_RAILWAY:
+    _ensure_cuda_torch()
 
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
