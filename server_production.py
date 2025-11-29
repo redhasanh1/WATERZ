@@ -13,20 +13,6 @@ import importlib
 import shutil
 from pathlib import Path
 
-# =============================================================================
-# RAILWAY DETECTION - Skip GPU/CUDA on Railway (CPU-only web frontend)
-# Railway provides these env vars automatically: RAILWAY_ENVIRONMENT_NAME,
-# RAILWAY_PROJECT_ID, RAILWAY_SERVICE_ID
-# =============================================================================
-IS_RAILWAY = bool(
-    os.environ.get('RAILWAY_ENVIRONMENT_NAME') or
-    os.environ.get('RAILWAY_PROJECT_ID') or
-    os.environ.get('RAILWAY')  # Manual override
-)
-
-if IS_RAILWAY:
-    print("[RAILWAY] Running on Railway - skipping GPU/CUDA initialization")
-
 # CRITICAL: Force ALL temp/cache to D drive (watermarkz folder)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(SCRIPT_DIR, 'temp')
@@ -116,8 +102,8 @@ def _ensure_cuda_torch():
     sys.modules['torch'] = torch_cuda
 
 
-# Only initialize CUDA/torch on local GPU machines, not on Railway
-if not IS_RAILWAY:
+# Only initialize CUDA/torch on local GPU machines, not on Railway (which is web-only)
+if not os.environ.get('RAILWAY'):
     _ensure_cuda_torch()
 
 from flask import Flask, request, send_file, jsonify
@@ -4629,6 +4615,14 @@ def terms_of_service():
     return send_file(os.path.join(app.static_folder, 'terms.html'))
 
 
+@app.route('/<path:filename>')
+def serve_static_files(filename):
+    """Serve HTML and other static files from web folder"""
+    if filename.endswith('.html'):
+        return send_file(os.path.join(app.static_folder, filename))
+    return send_from_directory(app.static_folder, filename)
+
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """
@@ -4730,171 +4724,6 @@ def sam2_select_object():
             'status': 'error',
             'message': 'Local worker timeout - is SAM2 worker running?'
         }), 504
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-# ============================================================================
-# SAM2 Video Processing Endpoint
-# ============================================================================
-
-@app.route('/api/sam2/process-video', methods=['POST'])
-def sam2_process_video():
-    """
-    Trigger SAM2 video processing with user-selected points.
-    Points are stored in Redis, then SAM2 worker generates masks and runs ProPainter.
-    """
-    try:
-        data = request.json
-        task_id = data.get('task_id')
-        points = data.get('points', [])
-        video_width = data.get('video_width')
-        video_height = data.get('video_height')
-        frame_index = data.get('frame_index', 0)
-
-        if not task_id:
-            return jsonify({'status': 'error', 'message': 'Missing task_id'}), 400
-
-        if not points or len(points) == 0:
-            return jsonify({'status': 'error', 'message': 'No points selected'}), 400
-
-        # Get video path from task_id
-        video_path = os.path.join(UPLOAD_DIR, f"{task_id}.mp4")
-        if not os.path.exists(video_path):
-            # Try with original extension
-            for ext in ['.mp4', '.mov', '.avi', '.webm']:
-                test_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
-                if os.path.exists(test_path):
-                    video_path = test_path
-                    break
-
-        if not os.path.exists(video_path):
-            return jsonify({'status': 'error', 'message': f'Video not found for task {task_id}'}), 404
-
-        # Store selection data in Redis for the worker to use
-        REDIS_URL = os.environ.get('REDIS_URL')
-        if REDIS_URL:
-            redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-            selection_data = {
-                'points': points,
-                'video_width': video_width,
-                'video_height': video_height,
-                'frame_index': frame_index
-            }
-            redis_client.set(f'sam2:selection:{task_id}', json.dumps(selection_data), ex=3600)  # 1 hour expiry
-
-        # Create a unique job ID for this SAM2 processing request
-        job_id = f"sam2_{task_id}_{uuid.uuid4().hex[:8]}"
-
-        # Import and call the SAM2 Celery task from server_production2
-        # The task is registered as 'watermark.process_sam2_interactive'
-        from celery import Celery
-        sam2_celery = Celery('server_production2', broker=REDIS_URL, backend=REDIS_URL)
-
-        # Create temp masks folder path (worker will generate masks here)
-        masks_folder = os.path.join(TEMP_DIR, f"sam2_masks_{task_id}")
-        os.makedirs(masks_folder, exist_ok=True)
-
-        # Store points as JSON file for the worker
-        points_file = os.path.join(masks_folder, 'points.json')
-        with open(points_file, 'w') as f:
-            json.dump({
-                'points': points,
-                'video_width': video_width,
-                'video_height': video_height,
-                'frame_index': frame_index,
-                'task_id': task_id
-            }, f)
-
-        # Send task to SAM2 worker queue
-        result = sam2_celery.send_task(
-            'watermark.process_sam2_interactive',
-            args=[video_path, masks_folder, task_id],
-            task_id=job_id
-        )
-
-        print(f"[SAM2] Started processing job {job_id} for video {task_id}")
-        print(f"[SAM2] Points: {len(points)}, Video: {video_width}x{video_height}")
-
-        return jsonify({
-            'status': 'success',
-            'job_id': job_id,
-            'task_id': job_id,  # For compatibility
-            'message': 'SAM2 processing started'
-        })
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@app.route('/api/sam2/status/<job_id>', methods=['GET'])
-def sam2_job_status(job_id):
-    """Get status of SAM2 processing job"""
-    try:
-        from celery.result import AsyncResult
-
-        REDIS_URL = os.environ.get('REDIS_URL')
-        if not REDIS_URL:
-            return jsonify({'status': 'error', 'message': 'Redis not configured'}), 500
-
-        from celery import Celery
-        sam2_celery = Celery('server_production2', broker=REDIS_URL, backend=REDIS_URL)
-
-        result = AsyncResult(job_id, app=sam2_celery)
-
-        if result.state == 'PENDING':
-            return jsonify({
-                'status': 'pending',
-                'state': 'PENDING',
-                'progress': 0,
-                'message': 'Waiting for SAM2 worker...'
-            })
-        elif result.state == 'STARTED':
-            meta = result.info or {}
-            return jsonify({
-                'status': 'processing',
-                'state': 'STARTED',
-                'progress': meta.get('progress', 0),
-                'message': meta.get('status', 'Processing...')
-            })
-        elif result.state == 'PROCESSING':
-            meta = result.info or {}
-            return jsonify({
-                'status': 'processing',
-                'state': 'PROCESSING',
-                'progress': meta.get('progress', 0),
-                'message': meta.get('status', 'Processing...')
-            })
-        elif result.state == 'SUCCESS':
-            result_data = result.result or {}
-            return jsonify({
-                'status': 'completed',
-                'state': 'SUCCESS',
-                'progress': 100,
-                'result_url': result_data.get('result_url'),
-                'output_path': result_data.get('output_path'),
-                'message': 'Processing complete!'
-            })
-        elif result.state == 'FAILURE':
-            return jsonify({
-                'status': 'failed',
-                'state': 'FAILURE',
-                'progress': 0,
-                'message': str(result.info) if result.info else 'Processing failed'
-            })
-        else:
-            meta = result.info or {}
-            return jsonify({
-                'status': 'processing',
-                'state': result.state,
-                'progress': meta.get('progress', 0) if isinstance(meta, dict) else 0,
-                'message': meta.get('status', 'Processing...') if isinstance(meta, dict) else str(meta)
-            })
 
     except Exception as e:
         import traceback
