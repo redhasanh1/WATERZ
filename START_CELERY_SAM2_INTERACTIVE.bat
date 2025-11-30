@@ -11,9 +11,11 @@ if exist redis_url.txt (
     set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
 )
 
-REM ✅ AUTO-LOAD TUNNEL_URL from web\tunnel_url.txt (needed for video download)
+REM ✅ AUTO-LOAD TUNNEL_URL from tunnel_url.txt (root) or web\tunnel_url.txt (needed for video download)
 if "%TUNNEL_URL%"=="" (
-    if exist "web\tunnel_url.txt" (
+    if exist "tunnel_url.txt" (
+        for /f "usebackq delims=" %%i in ("tunnel_url.txt") do set "TUNNEL_URL=%%i"
+    ) else if exist "web\tunnel_url.txt" (
         for /f "usebackq delims=" %%i in ("web\tunnel_url.txt") do set "TUNNEL_URL=%%i"
     )
 )
@@ -122,7 +124,9 @@ set TORCHINDUCTOR_FX_GRAPH_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
-REM Use thread pool with 1 worker (sequential to prevent temp folder collisions)
+REM Use thread pool with 4 workers
 REM -Q sam2 ensures this worker ONLY handles SAM2 tasks (ignores prepare_video etc)
 REM Using server_production2.celery for the 10fps optimized SAM2 pipeline
-"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q sam2 --loglevel=info --pool=threads --concurrency=1
+set CELERY_POOL=threads
+set CELERY_CONCURRENCY=4
+"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q sam2 --loglevel=info --pool=threads --concurrency=4
