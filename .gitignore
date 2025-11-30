@@ -183,3 +183,22 @@ untracked_files.txt
 # Intermediate/experimental transformer implementations
 faster-propainter-main/custom_kernel_transformer.py
 faster-propainter-main/model/modules/tensorrt_transformer.py
+# Local runtime artifacts
+.env
+docker_cache/
+docker_results/
+docker_test/
+masks/
+output*/
+temp_sam2_*/
+temp_test_masks/
+videostotrain/
+venv_wsl2/
+faster-propainter-main/weights/
+faster-propainter-main/models/
+weights/*.lock
+weights/*.ts
+segment-anything-2/
+pure_trt_masks/
+*.png
+*.mp4
