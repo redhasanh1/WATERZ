@@ -15,7 +15,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Segment detection for parallel processing
-from segment_detector import detect_segments_from_masks, merge_adjacent_segments
+from segment_detector import detect_segments_from_masks, merge_adjacent_segments, detect_segments
 from crop_utils import calculate_crop_region
 
 # Number of parallel segment workers
@@ -32,11 +32,17 @@ SAM2_MASK_DILATION = int(os.getenv('SAM2_MASK_DILATION', '4'))
 # Strict mode: use single full-video inpainting (no segment split)
 SAM2_USE_SEGMENTS = os.getenv('SAM2_USE_SEGMENTS', '0') in ('1', 'true', 'yes', 'on')
 
-# Segment detection sensitivity (10fps domain)
-# Higher SEGMENT_POS_TOLERANCE and SEGMENT_MERGE_GAP_10FPS = less sensitive (fewer segments)
-SEGMENT_POS_TOLERANCE = int(os.getenv('SEGMENT_POS_TOLERANCE', '80'))
+# Segment detection sensitivity
+# Higher tolerance/gap = less sensitive (fewer segments)
+SEGMENT_POS_TOLERANCE = int(os.getenv('SEGMENT_POS_TOLERANCE', '50'))  # match commit defaults
+# 10fps domain (legacy fallback)
 SEGMENT_MIN_LEN_10FPS = int(os.getenv('SEGMENT_MIN_LEN_10FPS', '10'))
-SEGMENT_MERGE_GAP_10FPS = int(os.getenv('SEGMENT_MERGE_GAP_10FPS', '12'))
+SEGMENT_MERGE_GAP_10FPS = int(os.getenv('SEGMENT_MERGE_GAP_10FPS', '6'))
+# Full-FPS domain (preferred)
+SEGMENT_MIN_LEN_FULL = int(os.getenv('SEGMENT_MIN_LEN_FULL', '15'))
+SEGMENT_MERGE_GAP_FULL = int(os.getenv('SEGMENT_MERGE_GAP_FULL', '60'))
+# Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
+SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
 # Configure paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -535,33 +541,62 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         # --- 9. Determine segment strategy ---
         if SAM2_USE_SEGMENTS:
             self.update_state(state='PROCESSING', meta={'progress': 22, 'status': 'Detecting segments'})
-            print(f"[SAM2] Detecting segments from 10fps masks...")
+            if SAM2_SEGMENT_DETECTION_MODE == 'full':
+                print(f"[SAM2] Detecting segments from FULL-FPS in-memory masks...")
+                # Compute bbox per full-FPS mask in memory, then run detection
+                detections_per_frame = []
+                for m in all_masks:
+                    coords = cv2.findNonZero(m)
+                    if coords is not None:
+                        x, y, w, h = cv2.boundingRect(coords)
+                        detections_per_frame.append((x, y, x + w, y + h))
+                    else:
+                        detections_per_frame.append(None)
 
-            segments_10fps = detect_segments_from_masks(
-                masks_10fps_dir,
-                position_tolerance=SEGMENT_POS_TOLERANCE,
-                min_segment_length=SEGMENT_MIN_LEN_10FPS,
-                max_segments=80
-            )
-
-            if len(segments_10fps) > 1:
-                segments_10fps = merge_adjacent_segments(
-                    segments_10fps,
+                segments = detect_segments(
+                    detections_per_frame,
                     position_tolerance=SEGMENT_POS_TOLERANCE,
-                    max_gap=SEGMENT_MERGE_GAP_10FPS
+                    min_segment_length=SEGMENT_MIN_LEN_FULL,
                 )
 
-            # Scale segments from 10fps to full FPS
-            fps_ratio = original_fps / 10.0
-            segments = []
-            for start_10fps, end_10fps, bbox in segments_10fps:
-                start_full = int(start_10fps * fps_ratio)
-                end_full = min(int((end_10fps + 1) * fps_ratio), total_frames)  # +1 because end is exclusive
-                segments.append((start_full, end_full, bbox))
+                if len(segments) > 1:
+                    segments = merge_adjacent_segments(
+                        segments,
+                        position_tolerance=SEGMENT_POS_TOLERANCE,
+                        max_gap=SEGMENT_MERGE_GAP_FULL,
+                    )
 
-            print(f"[SAM2] Detected {len(segments)} segments (scaled to full FPS)")
-            for idx, (start, end, bbox) in enumerate(segments):
-                print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
+                print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS)")
+                for idx, (start, end, bbox) in enumerate(segments):
+                    print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
+            else:
+                print(f"[SAM2] Detecting segments from 10fps masks...")
+
+                segments_10fps = detect_segments_from_masks(
+                    masks_10fps_dir,
+                    position_tolerance=SEGMENT_POS_TOLERANCE,
+                    min_segment_length=SEGMENT_MIN_LEN_10FPS,
+                    max_segments=80,
+                )
+
+                if len(segments_10fps) > 1:
+                    segments_10fps = merge_adjacent_segments(
+                        segments_10fps,
+                        position_tolerance=SEGMENT_POS_TOLERANCE,
+                        max_gap=SEGMENT_MERGE_GAP_10FPS,
+                    )
+
+                # Scale segments from 10fps to full FPS
+                fps_ratio = original_fps / 10.0
+                segments = []
+                for start_10fps, end_10fps, bbox in segments_10fps:
+                    start_full = int(start_10fps * fps_ratio)
+                    end_full = min(int((end_10fps + 1) * fps_ratio), total_frames)  # +1 because end is exclusive
+                    segments.append((start_full, end_full, bbox))
+
+                print(f"[SAM2] Detected {len(segments)} segments (scaled to full FPS)")
+                for idx, (start, end, bbox) in enumerate(segments):
+                    print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
         else:
             # Strict monolithic mode (commit logic): process entire video in a single pass
             segments = [(0, total_frames, [0, 0, width, height])]
