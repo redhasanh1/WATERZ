@@ -135,6 +135,7 @@ echo ============================================================
 echo.
 
 REM Start Celery worker pointing to server_production2
-"%PYTHON_PATH%" -m celery -A server_production2.celery worker --loglevel=info --pool=threads --concurrency=4
+REM -Q sam2 ensures this worker ONLY handles SAM2 tasks (ignores prepare_video etc)
+"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q sam2 --loglevel=info --pool=threads --concurrency=4
 
 pause

@@ -113,4 +113,5 @@ echo [CLEANUP] Purging old tasks from Redis queue...
 echo.
 
 REM Use thread pool with 1 worker (sequential to prevent temp folder collisions)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=1
+REM -Q sam2 ensures this worker ONLY handles SAM2 tasks (ignores prepare_video etc)
+"%PYTHON_PATH%" -m celery -A server_production.celery worker -Q sam2 --loglevel=info --pool=threads --concurrency=1

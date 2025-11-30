@@ -12,7 +12,11 @@ if tensorrt_bin not in os.environ["PATH"]:
     os.environ["PATH"] = tensorrt_bin + os.pathsep + os.environ["PATH"]
 
 import numpy as np
-import tensorrt as trt
+# Try tensorrt_bindings first (WSL2), fallback to tensorrt (Windows)
+try:
+    import tensorrt_bindings as trt
+except ImportError:
+    import tensorrt as trt
 import cv2
 from pathlib import Path
 import logging
