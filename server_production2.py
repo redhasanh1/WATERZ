@@ -88,25 +88,31 @@ def clear_gpu_memory():
 #============================================================================
 
 @celery.task(bind=True, name='watermark.process_sam2_interactive')
-def process_sam2_interactive_task(self, video_path, video_id=None):
+def process_sam2_interactive_task(self, video_path, video_id=None, points=None, video_width=None, video_height=None, frame_index=0):
     """
     SAM2 Interactive Mode: Process video with user-provided SAM2 masks
-    - Skip YOLO detection completely
-    - Load SAM2 masks from a locally constructed path
+    - Downloads video from remote
+    - Generates masks from user points using SAM2Tracker
     - Run ProPainter with full optimizations
     - Return processed video
 
     Args:
-        video_path: Path to input video
-        video_id: Optional video ID for tracking
+        video_path (str): Path to input video (on remote server)
+        video_id (str): Video ID for tracking
+        points (list): User selection points
+        video_width (int): Width of the video
+        video_height (int): Height of the video
+        frame_index (int): The frame index the user clicked on
     """
     try:
         import shutil
         import json
         import numpy as np
         import cv2
+        import requests
+        from urllib.parse import urljoin
 
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Loading SAM2 masks'})
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Initializing SAM2'})
 
         if not _check_propainter_assets():
             raise RuntimeError("ProPainter assets missing")
@@ -115,15 +121,95 @@ def process_sam2_interactive_task(self, video_path, video_id=None):
         if not video_id:
             video_id = os.path.basename(video_path).split('.')[0][:8]
 
-        # === FIX: Construct the masks_folder path locally ===
+        # --- 1. Download video from remote server ---
+        local_video_path = os.path.join(TEMP_DIR, f"{video_id}_sam2_input.mp4")
+        if not os.path.exists(local_video_path):
+            tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
+            if not tunnel:
+                raise RuntimeError("TUNNEL_URL or API_BASE_URL not set, cannot download video")
+            
+            try:
+                from pathlib import PureWindowsPath
+                base_name = PureWindowsPath(video_path).name
+            except Exception:
+                base_name = os.path.basename(video_path.replace('\\', '/'))
+
+            download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+            print(f"🌐 Downloading video for SAM2 processing: {download_url}")
+            self.update_state(state='STARTED', meta={'progress': 1, 'status': 'Downloading video'})
+            
+            r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=120)
+            r.raise_for_status()
+            with open(local_video_path, 'wb') as f:
+                f.write(r.content)
+            print(f"[OK] Video downloaded to: {local_video_path}")
+        else:
+            print(f"[OK] Using cached local video: {local_video_path}")
+        
+        video_path = local_video_path # Use local path from now on
+
+        # --- 2. Extract all frames from video ---
+        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Extracting frames'})
+        print(f"[SAM2 INTERACTIVE] Extracting all frames from video...")
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise RuntimeError(f"Failed to open video: {video_path}")
+
+        all_frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            all_frames.append(frame)
+        cap.release()
+        
+        if not all_frames:
+            raise RuntimeError("Could not extract any frames from the video.")
+        
+        extracted_frames = len(all_frames)
+        print(f"[SAM2 INTERACTIVE] Extracted {extracted_frames} frames")
+
+        # --- 3. Generate masks from points using SAM2Tracker ---
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Generating masks with SAM2'})
+        
+        if not points:
+            raise ValueError("No points provided for mask generation.")
+
+        try:
+            from sam2_tracker import SAM2Tracker
+        except ImportError:
+            raise RuntimeError("Failed to import SAM2Tracker. Ensure sam2_tracker.py is present.")
+
+        # Convert points to a bounding box for the tracker
+        points_np = np.array(points)
+        x1, y1 = points_np.min(axis=0)
+        x2, y2 = points_np.max(axis=0)
+        bbox = [int(x1), int(y1), int(x2), int(y2)]
+        
+        print(f"[SAM2 INTERACTIVE] Tracking from bbox {bbox} on frame {frame_index}")
+
+        tracker = SAM2Tracker(device="cuda")
+        masks_bool = tracker.track_from_box(
+            video_frames=all_frames,
+            bbox=bbox,
+            frame_idx=frame_index,
+            video_path=video_path # for logging/caching inside tracker
+        )
+        
+        all_masks = [(mask * 255).astype(np.uint8) for mask in masks_bool]
+        print(f"[SAM2 INTERACTIVE] Generated {len(all_masks)} masks.")
+
+        # --- 4. Save generated masks to a local folder ---
         masks_folder = os.path.join(TEMP_DIR, f"sam2_masks_{video_id}")
+        os.makedirs(masks_folder, exist_ok=True)
+        
+        for i, mask_img in enumerate(all_masks):
+            mask_path = os.path.join(masks_folder, f"{i:04d}.png")
+            cv2.imwrite(mask_path, mask_img)
+        
+        print(f"[SAM2 INTERACTIVE] Saved {len(all_masks)} masks to {masks_folder}")
 
-        print(f"\n[SAM2 INTERACTIVE] Processing video: {video_path}")
-        print(f"[SAM2 INTERACTIVE] Constructed local masks path: {masks_folder}")
-
-        # Check if masks folder exists
-        if not os.path.exists(masks_folder):
-            raise ValueError(f"Masks folder not found: {masks_folder}")
+        # --- Original logic continues below, using the generated masks ---
 
         # Get video metadata using FFprobe
         try:
@@ -146,29 +232,24 @@ def process_sam2_interactive_task(self, video_path, video_id=None):
             fps_parts = stream['r_frame_rate'].split('/')
             fps = float(fps_parts[0]) / float(fps_parts[1])
 
-            # Get frame count
-            total_frames = int(stream.get('nb_frames', 0))
-            if total_frames == 0:
-                mask_files = sorted([f for f in os.listdir(masks_folder) if f.endswith('.png')])
-                total_frames = len(mask_files)
+            total_frames = extracted_frames
         except Exception as e:
             print(f"[ERROR] Failed to get video metadata: {e}")
-            mask_files = sorted([f for f in os.listdir(masks_folder) if f.endswith('.png')])
-            total_frames = len(mask_files)
-            width = 1920
-            height = 1080
+            total_frames = extracted_frames
+            width = all_frames[0].shape[1]
+            height = all_frames[0].shape[0]
             fps = 30.0
 
         print(f"[SAM2 INTERACTIVE] Video: {width}x{height} @ {fps}fps, {total_frames} frames")
 
-        # Load SAM2 masks
+        # Load SAM2 masks (that we just generated)
         mask_files = sorted([f for f in os.listdir(masks_folder) if f.endswith('.png')])
         print(f"[SAM2 INTERACTIVE] Found {len(mask_files)} SAM2 masks")
 
         if len(mask_files) != total_frames:
             print(f"[WARNING] Mask count mismatch: {len(mask_files)} masks vs {total_frames} frames")
 
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Extracting frames'})
+        self.update_state(state='PROCESSING', meta={'progress': 20, 'status': 'Preparing for inpainting'})
 
         # Create temp directories
         base_name = os.path.basename(video_path).rsplit('.', 1)[0]
@@ -181,29 +262,14 @@ def process_sam2_interactive_task(self, video_path, video_id=None):
         for path in [frames_dir, cropped_dir, sam2_masks_dir, output_dir]:
             os.makedirs(path, exist_ok=True)
 
-        # Extract frames
-        print(f"[SAM2 INTERACTIVE] Extracting frames from video...")
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise RuntimeError(f"Failed to open video: {video_path}")
-
-        frame_idx = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frame_path = os.path.join(frames_dir, f"{frame_idx:04d}.png")
+        # Save extracted frames to disk for ProPainter
+        print(f"[SAM2 INTERACTIVE] Saving extracted frames to disk...")
+        for i, frame in enumerate(all_frames):
+            frame_path = os.path.join(frames_dir, f"{i:04d}.png")
             cv2.imwrite(frame_path, frame)
-            frame_idx += 1
-        cap.release()
-
-        extracted_frames = frame_idx
-        print(f"[SAM2 INTERACTIVE] Extracted {extracted_frames} frames")
 
         # Copy SAM2 masks
-        print(f"[SAM2 INTERACTIVE] Loading {len(mask_files)} SAM2 masks...")
-        self.update_state(state='PROCESSING', meta={'progress': 20, 'status': 'Loading SAM2 masks'})
-
+        print(f"[SAM2 INTERACTIVE] Copying {len(mask_files)} SAM2 masks for processing...")
         for i, mask_file in enumerate(mask_files):
             src = os.path.join(masks_folder, mask_file)
             dst = os.path.join(sam2_masks_dir, f"{i:04d}.png")
