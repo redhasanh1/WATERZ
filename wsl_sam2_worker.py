@@ -51,7 +51,7 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
 
     # Import helper module from repo (runs under WSL)
     import sam2_track_wsl2 as sam2w
-    import subprocess, shlex
+    import subprocess, shlex, shutil
 
     def to_wsl_path(p: str) -> str:
         if not isinstance(p, str):
@@ -73,14 +73,21 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
 
     os.makedirs(masks_dir_wsl, exist_ok=True)
 
-    # Optional: track at 10fps for speed, then Windows will expand masks
-    use_10fps = os.getenv('SAM2_WSL_TRACK_10FPS', '0').lower() in ('1','true','yes','on')
+    # Optional: track at 10fps for speed, then Windows will expand masks back to full-FPS
+    use_10fps_env = os.getenv('SAM2_WSL_TRACK_10FPS', '0').lower() in ('1','true','yes','on')
+    # If Windows already created a 10fps video (e.g., *_tracking_10fps.mp4), do NOT try to downsample again
+    already_10 = ('_tracking_10fps' in os.path.basename(video_path_wsl)) or video_path_wsl.lower().endswith('_10fps.mp4')
+    ffmpeg_ok = shutil.which('ffmpeg') is not None
     track_src = video_path_wsl
-    if use_10fps:
+    if use_10fps_env and not already_10 and ffmpeg_ok:
         video_10_path = f"/tmp/sam2_{os.path.basename(video_path_wsl)}_10fps.mp4"
         cmd = f"ffmpeg -y -i {shlex.quote(video_path_wsl)} -vf fps=10 -c:v libx264 -preset ultrafast -crf 18 -an {shlex.quote(video_10_path)}"
-        subprocess.run(cmd, shell=True, check=True)
-        track_src = video_10_path
+        try:
+            subprocess.run(cmd, shell=True, check=True)
+            track_src = video_10_path
+        except Exception as e:
+            # Fallback: if ffmpeg fails, track at full FPS instead of crashing
+            print(f"[WSL] Warning: ffmpeg downsample failed ({e}); tracking at full FPS")
 
     # Extract frames
     self.update_state(state='PROCESSING', meta={'status': 'Extracting frames', 'progress': 5})
