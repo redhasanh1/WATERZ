@@ -543,14 +543,24 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         max_gap=SEGMENT_MERGE_GAP_FULL,
                     )
 
+                # Convert inclusive end -> exclusive end for internal processing
+                segments_exclusive = []
+                for (s, e, bb) in segments:
+                    s_e = max(0, int(s))
+                    e_e = min(int(e) + 1, total_frames)  # inclusive -> exclusive
+                    if s_e < e_e:
+                        segments_exclusive.append((s_e, e_e, bb))
+
+                segments = segments_exclusive
+
                 print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS)")
                 for idx, (start, end, bbox) in enumerate(segments):
-                    print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
+                    print(f"[SAM2]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
             else:
                 print(f"[SAM2] Detecting segments from 10fps masks...")
 
                 segments_10fps = detect_segments_from_masks(
-                    masks_10fps_dir,
+                    masks_dir,
                     position_tolerance=SEGMENT_POS_TOLERANCE,
                     min_segment_length=SEGMENT_MIN_LEN_10FPS,
                     max_segments=80,
@@ -612,11 +622,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         import torch
         use_fp16 = torch.cuda.is_available()
 
-            print(f"[SAM2] ProPainter config:")
+        print(f"[SAM2] ProPainter config:")
         print(f"   - Segments: {len(segments)}")
         print(f"   - Workers: {SEGMENT_WORKERS}")
         print(f"   - FP16: {use_fp16}")
-            print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
+        print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
 
         # Crop all frames and masks to global crop region
         all_frames_cropped = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for f in all_frames]

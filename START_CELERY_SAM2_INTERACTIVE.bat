@@ -27,12 +27,11 @@ if not "%TUNNEL_URL%"=="" (
 )
 echo.
 
-echo Starting Celery worker (SAM2 10fps OPTIMIZED Pipeline!)...
+echo Starting Celery worker (SAM2 FULL-FPS Pipeline!)...
 echo.
 echo ============================================================
-echo SAM2 10fps OPTIMIZED PIPELINE:
-echo   - Converts video to 10fps for SAM2 (3-6x faster)
-echo   - Expands masks in memory (zero-copy)
+echo SAM2 FULL-FPS PIPELINE:
+echo   - SAM2 tracking at original FPS (more accurate)
 echo   - In-memory ProPainter (ZERO disk I/O)
 echo   - NeuFlow TRT optical flow (10-70x faster)
 echo ============================================================
@@ -49,7 +48,11 @@ set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6"
 echo [CUDA] Set CUDA_PATH=%CUDA_PATH%
 
 REM Ensure TensorRT DLLs and tools are on PATH
-call "%~dp0SETUP_TRT_ENV.bat"
+if exist "%~dp0SETUP_TRT_ENV.bat" (
+  call "%~dp0SETUP_TRT_ENV.bat"
+) else (
+  echo [WARN] SETUP_TRT_ENV.bat not found; ensure TensorRT is on PATH
+)
 
 REM Use explicit Python path to avoid Windows Store stub
 set PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python312\python.exe
@@ -104,11 +107,6 @@ set TORCHINDUCTOR_CUDAGRAPHS=0
 REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers
 set SEGMENT_WORKERS=4
 
-REM Segment detection sensitivity (less sensitive = fewer segments)
-set SEGMENT_POS_TOLERANCE=80
-set SEGMENT_MIN_LEN_10FPS=10
-set SEGMENT_MERGE_GAP_10FPS=12
-
 REM Prefer point prompt for SAM2 tracking (higher quality); set to bbox to force bbox mode
 set SAM2_PROMPT_MODE=point
 
@@ -125,14 +123,12 @@ set SEGMENT_MERGE_GAP_FULL=60
 set SEGMENT_MIN_LEN_10FPS=3
 set SEGMENT_MERGE_GAP_10FPS=6
 
-REM ⚡ SAM2 TRACKING: NOT USED IN INTERACTIVE MODE (masks provided by user)
-set USE_SAM2_TRACKING=0
+REM ⚡ SAM2 tracking runs in WSL2; ensure WSL2 environment is ready
 
 echo.
 echo ============================================================
-echo SAM2 10fps OPTIMIZED CONFIG (RTX 4090):
-echo   - SAM2 Masks: 10fps generation (3-6x faster!)
-echo   - Mask Expansion: Zero-copy in memory
+echo SAM2 FULL-FPS CONFIG (RTX 4090):
+echo   - SAM2 Masks: full FPS (no 10fps conversion)
 echo   - ProPainter: In-memory arrays (ZERO disk I/O!)
 echo   - Optical Flow: NeuFlow v2 TensorRT FP16
 echo   - RFCNet: TensorRT FP16 + DCNv4 plugin
@@ -147,7 +143,7 @@ set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
 REM Use thread pool with 4 workers
 REM -Q sam2 ensures this worker ONLY handles SAM2 tasks (ignores prepare_video etc)
-REM Using server_production2.celery for the 10fps optimized SAM2 pipeline
+REM Using server_production2.celery for the SAM2 FULL-FPS pipeline
 set CELERY_POOL=threads
 set CELERY_CONCURRENCY=4
 "%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q sam2 --loglevel=info --pool=threads --concurrency=4
