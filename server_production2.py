@@ -21,6 +21,9 @@ from crop_utils import calculate_crop_region
 # Number of parallel segment workers
 SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '4'))
 
+# Inpainting mask dilation (higher = stronger removal, more context fill)
+SAM2_MASK_DILATION = int(os.getenv('SAM2_MASK_DILATION', '6'))
+
 # Segment detection sensitivity (10fps domain)
 # Higher SEGMENT_POS_TOLERANCE and SEGMENT_MERGE_GAP_10FPS = less sensitive (fewer segments)
 SEGMENT_POS_TOLERANCE = int(os.getenv('SEGMENT_POS_TOLERANCE', '80'))
@@ -432,11 +435,22 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         wsl_video = _to_wsl_path(video_10fps_path)
         wsl_masks = _to_wsl_path(masks_10fps_dir)
 
+        # Prefer point prompt for higher-quality masks (fallback to bbox via SAM2_PROMPT_MODE=bbox)
+        prompt_mode = os.getenv('SAM2_PROMPT_MODE', 'point').strip().lower()
+        if prompt_mode == 'point':
+            cx = int(np.clip(np.mean(xy[:, 0]), 0, (video_width or width) - 1))
+            cy = int(np.clip(np.mean(xy[:, 1]), 0, (video_height or height) - 1))
+            prompt_flag = f'--point {cx},{cy}'
+            print(f"[SAM2] Using POINT prompt: ({cx},{cy})")
+        else:
+            prompt_flag = f'--bbox {bbox_str}'
+            print(f"[SAM2] Using BBOX prompt: {bbox_str}")
+
         wsl_cmd = (
             f'cd /mnt/d/watermarkz && '
             f'source venv_wsl2/bin/activate && '
             f'python sam2_track_wsl2.py "{wsl_video}" "{wsl_masks}" '
-            f'--bbox {bbox_str} --frame-idx {frame_index_10fps}'
+            f'{prompt_flag} --frame-idx {frame_index_10fps}'
         )
         print(f"[SAM2-WSL2] Running: wsl -e bash -c \"{wsl_cmd}\"")
 
@@ -630,7 +644,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     mask='dummy',
                     output=seg_output_dir,
                     resize_ratio=1.0,
-                    mask_dilation=4,
+                    mask_dilation=SAM2_MASK_DILATION,
                     ref_stride=15,
                     neighbor_length=neighbor_length,
                     subvideo_length=subvideo_length,
@@ -680,7 +694,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 mask='dummy_mask',
                 output=output_dir,
                 resize_ratio=1.0,
-                mask_dilation=4,
+                mask_dilation=SAM2_MASK_DILATION,
                 ref_stride=15,
                 neighbor_length=10,
                 subvideo_length=120,

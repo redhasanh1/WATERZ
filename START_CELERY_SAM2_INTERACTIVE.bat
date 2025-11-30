@@ -109,6 +109,12 @@ set SEGMENT_POS_TOLERANCE=80
 set SEGMENT_MIN_LEN_10FPS=10
 set SEGMENT_MERGE_GAP_10FPS=12
 
+REM Prefer point prompt for SAM2 tracking (higher quality); set to bbox to force bbox mode
+set SAM2_PROMPT_MODE=point
+
+REM Stronger mask dilation for better coverage (1-12 recommended)
+set SAM2_MASK_DILATION=6
+
 REM ⚡ SAM2 TRACKING: NOT USED IN INTERACTIVE MODE (masks provided by user)
 set USE_SAM2_TRACKING=0
 
