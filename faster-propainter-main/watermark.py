@@ -304,6 +304,42 @@ def binary_mask(mask, th=0.1):
     return mask
 
 
+def expand_masks_10fps(masks_10fps: list, total_frames: int, original_fps: float) -> list:
+    """
+    Expand 10fps masks to original FPS using index mapping.
+    ZERO disk I/O, ZERO file duplication - pure memory operation.
+
+    This is the fastest possible mask expansion - just references to the same
+    numpy arrays, no copying. For a 60fps video, each 10fps mask is referenced
+    6 times instead of being duplicated 6 times.
+
+    Args:
+        masks_10fps: List of numpy mask arrays at 10fps
+        total_frames: Total frames in original video
+        original_fps: Original video FPS (e.g., 60.0)
+
+    Returns:
+        List of masks at original FPS (same objects, not copies!)
+
+    Example:
+        # 60fps video: 600 frames → 10fps: 100 masks
+        masks_10fps = [load_mask(i) for i in range(100)]
+        masks_full = expand_masks_10fps(masks_10fps, 600, 60.0)
+        # masks_full[0:6] all point to masks_10fps[0]
+        # masks_full[6:12] all point to masks_10fps[1]
+        # etc.
+    """
+    if not masks_10fps:
+        return []
+
+    multiplier = original_fps / 10.0
+    num_masks = len(masks_10fps)
+
+    # Fast list comprehension with bounds checking
+    return [masks_10fps[min(int(i / multiplier), num_masks - 1)]
+            for i in range(total_frames)]
+
+
 # read frame-wise masks
 # @timer_decorator
 def read_mask(mpath, length, size, flow_mask_dilates=8, mask_dilates=5):
