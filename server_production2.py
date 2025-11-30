@@ -44,6 +44,13 @@ SEGMENT_MERGE_GAP_FULL = int(os.getenv('SEGMENT_MERGE_GAP_FULL', '60'))
 # Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
 SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
+# Tail mask fill (replicate last non-empty mask to the end to avoid missed final seconds)
+TAIL_MASK_FILL = os.getenv('TAIL_MASK_FILL', '1').lower() in ('1', 'true', 'yes', 'on')
+try:
+    TAIL_MASK_MAX_SECONDS = float(os.getenv('TAIL_MASK_MAX_SECONDS', '2.0'))
+except Exception:
+    TAIL_MASK_MAX_SECONDS = 2.0
+
 # Configure paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(BASE_DIR, 'temp')
@@ -506,6 +513,20 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             total_frames = min_count
         all_masks = masks_full
 
+        # Optionally fill tail by replicating last non-empty mask up to a max duration
+        if TAIL_MASK_FILL and all_masks:
+            presence = [np.sum(m > 127) > 0 for m in all_masks]
+            if any(presence):
+                last_idx = max(i for i, p in enumerate(presence) if p)
+                if last_idx < (total_frames - 1):
+                    max_fill = min(int(round(original_fps * TAIL_MASK_MAX_SECONDS)), (total_frames - 1) - last_idx)
+                    if max_fill > 0:
+                        src = all_masks[last_idx]
+                        for k in range(1, max_fill + 1):
+                            # replicate mask (copy) to avoid aliasing surprises
+                            all_masks[last_idx + k] = src.copy()
+                        print(f"[SAM2] Tail fill: replicated last mask across {max_fill} frame(s) to cover video end")
+
         # --- 8. Validate masks and count coverage (in memory) ---
         self.update_state(state='PROCESSING', meta={'progress': 20, 'status': 'Validating masks'})
 
@@ -543,9 +564,19 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         max_gap=SEGMENT_MERGE_GAP_FULL,
                     )
 
+                # Convert inclusive end -> exclusive end and clamp to total_frames
+                if segments:
+                    segments = [
+                        (max(0, int(s)), min(int(e) + 1, total_frames), bb) for (s, e, bb) in segments
+                        if max(0, int(s)) < min(int(e) + 1, total_frames)
+                    ]
+                    # Ensure last segment reaches the very end for full coverage
+                    ls, le, lb = segments[-1]
+                    segments[-1] = (ls, total_frames, lb)
+
                 print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS)")
                 for idx, (start, end, bbox) in enumerate(segments):
-                    print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
+                    print(f"[SAM2]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
             else:
                 print(f"[SAM2] Detecting segments from 10fps masks...")
 
@@ -612,11 +643,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         import torch
         use_fp16 = torch.cuda.is_available()
 
-            print(f"[SAM2] ProPainter config:")
+        print(f"[SAM2] ProPainter config:")
         print(f"   - Segments: {len(segments)}")
         print(f"   - Workers: {SEGMENT_WORKERS}")
         print(f"   - FP16: {use_fp16}")
-            print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
+        print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
 
         # Crop all frames and masks to global crop region
         all_frames_cropped = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for f in all_frames]
@@ -705,11 +736,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         if frame is not None:
                             output_frames.append(frame)
 
-                # Trim padded outputs: keep only frames corresponding to [start_f, end_f)
-                # output_frames maps to [proc_start, proc_end); compute slice indices
-                keep_start = start_f - proc_start
-                keep_end = keep_start + (end_f - start_f)
-                if 0 <= keep_start <= len(output_frames) and 0 <= keep_end <= len(output_frames):
+                # Trim padded outputs
+                # output_frames maps to [proc_start, proc_end)
+                keep_start = max(0, start_f - proc_start)
+                # For the last segment, keep tail padding to ensure end coverage
+                if seg_idx == (len(segments) - 1):
+                    keep_end = len(output_frames)
+                else:
+                    keep_end = min(len(output_frames), keep_start + (end_f - start_f))
+                if keep_start < keep_end:
                     output_frames = output_frames[keep_start:keep_end]
 
                 return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h)
