@@ -21,6 +21,12 @@ from crop_utils import calculate_crop_region
 # Number of parallel segment workers
 SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '4'))
 
+# Segment detection sensitivity (10fps domain)
+# Higher SEGMENT_POS_TOLERANCE and SEGMENT_MERGE_GAP_10FPS = less sensitive (fewer segments)
+SEGMENT_POS_TOLERANCE = int(os.getenv('SEGMENT_POS_TOLERANCE', '80'))
+SEGMENT_MIN_LEN_10FPS = int(os.getenv('SEGMENT_MIN_LEN_10FPS', '10'))
+SEGMENT_MERGE_GAP_10FPS = int(os.getenv('SEGMENT_MERGE_GAP_10FPS', '12'))
+
 # Configure paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(BASE_DIR, 'temp')
@@ -510,13 +516,17 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         segments_10fps = detect_segments_from_masks(
             masks_10fps_dir,
-            position_tolerance=50,
-            min_segment_length=3,
+            position_tolerance=SEGMENT_POS_TOLERANCE,
+            min_segment_length=SEGMENT_MIN_LEN_10FPS,
             max_segments=80
         )
 
         if len(segments_10fps) > 1:
-            segments_10fps = merge_adjacent_segments(segments_10fps, position_tolerance=50, max_gap=6)  # 6 frames at 10fps = ~60 frames at full fps
+            segments_10fps = merge_adjacent_segments(
+                segments_10fps,
+                position_tolerance=SEGMENT_POS_TOLERANCE,
+                max_gap=SEGMENT_MERGE_GAP_10FPS
+            )
 
         # Scale segments from 10fps to full FPS
         fps_ratio = original_fps / 10.0
