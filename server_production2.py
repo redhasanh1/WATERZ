@@ -51,6 +51,19 @@ try:
 except Exception:
     TAIL_MASK_MAX_SECONDS = 2.0
 
+# Fill short internal mask gaps (replicate nearest non-empty mask across brief gaps)
+FILL_MASK_GAPS = os.getenv('FILL_MASK_GAPS', '1').lower() in ('1', 'true', 'yes', 'on')
+try:
+    MASK_GAP_MAX_SECONDS = float(os.getenv('MASK_GAP_MAX_SECONDS', '1.0'))
+except Exception:
+    MASK_GAP_MAX_SECONDS = 1.0
+
+# Per-segment crop padding ratio (increase to avoid missing moving object near crop edges)
+try:
+    SEGMENT_CROP_PAD_RATIO = float(os.getenv('SEGMENT_CROP_PAD_RATIO', '0.25'))
+except Exception:
+    SEGMENT_CROP_PAD_RATIO = 0.25
+
 # Configure paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(BASE_DIR, 'temp')
@@ -513,6 +526,29 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             total_frames = min_count
         all_masks = masks_full
 
+        # Optionally fill short internal gaps by replicating nearest non-empty mask
+        if FILL_MASK_GAPS and all_masks:
+            max_gap = int(round(original_fps * MASK_GAP_MAX_SECONDS))
+            presence = [np.sum(m > 127) > 0 for m in all_masks]
+            i = 0
+            while i < len(presence):
+                if not presence[i]:
+                    # start of a gap
+                    j = i
+                    while j < len(presence) and not presence[j]:
+                        j += 1
+                    gap_len = j - i
+                    if gap_len > 0 and gap_len <= max_gap:
+                        # choose source: prefer previous non-empty, fallback to next
+                        src_idx = i - 1 if i - 1 >= 0 and presence[i - 1] else (j if j < len(presence) else None)
+                        if src_idx is not None and 0 <= src_idx < len(all_masks):
+                            src = all_masks[src_idx]
+                            for k in range(i, j):
+                                all_masks[k] = src.copy()
+                    i = j
+                else:
+                    i += 1
+
         # Optionally fill tail by replicating last non-empty mask up to a max duration
         if TAIL_MASK_FILL and all_masks:
             presence = [np.sum(m > 127) > 0 for m in all_masks]
@@ -736,18 +772,8 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         if frame is not None:
                             output_frames.append(frame)
 
-                # Trim padded outputs
-                # output_frames maps to [proc_start, proc_end)
-                keep_start = max(0, start_f - proc_start)
-                # For the last segment, keep tail padding to ensure end coverage
-                if seg_idx == (len(segments) - 1):
-                    keep_end = len(output_frames)
-                else:
-                    keep_end = min(len(output_frames), keep_start + (end_f - start_f))
-                if keep_start < keep_end:
-                    output_frames = output_frames[keep_start:keep_end]
-
-                return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h)
+                # Do not trim; return full padded outputs with timing info
+                return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
 
             except Exception as e:
                 print(f"[ERROR] Segment {seg_idx} failed: {e}")
@@ -839,13 +865,22 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
                 if seg_idx not in segment_results:
                     continue
-                _, output_frames, crop_info = segment_results[seg_idx]
+                # Unpack padded output and timing info
+                if segment_results[seg_idx] is None:
+                    continue
+                try:
+                    _, output_frames, crop_info, time_info = segment_results[seg_idx]
+                except ValueError:
+                    # Backward-compat (if timing info missing), fall back to original range
+                    _, output_frames, crop_info = segment_results[seg_idx]
+                    time_info = (start_f, end_f)
                 if output_frames is None or crop_info is None:
                     continue
 
                 seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = crop_info
+                proc_start, proc_end = time_info
 
-                for i, frame_idx in enumerate(range(start_f, end_f)):
+                for i, frame_idx in enumerate(range(proc_start, proc_end)):
                     if frame_idx < len(final_cropped_frames) and i < len(output_frames):
                         # Paste segment result back into cropped frame
                         final_cropped_frames[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w] = output_frames[i]
