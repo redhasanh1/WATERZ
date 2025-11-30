@@ -439,54 +439,54 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             except Exception:
                 return p
 
-        wsl_video = _to_wsl_path(video_path)
-        wsl_masks = _to_wsl_path(masks_dir)
-
-        # Prefer point prompt for higher-quality masks (fallback to bbox via SAM2_PROMPT_MODE=bbox)
+        # Prefer WSL Celery worker (shared Redis) for mask generation using non-blocking chain
+        from celery import signature, chain
         prompt_mode = os.getenv('SAM2_PROMPT_MODE', 'point').strip().lower()
         if prompt_mode == 'point':
             cx = int(np.clip(np.mean(xy[:, 0]), 0, (video_width or width) - 1))
             cy = int(np.clip(np.mean(xy[:, 1]), 0, (video_height or height) - 1))
-            prompt_flag = f'--point {cx},{cy}'
             print(f"[SAM2] Using POINT prompt: ({cx},{cy})")
+            point_arg = (cx, cy)
+            bbox_arg = None
         else:
-            prompt_flag = f'--bbox {bbox_str}'
             print(f"[SAM2] Using BBOX prompt: {bbox_str}")
+            point_arg = None
+            bbox_arg = [int(x) for x in bbox]
 
-        wsl_cmd = (
-            f'cd /mnt/d/watermarkz && '
-            f'source venv_wsl2/bin/activate && '
-            f'python sam2_track_wsl2.py "{wsl_video}" "{wsl_masks}" '
-            f'{prompt_flag} --frame-idx {frame_index_full}'
-        )
-        print(f"[SAM2-WSL2] Running: wsl -e bash -c \"{wsl_cmd}\"")
+        if os.getenv('USE_WSL_CELERY', '1').lower() in ('1','true','yes','on'):
+            print(f"[SAM2] Dispatching mask generation to WSL Celery worker (chain)…")
+            # Optional: do 10fps conversion on Windows side for speed (avoid requiring ffmpeg in WSL)
+            track_src = video_path
+            if os.getenv('SAM2_TRACK_10FPS', '0').lower() in ('1','true','yes','on'):
+                video_10fps_path = os.path.join(TEMP_DIR, f"{video_id}_tracking_10fps.mp4")
+                if not os.path.exists(video_10fps_path):
+                    print(f"[SAM2] Creating 10fps tracking video on Windows for WSL speed…")
+                    convert_to_10fps_gpu(video_path, video_10fps_path)
+                else:
+                    print(f"[SAM2] Using cached 10fps tracking video: {video_10fps_path}")
+                track_src = video_10fps_path
 
-        result = subprocess.run(
-            ['wsl', '-e', 'bash', '-c', wsl_cmd],
-            capture_output=True,
-            text=True,
-            timeout=600  # 10 minute timeout
-        )
+            s1 = signature('sam2.generate_masks_fullfps', args=[track_src, masks_dir, prompt_mode, point_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
+            s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='sam2')
+            # Replace current task with the chained workflow to avoid blocking (.get) inside a task
+            raise self.replace(chain(s1, s2))
 
-        if result.returncode != 0:
-            print(f"[SAM2-WSL2] STDERR: {result.stderr}")
-            raise RuntimeError(f"WSL2 SAM2 tracking failed: {result.stderr}")
-
-        print(f"[SAM2-WSL2] STDOUT: {result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout}")
-
-        # Parse result JSON from output
-        try:
-            # Find the [RESULT] JSON line
-            for line in result.stdout.split('\n'):
-                if '[RESULT]' in line:
-                    json_str = line.split('[RESULT]')[1].strip()
-                    sam2_result = json.loads(json_str)
-                    print(f"[SAM2-WSL2] Result: {sam2_result}")
-                    break
+        # If using WSL worker pattern (non-blocking), delegate continuation via chain
+        use_wsl_celery = os.getenv('USE_WSL_CELERY', '1').lower() in ('1','true','yes','on')
+        if use_wsl_celery:
+            from celery import signature, chain
+            prompt_mode = os.getenv('SAM2_PROMPT_MODE', 'point').strip().lower()
+            if prompt_mode == 'point':
+                cx = int(np.clip(np.mean(xy[:, 0]), 0, (video_width or width) - 1))
+                cy = int(np.clip(np.mean(xy[:, 1]), 0, (video_height or height) - 1))
+                point_arg = (cx, cy)
+                bbox_arg = None
             else:
-                print(f"[SAM2-WSL2] Warning: No [RESULT] JSON found in output")
-        except Exception as e:
-            print(f"[SAM2-WSL2] Warning: Could not parse result JSON: {e}")
+                point_arg = None
+                bbox_arg = [int(x) for x in bbox]
+            s1 = signature('sam2.generate_masks_fullfps', args=[video_path, masks_dir, prompt_mode, point_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
+            s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='sam2')
+            raise self.replace(chain(s1, s2))
 
         # Read masks from output directory (FULL FPS)
         mask_files = sorted(glob.glob(os.path.join(masks_dir, "*.png")))
@@ -972,7 +972,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         print(f"[ERROR] SAM2 task failed: {e}")
         import traceback
         traceback.print_exc()
-        self.update_state(state='FAILURE', meta={'error': str(e)})
+        # Do not call update_state with FAILURE meta (Celery will store proper exception info)
         raise
 
 
@@ -1044,3 +1044,256 @@ def health():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
+
+
+#============================================================================
+# CONTINUATION TASK (runs after WSL mask generation)
+#============================================================================
+
+@celery.task(bind=True, name='watermark._continue_after_masks')
+def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=None, video_width=None, video_height=None, frame_index=0, api_base=None):
+    try:
+        import cv2, glob, numpy as np, os, json
+        from watermark import expand_masks_10fps  # not used but keep import parity
+        from urllib.parse import urljoin
+
+        if not sam2_result or not isinstance(sam2_result, dict):
+            raise RuntimeError(f"Invalid sam2_result: {sam2_result}")
+        masks_dir = sam2_result.get('masks_dir') or os.path.join(TEMP_DIR, f"{video_id}_sam2_masks")
+        if not os.path.isdir(masks_dir):
+            raise RuntimeError(f"Masks directory missing: {masks_dir}")
+
+        # Video metadata
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise RuntimeError(f"Failed to open video: {video_path}")
+        original_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames_original = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+
+        # Read masks
+        mask_files = sorted(glob.glob(os.path.join(masks_dir, "*.png")))
+        if not mask_files:
+            raise RuntimeError(f"No masks generated in {masks_dir}")
+        masks_full = [cv2.imread(mf, cv2.IMREAD_GRAYSCALE) for mf in mask_files]
+        masks_full = [m for m in masks_full if m is not None]
+
+        # Extract frames
+        all_frames = []
+        cap = cv2.VideoCapture(video_path)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            all_frames.append(frame)
+        cap.release()
+        total_frames = len(all_frames)
+
+        # Align and expand 10fps masks if needed
+        # If WSL did 10fps tracking (returned fps ~10), expand to full-FPS mask timeline
+        track_fps = None
+        try:
+            track_fps = float(sam2_result.get('fps')) if isinstance(sam2_result, dict) else None
+        except Exception:
+            track_fps = None
+        if track_fps and track_fps > 0 and abs(track_fps - 10.0) < 1.0 and total_frames > len(masks_full) >= 2:
+            print(f"[SAM2] Expanding {len(masks_full)} masks (tracking @ ~10fps) to {total_frames} full-FPS frames…")
+            all_masks = expand_masks_10fps(masks_full, total_frames, original_fps)
+        else:
+            # Fallback: strict alignment (truncate to shortest)
+            if len(masks_full) != total_frames:
+                min_count = min(len(masks_full), total_frames)
+                masks_full = masks_full[:min_count]
+                all_frames = all_frames[:min_count]
+                total_frames = min_count
+            all_masks = masks_full
+
+        # Fill short internal gaps
+        if FILL_MASK_GAPS and all_masks:
+            presence = [np.sum(m > 127) > 0 for m in all_masks]
+            max_gap = int(round(original_fps * MASK_GAP_MAX_SECONDS))
+            i = 0
+            while i < len(presence):
+                if not presence[i]:
+                    j = i
+                    while j < len(presence) and not presence[j]:
+                        j += 1
+                    gap_len = j - i
+                    if 0 < gap_len <= max_gap:
+                        src_idx = i - 1 if i - 1 >= 0 and presence[i - 1] else (j if j < len(presence) else None)
+                        if src_idx is not None:
+                            src = all_masks[src_idx]
+                            for k in range(i, j):
+                                all_masks[k] = src.copy()
+                    i = j
+                else:
+                    i += 1
+
+        # Tail fill
+        if TAIL_MASK_FILL and all_masks:
+            presence = [np.sum(m > 127) > 0 for m in all_masks]
+            if any(presence):
+                last_idx = max(i for i, p in enumerate(presence) if p)
+                if last_idx < (total_frames - 1):
+                    max_fill = min(int(round(original_fps * TAIL_MASK_MAX_SECONDS)), (total_frames - 1) - last_idx)
+                    if max_fill > 0:
+                        src = all_masks[last_idx]
+                        for k in range(1, max_fill + 1):
+                            all_masks[last_idx + k] = src.copy()
+                        print(f"[SAM2] Tail fill: replicated last mask across {max_fill} frame(s) to cover video end")
+
+        # The rest of pipeline identical to main task from global crop → encode
+        # Calculate global crop
+        min_x, min_y = width, height
+        max_x, max_y = 0, 0
+        for mask in all_masks:
+            coords = cv2.findNonZero(mask)
+            if coords is not None:
+                x, y, w, h = cv2.boundingRect(coords)
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x + w)
+                max_y = max(max_y, y + h)
+        global_bbox = [min_x, min_y, max_x, max_y] if max_x > min_x and max_y > min_y else [0, 0, width, height]
+        crop_x, crop_y, crop_w, crop_h = calculate_crop_region(global_bbox, width, height, padding_ratio=0.2, min_size=128)
+
+        # Prepare arrays
+        all_frames_cropped = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for f in all_frames]
+        all_masks_cropped = [m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for m in all_masks]
+
+        # Detect segments (full-FPS default)
+        detections_per_frame = []
+        for m in all_masks:
+            coords = cv2.findNonZero(m)
+            if coords is not None:
+                x, y, w, h = cv2.boundingRect(coords)
+                detections_per_frame.append((x, y, x + w, y + h))
+            else:
+                detections_per_frame.append(None)
+        segments = detect_segments(detections_per_frame, position_tolerance=SEGMENT_POS_TOLERANCE, min_segment_length=SEGMENT_MIN_LEN_FULL)
+        if len(segments) > 1:
+            segments = merge_adjacent_segments(segments, position_tolerance=SEGMENT_POS_TOLERANCE, max_gap=SEGMENT_MERGE_GAP_FULL)
+        # Convert inclusive end → exclusive
+        if segments:
+            segments = [(max(0,int(s)), min(int(e)+1, total_frames), bb) for (s,e,bb) in segments if max(0,int(s))<min(int(e)+1,total_frames)]
+            ls, le, lb = segments[-1]
+            segments[-1] = (ls, total_frames, lb)
+
+        # Now reuse the same merging + ProPainter logic as the main task
+        # For brevity, call back into process_sam2_interactive_task's internal pipeline is not trivial; so inline minimal subset
+        # We re-use the same process_segment closure pattern
+
+        # Settings
+        import torch
+        use_fp16 = torch.cuda.is_available()
+        faster_propainter_pipeline = get_propainter_pipeline()
+        output_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_output")
+        os.makedirs(output_dir, exist_ok=True)
+
+        segment_results = {}
+
+        def process_segment_local(seg_idx, start_f, end_f, seg_bbox):
+            duration = end_f - start_f
+            seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
+                [seg_bbox[0] - crop_x, seg_bbox[1] - crop_y, seg_bbox[2] - crop_x, seg_bbox[3] - crop_y],
+                crop_w, crop_h, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+            )
+            movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
+            if movement < 10:
+                neighbor_length, subvideo_length = 2, 30
+            else:
+                neighbor_length, subvideo_length = 3, 60
+            pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
+            pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
+            proc_start = start_f - pad_left
+            proc_end = end_f + pad_right
+            seg_frames = [np.ascontiguousarray(all_frames_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]) for i in range(proc_start, proc_end) if i < len(all_frames_cropped)]
+            seg_masks = [np.ascontiguousarray(all_masks_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]) for i in range(proc_start, proc_end) if i < len(all_masks_cropped)]
+            if not seg_frames or not seg_masks:
+                return seg_idx, None, None, (proc_start, proc_end)
+            seg_output_dir = os.path.join(output_dir, f"segment_{seg_idx}")
+            os.makedirs(seg_output_dir, exist_ok=True)
+            faster_propainter_pipeline(
+                video='dummy', mask='dummy', output=seg_output_dir,
+                resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
+                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                raft_iter=10, mode="video_inpainting", save_fps=int(original_fps), save_frames=True,
+                fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks
+            )
+            frames_subdir = None
+            for d in os.listdir(seg_output_dir):
+                candidate = os.path.join(seg_output_dir, d, 'frames')
+                if os.path.isdir(candidate):
+                    frames_subdir = candidate
+                    break
+            output_frames = []
+            if frames_subdir:
+                frame_files = sorted([f for f in os.listdir(frames_subdir) if f.endswith('.png')])
+                for ff in frame_files:
+                    fr = cv2.imread(os.path.join(frames_subdir, ff))
+                    if fr is not None:
+                        output_frames.append(fr)
+            return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
+
+        # Process segments sequentially to keep memory modest
+        for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments or [(0, total_frames, [0,0,width,height])]):
+            segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
+
+        # Merge
+        final_cropped_frames = [f.copy() for f in all_frames_cropped]
+        for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments or [(0, total_frames, [0,0,width,height])]):
+            if seg_idx not in segment_results:
+                continue
+            try:
+                _, output_frames, crop_info, time_info = segment_results[seg_idx]
+            except ValueError:
+                _, output_frames, crop_info = segment_results[seg_idx]
+                time_info = (start_f, end_f)
+            if output_frames is None or crop_info is None:
+                continue
+            seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = crop_info
+            proc_start, proc_end = time_info
+            for i, frame_idx in enumerate(range(proc_start, proc_end)):
+                if frame_idx < len(final_cropped_frames) and i < len(output_frames):
+                    final_cropped_frames[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w] = output_frames[i]
+
+        # Merge back to full res
+        final_frames = []
+        for i, orig_frame in enumerate(all_frames):
+            result_frame = orig_frame.copy()
+            if i < len(final_cropped_frames):
+                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[i]
+            final_frames.append(result_frame)
+
+        # Encode
+        output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
+        final_frames_dir = os.path.join(output_dir, 'final_frames')
+        os.makedirs(final_frames_dir, exist_ok=True)
+        for i, frame in enumerate(final_frames):
+            cv2.imwrite(os.path.join(final_frames_dir, f'{i:05d}.png'), frame)
+        ffmpeg_cmd = [
+            str(FFMPEG_EXE), '-y', '-framerate', str(int(original_fps)),
+            '-i', os.path.join(final_frames_dir, '%05d.png'),
+            '-i', video_path,
+            '-map', '0:v:0', '-map', '1:a:0?',
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-b:a', '192k', output_path
+        ]
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            raise RuntimeError(f"Video encoding failed: {result.stderr}")
+
+        return {
+            'status': 'success', 'video_id': video_id,
+            'video_path': video_path, 'output_path': output_path,
+            'total_frames': total_frames, 'masks_generated': len(all_masks), 'masks_expanded': len(all_masks),
+            'segments_processed': len(segments or []), 'width': width, 'height': height,
+            'fps': original_fps, 'pipeline': 'full_fps_segments', 'message': f'SAM2 pipeline complete! Processed {len(segments or [])} segment(s)'
+        }
+    except Exception as e:
+        print(f"[ERROR] Continue-after-masks task failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
