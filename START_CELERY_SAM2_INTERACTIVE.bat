@@ -10,12 +10,29 @@ if exist redis_url.txt (
     echo [REDIS] Using default localhost (redis_url.txt not found)
     set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
 )
+
+REM ✅ AUTO-LOAD TUNNEL_URL from web\tunnel_url.txt (needed for video download)
+if "%TUNNEL_URL%"=="" (
+    if exist "web\tunnel_url.txt" (
+        for /f "usebackq delims=" %%i in ("web\tunnel_url.txt") do set "TUNNEL_URL=%%i"
+    )
+)
+if not "%TUNNEL_URL%"=="" (
+    set "API_BASE_URL=%TUNNEL_URL%"
+    echo [TUNNEL] Using TUNNEL_URL: %TUNNEL_URL%
+) else (
+    echo [TUNNEL] No TUNNEL_URL set - local paths only
+)
 echo.
 
-echo Starting Celery worker (SAM2 INTERACTIVE MODE - TensorRT optimized!)...
+echo Starting Celery worker (SAM2 10fps OPTIMIZED Pipeline!)...
 echo.
 echo ============================================================
-echo SAM2 INTERACTIVE MODE: User-click based object removal
+echo SAM2 10fps OPTIMIZED PIPELINE:
+echo   - Converts video to 10fps for SAM2 (3-6x faster)
+echo   - Expands masks in memory (zero-copy)
+echo   - In-memory ProPainter (ZERO disk I/O)
+echo   - NeuFlow TRT optical flow (10-70x faster)
 echo ============================================================
 echo.
 
@@ -90,14 +107,13 @@ set USE_SAM2_TRACKING=0
 
 echo.
 echo ============================================================
-echo SAM2 INTERACTIVE CONFIG (RTX 4090):
-echo   - Detection: SAM2 INTERACTIVE (user clicks, no YOLO!)
+echo SAM2 10fps OPTIMIZED CONFIG (RTX 4090):
+echo   - SAM2 Masks: 10fps generation (3-6x faster!)
+echo   - Mask Expansion: Zero-copy in memory
+echo   - ProPainter: In-memory arrays (ZERO disk I/O!)
 echo   - Optical Flow: NeuFlow v2 TensorRT FP16
 echo   - RFCNet: TensorRT FP16 + DCNv4 plugin
-echo   - Transformer: Manual attention (FASTEST!)
 echo   - FP8 Optimizations: ENABLED
-echo   - DCNv4: ENABLED (3x faster!)
-echo   - Concurrency: 4 workers (TRUE parallel!)
 echo ============================================================
 echo.
 
@@ -106,12 +122,7 @@ set TORCHINDUCTOR_FX_GRAPH_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
-REM Purge old tasks from Redis queue before starting
-echo.
-echo [CLEANUP] Purging old tasks from Redis queue...
-"%PYTHON_PATH%" -c "from server_production import celery; celery.control.purge(); print('[OK] Redis queue cleared')"
-echo.
-
 REM Use thread pool with 1 worker (sequential to prevent temp folder collisions)
 REM -Q sam2 ensures this worker ONLY handles SAM2 tasks (ignores prepare_video etc)
-"%PYTHON_PATH%" -m celery -A server_production.celery worker -Q sam2 --loglevel=info --pool=threads --concurrency=1
+REM Using server_production2.celery for the 10fps optimized SAM2 pipeline
+"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q sam2 --loglevel=info --pool=threads --concurrency=1

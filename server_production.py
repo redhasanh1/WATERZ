@@ -6086,10 +6086,27 @@ def sam2_process_video():
         # Create a unique job ID for this SAM2 processing request
         job_id = f"sam2_{task_id}_{uuid.uuid4().hex[:8]}"
 
+        # Get public base URL for video download (same pattern as YOLO from d5443f3d)
+        def _current_public_base():
+            env_url = os.getenv('TUNNEL_URL')
+            if env_url:
+                return env_url.strip()
+            try:
+                tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
+                if os.path.exists(tunnel_file):
+                    with open(tunnel_file, 'r') as f:
+                        return f.read().strip()
+            except Exception:
+                pass
+            return 'http://localhost:9000'
+
+        api_base = _current_public_base()
+
         # Send task to SAM2 worker queue with points data
         result = celery.send_task(
             'watermark.process_sam2_interactive',
             args=[video_path, task_id, points, video_width, video_height, frame_index],
+            kwargs={'api_base': api_base},  # Pass Railway URL for video download
             task_id=job_id,
             queue='sam2' # Explicitly route to the SAM2 worker queue
         )
