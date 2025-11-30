@@ -21,6 +21,10 @@ from crop_utils import calculate_crop_region
 # Number of parallel segment workers
 SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '4'))
 
+# Temporal padding (in full-FPS frames) around each detected segment
+# Helps prevent reappearance at segment boundaries by giving ProPainter context
+SEGMENT_TEMPORAL_PAD = int(os.getenv('SEGMENT_TEMPORAL_PAD', '5'))
+
 # Inpainting mask dilation (higher = stronger removal, more context fill)
 SAM2_MASK_DILATION = int(os.getenv('SAM2_MASK_DILATION', '6'))
 
@@ -618,12 +622,18 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 else:
                     neighbor_length, subvideo_length = 2, 40
 
-                print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{end_f} ({duration}f), crop={seg_crop_w}x{seg_crop_h}")
+                # Temporal padding for context
+                pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
+                pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
+                proc_start = start_f - pad_left
+                proc_end = end_f + pad_right
+
+                print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{end_f} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=±{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
 
                 # Extract segment frames and masks (double-cropped: global + segment)
                 seg_frames = []
                 seg_masks = []
-                for i in range(start_f, end_f):
+                for i in range(proc_start, proc_end):
                     if i < len(all_frames_cropped):
                         seg_frame = all_frames_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                         seg_frames.append(np.ascontiguousarray(seg_frame))
@@ -673,6 +683,13 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         frame = cv2.imread(os.path.join(frames_subdir, ff))
                         if frame is not None:
                             output_frames.append(frame)
+
+                # Trim padded outputs: keep only frames corresponding to [start_f, end_f)
+                # output_frames maps to [proc_start, proc_end); compute slice indices
+                keep_start = start_f - proc_start
+                keep_end = keep_start + (end_f - start_f)
+                if 0 <= keep_start <= len(output_frames) and 0 <= keep_end <= len(output_frames):
+                    output_frames = output_frames[keep_start:keep_end]
 
                 return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h)
 
