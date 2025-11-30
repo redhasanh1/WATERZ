@@ -12,6 +12,14 @@ import json
 from flask import Flask, request, jsonify
 from celery import Celery
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Segment detection for parallel processing
+from segment_detector import detect_segments_from_masks, merge_adjacent_segments
+from crop_utils import calculate_crop_region
+
+# Number of parallel segment workers
+SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '4'))
 
 # Configure paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -496,34 +504,170 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         if masks_with_content == 0:
             raise RuntimeError("No mask content generated - SAM2 tracking failed")
 
-        # --- 9. Make arrays contiguous for GPU processing ---
-        print(f"[SAM2] Preparing arrays for ProPainter...")
-        all_frames_contiguous = [np.ascontiguousarray(f) for f in all_frames]
-        all_masks_contiguous = [np.ascontiguousarray(m) for m in all_masks]
+        # --- 9. Detect segments from 10fps masks (for parallel processing) ---
+        self.update_state(state='PROCESSING', meta={'progress': 22, 'status': 'Detecting segments'})
+        print(f"[SAM2] Detecting segments from 10fps masks...")
+
+        segments_10fps = detect_segments_from_masks(
+            masks_10fps_dir,
+            position_tolerance=50,
+            min_segment_length=3,
+            max_segments=80
+        )
+
+        if len(segments_10fps) > 1:
+            segments_10fps = merge_adjacent_segments(segments_10fps, position_tolerance=50, max_gap=6)  # 6 frames at 10fps = ~60 frames at full fps
+
+        # Scale segments from 10fps to full FPS
+        fps_ratio = original_fps / 10.0
+        segments = []
+        for start_10fps, end_10fps, bbox in segments_10fps:
+            start_full = int(start_10fps * fps_ratio)
+            end_full = min(int((end_10fps + 1) * fps_ratio), total_frames)  # +1 because end is exclusive
+            segments.append((start_full, end_full, bbox))
+
+        print(f"[SAM2] Detected {len(segments)} segments (scaled to full FPS)")
+        for idx, (start, end, bbox) in enumerate(segments):
+            print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
+
+        # --- 10. Calculate global crop region from all masks ---
+        print(f"[SAM2] Calculating global crop region...")
+        min_x, min_y = width, height
+        max_x, max_y = 0, 0
+
+        for mask in all_masks:
+            coords = cv2.findNonZero(mask)
+            if coords is not None:
+                x, y, w, h = cv2.boundingRect(coords)
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x + w)
+                max_y = max(max_y, y + h)
+
+        if max_x > min_x and max_y > min_y:
+            global_bbox = [min_x, min_y, max_x, max_y]
+        else:
+            global_bbox = [0, 0, width, height]
+
+        crop_x, crop_y, crop_w, crop_h = calculate_crop_region(global_bbox, width, height, padding_ratio=0.2, min_size=128)
+        print(f"[SAM2] Global crop: {crop_x},{crop_y} {crop_w}x{crop_h}")
 
         # Create output directory for ProPainter
         output_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_output")
         os.makedirs(output_dir, exist_ok=True)
 
-        # --- 10. Run ProPainter with IN-MEMORY arrays (ZERO disk I/O) ---
-        print(f"[SAM2] Running ProPainter with TensorRT NeuFlow (in-memory)...")
-        self.update_state(state='PROCESSING', meta={'progress': 30, 'status': 'Running ProPainter'})
+        # --- 11. Process segments with ProPainter ---
+        self.update_state(state='PROCESSING', meta={'progress': 30, 'status': f'Processing {len(segments)} segments'})
 
-        try:
-            faster_propainter_pipeline = get_propainter_pipeline()
-            import torch
-            use_fp16 = torch.cuda.is_available()
+        faster_propainter_pipeline = get_propainter_pipeline()
+        import torch
+        use_fp16 = torch.cuda.is_available()
 
-            print(f"[SAM2] ProPainter config:")
-            print(f"   - Frames: {len(all_frames_contiguous)} in memory")
-            print(f"   - Masks: {len(all_masks_contiguous)} in memory")
-            print(f"   - FP16: {use_fp16}")
-            print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
+        print(f"[SAM2] ProPainter config:")
+        print(f"   - Segments: {len(segments)}")
+        print(f"   - Workers: {SEGMENT_WORKERS}")
+        print(f"   - FP16: {use_fp16}")
+        print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
 
-            # Run ProPainter with in-memory arrays - SAME as local test script!
+        # Crop all frames and masks to global crop region
+        all_frames_cropped = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for f in all_frames]
+        all_masks_cropped = [m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for m in all_masks]
+
+        # Store segment results for merging
+        segment_results = {}
+
+        def process_segment(seg_idx, start_f, end_f, seg_bbox):
+            """Process a single segment with ProPainter"""
+            try:
+                duration = end_f - start_f
+                # Calculate segment-specific crop within the global crop
+                seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
+                    [seg_bbox[0] - crop_x, seg_bbox[1] - crop_y,
+                     seg_bbox[2] - crop_x, seg_bbox[3] - crop_y],
+                    crop_w, crop_h, padding_ratio=0.15, min_size=128
+                )
+
+                # Determine optimization level based on movement
+                movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
+                if movement < 10:
+                    neighbor_length, subvideo_length = 2, 20
+                else:
+                    neighbor_length, subvideo_length = 2, 40
+
+                print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{end_f} ({duration}f), crop={seg_crop_w}x{seg_crop_h}")
+
+                # Extract segment frames and masks (double-cropped: global + segment)
+                seg_frames = []
+                seg_masks = []
+                for i in range(start_f, end_f):
+                    if i < len(all_frames_cropped):
+                        seg_frame = all_frames_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                        seg_frames.append(np.ascontiguousarray(seg_frame))
+                    if i < len(all_masks_cropped):
+                        seg_mask = all_masks_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                        seg_masks.append(np.ascontiguousarray(seg_mask))
+
+                if not seg_frames or not seg_masks:
+                    return seg_idx, None, None
+
+                # Create segment output directory
+                seg_output_dir = os.path.join(output_dir, f"segment_{seg_idx}")
+                os.makedirs(seg_output_dir, exist_ok=True)
+
+                # Run ProPainter on segment
+                faster_propainter_pipeline(
+                    video='dummy',
+                    mask='dummy',
+                    output=seg_output_dir,
+                    resize_ratio=1.0,
+                    mask_dilation=4,
+                    ref_stride=15,
+                    neighbor_length=neighbor_length,
+                    subvideo_length=subvideo_length,
+                    raft_iter=10,
+                    mode="video_inpainting",
+                    save_fps=int(original_fps),
+                    save_frames=True,
+                    fp16=use_fp16,
+                    use_cached_models=True,
+                    frames_array=seg_frames,
+                    masks_array=seg_masks
+                )
+
+                # Load output frames
+                output_frames = []
+                frames_subdir = None
+                for d in os.listdir(seg_output_dir):
+                    candidate = os.path.join(seg_output_dir, d, 'frames')
+                    if os.path.isdir(candidate):
+                        frames_subdir = candidate
+                        break
+
+                if frames_subdir:
+                    frame_files = sorted([f for f in os.listdir(frames_subdir) if f.endswith('.png')])
+                    for ff in frame_files:
+                        frame = cv2.imread(os.path.join(frames_subdir, ff))
+                        if frame is not None:
+                            output_frames.append(frame)
+
+                return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h)
+
+            except Exception as e:
+                print(f"[ERROR] Segment {seg_idx} failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return seg_idx, None, None
+
+        # Process segments (sequentially for GPU, parallel prep could be added)
+        if len(segments) <= 1:
+            # Single segment - process entire video as one
+            print(f"[SAM2] Processing as single segment...")
+            all_frames_contiguous = [np.ascontiguousarray(f) for f in all_frames_cropped]
+            all_masks_contiguous = [np.ascontiguousarray(m) for m in all_masks_cropped]
+
             faster_propainter_pipeline(
-                video=video_path,  # Used for metadata only
-                mask='dummy_mask',  # Not used when masks_array provided
+                video=video_path,
+                mask='dummy_mask',
                 output=output_dir,
                 resize_ratio=1.0,
                 mask_dilation=4,
@@ -535,37 +679,84 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 save_fps=int(original_fps),
                 save_frames=True,
                 fp16=use_fp16,
-                use_cached_models=True,  # Reuse loaded models
-                frames_array=all_frames_contiguous,  # Direct memory input (skips disk I/O!)
+                use_cached_models=True,
+                frames_array=all_frames_contiguous,
                 masks_array=all_masks_contiguous
             )
 
-            print(f"[SAM2] ProPainter complete!")
-        except Exception as e:
-            print(f"[ERROR] ProPainter failed: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
-
-        # --- 11. Find ProPainter output video ---
-        self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Finding output'})
-
-        propainter_output_video = None
-        for root, dirs, files in os.walk(output_dir):
-            for file in files:
-                if file == 'inpaint_out.mp4':
-                    propainter_output_video = os.path.join(root, file)
+            # Find output frames
+            final_cropped_frames = []
+            for root, dirs, files in os.walk(output_dir):
+                if os.path.basename(root) == 'frames':
+                    frame_files = sorted([f for f in files if f.endswith('.png')])
+                    for ff in frame_files:
+                        frame = cv2.imread(os.path.join(root, ff))
+                        if frame is not None:
+                            final_cropped_frames.append(frame)
                     break
-            if propainter_output_video:
-                break
 
-        if not propainter_output_video or not os.path.exists(propainter_output_video):
-            raise RuntimeError(f"ProPainter output not found in {output_dir}")
+        else:
+            # Multiple segments - process each and merge
+            print(f"[SAM2] Processing {len(segments)} segments...")
 
-        print(f"[SAM2] ProPainter output: {propainter_output_video}")
+            for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                progress = 30 + int((seg_idx / len(segments)) * 40)
+                self.update_state(state='PROCESSING', meta={
+                    'progress': progress,
+                    'status': f'Processing segment {seg_idx+1}/{len(segments)}'
+                })
 
-        # --- 12. Merge audio from original video ---
-        print(f"[SAM2] Merging audio from original video...")
+                clear_gpu_memory()
+                result = process_segment(seg_idx, start_f, end_f, seg_bbox)
+                segment_results[seg_idx] = result
+
+            # --- 12. Merge segments back to cropped frames ---
+            print(f"[SAM2] Merging {len(segments)} segments back...")
+            self.update_state(state='PROCESSING', meta={'progress': 75, 'status': 'Merging segments'})
+
+            # Start with original cropped frames
+            final_cropped_frames = [f.copy() for f in all_frames_cropped]
+
+            for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                if seg_idx not in segment_results:
+                    continue
+                _, output_frames, crop_info = segment_results[seg_idx]
+                if output_frames is None or crop_info is None:
+                    continue
+
+                seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = crop_info
+
+                for i, frame_idx in enumerate(range(start_f, end_f)):
+                    if frame_idx < len(final_cropped_frames) and i < len(output_frames):
+                        # Paste segment result back into cropped frame
+                        final_cropped_frames[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w] = output_frames[i]
+
+        # --- 13. Merge cropped frames back to full resolution ---
+        print(f"[SAM2] Merging to full resolution...")
+        self.update_state(state='PROCESSING', meta={'progress': 78, 'status': 'Merging to full resolution'})
+
+        final_frames = []
+        for i, orig_frame in enumerate(all_frames):
+            result_frame = orig_frame.copy()
+            if i < len(final_cropped_frames):
+                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[i]
+            final_frames.append(result_frame)
+
+        # --- 14. Encode final video from frames ---
+        print(f"[SAM2] Encoding final video ({len(final_frames)} frames)...")
+        self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Encoding video'})
+
+        # Save frames temporarily for FFmpeg
+        final_frames_dir = os.path.join(output_dir, 'final_frames')
+        os.makedirs(final_frames_dir, exist_ok=True)
+
+        for i, frame in enumerate(final_frames):
+            cv2.imwrite(os.path.join(final_frames_dir, f'{i:05d}.png'), frame)
+
+        print(f"[SAM2] Saved {len(final_frames)} final frames")
+
+        # --- 15. Encode final video from frames with audio ---
+        print(f"[SAM2] Encoding final video with audio...")
         self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Encoding final video'})
 
         output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
@@ -573,13 +764,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         ffmpeg_cmd = [
             str(FFMPEG_EXE),
             '-y',
-            '-i', propainter_output_video,
+            '-framerate', str(int(original_fps)),
+            '-i', os.path.join(final_frames_dir, '%05d.png'),
             '-i', video_path,
             '-map', '0:v:0',
             '-map', '1:a:0?',
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
             '-crf', '18',
+            '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
             '-b:a', '192k',
             output_path
@@ -592,9 +785,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         print(f"[SAM2] Final video: {output_path}")
 
-        # --- 13. Cleanup temp files ---
+        # --- 16. Cleanup temp files ---
         print(f"[SAM2] Cleaning up...")
-        for temp_path in [output_dir, video_10fps_path]:
+        for temp_path in [output_dir, video_10fps_path, masks_10fps_dir]:
             if isinstance(temp_path, str) and os.path.exists(temp_path):
                 if os.path.isdir(temp_path):
                     shutil.rmtree(temp_path)
@@ -613,11 +806,12 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             'total_frames': total_frames,
             'masks_generated': len(masks_10fps),
             'masks_expanded': len(all_masks),
+            'segments_processed': len(segments),
             'width': width,
             'height': height,
             'fps': original_fps,
-            'pipeline': '10fps_optimized',
-            'message': 'SAM2 10fps pipeline complete!'
+            'pipeline': '10fps_optimized_segments',
+            'message': f'SAM2 pipeline complete! Processed {len(segments)} segment(s)'
         }
 
     except Exception as e:
