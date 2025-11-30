@@ -182,11 +182,10 @@ def clear_gpu_memory():
         pass
 
 #============================================================================
-# CELERY TASK: SAM2 Interactive Mode - 10fps OPTIMIZED Pipeline
+# CELERY TASK: SAM2 Interactive Mode - FULL FPS Pipeline
 #
 # Optimizations:
-# - Convert video to 10fps for SAM2 (3-6x faster mask generation)
-# - Expand masks in memory using zero-copy references
+# - Use original FPS for SAM2 tracking (more accurate masks)
 # - Run ProPainter with in-memory arrays (ZERO disk I/O)
 # - Use NeuFlow TRT for optical flow (10-70x faster than RAFT)
 #============================================================================
@@ -194,11 +193,9 @@ def clear_gpu_memory():
 @celery.task(bind=True, name='watermark.process_sam2_interactive')
 def process_sam2_interactive_task(self, video_path, video_id=None, points=None, video_width=None, video_height=None, frame_index=0, api_base=None):
     """
-    SAM2 Interactive Mode - 10fps OPTIMIZED Pipeline:
+    SAM2 Interactive Mode - FULL FPS Pipeline:
     - Downloads video from remote
-    - Converts to 10fps for SAM2 (3-6x faster mask generation)
-    - Generates masks at 10fps using SAM2Tracker
-    - Expands masks to full FPS in memory (zero-copy)
+    - Generates masks at original FPS using SAM2Tracker (WSL2)
     - Runs ProPainter with in-memory arrays (zero disk I/O)
     - Returns processed video with audio
 
@@ -217,9 +214,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         import cv2
         import requests
         from urllib.parse import urljoin
-        from watermark import expand_masks_10fps
-
-        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Initializing SAM2 10fps Pipeline'})
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Initializing SAM2 FULL-FPS Pipeline'})
 
         if not _check_propainter_assets():
             raise RuntimeError("ProPainter assets missing")
@@ -296,32 +291,12 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         print(f"[SAM2] Video: {width}x{height} @ {original_fps}fps, {total_frames_original} frames")
 
-        # --- 3. Convert video to 10fps for SAM2 (3-6x faster mask generation) ---
-        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Converting to 10fps'})
-        video_10fps_path = os.path.join(TEMP_DIR, f"{video_id}_10fps.mp4")
+        # --- 3. Use original FPS for SAM2 (more accurate masks) ---
+        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Preparing full-FPS tracking'})
+        print(f"[SAM2] Using original FPS for SAM2 tracking (no 10fps conversion)")
 
-        if not os.path.exists(video_10fps_path):
-            print(f"[SAM2] Converting to 10fps for faster mask generation...")
-            video_10fps_path = convert_to_10fps_gpu(video_path, video_10fps_path)
-        else:
-            print(f"[SAM2] Using cached 10fps video: {video_10fps_path}")
-
-        # --- 4. Extract 10fps frames for SAM2 ---
-        self.update_state(state='PROCESSING', meta={'progress': 8, 'status': 'Extracting 10fps frames'})
-        print(f"[SAM2] Extracting 10fps frames...")
-        cap_10fps = cv2.VideoCapture(video_10fps_path)
-        frames_10fps = []
-        while True:
-            ret, frame = cap_10fps.read()
-            if not ret:
-                break
-            frames_10fps.append(frame)
-        cap_10fps.release()
-
-        print(f"[SAM2] Extracted {len(frames_10fps)} frames at 10fps (vs {total_frames_original} at original)")
-
-        # --- 5. Generate masks at 10fps using WSL2 SAM2 subprocess ---
-        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Generating masks with SAM2 (10fps via WSL2)'})
+        # --- 4. Generate masks at FULL FPS using WSL2 SAM2 subprocess ---
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Generating masks with SAM2 (FULL FPS via WSL2)'})
 
         if not points:
             raise ValueError("No points provided for mask generation.")
@@ -424,15 +399,13 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         bbox = [x1, y1, x2, y2]
         bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
 
-        # Convert frame_index from original FPS to 10fps
-        frame_index_10fps = int(frame_index / (original_fps / 10.0))
-        frame_index_10fps = min(frame_index_10fps, len(frames_10fps) - 1)
+        # Use original frame index directly (clip to bounds)
+        frame_index_full = min(max(int(frame_index), 0), total_frames_original - 1)
+        print(f"[SAM2] Tracking from bbox {bbox} on full-FPS frame {frame_index_full}")
 
-        print(f"[SAM2] Tracking from bbox {bbox} on 10fps frame {frame_index_10fps} (original: {frame_index})")
-
-        # Create output masks directory for WSL2 script
-        masks_10fps_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_masks_10fps")
-        os.makedirs(masks_10fps_dir, exist_ok=True)
+        # Create output masks directory for WSL2 script (full FPS)
+        masks_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_masks")
+        os.makedirs(masks_dir, exist_ok=True)
 
         # Call WSL2 subprocess for SAM2 tracking (PyTorch + torch.compile)
         def _to_wsl_path(p: str) -> str:
@@ -446,8 +419,8 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             except Exception:
                 return p
 
-        wsl_video = _to_wsl_path(video_10fps_path)
-        wsl_masks = _to_wsl_path(masks_10fps_dir)
+        wsl_video = _to_wsl_path(video_path)
+        wsl_masks = _to_wsl_path(masks_dir)
 
         # Prefer point prompt for higher-quality masks (fallback to bbox via SAM2_PROMPT_MODE=bbox)
         prompt_mode = os.getenv('SAM2_PROMPT_MODE', 'point').strip().lower()
@@ -464,7 +437,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             f'cd /mnt/d/watermarkz && '
             f'source venv_wsl2/bin/activate && '
             f'python sam2_track_wsl2.py "{wsl_video}" "{wsl_masks}" '
-            f'{prompt_flag} --frame-idx {frame_index_10fps}'
+            f'{prompt_flag} --frame-idx {frame_index_full}'
         )
         print(f"[SAM2-WSL2] Running: wsl -e bash -c \"{wsl_cmd}\"")
 
@@ -495,20 +468,20 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         except Exception as e:
             print(f"[SAM2-WSL2] Warning: Could not parse result JSON: {e}")
 
-        # Read masks from output directory
-        mask_files = sorted(glob.glob(os.path.join(masks_10fps_dir, "*.png")))
+        # Read masks from output directory (FULL FPS)
+        mask_files = sorted(glob.glob(os.path.join(masks_dir, "*.png")))
         if not mask_files:
-            raise RuntimeError(f"No masks generated in {masks_10fps_dir}")
+            raise RuntimeError(f"No masks generated in {masks_dir}")
 
-        masks_10fps = []
+        masks_full = []
         for mask_file in mask_files:
             mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
             if mask is not None:
-                masks_10fps.append(mask)
+                masks_full.append(mask)
 
-        print(f"[SAM2-WSL2] Loaded {len(masks_10fps)} masks from {masks_10fps_dir}")
+        print(f"[SAM2-WSL2] Loaded {len(masks_full)} masks from {masks_dir}")
 
-        # --- 6. Extract ALL frames from original video (for ProPainter) ---
+        # --- 5. Extract ALL frames from original video (for ProPainter) ---
         self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Extracting full-res frames'})
         print(f"[SAM2] Extracting all {total_frames_original} original frames...")
         cap = cv2.VideoCapture(video_path)
@@ -523,11 +496,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         total_frames = len(all_frames)
         print(f"[SAM2] Extracted {total_frames} original frames")
 
-        # --- 7. Expand 10fps masks to full FPS (zero-copy in memory) ---
-        self.update_state(state='PROCESSING', meta={'progress': 18, 'status': 'Expanding masks to full FPS'})
-        print(f"[SAM2] Expanding {len(masks_10fps)} 10fps masks to {total_frames} full-FPS masks...")
-        all_masks = expand_masks_10fps(masks_10fps, total_frames, original_fps)
-        print(f"[SAM2] Expanded to {len(all_masks)} masks (zero-copy references)")
+        # --- 6. Use FULL-FPS masks directly (no expansion needed) ---
+        self.update_state(state='PROCESSING', meta={'progress': 18, 'status': 'Validating masks'})
+        if len(masks_full) != total_frames:
+            print(f"[SAM2] Warning: mask count {len(masks_full)} != frame count {total_frames}; aligning by truncation")
+            min_count = min(len(masks_full), total_frames)
+            masks_full = masks_full[:min_count]
+            all_frames = all_frames[:min_count]
+            total_frames = min_count
+        all_masks = masks_full
 
         # --- 8. Validate masks and count coverage (in memory) ---
         self.update_state(state='PROCESSING', meta={'progress': 20, 'status': 'Validating masks'})
@@ -635,11 +612,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         import torch
         use_fp16 = torch.cuda.is_available()
 
-        print(f"[SAM2] ProPainter config:")
+            print(f"[SAM2] ProPainter config:")
         print(f"   - Segments: {len(segments)}")
         print(f"   - Workers: {SEGMENT_WORKERS}")
         print(f"   - FP16: {use_fp16}")
-        print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
+            print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
 
         # Crop all frames and masks to global crop region
         all_frames_cropped = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for f in all_frames]
@@ -894,7 +871,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         # --- 16. Cleanup temp files ---
         print(f"[SAM2] Cleaning up...")
-        for temp_path in [output_dir, video_10fps_path, masks_10fps_dir]:
+        for temp_path in [output_dir, masks_dir]:
             if isinstance(temp_path, str) and os.path.exists(temp_path):
                 if os.path.isdir(temp_path):
                     shutil.rmtree(temp_path)
@@ -911,13 +888,13 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             'video_path': video_path,
             'output_path': output_path,
             'total_frames': total_frames,
-            'masks_generated': len(masks_10fps),
+            'masks_generated': len(all_masks),
             'masks_expanded': len(all_masks),
             'segments_processed': len(segments),
             'width': width,
             'height': height,
             'fps': original_fps,
-            'pipeline': '10fps_optimized_segments',
+            'pipeline': 'full_fps_segments',
             'message': f'SAM2 pipeline complete! Processed {len(segments)} segment(s)'
         }
 
