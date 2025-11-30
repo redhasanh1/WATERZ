@@ -501,7 +501,7 @@ def pipeline(
         else:
             video_name = os.path.basename(video)
 
-        print(f"⚡ Using {len(frames)} frames from memory (ZERO disk I/O!)")
+        print(f"[FAST] Using {len(frames)} frames from memory (ZERO disk I/O!)")
     else:
         # Original disk-based loading
         frames, fps, size, video_name = read_frame_from_videos(video)
@@ -562,7 +562,7 @@ def pipeline(
                 flow_masks = flow_masks * frames_len
                 masks_dilated = masks_dilated * frames_len
 
-            print(f"⚡ Using {len(masks_array)} masks from memory (ZERO disk I/O!)")
+            print(f"[FAST] Using {len(masks_array)} masks from memory (ZERO disk I/O!)")
         else:
             # Original disk-based loading
             flow_masks, masks_dilated = read_mask(
@@ -1698,7 +1698,7 @@ def pipeline(
     accounted_time = optical_flow_time + flow_time + img_prop_time + prop_time
     other_time = propainter_total_time - accounted_time
     print(f"  5. Other (overhead):      {other_time:6.2f}s ({other_time/propainter_total_time*100:5.1f}%)")
-    print(f"  {'─'*70}")
+    print(f"  {'-'*70}")
     print(f"  TOTAL:                    {propainter_total_time:6.2f}s (100.0%)")
     print(f"  Per-frame avg:            {propainter_total_time/video_length*1000:6.1f}ms")
     print(f"{'='*70}\n")
