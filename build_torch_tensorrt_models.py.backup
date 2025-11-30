@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""
+Torch-TensorRT AOT (Ahead-of-Time) Model Compilation Script
+
+This script pre-compiles RAFT and RFCNet models using torch-tensorrt to eliminate
+the 30-60s JIT compilation overhead per worker in multiprocessing scenarios.
+
+Usage:
+    python build_torch_tensorrt_models.py
+
+Outputs:
+    - faster-propainter-main/weights/raft_torchtrt_fp16.ts
+    - faster-propainter-main/weights/rfcnet_torchtrt_fp16.ts
+
+Environment Variables:
+    TORCH_TENSORRT_PRECISION: fp16 (default) or fp32
+    TORCH_TENSORRT_WORKSPACE: Memory in MB for compilation (default: 4096)
+"""
+
+import os
+import sys
+import time
+import torch
+import torch.nn as nn
+
+# Add faster-propainter-main to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'faster-propainter-main'))
+
+print("=" * 80)
+print("TORCH-TENSORRT AOT MODEL COMPILATION")
+print("=" * 80)
+print()
+
+# Check torch-tensorrt availability
+try:
+    import torch_tensorrt
+    print(f"[OK] torch-tensorrt version: {torch_tensorrt.__version__}")
+except ImportError:
+    print("[ERROR] torch-tensorrt not installed!")
+    print("Install with: pip install torch-tensorrt --index-url https://download.pytorch.org/whl/cu121")
+    sys.exit(1)
+
+# Configuration
+PRECISION = os.getenv("TORCH_TENSORRT_PRECISION", "fp16")
+WORKSPACE_MB = int(os.getenv("TORCH_TENSORRT_WORKSPACE", "4096"))
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+if DEVICE.type != "cuda":
+    print("[ERROR] CUDA is required for torch-tensorrt compilation!")
+    sys.exit(1)
+
+print(f"[CONFIG] Precision: {PRECISION}")
+print(f"[CONFIG] Workspace: {WORKSPACE_MB} MB")
+print(f"[CONFIG] Device: {DEVICE}")
+print()
+
+# Paths
+WEIGHTS_DIR = "weights"  # Use root weights directory
+FASTER_WEIGHTS_DIR = os.path.join("faster-propainter-main", "weights")
+os.makedirs(FASTER_WEIGHTS_DIR, exist_ok=True)
+
+RAFT_CHECKPOINT = os.path.join(WEIGHTS_DIR, "raft-things.pth")
+RFCNET_CHECKPOINT = os.path.join(WEIGHTS_DIR, "recurrent_flow_completion.pth")
+
+RAFT_OUTPUT = os.path.join(FASTER_WEIGHTS_DIR, "raft_torchtrt_fp16.ts")
+RFCNET_OUTPUT = os.path.join(FASTER_WEIGHTS_DIR, "rfcnet_torchtrt_fp16.ts")
+
+
+def compile_raft_model():
+    """Compile RAFT optical flow model with torch-tensorrt"""
+    print("[1/2] Compiling RAFT Optical Flow Model...")
+    print("-" * 80)
+
+    if not os.path.exists(RAFT_CHECKPOINT):
+        print(f"[ERROR] RAFT checkpoint not found: {RAFT_CHECKPOINT}")
+        print("Please download it first by running the main script once.")
+        return False
+
+    try:
+        # Import RAFT model
+        from model.modules.flow_comp_raft import RAFT_bi
+
+        print(f"[1.1] Loading RAFT from {RAFT_CHECKPOINT}...")
+        raft_model = RAFT_bi(RAFT_CHECKPOINT, DEVICE)
+        raft_model.eval()
+
+        # Cast model to FP16 if using FP16 precision
+        if PRECISION == "fp16":
+            print("[1.2] Casting model to FP16...")
+            raft_model = raft_model.half()
+
+        # Create example inputs (batch=1, frames=2, channels=3, height=256, width=256)
+        print("[1.3] Creating example inputs (1x2x3x256x256)...")
+        example_frames = torch.randn(1, 2, 3, 256, 256, device=DEVICE)
+        if PRECISION == "fp16":
+            example_frames = example_frames.half()
+        example_iters = 20
+
+        # Warmup inference
+        print("[1.4] Running warmup inference...")
+        with torch.no_grad():
+            _ = raft_model(example_frames, iters=example_iters)
+
+        # Compile with torch-tensorrt
+        print("[1.4] Compiling with torch-tensorrt (this may take 30-60s)...")
+        start_time = time.time()
+
+        # Note: RAFT is complex and may not fully compile, so we use require_full_compilation=False
+        compiled_model = torch_tensorrt.compile(
+            raft_model,
+            inputs=[
+                torch_tensorrt.Input(
+                    min_shape=[1, 2, 3, 128, 128],
+                    opt_shape=[1, 2, 3, 256, 256],
+                    max_shape=[1, 2, 3, 640, 640],
+                    dtype=torch.float16 if PRECISION == "fp16" else torch.float32,
+                )
+            ],
+            enabled_precisions={torch.float16} if PRECISION == "fp16" else {torch.float32},
+            workspace_size=WORKSPACE_MB * 1024 * 1024,
+            require_full_compilation=False,  # Allow PyTorch fallback
+            device=DEVICE,
+        )
+
+        compile_time = time.time() - start_time
+
+        # Save compiled model
+        print(f"[1.5] Saving compiled model to {RAFT_OUTPUT}...")
+        torch.jit.save(compiled_model, RAFT_OUTPUT)
+
+        file_size_mb = os.path.getsize(RAFT_OUTPUT) / (1024 * 1024)
+        print(f"[OK] RAFT compiled successfully!")
+        print(f"      Compilation time: {compile_time:.1f}s")
+        print(f"      Output file: {RAFT_OUTPUT} ({file_size_mb:.1f} MB)")
+        print()
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] RAFT compilation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def compile_rfcnet_model():
+    """Compile RFCNet flow completion model with torch-tensorrt"""
+    print("[2/2] Compiling RFCNet Flow Completion Model...")
+    print("-" * 80)
+
+    if not os.path.exists(RFCNET_CHECKPOINT):
+        print(f"[ERROR] RFCNet checkpoint not found: {RFCNET_CHECKPOINT}")
+        print("Please download it first by running the main script once.")
+        return False
+
+    try:
+        # Import RFCNet model
+        from model.recurrent_flow_completion import RecurrentFlowCompleteNet
+
+        print(f"[2.1] Loading RFCNet from {RFCNET_CHECKPOINT}...")
+        rfcnet_model = RecurrentFlowCompleteNet(RFCNET_CHECKPOINT)
+        rfcnet_model.to(DEVICE)
+        rfcnet_model.eval()
+
+        # Create example inputs
+        # masked_flows: [B=1, T=80, C=2, H=480, W=480]
+        # masks: [B=1, T=80, C=1, H=480, W=480]
+        print("[2.2] Creating example inputs (1x80x2x480x480 flows, 1x80x1x480x480 masks)...")
+        example_flows = torch.randn(1, 80, 2, 480, 480, device=DEVICE)
+        example_masks = torch.randn(1, 80, 1, 480, 480, device=DEVICE)
+
+        # Warmup inference
+        print("[2.3] Running warmup inference...")
+        with torch.no_grad():
+            _ = rfcnet_model(example_flows, example_masks)
+
+        # Compile with torch-tensorrt
+        print("[2.4] Compiling with torch-tensorrt (this may take 30-60s)...")
+        start_time = time.time()
+
+        # RFCNet uses deformable conv, so require_full_compilation=False
+        compiled_model = torch_tensorrt.compile(
+            rfcnet_model,
+            inputs=[
+                torch_tensorrt.Input(
+                    min_shape=[1, 40, 2, 240, 240],
+                    opt_shape=[1, 80, 2, 480, 480],
+                    max_shape=[1, 160, 2, 640, 640],
+                    dtype=torch.float16 if PRECISION == "fp16" else torch.float32,
+                ),
+                torch_tensorrt.Input(
+                    min_shape=[1, 40, 1, 240, 240],
+                    opt_shape=[1, 80, 1, 480, 480],
+                    max_shape=[1, 160, 1, 640, 640],
+                    dtype=torch.float16 if PRECISION == "fp16" else torch.float32,
+                ),
+            ],
+            enabled_precisions={torch.float16} if PRECISION == "fp16" else {torch.float32},
+            workspace_size=WORKSPACE_MB * 1024 * 1024,
+            require_full_compilation=False,  # Allow PyTorch fallback for deformable conv
+            device=DEVICE,
+        )
+
+        compile_time = time.time() - start_time
+
+        # Save compiled model
+        print(f"[2.5] Saving compiled model to {RFCNET_OUTPUT}...")
+        torch.jit.save(compiled_model, RFCNET_OUTPUT)
+
+        file_size_mb = os.path.getsize(RFCNET_OUTPUT) / (1024 * 1024)
+        print(f"[OK] RFCNet compiled successfully!")
+        print(f"      Compilation time: {compile_time:.1f}s")
+        print(f"      Output file: {RFCNET_OUTPUT} ({file_size_mb:.1f} MB)")
+        print()
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] RFCNet compilation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def main():
+    """Main compilation workflow"""
+    print("Starting AOT compilation of models with torch-tensorrt...")
+    print()
+
+    success_count = 0
+    total_count = 2
+
+    # Compile RAFT
+    if compile_raft_model():
+        success_count += 1
+
+    # Compile RFCNet
+    if compile_rfcnet_model():
+        success_count += 1
+
+    # Summary
+    print("=" * 80)
+    print(f"COMPILATION COMPLETE: {success_count}/{total_count} models compiled successfully")
+    print("=" * 80)
+
+    if success_count == total_count:
+        print()
+        print("[NEXT STEPS]")
+        print("1. Set environment variable: USE_TORCH_TENSORRT=1")
+        print("2. Run your processing script normally")
+        print("3. Models will load from .ts files in 0.5s (not 30-60s JIT compile)")
+        print()
+        print("[PARALLEL PROCESSING]")
+        print("- Enable with: MAX_PARALLEL_STREAMS=4 PARALLEL_MODE=multiprocessing")
+        print("- Each worker loads .ts file instantly (no per-worker compilation)")
+        print("- Expected speedup: 4x for 4 workers")
+        print()
+        return 0
+    else:
+        print()
+        print("[WARNING] Some models failed to compile.")
+        print("The system will fall back to PyTorch + JIT compilation for failed models.")
+        print()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

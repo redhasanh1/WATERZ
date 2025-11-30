@@ -1,0 +1,157 @@
+# ===========================================
+# Celery Worker for Watermark Removal
+# PyTorch-only mode - Works on all GPU types
+# Target: Salad.com GPU Cloud
+# ===========================================
+
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set working directory
+WORKDIR /app
+
+# ----- System Dependencies -----
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 \
+    python3.10-venv \
+    python3.10-dev \
+    python3-pip \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libglib2.0-0 \
+    libgl1-mesa-glx \
+    libgomp1 \
+    wget \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python3
+
+# ----- Upgrade pip -----
+RUN python -m pip install --upgrade pip setuptools wheel
+
+# ----- PyTorch with CUDA 12.4 -----
+# Install PyTorch first (largest dependency)
+RUN pip install --no-cache-dir \
+    torch==2.5.1+cu124 \
+    torchvision==0.20.1+cu124 \
+    torchaudio==2.5.1+cu124 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# ----- Core Dependencies -----
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# ----- AI/ML Dependencies -----
+RUN pip install --no-cache-dir \
+    opencv-python-headless==4.8.1.78 \
+    ultralytics==8.3.52 \
+    scipy==1.11.4 \
+    scikit-image==0.22.0 \
+    einops==0.7.0 \
+    timm==0.9.12 \
+    matplotlib==3.8.2 \
+    av==12.0.0 \
+    addict==2.4.0 \
+    yapf==0.40.2 \
+    future==0.18.3 \
+    imageio==2.33.1 \
+    imageio-ffmpeg==0.4.9 \
+    decord==0.6.0 \
+    tqdm==4.66.1 \
+    omegaconf==2.3.0 \
+    static-ffmpeg==2.7
+
+# ----- SAM2 Dependencies -----
+RUN pip install --no-cache-dir \
+    hydra-core==1.3.2 \
+    iopath==0.1.10
+
+# ----- Hugging Face (for model downloads) -----
+RUN pip install --no-cache-dir \
+    huggingface-hub==0.20.3 \
+    transformers==4.37.2
+
+# ----- Create runtime directories -----
+RUN mkdir -p /data/temp /data/cache /data/uploads /data/results /data/pip_cache
+
+# ----- Copy Application Code -----
+# Core application files
+COPY server_production.py .
+COPY email_utils.py .
+COPY yolo_detector.py .
+COPY cache_config.py .
+
+# Faster-ProPainter (optimized inpainting pipeline)
+COPY faster-propainter-main/ ./faster-propainter-main/
+
+# ProPainter weights
+COPY weights/ ./weights/
+
+# SAM2 (object tracking)
+COPY segment-anything-2/ ./segment-anything-2/
+
+# YOLO model weights
+COPY runs/detect/new_sora_watermark/weights/best.pt ./runs/detect/new_sora_watermark/weights/
+
+# ----- Environment Variables -----
+# Force PyTorch mode (no TensorRT)
+ENV YOLO_REQUIRE_TENSORRT=0
+ENV FORCE_TRT_RFCNET=0
+ENV FORCE_TRT_TRANSFORMER=0
+ENV FORCE_TRT_RAFT=0
+
+# PyTorch optimizations
+ENV USE_TORCH_COMPILE=1
+ENV USE_TORCH_COMPILE_RAFT=1
+ENV USE_TORCH_COMPILE_YOLO=0
+ENV TORCH_CUDAGRAPHS=0
+ENV TORCHINDUCTOR_FX_GRAPH_CACHE=1
+
+# Use NeuFlow for optical flow (faster than RAFT)
+ENV USE_NEUFLOW=1
+ENV PROPAINTER_FLOW_BACKEND=raft
+
+# FP8 optimizations (if GPU supports it)
+ENV ENABLE_FP8_TRANSFORMER=1
+ENV ENABLE_FP8_ENCODER=1
+ENV ENABLE_FP8_DECODER=1
+
+# GPU features
+ENV ENABLE_NVDEC=1
+ENV ENABLE_FLASH_ATTENTION=0
+ENV ENABLE_SAGE_ATTENTION=0
+
+# SAM2 tracking
+ENV USE_SAM2_TRACKING=1
+
+# Runtime paths (use mounted volume)
+ENV TEMP=/data/temp
+ENV TMP=/data/temp
+ENV TMPDIR=/data/temp
+ENV TORCH_HOME=/data/cache
+ENV HF_HOME=/data/cache
+ENV XDG_CACHE_HOME=/data/cache
+ENV PIP_CACHE_DIR=/data/pip_cache
+
+# Celery configuration
+ENV CELERY_WORKER_POOL=solo
+ENV CELERY_CONCURRENCY=1
+
+# NVIDIA Container Toolkit
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+# ----- Entrypoint -----
+COPY entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default command: Start Celery worker
+CMD ["celery", "-A", "server_production.celery", "worker", "--loglevel=info", "--pool=solo"]

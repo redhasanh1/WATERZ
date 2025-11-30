@@ -1,0 +1,27 @@
+================================================================================
+TESTING .TS FILE LOADING
+================================================================================
+[OK] Found .ts file: raft_bi_jit.ts
+[OK] File size: 20.6 MB
+
+[LOADING] Loading .ts file with torch.jit.load...
+[OK] Loaded in 0.56s
+
+[TESTING] Testing with sample input...
+[INPUT] Shape: torch.Size([1, 5, 3, 432, 256]) (B, T, C, H, W)
+C:\Users\has\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py:1747: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\aten\src\ATen\native\TensorShape.cpp:3596.)
+  return forward_call(*args, **kwargs)
+[OK] Model forward() succeeded!
+[OUTPUT] Type: <class 'tuple'>
+[OUTPUT] Number of outputs: 2
+[OUTPUT] Output 0 shape: torch.Size([1, 4, 2, 432, 256])
+[OUTPUT] Output 1 shape: torch.Size([1, 4, 2, 432, 256])
+
+================================================================================
+[SUCCESS] .TS FILE WORKS!
+================================================================================
+
+Next steps:
+1. Run RUN_SAM2_LOCAL.py to test 4-worker parallel
+2. Each worker will load this .ts file in ~0.5s
+3. No cache conflicts, TRUE parallel!
