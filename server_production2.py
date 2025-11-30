@@ -26,7 +26,9 @@ SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '4'))
 SEGMENT_TEMPORAL_PAD = int(os.getenv('SEGMENT_TEMPORAL_PAD', '5'))
 
 # Inpainting mask dilation (higher = stronger removal, more context fill)
-SAM2_MASK_DILATION = int(os.getenv('SAM2_MASK_DILATION', '6'))
+SAM2_MASK_DILATION = int(os.getenv('SAM2_MASK_DILATION', '4'))
+# Strict mode: use single full-video inpainting (no segment split)
+SAM2_USE_SEGMENTS = os.getenv('SAM2_USE_SEGMENTS', '0') in ('1', 'true', 'yes', 'on')
 
 # Segment detection sensitivity (10fps domain)
 # Higher SEGMENT_POS_TOLERANCE and SEGMENT_MERGE_GAP_10FPS = less sensitive (fewer segments)
@@ -528,35 +530,40 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         if masks_with_content == 0:
             raise RuntimeError("No mask content generated - SAM2 tracking failed")
 
-        # --- 9. Detect segments from 10fps masks (for parallel processing) ---
-        self.update_state(state='PROCESSING', meta={'progress': 22, 'status': 'Detecting segments'})
-        print(f"[SAM2] Detecting segments from 10fps masks...")
+        # --- 9. Determine segment strategy ---
+        if SAM2_USE_SEGMENTS:
+            self.update_state(state='PROCESSING', meta={'progress': 22, 'status': 'Detecting segments'})
+            print(f"[SAM2] Detecting segments from 10fps masks...")
 
-        segments_10fps = detect_segments_from_masks(
-            masks_10fps_dir,
-            position_tolerance=SEGMENT_POS_TOLERANCE,
-            min_segment_length=SEGMENT_MIN_LEN_10FPS,
-            max_segments=80
-        )
-
-        if len(segments_10fps) > 1:
-            segments_10fps = merge_adjacent_segments(
-                segments_10fps,
+            segments_10fps = detect_segments_from_masks(
+                masks_10fps_dir,
                 position_tolerance=SEGMENT_POS_TOLERANCE,
-                max_gap=SEGMENT_MERGE_GAP_10FPS
+                min_segment_length=SEGMENT_MIN_LEN_10FPS,
+                max_segments=80
             )
 
-        # Scale segments from 10fps to full FPS
-        fps_ratio = original_fps / 10.0
-        segments = []
-        for start_10fps, end_10fps, bbox in segments_10fps:
-            start_full = int(start_10fps * fps_ratio)
-            end_full = min(int((end_10fps + 1) * fps_ratio), total_frames)  # +1 because end is exclusive
-            segments.append((start_full, end_full, bbox))
+            if len(segments_10fps) > 1:
+                segments_10fps = merge_adjacent_segments(
+                    segments_10fps,
+                    position_tolerance=SEGMENT_POS_TOLERANCE,
+                    max_gap=SEGMENT_MERGE_GAP_10FPS
+                )
 
-        print(f"[SAM2] Detected {len(segments)} segments (scaled to full FPS)")
-        for idx, (start, end, bbox) in enumerate(segments):
-            print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
+            # Scale segments from 10fps to full FPS
+            fps_ratio = original_fps / 10.0
+            segments = []
+            for start_10fps, end_10fps, bbox in segments_10fps:
+                start_full = int(start_10fps * fps_ratio)
+                end_full = min(int((end_10fps + 1) * fps_ratio), total_frames)  # +1 because end is exclusive
+                segments.append((start_full, end_full, bbox))
+
+            print(f"[SAM2] Detected {len(segments)} segments (scaled to full FPS)")
+            for idx, (start, end, bbox) in enumerate(segments):
+                print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
+        else:
+            # Strict monolithic mode (commit logic): process entire video in a single pass
+            segments = [(0, total_frames, [0, 0, width, height])]
+            print(f"[SAM2] Strict full-video mode: 1 segment covering all frames")
 
         # --- 10. Calculate global crop region from all masks ---
         print(f"[SAM2] Calculating global crop region...")

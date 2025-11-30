@@ -113,7 +113,10 @@ REM Prefer point prompt for SAM2 tracking (higher quality); set to bbox to force
 set SAM2_PROMPT_MODE=point
 
 REM Stronger mask dilation for better coverage (1-12 recommended)
-set SAM2_MASK_DILATION=6
+set SAM2_MASK_DILATION=4
+
+REM Use strict full-video inpainting (no segment splitting) by default
+set SAM2_USE_SEGMENTS=0
 
 REM ⚡ SAM2 TRACKING: NOT USED IN INTERACTIVE MODE (masks provided by user)
 set USE_SAM2_TRACKING=0
