@@ -20,6 +20,8 @@ from crop_utils import calculate_crop_region
 
 # Number of parallel segment workers
 SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '4'))
+# Parallel segment execution (inside a single video task)
+SAM2_PARALLEL_SEGMENTS = os.getenv('SAM2_PARALLEL_SEGMENTS', '1').lower() in ('1', 'true', 'yes', 'on')
 
 # Temporal padding (in full-FPS frames) around each detected segment
 # Helps prevent reappearance at segment boundaries by giving ProPainter context
@@ -744,19 +746,41 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     break
 
         else:
-            # Multiple segments - process each and merge
-            print(f"[SAM2] Processing {len(segments)} segments...")
+            # Multiple segments - process each (optionally in parallel) and merge
+            if SAM2_PARALLEL_SEGMENTS and SEGMENT_WORKERS > 1:
+                print(f"[SAM2] Processing {len(segments)} segments in PARALLEL (workers={min(SEGMENT_WORKERS, len(segments))})...")
+                self.update_state(state='PROCESSING', meta={'progress': 30, 'status': f'Processing {len(segments)} segments (parallel)'})
 
-            for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
-                progress = 30 + int((seg_idx / len(segments)) * 40)
-                self.update_state(state='PROCESSING', meta={
-                    'progress': progress,
-                    'status': f'Processing segment {seg_idx+1}/{len(segments)}'
-                })
+                max_workers = min(SEGMENT_WORKERS, len(segments))
+                futures = {}
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                        futures[executor.submit(process_segment, seg_idx, start_f, end_f, seg_bbox)] = seg_idx
 
-                clear_gpu_memory()
-                result = process_segment(seg_idx, start_f, end_f, seg_bbox)
-                segment_results[seg_idx] = result
+                    completed = 0
+                    for future in as_completed(futures):
+                        seg_idx_done = futures[future]
+                        try:
+                            result = future.result()
+                        except Exception as e:
+                            print(f"[ERROR] Segment {seg_idx_done} raised: {e}")
+                            result = (seg_idx_done, None, None)
+                        segment_results[seg_idx_done] = result
+                        completed += 1
+                        progress = 30 + int((completed / len(segments)) * 40)
+                        self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Processed {completed}/{len(segments)} segments'})
+            else:
+                print(f"[SAM2] Processing {len(segments)} segments (sequential)...")
+                for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
+                    progress = 30 + int((seg_idx / len(segments)) * 40)
+                    self.update_state(state='PROCESSING', meta={
+                        'progress': progress,
+                        'status': f'Processing segment {seg_idx+1}/{len(segments)}'
+                    })
+
+                    clear_gpu_memory()
+                    result = process_segment(seg_idx, start_f, end_f, seg_bbox)
+                    segment_results[seg_idx] = result
 
             # --- 12. Merge segments back to cropped frames ---
             print(f"[SAM2] Merging {len(segments)} segments back...")

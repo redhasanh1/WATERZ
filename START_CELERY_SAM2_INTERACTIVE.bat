@@ -116,7 +116,8 @@ REM Stronger mask dilation for better coverage (1-12 recommended)
 set SAM2_MASK_DILATION=4
 
 REM Use strict full-video inpainting (no segment splitting) by default
-set SAM2_USE_SEGMENTS=0
+set SAM2_USE_SEGMENTS=1
+set SAM2_PARALLEL_SEGMENTS=1
 
 REM ⚡ SAM2 TRACKING: NOT USED IN INTERACTIVE MODE (masks provided by user)
 set USE_SAM2_TRACKING=0
