@@ -9,10 +9,13 @@ import os
 import sys
 import glob
 import json
+from typing import List, Optional, Tuple
 from flask import Flask, request, jsonify
 from celery import Celery
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import cv2
+import numpy as np
 
 # Segment detection for parallel processing
 from segment_detector import detect_segments_from_masks, merge_adjacent_segments, detect_segments, detect_segments_motion_based
@@ -46,6 +49,8 @@ SEGMENT_MERGE_GAP_FULL = int(os.getenv('SEGMENT_MERGE_GAP_FULL', '60'))
 SEGMENT_MOTION_THRESHOLD = int(os.getenv('SEGMENT_MOTION_THRESHOLD', '20'))
 # Use motion-based detection instead of average-based (1=motion, 0=average)
 SEGMENT_USE_MOTION_DETECTION = os.getenv('SEGMENT_USE_MOTION_DETECTION', '1').lower() in ('1', 'true', 'yes', 'on')
+# Max frames per segment (longer segments get split to prevent OOM)
+MAX_SEGMENT_FRAMES = int(os.getenv('MAX_SEGMENT_FRAMES', '300'))
 # Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
 SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
@@ -137,21 +142,58 @@ def get_ffmpeg_executables():
 FFMPEG_EXE, FFPROBE_EXE = get_ffmpeg_executables()
 
 
-def convert_to_10fps_gpu(video_path: str, output_path: str = None) -> str:
+def read_video_frames_range(video_path: str, start_frame: int, end_frame: int,
+                            crop_region: Optional[Tuple[int, int, int, int]] = None) -> List[np.ndarray]:
     """
-    Convert video to 10fps using FFmpeg NVENC GPU acceleration.
-    Returns path to the 10fps video.
+    Read frames [start_frame, end_frame) from video, optionally crop on-the-fly.
+    This prevents loading entire video into memory - only loads the requested range.
+
+    Args:
+        video_path: Path to the video file
+        start_frame: First frame to read (0-indexed)
+        end_frame: One past the last frame to read
+        crop_region: Optional (x, y, w, h) tuple to crop each frame
+
+    Returns:
+        List of frames as numpy arrays
+    """
+    cap = cv2.VideoCapture(video_path)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    frames = []
+    for _ in range(end_frame - start_frame):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if crop_region:
+            cx, cy, cw, ch = crop_region
+            frame = frame[cy:cy+ch, cx:cx+cw]
+        frames.append(frame)
+    cap.release()
+    return frames
+
+
+# Configurable tracking FPS (default 15fps - good balance for fast objects)
+SAM2_TRACK_FPS = int(os.getenv('SAM2_TRACK_FPS', '15'))
+
+def convert_to_tracking_fps(video_path: str, output_path: str = None, target_fps: int = None) -> str:
+    """
+    Convert video to target FPS using FFmpeg for SAM2 tracking.
+    Returns path to the converted video.
 
     Args:
         video_path: Path to input video
         output_path: Optional output path (auto-generated if None)
+        target_fps: Target FPS (defaults to SAM2_TRACK_FPS env var)
 
     Returns:
-        Path to 10fps video
+        Path to converted video
     """
+    if target_fps is None:
+        target_fps = SAM2_TRACK_FPS
+
     if output_path is None:
         base, ext = os.path.splitext(video_path)
-        output_path = f"{base}_10fps{ext}"
+        output_path = f"{base}_{target_fps}fps{ext}"
 
     # Try GPU acceleration first, fall back to CPU
     # Using scale filter to maintain quality while reducing framerate
@@ -159,7 +201,7 @@ def convert_to_10fps_gpu(video_path: str, output_path: str = None) -> str:
         str(FFMPEG_EXE),
         '-y',
         '-i', video_path,
-        '-vf', 'fps=10',
+        '-vf', f'fps={target_fps}',
         '-c:v', 'libx264',  # CPU fallback (more compatible)
         '-preset', 'ultrafast',
         '-crf', '18',
@@ -169,10 +211,10 @@ def convert_to_10fps_gpu(video_path: str, output_path: str = None) -> str:
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
-        print(f"[ERROR] FFmpeg 10fps conversion failed: {result.stderr[:500]}")
-        raise RuntimeError(f"10fps conversion failed: {result.stderr[:200]}")
+        print(f"[ERROR] FFmpeg {target_fps}fps conversion failed: {result.stderr[:500]}")
+        raise RuntimeError(f"{target_fps}fps conversion failed: {result.stderr[:200]}")
 
-    print(f"[OK] Converted to 10fps: {output_path}")
+    print(f"[OK] Converted to {target_fps}fps: {output_path}")
     return output_path
 
 
@@ -460,16 +502,16 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         if os.getenv('USE_WSL_CELERY', '1').lower() in ('1','true','yes','on'):
             print(f"[SAM2] Dispatching mask generation to WSL Celery worker (chain)…")
-            # Optional: do 10fps conversion on Windows side for speed (avoid requiring ffmpeg in WSL)
+            # Optional: do FPS conversion on Windows side for speed (avoid requiring ffmpeg in WSL)
             track_src = video_path
-            if os.getenv('SAM2_TRACK_10FPS', '0').lower() in ('1','true','yes','on'):
-                video_10fps_path = os.path.join(TEMP_DIR, f"{video_id}_tracking_10fps.mp4")
-                if not os.path.exists(video_10fps_path):
-                    print(f"[SAM2] Creating 10fps tracking video on Windows for WSL speed…")
-                    convert_to_10fps_gpu(video_path, video_10fps_path)
+            if os.getenv('SAM2_TRACK_DOWNSAMPLE', '0').lower() in ('1','true','yes','on'):
+                video_downsampled_path = os.path.join(TEMP_DIR, f"{video_id}_tracking_{SAM2_TRACK_FPS}fps.mp4")
+                if not os.path.exists(video_downsampled_path):
+                    print(f"[SAM2] Creating {SAM2_TRACK_FPS}fps tracking video on Windows for WSL speed…")
+                    convert_to_tracking_fps(video_path, video_downsampled_path)
                 else:
-                    print(f"[SAM2] Using cached 10fps tracking video: {video_10fps_path}")
-                track_src = video_10fps_path
+                    print(f"[SAM2] Using cached {SAM2_TRACK_FPS}fps tracking video: {video_downsampled_path}")
+                track_src = video_downsampled_path
 
             s1 = signature('sam2.generate_masks_fullfps', args=[track_src, masks_dir, prompt_mode, point_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
             s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='sam2')
@@ -545,20 +587,10 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         print(f"[SAM2-WSL2] Loaded {len(masks_full)} masks from {masks_dir}")
 
-        # --- 5. Extract ALL frames from original video (for ProPainter) ---
-        self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Extracting full-res frames'})
-        print(f"[SAM2] Extracting all {total_frames_original} original frames...")
-        cap = cv2.VideoCapture(video_path)
-        all_frames = []
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            all_frames.append(frame)
-        cap.release()
-
-        total_frames = len(all_frames)
-        print(f"[SAM2] Extracted {total_frames} original frames")
+        # --- 5. Prepare for per-segment frame loading (DON'T load all frames upfront!) ---
+        self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Preparing segment processing'})
+        total_frames = total_frames_original
+        print(f"[SAM2] Video has {total_frames} frames (will load per-segment to save memory)")
 
         # --- 6. Use FULL-FPS masks directly (no expansion needed) ---
         self.update_state(state='PROCESSING', meta={'progress': 18, 'status': 'Validating masks'})
@@ -566,7 +598,6 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             print(f"[SAM2] Warning: mask count {len(masks_full)} != frame count {total_frames}; aligning by truncation")
             min_count = min(len(masks_full), total_frames)
             masks_full = masks_full[:min_count]
-            all_frames = all_frames[:min_count]
             total_frames = min_count
         all_masks = masks_full
 
@@ -675,6 +706,45 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         fixed_segments.append((s, e, bb))
                     segments = fixed_segments
 
+                    # Replace each segment's averaged bbox with union bbox for that segment's frames
+                    # This ensures fast-moving objects are fully covered within each segment
+                    if detections_per_frame:
+                        updated_segments = []
+                        for s, e, bb in segments:
+                            # Compute union of all bboxes in this segment's frame range
+                            segment_bboxes = [detections_per_frame[f] for f in range(s, e)
+                                             if f < len(detections_per_frame) and detections_per_frame[f] is not None]
+                            if segment_bboxes:
+                                seg_min_x = min(b[0] for b in segment_bboxes)
+                                seg_min_y = min(b[1] for b in segment_bboxes)
+                                seg_max_x = max(b[2] for b in segment_bboxes)
+                                seg_max_y = max(b[3] for b in segment_bboxes)
+                                union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
+                                updated_segments.append((s, e, union_bbox))
+                                if union_bbox != bb:
+                                    print(f"[SAM2] Segment {len(updated_segments)}: union bbox {union_bbox} (was avg {bb})")
+                            else:
+                                updated_segments.append((s, e, bb))
+                        segments = updated_segments
+
+                # Split segments that exceed MAX_SEGMENT_FRAMES to prevent OOM
+                if MAX_SEGMENT_FRAMES > 0:
+                    split_segments = []
+                    for s, e, bb in segments:
+                        seg_len = e - s
+                        if seg_len > MAX_SEGMENT_FRAMES:
+                            # Split into chunks of MAX_SEGMENT_FRAMES
+                            num_chunks = (seg_len + MAX_SEGMENT_FRAMES - 1) // MAX_SEGMENT_FRAMES
+                            chunk_size = seg_len // num_chunks
+                            for i in range(num_chunks):
+                                chunk_start = s + i * chunk_size
+                                chunk_end = s + (i + 1) * chunk_size if i < num_chunks - 1 else e
+                                split_segments.append((chunk_start, chunk_end, bb))
+                            print(f"[SAM2] Split {seg_len}f segment into {num_chunks} chunks of ~{chunk_size}f")
+                        else:
+                            split_segments.append((s, e, bb))
+                    segments = split_segments
+
                 print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")
                 for idx, (start, end, bbox) in enumerate(segments):
                     print(f"[SAM2]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
@@ -733,14 +803,6 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         crop_x, crop_y, crop_w, crop_h = calculate_crop_region(global_bbox, width, height, padding_ratio=0.2, min_size=128)
         print(f"[SAM2] Global crop: {crop_x},{crop_y} {crop_w}x{crop_h}")
 
-        # For single segment covering full video, use global_bbox (union) instead of average
-        # This prevents the segment crop from cutting off fast-moving objects at extreme positions
-        if len(segments) == 1 and segments[0][0] == 0 and segments[0][1] == total_frames:
-            old_bbox = segments[0][2]
-            if old_bbox != global_bbox:
-                print(f"[SAM2] Single full-video segment: using global_bbox {global_bbox} instead of average {old_bbox}")
-                segments = [(0, total_frames, global_bbox)]
-
         # Create output directory for ProPainter
         output_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_output")
         os.makedirs(output_dir, exist_ok=True)
@@ -758,12 +820,19 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         print(f"   - FP16: {use_fp16}")
         print(f"   - Optical Flow: NeuFlow TRT (USE_NEUFLOW={os.getenv('USE_NEUFLOW', '0')})")
 
-        # Crop all frames and masks to global crop region
-        all_frames_cropped = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for f in all_frames]
+        # Crop masks to global crop region (masks are small - 1 channel)
+        # Frames will be loaded per-segment to avoid OOM on large videos
         all_masks_cropped = [m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for m in all_masks]
+        global_crop = (crop_x, crop_y, crop_w, crop_h)
+        print(f"[SAM2] Masks cropped, frames will be loaded per-segment")
 
-        # Store segment results for merging
-        segment_results = {}
+        # Create output directory upfront for write-through processing
+        final_frames_dir = os.path.join(output_dir, 'final_frames')
+        os.makedirs(final_frames_dir, exist_ok=True)
+
+        # Track segment metadata (NOT frames - those go directly to disk)
+        segment_results = {}  # seg_idx -> (success, crop_info, time_info)
+        processed_frames = set()  # Track which frames have been written
 
         def process_segment(seg_idx, start_f, end_f, seg_bbox):
             """Process a single segment with ProPainter"""
@@ -794,16 +863,23 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
                 print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
 
-                # Extract segment frames and masks (double-cropped: global + segment)
+                # LOAD ONLY THIS SEGMENT'S FRAMES (per-segment loading to avoid OOM)
+                print(f"[SAM2] Loading frames {proc_start}-{proc_end} from video...")
+                seg_frames_global_crop = read_video_frames_range(video_path, proc_start, proc_end, global_crop)
+
+                # Apply segment-specific crop to loaded frames and masks
                 seg_frames = []
                 seg_masks = []
-                for i in range(proc_start, proc_end):
-                    if i < len(all_frames_cropped):
-                        seg_frame = all_frames_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                        seg_frames.append(np.ascontiguousarray(seg_frame))
-                    if i < len(all_masks_cropped):
-                        seg_mask = all_masks_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                for i, frame in enumerate(seg_frames_global_crop):
+                    frame_idx = proc_start + i
+                    seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                    seg_frames.append(np.ascontiguousarray(seg_frame))
+                    if frame_idx < len(all_masks_cropped):
+                        seg_mask = all_masks_cropped[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                         seg_masks.append(np.ascontiguousarray(seg_mask))
+
+                # Release global-cropped frames to free memory
+                del seg_frames_global_crop
 
                 if not seg_frames or not seg_masks:
                     return seg_idx, None, None, (proc_start, proc_end)
@@ -832,7 +908,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     masks_array=seg_masks
                 )
 
-                # Load output frames
+                # Load output frames from ProPainter
                 output_frames = []
                 frames_subdir = None
                 for d in os.listdir(seg_output_dir):
@@ -848,20 +924,43 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         if frame is not None:
                             output_frames.append(frame)
 
-                # Do not trim; return full padded outputs with timing info
-                return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
+                # WRITE-THROUGH: Composite and write to disk immediately (don't store in memory!)
+                print(f"[SAM2] Segment {seg_idx+1}: writing {len(output_frames)} frames to disk...")
+                cap_out = cv2.VideoCapture(video_path)
+                cap_out.set(cv2.CAP_PROP_POS_FRAMES, proc_start)
+                frames_written = 0
+                for i in range(len(output_frames)):
+                    frame_idx = proc_start + i
+                    ret, orig_frame = cap_out.read()
+                    if not ret:
+                        break
+                    # Composite segment output onto original frame
+                    orig_frame[crop_y + seg_crop_y:crop_y + seg_crop_y + seg_crop_h,
+                              crop_x + seg_crop_x:crop_x + seg_crop_x + seg_crop_w] = output_frames[i]
+                    cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), orig_frame)
+                    processed_frames.add(frame_idx)
+                    frames_written += 1
+                cap_out.release()
+                del output_frames  # Free memory immediately!
+                print(f"[SAM2] Segment {seg_idx+1}: wrote {frames_written} frames to disk")
+
+                # Return success flag and metadata (NOT frames!)
+                return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
 
             except Exception as e:
                 print(f"[ERROR] Segment {seg_idx} failed: {e}")
                 import traceback
                 traceback.print_exc()
-                return seg_idx, None, None, (proc_start, proc_end)
+                return seg_idx, False, None, (proc_start, proc_end)
 
         # Process segments (sequentially for GPU, parallel prep could be added)
         if len(segments) <= 1:
-            # Single segment - process entire video as one
+            # Single segment - load frames on-demand (still per-segment to save memory)
             print(f"[SAM2] Processing as single segment...")
-            all_frames_contiguous = [np.ascontiguousarray(f) for f in all_frames_cropped]
+            print(f"[SAM2] Loading all {total_frames} frames with global crop...")
+            seg_frames = read_video_frames_range(video_path, 0, total_frames, global_crop)
+            all_frames_contiguous = [np.ascontiguousarray(f) for f in seg_frames]
+            del seg_frames  # Free memory after conversion
             all_masks_contiguous = [np.ascontiguousarray(m) for m in all_masks_cropped]
 
             faster_propainter_pipeline(
@@ -883,7 +982,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 masks_array=all_masks_contiguous
             )
 
-            # Find output frames
+            # Find output frames for streaming output
             final_cropped_frames = []
             for root, dirs, files in os.walk(output_dir):
                 if os.path.basename(root) == 'frames':
@@ -931,59 +1030,29 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     result = process_segment(seg_idx, start_f, end_f, seg_bbox)
                     segment_results[seg_idx] = result
 
-            # --- 12. Merge segments back to cropped frames ---
-            print(f"[SAM2] Merging {len(segments)} segments back...")
-            self.update_state(state='PROCESSING', meta={'progress': 75, 'status': 'Merging segments'})
+            # --- 12. Segments already written to disk - just log results ---
+            print(f"[SAM2] Segment processing complete - {len(processed_frames)} frames written to disk")
+            self.update_state(state='PROCESSING', meta={'progress': 75, 'status': 'Filling unprocessed frames'})
 
-            # Start with original cropped frames
-            final_cropped_frames = [f.copy() for f in all_frames_cropped]
-
-            for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments):
-                if seg_idx not in segment_results:
-                    continue
-                # Unpack padded output and timing info
-                if segment_results[seg_idx] is None:
-                    continue
-                try:
-                    _, output_frames, crop_info, time_info = segment_results[seg_idx]
-                except ValueError:
-                    # Backward-compat (if timing info missing), fall back to original range
-                    _, output_frames, crop_info = segment_results[seg_idx]
-                    time_info = (start_f, end_f)
-                if output_frames is None or crop_info is None:
-                    continue
-
-                seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = crop_info
-                proc_start, proc_end = time_info
-
-                for i, frame_idx in enumerate(range(proc_start, proc_end)):
-                    if frame_idx < len(final_cropped_frames) and i < len(output_frames):
-                        # Paste segment result back into cropped frame
-                        final_cropped_frames[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w] = output_frames[i]
-
-        # --- 13. Merge cropped frames back to full resolution ---
-        print(f"[SAM2] Merging to full resolution...")
-        self.update_state(state='PROCESSING', meta={'progress': 78, 'status': 'Merging to full resolution'})
-
-        final_frames = []
-        for i, orig_frame in enumerate(all_frames):
-            result_frame = orig_frame.copy()
-            if i < len(final_cropped_frames):
-                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[i]
-            final_frames.append(result_frame)
-
-        # --- 14. Encode final video from frames ---
-        print(f"[SAM2] Encoding final video ({len(final_frames)} frames)...")
-        self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Encoding video'})
-
-        # Save frames temporarily for FFmpeg
-        final_frames_dir = os.path.join(output_dir, 'final_frames')
-        os.makedirs(final_frames_dir, exist_ok=True)
-
-        for i, frame in enumerate(final_frames):
-            cv2.imwrite(os.path.join(final_frames_dir, f'{i:05d}.png'), frame)
-
-        print(f"[SAM2] Saved {len(final_frames)} final frames")
+        # --- 13. Fill unprocessed frames (those not covered by any segment) ---
+        unprocessed_count = total_frames - len(processed_frames)
+        if unprocessed_count > 0:
+            print(f"[SAM2] Filling {unprocessed_count} unprocessed frames...")
+            cap = cv2.VideoCapture(video_path)
+            frame_idx = 0
+            while True:
+                ret, orig_frame = cap.read()
+                if not ret:
+                    break
+                # Only write frames that weren't processed by segments
+                if frame_idx not in processed_frames:
+                    # Single segment case: use final_cropped_frames if available
+                    if len(segments) <= 1 and frame_idx < len(final_cropped_frames):
+                        orig_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[frame_idx]
+                    cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), orig_frame)
+                frame_idx += 1
+            cap.release()
+        print(f"[SAM2] Total {total_frames} frames ready for encoding")
 
         # --- 15. Encode final video from frames with audio ---
         print(f"[SAM2] Encoding final video with audio...")
@@ -1156,16 +1225,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         masks_full = [cv2.imread(mf, cv2.IMREAD_GRAYSCALE) for mf in mask_files]
         masks_full = [m for m in masks_full if m is not None]
 
-        # Extract frames
-        all_frames = []
-        cap = cv2.VideoCapture(video_path)
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            all_frames.append(frame)
-        cap.release()
-        total_frames = len(all_frames)
+        # DON'T load all frames upfront - use per-segment loading
+        total_frames = total_frames_original
+        print(f"[SAM2] Video has {total_frames} frames (will load per-segment)")
 
         # Align and expand 10fps masks if needed
         # If WSL did 10fps tracking (returned fps ~10), expand to full-FPS mask timeline
@@ -1182,7 +1244,6 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             if len(masks_full) != total_frames:
                 min_count = min(len(masks_full), total_frames)
                 masks_full = masks_full[:min_count]
-                all_frames = all_frames[:min_count]
                 total_frames = min_count
             all_masks = masks_full
 
@@ -1235,9 +1296,10 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         global_bbox = [min_x, min_y, max_x, max_y] if max_x > min_x and max_y > min_y else [0, 0, width, height]
         crop_x, crop_y, crop_w, crop_h = calculate_crop_region(global_bbox, width, height, padding_ratio=0.2, min_size=128)
 
-        # Prepare arrays
-        all_frames_cropped = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for f in all_frames]
+        # Prepare arrays (masks only - frames loaded per-segment)
         all_masks_cropped = [m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for m in all_masks]
+        global_crop = (crop_x, crop_y, crop_w, crop_h)
+        print(f"[SAM2] Masks cropped, frames will be loaded per-segment")
 
         # --- Segment detection (FULL-FPS, boundary-safe like commit 578a2603) ---
         print(f"[SAM2] Detecting segments from FULL-FPS in-memory masks...")
@@ -1280,15 +1342,48 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                     e = total_frames
                 fixed_segments.append((s, e, bb))
             segments = fixed_segments
+
+            # Replace each segment's averaged bbox with union bbox for that segment's frames
+            # This ensures fast-moving objects are fully covered within each segment
+            if detections_per_frame:
+                updated_segments = []
+                for s, e, bb in segments:
+                    # Compute union of all bboxes in this segment's frame range
+                    segment_bboxes = [detections_per_frame[f] for f in range(s, e)
+                                     if f < len(detections_per_frame) and detections_per_frame[f] is not None]
+                    if segment_bboxes:
+                        seg_min_x = min(b[0] for b in segment_bboxes)
+                        seg_min_y = min(b[1] for b in segment_bboxes)
+                        seg_max_x = max(b[2] for b in segment_bboxes)
+                        seg_max_y = max(b[3] for b in segment_bboxes)
+                        union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
+                        updated_segments.append((s, e, union_bbox))
+                        if union_bbox != bb:
+                            print(f"[SAM2] Segment {len(updated_segments)}: union bbox {union_bbox} (was avg {bb})")
+                    else:
+                        updated_segments.append((s, e, bb))
+                segments = updated_segments
         else:
             # No segments detected - cover entire video
             segments = [(0, total_frames, global_bbox)]
 
-        # For single segment covering full video, use global_bbox (union) instead of average
-        # This prevents the segment crop from cutting off fast-moving objects at extreme positions
-        if len(segments) == 1 and segments[0][0] == 0 and segments[0][1] == total_frames:
-            print(f"[SAM2] Single full-video segment: using global_bbox instead of average")
-            segments = [(0, total_frames, global_bbox)]
+        # Split segments that exceed MAX_SEGMENT_FRAMES to prevent OOM
+        if MAX_SEGMENT_FRAMES > 0:
+            split_segments = []
+            for s, e, bb in segments:
+                seg_len = e - s
+                if seg_len > MAX_SEGMENT_FRAMES:
+                    # Split into chunks of MAX_SEGMENT_FRAMES
+                    num_chunks = (seg_len + MAX_SEGMENT_FRAMES - 1) // MAX_SEGMENT_FRAMES
+                    chunk_size = seg_len // num_chunks
+                    for i in range(num_chunks):
+                        chunk_start = s + i * chunk_size
+                        chunk_end = s + (i + 1) * chunk_size if i < num_chunks - 1 else e
+                        split_segments.append((chunk_start, chunk_end, bb))
+                    print(f"[SAM2] Split {seg_len}f segment into {num_chunks} chunks of ~{chunk_size}f")
+                else:
+                    split_segments.append((s, e, bb))
+            segments = split_segments
 
         print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")
         for idx, (start, end, bbox) in enumerate(segments):
@@ -1305,7 +1400,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         output_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_output")
         os.makedirs(output_dir, exist_ok=True)
 
+        # Create output directory upfront for write-through processing
+        final_frames_dir = os.path.join(output_dir, 'final_frames')
+        os.makedirs(final_frames_dir, exist_ok=True)
+
+        # Track segment metadata (NOT frames - those go directly to disk)
         segment_results = {}
+        processed_frames = set()  # Track which frames have been written
 
         def process_segment_local(seg_idx, start_f, end_f, seg_bbox):
             duration = end_f - start_f
@@ -1326,8 +1427,23 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end-1}")
 
-            seg_frames = [np.ascontiguousarray(all_frames_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]) for i in range(proc_start, proc_end) if i < len(all_frames_cropped)]
-            seg_masks = [np.ascontiguousarray(all_masks_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]) for i in range(proc_start, proc_end) if i < len(all_masks_cropped)]
+            # LOAD ONLY THIS SEGMENT'S FRAMES (per-segment loading to avoid OOM)
+            print(f"[SAM2] Loading frames {proc_start}-{proc_end} from video...")
+            seg_frames_global_crop = read_video_frames_range(video_path, proc_start, proc_end, global_crop)
+
+            # Apply segment-specific crop to loaded frames and masks
+            seg_frames = []
+            seg_masks = []
+            for i, frame in enumerate(seg_frames_global_crop):
+                frame_idx = proc_start + i
+                seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                seg_frames.append(np.ascontiguousarray(seg_frame))
+                if frame_idx < len(all_masks_cropped):
+                    seg_mask = all_masks_cropped[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                    seg_masks.append(np.ascontiguousarray(seg_mask))
+
+            # Release global-cropped frames to free memory
+            del seg_frames_global_crop
             if not seg_frames or not seg_masks:
                 print(f"[SAM2] WARNING: Segment {seg_idx+1} has no frames/masks! seg_frames={len(seg_frames)}, seg_masks={len(seg_masks)}")
                 return seg_idx, None, None, (proc_start, proc_end)
@@ -1360,7 +1476,28 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             else:
                 print(f"[SAM2] Segment {seg_idx+1}: ProPainter returned {len(output_frames)} frames (OK)")
 
-            return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
+            # WRITE-THROUGH: Composite and write to disk immediately (don't store in memory!)
+            print(f"[SAM2] Segment {seg_idx+1}: writing {len(output_frames)} frames to disk...")
+            cap_out = cv2.VideoCapture(video_path)
+            cap_out.set(cv2.CAP_PROP_POS_FRAMES, proc_start)
+            frames_written = 0
+            for i in range(len(output_frames)):
+                frame_idx = proc_start + i
+                ret, orig_frame = cap_out.read()
+                if not ret:
+                    break
+                # Composite segment output onto original frame
+                orig_frame[crop_y + seg_crop_y:crop_y + seg_crop_y + seg_crop_h,
+                          crop_x + seg_crop_x:crop_x + seg_crop_x + seg_crop_w] = output_frames[i]
+                cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), orig_frame)
+                processed_frames.add(frame_idx)
+                frames_written += 1
+            cap_out.release()
+            del output_frames  # Free memory immediately!
+            print(f"[SAM2] Segment {seg_idx+1}: wrote {frames_written} frames to disk")
+
+            # Return success flag and metadata (NOT frames!)
+            return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
 
         # Process segments (parallel when enabled, like main task)
         segments_to_process = segments or [(0, total_frames, [0, 0, width, height])]
@@ -1392,48 +1529,26 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
                 segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
 
-        # --- Merge segments back to cropped frames ---
-        print(f"[SAM2] Merging {len(segments or [])} segment(s) back to {len(all_frames_cropped)} frames...")
-        final_cropped_frames = [f.copy() for f in all_frames_cropped]
-        for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments or [(0, total_frames, [0,0,width,height])]):
-            if seg_idx not in segment_results:
-                print(f"[SAM2] WARNING: Segment {seg_idx+1} not in results!")
-                continue
-            try:
-                _, output_frames, crop_info, time_info = segment_results[seg_idx]
-            except ValueError:
-                # Backward-compat (if timing info missing), fall back to original range
-                _, output_frames, crop_info = segment_results[seg_idx]
-                time_info = (start_f, end_f)
-                print(f"[SAM2] WARNING: Segment {seg_idx+1} missing time_info, using fallback ({start_f}, {end_f})")
-            if output_frames is None or crop_info is None:
-                print(f"[SAM2] WARNING: Segment {seg_idx+1} has None output!")
-                continue
-            seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = crop_info
-            proc_start, proc_end = time_info
+        # --- Segments already written to disk - just log results ---
+        print(f"[SAM2] Segment processing complete - {len(processed_frames)} frames written to disk")
 
-            # Count how many frames will actually be pasted
-            pasted_count = 0
-            for i, frame_idx in enumerate(range(proc_start, proc_end)):
-                if frame_idx < len(final_cropped_frames) and i < len(output_frames):
-                    final_cropped_frames[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w] = output_frames[i]
-                    pasted_count += 1
-            print(f"[SAM2] Segment {seg_idx+1}: pasted {pasted_count} frames to indices {proc_start}-{min(proc_end-1, len(final_cropped_frames)-1)}")
-
-        # Merge back to full res
-        final_frames = []
-        for i, orig_frame in enumerate(all_frames):
-            result_frame = orig_frame.copy()
-            if i < len(final_cropped_frames):
-                result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[i]
-            final_frames.append(result_frame)
-
-        # Encode
+        # --- Fill unprocessed frames (those not covered by any segment) ---
+        unprocessed_count = total_frames - len(processed_frames)
         output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
-        final_frames_dir = os.path.join(output_dir, 'final_frames')
-        os.makedirs(final_frames_dir, exist_ok=True)
-        for i, frame in enumerate(final_frames):
-            cv2.imwrite(os.path.join(final_frames_dir, f'{i:05d}.png'), frame)
+        if unprocessed_count > 0:
+            print(f"[SAM2] Filling {unprocessed_count} unprocessed frames...")
+            cap = cv2.VideoCapture(video_path)
+            frame_idx = 0
+            while True:
+                ret, orig_frame = cap.read()
+                if not ret:
+                    break
+                # Only write frames that weren't processed by segments
+                if frame_idx not in processed_frames:
+                    cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), orig_frame)
+                frame_idx += 1
+            cap.release()
+        print(f"[SAM2] Total {total_frames} frames ready for encoding")
         ffmpeg_cmd = [
             str(FFMPEG_EXE), '-y', '-framerate', str(int(original_fps)),
             '-i', os.path.join(final_frames_dir, '%05d.png'),
