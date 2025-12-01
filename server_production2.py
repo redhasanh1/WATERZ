@@ -488,6 +488,45 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='sam2')
             raise self.replace(chain(s1, s2))
 
+        if not use_wsl_celery:
+            wsl_video = _to_wsl_path(video_path)
+            wsl_masks = _to_wsl_path(masks_dir)
+            if prompt_mode == 'point':
+                prompt_flag = f'--point {cx},{cy}'
+            else:
+                prompt_flag = f'--bbox {bbox_str}'
+
+            wsl_cmd = (
+                f'cd /mnt/d/watermarkz && '
+                f'source venv_wsl2/bin/activate && '
+                f'python sam2_track_wsl2.py "{wsl_video}" "{wsl_masks}" '
+                f'{prompt_flag} --frame-idx {frame_index_full}'
+            )
+            print(f"[SAM2-WSL2] Running: wsl -e bash -c \"{wsl_cmd}\"")
+
+            result = subprocess.run(
+                ['wsl', '-e', 'bash', '-c', wsl_cmd],
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minute timeout
+            )
+
+            if result.returncode != 0:
+                print(f"[SAM2-WSL2] STDERR: {result.stderr}")
+                raise RuntimeError(f"WSL2 SAM2 tracking failed: {result.stderr}")
+
+            print(f"[SAM2-WSL2] STDOUT: {result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout}")
+
+            try:
+                for line in result.stdout.split('\n'):
+                    if '[RESULT]' in line:
+                        json_str = line.split('[RESULT]')[1].strip()
+                        sam2_result = json.loads(json_str)
+                        print(f"[SAM2-WSL2] Result: {sam2_result}")
+                        break
+            except Exception as e:
+                print(f"[SAM2-WSL2] Warning: Could not parse result JSON: {e}")
+
         # Read masks from output directory (FULL FPS)
         mask_files = sorted(glob.glob(os.path.join(masks_dir, "*.png")))
         if not mask_files:
@@ -606,11 +645,22 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         (max(0, int(s)), min(int(e) + 1, total_frames), bb) for (s, e, bb) in segments
                         if max(0, int(s)) < min(int(e) + 1, total_frames)
                     ]
-                    # Ensure last segment reaches the very end for full coverage
-                    ls, le, lb = segments[-1]
-                    segments[-1] = (ls, total_frames, lb)
 
-                print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS)")
+                    # --- BOUNDARY-SAFE: Ensure CONTIGUOUS coverage (no gaps!) ---
+                    fixed_segments = []
+                    for i, (s, e, bb) in enumerate(segments):
+                        if i == 0 and s > 0:
+                            s = 0  # First segment must start at 0
+                        if i > 0:
+                            prev_end = fixed_segments[-1][1]
+                            if s > prev_end:
+                                s = prev_end  # No gaps between segments!
+                        if i == len(segments) - 1:
+                            e = total_frames  # Last segment must reach the end
+                        fixed_segments.append((s, e, bb))
+                    segments = fixed_segments
+
+                print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")
                 for idx, (start, end, bbox) in enumerate(segments):
                     print(f"[SAM2]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
             else:
@@ -640,7 +690,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
                 print(f"[SAM2] Detected {len(segments)} segments (scaled to full FPS)")
                 for idx, (start, end, bbox) in enumerate(segments):
-                    print(f"[SAM2]   Segment {idx+1}: frames {start}-{end} ({end-start}f) bbox={bbox}")
+                    print(f"[SAM2]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
         else:
             # Strict monolithic mode (commit logic): process entire video in a single pass
             segments = [(0, total_frames, [0, 0, width, height])]
@@ -694,21 +744,24 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         def process_segment(seg_idx, start_f, end_f, seg_bbox):
             """Process a single segment with ProPainter"""
+            proc_start = start_f
+            proc_end = end_f
             try:
                 duration = end_f - start_f
+                log_end = end_f - 1 if end_f > start_f else end_f
                 # Calculate segment-specific crop within the global crop
                 seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
                     [seg_bbox[0] - crop_x, seg_bbox[1] - crop_y,
                      seg_bbox[2] - crop_x, seg_bbox[3] - crop_y],
-                    crop_w, crop_h, padding_ratio=0.15, min_size=128
+                    crop_w, crop_h, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
                 )
 
                 # Determine optimization level based on movement
                 movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
                 if movement < 10:
-                    neighbor_length, subvideo_length = 2, 20
+                    neighbor_length, subvideo_length = 2, 30
                 else:
-                    neighbor_length, subvideo_length = 2, 40
+                    neighbor_length, subvideo_length = 3, 60
 
                 # Temporal padding for context
                 pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
@@ -716,7 +769,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 proc_start = start_f - pad_left
                 proc_end = end_f + pad_right
 
-                print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{end_f} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=±{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
+                print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
 
                 # Extract segment frames and masks (double-cropped: global + segment)
                 seg_frames = []
@@ -730,7 +783,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         seg_masks.append(np.ascontiguousarray(seg_mask))
 
                 if not seg_frames or not seg_masks:
-                    return seg_idx, None, None
+                    return seg_idx, None, None, (proc_start, proc_end)
 
                 # Create segment output directory
                 seg_output_dir = os.path.join(output_dir, f"segment_{seg_idx}")
@@ -779,7 +832,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 print(f"[ERROR] Segment {seg_idx} failed: {e}")
                 import traceback
                 traceback.print_exc()
-                return seg_idx, None, None
+                return seg_idx, None, None, (proc_start, proc_end)
 
         # Process segments (sequentially for GPU, parallel prep could be added)
         if len(segments) <= 1:
@@ -837,7 +890,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                             result = future.result()
                         except Exception as e:
                             print(f"[ERROR] Segment {seg_idx_done} raised: {e}")
-                            result = (seg_idx_done, None, None)
+                            result = (seg_idx_done, None, None, (0, 0))
                         segment_results[seg_idx_done] = result
                         completed += 1
                         progress = 30 + int((completed / len(segments)) * 40)
@@ -1099,7 +1152,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         except Exception:
             track_fps = None
         if track_fps and track_fps > 0 and abs(track_fps - 10.0) < 1.0 and total_frames > len(masks_full) >= 2:
-            print(f"[SAM2] Expanding {len(masks_full)} masks (tracking @ ~10fps) to {total_frames} full-FPS frames…")
+            print(f"[SAM2] Expanding {len(masks_full)} masks (tracking @ ~10fps) to {total_frames} full-FPS frames...")
             all_masks = expand_masks_10fps(masks_full, total_frames, original_fps)
         else:
             # Fallback: strict alignment (truncate to shortest)
@@ -1163,7 +1216,8 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         all_frames_cropped = [f[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for f in all_frames]
         all_masks_cropped = [m[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] for m in all_masks]
 
-        # Detect segments (full-FPS default)
+        # --- Segment detection (FULL-FPS, boundary-safe like commit 578a2603) ---
+        print(f"[SAM2] Detecting segments from FULL-FPS in-memory masks...")
         detections_per_frame = []
         for m in all_masks:
             coords = cv2.findNonZero(m)
@@ -1175,11 +1229,36 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         segments = detect_segments(detections_per_frame, position_tolerance=SEGMENT_POS_TOLERANCE, min_segment_length=SEGMENT_MIN_LEN_FULL)
         if len(segments) > 1:
             segments = merge_adjacent_segments(segments, position_tolerance=SEGMENT_POS_TOLERANCE, max_gap=SEGMENT_MERGE_GAP_FULL)
-        # Convert inclusive end → exclusive
+
+        # Convert inclusive end → exclusive and clamp to total_frames
         if segments:
-            segments = [(max(0,int(s)), min(int(e)+1, total_frames), bb) for (s,e,bb) in segments if max(0,int(s))<min(int(e)+1,total_frames)]
-            ls, le, lb = segments[-1]
-            segments[-1] = (ls, total_frames, lb)
+            segments = [(max(0, int(s)), min(int(e) + 1, total_frames), bb) for (s, e, bb) in segments if max(0, int(s)) < min(int(e) + 1, total_frames)]
+
+            # --- BOUNDARY-SAFE: Ensure CONTIGUOUS coverage (no gaps!) ---
+            # Extend each segment to meet the next one (like commit 578a2603)
+            fixed_segments = []
+            for i, (s, e, bb) in enumerate(segments):
+                if i == 0 and s > 0:
+                    # First segment must start at 0
+                    s = 0
+                if i > 0:
+                    # This segment should start where previous ended (no gap!)
+                    prev_end = fixed_segments[-1][1]
+                    if s > prev_end:
+                        # Gap detected! Extend previous segment OR start this one earlier
+                        s = prev_end
+                if i == len(segments) - 1:
+                    # Last segment must reach the end
+                    e = total_frames
+                fixed_segments.append((s, e, bb))
+            segments = fixed_segments
+        else:
+            # No segments detected - cover entire video
+            segments = [(0, total_frames, global_bbox)]
+
+        print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")
+        for idx, (start, end, bbox) in enumerate(segments):
+            print(f"[SAM2]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
 
         # Now reuse the same merging + ProPainter logic as the main task
         # For brevity, call back into process_sam2_interactive_task's internal pipeline is not trivial; so inline minimal subset
@@ -1196,6 +1275,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         def process_segment_local(seg_idx, start_f, end_f, seg_bbox):
             duration = end_f - start_f
+            log_end = end_f - 1 if end_f > start_f else end_f
             seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
                 [seg_bbox[0] - crop_x, seg_bbox[1] - crop_y, seg_bbox[2] - crop_x, seg_bbox[3] - crop_y],
                 crop_w, crop_h, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
@@ -1209,9 +1289,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
             proc_start = start_f - pad_left
             proc_end = end_f + pad_right
+
+            print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end-1}")
+
             seg_frames = [np.ascontiguousarray(all_frames_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]) for i in range(proc_start, proc_end) if i < len(all_frames_cropped)]
             seg_masks = [np.ascontiguousarray(all_masks_cropped[i][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]) for i in range(proc_start, proc_end) if i < len(all_masks_cropped)]
             if not seg_frames or not seg_masks:
+                print(f"[SAM2] WARNING: Segment {seg_idx+1} has no frames/masks! seg_frames={len(seg_frames)}, seg_masks={len(seg_masks)}")
                 return seg_idx, None, None, (proc_start, proc_end)
             seg_output_dir = os.path.join(output_dir, f"segment_{seg_idx}")
             os.makedirs(seg_output_dir, exist_ok=True)
@@ -1235,29 +1319,46 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                     fr = cv2.imread(os.path.join(frames_subdir, ff))
                     if fr is not None:
                         output_frames.append(fr)
+
+            expected_count = proc_end - proc_start
+            if len(output_frames) != expected_count:
+                print(f"[SAM2] WARNING: Segment {seg_idx+1} frame count mismatch! Expected {expected_count}, got {len(output_frames)}")
+            else:
+                print(f"[SAM2] Segment {seg_idx+1}: ProPainter returned {len(output_frames)} frames (OK)")
+
             return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
 
         # Process segments sequentially to keep memory modest
         for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments or [(0, total_frames, [0,0,width,height])]):
             segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
 
-        # Merge
+        # --- Merge segments back to cropped frames ---
+        print(f"[SAM2] Merging {len(segments or [])} segment(s) back to {len(all_frames_cropped)} frames...")
         final_cropped_frames = [f.copy() for f in all_frames_cropped]
         for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments or [(0, total_frames, [0,0,width,height])]):
             if seg_idx not in segment_results:
+                print(f"[SAM2] WARNING: Segment {seg_idx+1} not in results!")
                 continue
             try:
                 _, output_frames, crop_info, time_info = segment_results[seg_idx]
             except ValueError:
+                # Backward-compat (if timing info missing), fall back to original range
                 _, output_frames, crop_info = segment_results[seg_idx]
                 time_info = (start_f, end_f)
+                print(f"[SAM2] WARNING: Segment {seg_idx+1} missing time_info, using fallback ({start_f}, {end_f})")
             if output_frames is None or crop_info is None:
+                print(f"[SAM2] WARNING: Segment {seg_idx+1} has None output!")
                 continue
             seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = crop_info
             proc_start, proc_end = time_info
+
+            # Count how many frames will actually be pasted
+            pasted_count = 0
             for i, frame_idx in enumerate(range(proc_start, proc_end)):
                 if frame_idx < len(final_cropped_frames) and i < len(output_frames):
                     final_cropped_frames[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w] = output_frames[i]
+                    pasted_count += 1
+            print(f"[SAM2] Segment {seg_idx+1}: pasted {pasted_count} frames to indices {proc_start}-{min(proc_end-1, len(final_cropped_frames)-1)}")
 
         # Merge back to full res
         final_frames = []
