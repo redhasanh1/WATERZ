@@ -1328,9 +1328,35 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             return seg_idx, output_frames, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
 
-        # Process segments sequentially to keep memory modest
-        for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments or [(0, total_frames, [0,0,width,height])]):
-            segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
+        # Process segments (parallel when enabled, like main task)
+        segments_to_process = segments or [(0, total_frames, [0, 0, width, height])]
+
+        if SAM2_PARALLEL_SEGMENTS and SEGMENT_WORKERS > 1 and len(segments_to_process) > 1:
+            print(f"[SAM2] Processing {len(segments_to_process)} segments in PARALLEL (workers={min(SEGMENT_WORKERS, len(segments_to_process))})...")
+
+            max_workers = min(SEGMENT_WORKERS, len(segments_to_process))
+            futures = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
+                    futures[executor.submit(process_segment_local, seg_idx, start_f, end_f, seg_bbox)] = seg_idx
+
+                completed = 0
+                for future in as_completed(futures):
+                    seg_idx_done = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        print(f"[ERROR] Segment {seg_idx_done} raised: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        result = (seg_idx_done, None, None, (0, 0))
+                    segment_results[seg_idx_done] = result
+                    completed += 1
+                    print(f"[SAM2] Completed {completed}/{len(segments_to_process)} segments")
+        else:
+            print(f"[SAM2] Processing {len(segments_to_process)} segment(s) sequentially...")
+            for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
+                segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
 
         # --- Merge segments back to cropped frames ---
         print(f"[SAM2] Merging {len(segments or [])} segment(s) back to {len(all_frames_cropped)} frames...")
