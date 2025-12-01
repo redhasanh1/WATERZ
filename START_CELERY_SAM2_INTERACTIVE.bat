@@ -104,8 +104,8 @@ set USE_TORCH_COMPILE=0
 set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
-REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers
-set SEGMENT_WORKERS=4
+REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (1 = sequential, safest for VRAM)
+set SEGMENT_WORKERS=1
 
 
 
@@ -127,6 +127,9 @@ set SEGMENT_MOTION_THRESHOLD=20
 set SEGMENT_MIN_LEN_FULL=3
 set SEGMENT_MERGE_GAP_FULL=10
 
+REM Max frames per segment (prevents OOM on long videos - splits into chunks)
+set MAX_SEGMENT_FRAMES=300
+
 REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50
 set SEGMENT_MIN_LEN_10FPS=3
@@ -135,8 +138,9 @@ set SEGMENT_MERGE_GAP_10FPS=6
 REM ⚡ SAM2 TRACKING: NOT USED IN INTERACTIVE MODE (masks provided by user)
 set USE_SAM2_TRACKING=0
 
-REM Windows-side 10fps downsample for WSL speed (DISABLED for fast-moving objects)
-set SAM2_TRACK_10FPS=0
+REM Windows-side FPS downsample for WSL speed (faster but less accurate for fast objects)
+set SAM2_TRACK_DOWNSAMPLE=0
+set SAM2_TRACK_FPS=15
 
 echo.
 echo ============================================================
@@ -154,9 +158,9 @@ set TORCHINDUCTOR_FX_GRAPH_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
-REM Use thread pool with 4 workers
+REM Use solo pool (1 task at a time) - safest for VRAM on big videos
 REM -Q sam2 ensures this worker ONLY handles SAM2 tasks (ignores prepare_video etc)
 REM Using server_production2.celery for the SAM2 FULL-FPS pipeline
-set CELERY_POOL=threads
-set CELERY_CONCURRENCY=4
-"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q sam2 --loglevel=info --pool=threads --concurrency=4
+set CELERY_POOL=solo
+set CELERY_CONCURRENCY=1
+"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q sam2 --loglevel=info --pool=solo
