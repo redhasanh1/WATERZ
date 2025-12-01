@@ -119,17 +119,24 @@ REM Use strict full-video inpainting (no segment splitting) by default
 set SAM2_USE_SEGMENTS=1
 set SAM2_PARALLEL_SEGMENTS=1
 set SAM2_SEGMENT_DETECTION_MODE=full
+
+REM Motion-based segment detection (better for fast-moving objects like footballs)
+REM Compares frame-to-frame movement instead of drift from average
+set SEGMENT_USE_MOTION_DETECTION=1
+set SEGMENT_MOTION_THRESHOLD=20
+set SEGMENT_MIN_LEN_FULL=3
+set SEGMENT_MERGE_GAP_FULL=10
+
+REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50
-set SEGMENT_MIN_LEN_FULL=15
-set SEGMENT_MERGE_GAP_FULL=60
 set SEGMENT_MIN_LEN_10FPS=3
 set SEGMENT_MERGE_GAP_10FPS=6
 
 REM ⚡ SAM2 TRACKING: NOT USED IN INTERACTIVE MODE (masks provided by user)
 set USE_SAM2_TRACKING=0
 
-REM Windows-side 10fps downsample for WSL speed (recommended)
-set SAM2_TRACK_10FPS=1
+REM Windows-side 10fps downsample for WSL speed (DISABLED for fast-moving objects)
+set SAM2_TRACK_10FPS=0
 
 echo.
 echo ============================================================

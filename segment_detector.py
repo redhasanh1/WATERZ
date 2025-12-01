@@ -247,6 +247,74 @@ def detect_segments(
     return segments
 
 
+def detect_segments_motion_based(
+    detections_per_frame: List[Optional[Tuple[int, int, int, int]]],
+    motion_threshold: int = 20,
+    min_segment_length: int = 3
+) -> List[Tuple[int, int, Tuple[int, int, int, int]]]:
+    """
+    Detect segments based on frame-to-frame motion.
+
+    Unlike detect_segments() which compares to running average (drifts with steady motion),
+    this compares each frame to the PREVIOUS frame - catching instant motion.
+
+    Better for fast-moving objects like footballs that move steadily across frames.
+
+    Args:
+        detections_per_frame: List of bbox per frame (None if no detection)
+        motion_threshold: Max pixel movement between consecutive frames (default 20px)
+        min_segment_length: Minimum frames for a valid segment (default 3)
+
+    Returns:
+        List of (start_frame, end_frame, average_bbox) tuples
+    """
+    if not detections_per_frame:
+        return []
+
+    segments = []
+    current_start = None
+    current_bboxes = []
+    prev_bbox = None
+
+    for frame_idx, bbox in enumerate(detections_per_frame):
+        if bbox is None:
+            # No detection - end current segment
+            if current_start is not None and len(current_bboxes) >= min_segment_length:
+                avg_bbox = average_bbox(current_bboxes)
+                segments.append((current_start, frame_idx - 1, avg_bbox))
+            current_start = None
+            current_bboxes = []
+            prev_bbox = None
+            continue
+
+        if prev_bbox is None:
+            # Start first segment
+            current_start = frame_idx
+            current_bboxes = [bbox]
+        else:
+            # Compare to PREVIOUS frame (not average!)
+            distance = bbox_distance(bbox, prev_bbox)
+            if distance > motion_threshold:
+                # Motion detected! End current segment, start new
+                if len(current_bboxes) >= min_segment_length:
+                    avg_bbox = average_bbox(current_bboxes)
+                    segments.append((current_start, frame_idx - 1, avg_bbox))
+                current_start = frame_idx
+                current_bboxes = [bbox]
+            else:
+                # Continue current segment
+                current_bboxes.append(bbox)
+
+        prev_bbox = bbox
+
+    # Handle final segment
+    if current_start is not None and len(current_bboxes) >= min_segment_length:
+        avg_bbox = average_bbox(current_bboxes)
+        segments.append((current_start, len(detections_per_frame) - 1, avg_bbox))
+
+    return segments
+
+
 def merge_adjacent_segments(
     segments: List[Tuple[int, int, Tuple[int, int, int, int]]],
     position_tolerance: int = 5,

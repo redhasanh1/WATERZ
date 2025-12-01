@@ -15,7 +15,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Segment detection for parallel processing
-from segment_detector import detect_segments_from_masks, merge_adjacent_segments, detect_segments
+from segment_detector import detect_segments_from_masks, merge_adjacent_segments, detect_segments, detect_segments_motion_based
 from crop_utils import calculate_crop_region
 
 # Number of parallel segment workers
@@ -41,6 +41,11 @@ SEGMENT_MERGE_GAP_10FPS = int(os.getenv('SEGMENT_MERGE_GAP_10FPS', '6'))
 # Full-FPS domain (preferred)
 SEGMENT_MIN_LEN_FULL = int(os.getenv('SEGMENT_MIN_LEN_FULL', '15'))
 SEGMENT_MERGE_GAP_FULL = int(os.getenv('SEGMENT_MERGE_GAP_FULL', '60'))
+# Motion-based detection (better for fast-moving objects)
+# SEGMENT_MOTION_THRESHOLD: max px movement between frames before new segment (default 20)
+SEGMENT_MOTION_THRESHOLD = int(os.getenv('SEGMENT_MOTION_THRESHOLD', '20'))
+# Use motion-based detection instead of average-based (1=motion, 0=average)
+SEGMENT_USE_MOTION_DETECTION = os.getenv('SEGMENT_USE_MOTION_DETECTION', '1').lower() in ('1', 'true', 'yes', 'on')
 # Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
 SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
@@ -626,13 +631,23 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     else:
                         detections_per_frame.append(None)
 
-                segments = detect_segments(
-                    detections_per_frame,
-                    position_tolerance=SEGMENT_POS_TOLERANCE,
-                    min_segment_length=SEGMENT_MIN_LEN_FULL,
-                )
+                # Use motion-based detection for fast-moving objects (frame-to-frame comparison)
+                # or average-based detection for static watermarks
+                if SEGMENT_USE_MOTION_DETECTION:
+                    segments = detect_segments_motion_based(
+                        detections_per_frame,
+                        motion_threshold=SEGMENT_MOTION_THRESHOLD,
+                        min_segment_length=SEGMENT_MIN_LEN_FULL,
+                    )
+                    print(f"[SAM2] Motion-based detection: {len(segments)} segments (threshold={SEGMENT_MOTION_THRESHOLD}px)")
+                else:
+                    segments = detect_segments(
+                        detections_per_frame,
+                        position_tolerance=SEGMENT_POS_TOLERANCE,
+                        min_segment_length=SEGMENT_MIN_LEN_FULL,
+                    )
 
-                if len(segments) > 1:
+                if len(segments) > 1 and not SEGMENT_USE_MOTION_DETECTION:
                     segments = merge_adjacent_segments(
                         segments,
                         position_tolerance=SEGMENT_POS_TOLERANCE,
@@ -717,6 +732,14 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         crop_x, crop_y, crop_w, crop_h = calculate_crop_region(global_bbox, width, height, padding_ratio=0.2, min_size=128)
         print(f"[SAM2] Global crop: {crop_x},{crop_y} {crop_w}x{crop_h}")
+
+        # For single segment covering full video, use global_bbox (union) instead of average
+        # This prevents the segment crop from cutting off fast-moving objects at extreme positions
+        if len(segments) == 1 and segments[0][0] == 0 and segments[0][1] == total_frames:
+            old_bbox = segments[0][2]
+            if old_bbox != global_bbox:
+                print(f"[SAM2] Single full-video segment: using global_bbox {global_bbox} instead of average {old_bbox}")
+                segments = [(0, total_frames, global_bbox)]
 
         # Create output directory for ProPainter
         output_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_output")
@@ -1226,8 +1249,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 detections_per_frame.append((x, y, x + w, y + h))
             else:
                 detections_per_frame.append(None)
-        segments = detect_segments(detections_per_frame, position_tolerance=SEGMENT_POS_TOLERANCE, min_segment_length=SEGMENT_MIN_LEN_FULL)
-        if len(segments) > 1:
+        # Use motion-based detection for fast-moving objects
+        if SEGMENT_USE_MOTION_DETECTION:
+            segments = detect_segments_motion_based(detections_per_frame, motion_threshold=SEGMENT_MOTION_THRESHOLD, min_segment_length=SEGMENT_MIN_LEN_FULL)
+            print(f"[SAM2] Motion-based detection: {len(segments)} segments (threshold={SEGMENT_MOTION_THRESHOLD}px)")
+        else:
+            segments = detect_segments(detections_per_frame, position_tolerance=SEGMENT_POS_TOLERANCE, min_segment_length=SEGMENT_MIN_LEN_FULL)
+        if len(segments) > 1 and not SEGMENT_USE_MOTION_DETECTION:
             segments = merge_adjacent_segments(segments, position_tolerance=SEGMENT_POS_TOLERANCE, max_gap=SEGMENT_MERGE_GAP_FULL)
 
         # Convert inclusive end → exclusive and clamp to total_frames
@@ -1254,6 +1282,12 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             segments = fixed_segments
         else:
             # No segments detected - cover entire video
+            segments = [(0, total_frames, global_bbox)]
+
+        # For single segment covering full video, use global_bbox (union) instead of average
+        # This prevents the segment crop from cutting off fast-moving objects at extreme positions
+        if len(segments) == 1 and segments[0][0] == 0 and segments[0][1] == total_frames:
+            print(f"[SAM2] Single full-video segment: using global_bbox instead of average")
             segments = [(0, total_frames, global_bbox)]
 
         print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")

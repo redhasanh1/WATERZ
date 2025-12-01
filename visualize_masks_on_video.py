@@ -42,10 +42,14 @@ def main():
     print("SAM2 Mask Visualization - With 10fps Expansion")
     print("="*60)
 
-    # Parse args
+    # Parse args: python visualize_masks_on_video.py [video_path] [masks_dir]
     video_path = None
+    masks_dir = None
+
     if len(sys.argv) >= 2:
         video_path = sys.argv[1]
+    if len(sys.argv) >= 3:
+        masks_dir = Path(sys.argv[2])
 
     if not video_path or not os.path.exists(video_path):
         video_path = select_video()
@@ -54,7 +58,8 @@ def main():
             return
 
     # Paths
-    masks_dir = Path("temp_sam2_masks")
+    if masks_dir is None:
+        masks_dir = Path("temp_sam2_masks")
     output_path = Path("results") / "mask_visualization.mp4"
 
     if not masks_dir.exists():
