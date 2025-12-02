@@ -487,7 +487,7 @@
             margin-top: 3rem;
         }
 
-.feature-card {
+        .feature-card {
             background: var(--bg-card);
             border-radius: 16px;
             padding: 2rem;
@@ -500,42 +500,40 @@
             box-shadow: 0 0 40px rgba(102, 126, 234, 0.3);
         }
 
-.feature-icon {
-            width: 84px;
-            height: 84px;
-            margin: 0 auto 1.25rem;
-            border-radius: 24px;
+        .feature-number {
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 1.5rem;
+            background: var(--gradient-rainbow);
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 10px 30px rgba(79, 70, 229, 0.25);
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
             animation: float 3s ease-in-out infinite;
         }
 
-        .feature-icon svg {
-            width: 42px;
-            height: 42px;
-            stroke: #ffffff;
-            stroke-width: 1.8;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-            fill: none;
+        .feature-card:nth-child(1) .feature-number {
+            background: var(--bg-gradient);
+            animation-delay: 0s;
         }
 
-        .feature-icon-upload {
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        .feature-card:nth-child(2) .feature-number {
+            background: var(--bg-gradient-2);
+            animation-delay: 0.3s;
         }
 
-        .feature-icon-click {
-            background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
+        .feature-card:nth-child(3) .feature-number {
+            background: var(--bg-gradient-3);
+            animation-delay: 0.6s;
         }
 
-        .feature-icon-magic {
-            background: linear-gradient(135deg, #06b6d4 0%, #0ea5e9 100%);
-        }
-
-        .feature-icon-download {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        .feature-card:nth-child(4) .feature-number {
+            background: var(--bg-gradient-4);
+            animation-delay: 0.9s;
         }
 
         .btn-primary {
@@ -1359,41 +1357,22 @@
                     </div>
                 </section>
 
-                <h2 style="text-align: center; font-size: 2.25rem; font-weight: 700; margin: 3rem 0 2rem; color: var(--text-primary);">How It Works - 4 Streamlined Steps</h2>
+                <h2 style="text-align: center; font-size: 2.25rem; font-weight: 700; margin: 3rem 0 2rem; color: var(--text-primary);">How It Works - 3 Simple Steps</h2>
                 <div class="feature-grid" id="how-to">
                     <div class="feature-card">
-                        <div class="feature-icon feature-icon-upload">
-                            <svg viewBox="0 0 48 48" role="img" aria-label="Upload icon">
-                                <path d="M24 32V12"></path>
-                                <path d="M16 20l8-8 8 8"></path>
-                                <path d="M12 36h24"></path>
-                            </svg>
-                        </div>
+                        <div class="feature-number">1</div>
                         <h3>Upload Video</h3>
-                        <p style="color: var(--text-secondary);">Drag & drop your video or paste a secure link. We handle large 4K files over encrypted transfer.</p>
+                        <p style="color: var(--text-secondary);">Drag and drop your video or paste a URL. Quick and easy.</p>
                     </div>
                     <div class="feature-card">
-                        <div class="feature-icon feature-icon-click">
-                            <svg viewBox="0 0 48 48" role="img" aria-label="Click icon">
-                                <path d="M20 10l4 20 4-5 6 9 4-3-6-9 5-1z"></path>
-                                <path d="M12 15l3 3"></path>
-                                <path d="M8 24h4"></path>
-                            </svg>
-                        </div>
+                        <div class="feature-number">2</div>
                         <h3>Click Object</h3>
-                        <p style="color: var(--text-secondary);">Smart previews highlight every object on hover. One click locks onto anything you want removed.</p>
+                        <p style="color: var(--text-secondary);">Click on any object you want to remove. Smart detection highlights it instantly.</p>
                     </div>
                     <div class="feature-card">
-                        <div class="feature-icon feature-icon-magic">
-                            <svg viewBox="0 0 48 48" role="img" aria-label="Magic icon">
-                                <path d="M12 24l6 0"></path>
-                                <path d="M24 12l0 6"></path>
-                                <path d="M30 30l6 6"></path>
-                                <path d="M18 30l12-12"></path>
-                            </svg>
-                        </div>
+                        <div class="feature-number">3</div>
                         <h3>Watch it Disappear</h3>
-                        <p style="color: var(--text-secondary);">Our TensorRT-accelerated inpainting removes objects in seconds with zero ghosting or hard edges.</p>
+                        <p style="color: var(--text-secondary);">Our AI removes the object seamlessly in seconds.</p>
                         <button id="removeWatermarkBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; display: none;">
                             Remove Object - Free (5 min wait)
                         </button>
@@ -1402,15 +1381,9 @@
                         </button>
                     </div>
                     <div class="feature-card">
-                        <div class="feature-icon feature-icon-download">
-                            <svg viewBox="0 0 48 48" role="img" aria-label="Download icon">
-                                <path d="M24 12v20"></path>
-                                <path d="M16 24l8 8 8-8"></path>
-                                <path d="M12 36h24"></path>
-                            </svg>
-                        </div>
+                        <div class="feature-number">4</div>
                         <h3>Download Clean Video</h3>
-                        <p style="color: var(--text-secondary);">Deliver instantly in ProRes, MP4, or MOV with audio perfectly synced—ready for clients.</p>
+                        <p style="color: var(--text-secondary);">Get your professionally edited video in high quality.</p>
                     </div>
                 </div>
 
@@ -3051,6 +3024,10 @@
 <script src="js/theme.js"></script>
 <script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script></body>
 </html>
+
+
+
+
 
 
 
