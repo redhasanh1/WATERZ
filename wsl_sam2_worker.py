@@ -110,6 +110,17 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     else:
         raise ValueError('Invalid prompt: provide point or bbox')
 
+    # Force VRAM cleanup after tracking
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except ImportError:
+        pass
+
     return {
         'status': 'success',
         'masks_dir': masks_dir,

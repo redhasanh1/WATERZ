@@ -37,7 +37,10 @@
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" test_dcnv4_integration.py)",
       "Bash(git checkout:*)",
       "Bash(git stash:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "WebFetch(domain:github.com)",
+      "mcp__ide__getDiagnostics",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []

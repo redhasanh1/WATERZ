@@ -123,12 +123,16 @@ set SAM2_SEGMENT_DETECTION_MODE=full
 REM Motion-based segment detection (better for fast-moving objects like footballs)
 REM Compares frame-to-frame movement instead of drift from average
 set SEGMENT_USE_MOTION_DETECTION=1
-set SEGMENT_MOTION_THRESHOLD=20
+set SEGMENT_MOTION_THRESHOLD=8
 set SEGMENT_MIN_LEN_FULL=3
 set SEGMENT_MERGE_GAP_FULL=10
 
 REM Max frames per segment (prevents OOM on long videos - splits into chunks)
 set MAX_SEGMENT_FRAMES=300
+
+REM Max pixels (width*height) per segment's union bbox - prevents huge crops that slow processing
+REM 400000 = ~630x630, keeps per-frame under 200ms. Lower = more segments = faster per segment
+set MAX_SEGMENT_PIXELS=400000
 
 REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50

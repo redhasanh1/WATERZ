@@ -178,6 +178,17 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, point=N
                 masks_saved += 1
 
     print(f"[SAM2] Complete! Saved {masks_saved} masks to {output_masks_dir}")
+
+    # Cleanup VRAM to prevent accumulation across jobs
+    del predictor
+    del inference_state
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    print(f"[SAM2] VRAM cleanup complete")
+
     return masks_saved
 
 

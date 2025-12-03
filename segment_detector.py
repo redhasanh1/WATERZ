@@ -95,6 +95,27 @@ def average_bbox(bboxes: List[Tuple[int, int, int, int]]) -> Tuple[int, int, int
     return (x1_avg, y1_avg, x2_avg, y2_avg)
 
 
+def union_bbox(bboxes: List[Tuple[int, int, int, int]]) -> Tuple[int, int, int, int]:
+    """
+    Calculate union bounding box that covers all bboxes.
+
+    Args:
+        bboxes: List of (x1, y1, x2, y2) tuples
+
+    Returns:
+        Union bbox (x1, y1, x2, y2) covering all input bboxes
+    """
+    if not bboxes:
+        return (0, 0, 0, 0)
+
+    x1 = min(b[0] for b in bboxes)
+    y1 = min(b[1] for b in bboxes)
+    x2 = max(b[2] for b in bboxes)
+    y2 = max(b[3] for b in bboxes)
+
+    return (x1, y1, x2, y2)
+
+
 def detect_segments_from_masks(
     mask_files_dir: str,
     position_tolerance: int = 50,
@@ -250,7 +271,8 @@ def detect_segments(
 def detect_segments_motion_based(
     detections_per_frame: List[Optional[Tuple[int, int, int, int]]],
     motion_threshold: int = 20,
-    min_segment_length: int = 3
+    min_segment_length: int = 3,
+    max_segment_pixels: int = 0
 ) -> List[Tuple[int, int, Tuple[int, int, int, int]]]:
     """
     Detect segments based on frame-to-frame motion.
@@ -264,6 +286,7 @@ def detect_segments_motion_based(
         detections_per_frame: List of bbox per frame (None if no detection)
         motion_threshold: Max pixel movement between consecutive frames (default 20px)
         min_segment_length: Minimum frames for a valid segment (default 3)
+        max_segment_pixels: Max pixels (width*height) for segment's union bbox (0=unlimited)
 
     Returns:
         List of (start_frame, end_frame, average_bbox) tuples
@@ -294,8 +317,19 @@ def detect_segments_motion_based(
         else:
             # Compare to PREVIOUS frame (not average!)
             distance = bbox_distance(bbox, prev_bbox)
-            if distance > motion_threshold:
-                # Motion detected! End current segment, start new
+
+            # Check if adding this bbox would make union too large
+            bbox_too_large = False
+            if max_segment_pixels > 0 and current_bboxes:
+                test_bboxes = current_bboxes + [bbox]
+                ub = union_bbox(test_bboxes)
+                pixels = (ub[2] - ub[0]) * (ub[3] - ub[1])
+                if pixels > max_segment_pixels:
+                    bbox_too_large = True
+                    print(f"[SEGMENT] Frame {frame_idx}: union bbox {pixels:,} pixels > {max_segment_pixels:,} limit, splitting")
+
+            if distance > motion_threshold or bbox_too_large:
+                # Motion detected OR bbox too large! End current segment, start new
                 if len(current_bboxes) >= min_segment_length:
                     avg_bbox = average_bbox(current_bboxes)
                     segments.append((current_start, frame_idx - 1, avg_bbox))
