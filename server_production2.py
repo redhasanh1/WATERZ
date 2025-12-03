@@ -1326,7 +1326,22 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         if not sam2_result or not isinstance(sam2_result, dict):
             raise RuntimeError(f"Invalid sam2_result: {sam2_result}")
+
+        # Convert Windows paths to WSL paths if running in WSL
+        def _to_wsl_path(p: str) -> str:
+            if not p:
+                return p
+            # Handle D:\ or d:\ style paths
+            if len(p) >= 2 and p[1] == ':':
+                drive = p[0].lower()
+                return f'/mnt/{drive}' + p[2:].replace('\\', '/')
+            return p.replace('\\', '/')
+
         masks_dir = sam2_result.get('masks_dir') or os.path.join(TEMP_DIR, f"{video_id}_sam2_masks")
+        # Convert paths if we're in WSL (check if /mnt exists)
+        if os.path.exists('/mnt') and ':\\' in masks_dir:
+            masks_dir = _to_wsl_path(masks_dir)
+            video_path = _to_wsl_path(video_path)
         if not os.path.isdir(masks_dir):
             raise RuntimeError(f"Masks directory missing: {masks_dir}")
 

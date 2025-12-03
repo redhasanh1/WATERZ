@@ -99,13 +99,13 @@ set ENABLE_DCNV4_RFCNET=1
 REM ❌ NVDEC VIDEO DECODER: DISABLED
 set ENABLE_NVDEC=0
 
-REM ⚡ TORCH COMPILE: DISABLED (not thread-safe)
-set USE_TORCH_COMPILE=0
-set TORCH_CUDAGRAPHS=0
-set TORCHINDUCTOR_CUDAGRAPHS=0
+REM ⚡ TORCH COMPILE: ENABLED (safe with 1 worker - sequential mode)
+set USE_TORCH_COMPILE=1
+set TORCH_CUDAGRAPHS=1
+set TORCHINDUCTOR_CUDAGRAPHS=1
 
-REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (4 = share preloaded frames)
-set SEGMENT_WORKERS=4
+REM ⚡ SEGMENT_WORKERS: Sequential processing with torch.compile (thread-safe)
+set SEGMENT_WORKERS=1
 
 
 
