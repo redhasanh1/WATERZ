@@ -120,7 +120,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, point=N
         SAM2_CONFIG,
         str(SAM2_CHECKPOINT),
         device=device,
-        vos_optimized=True
+        vos_optimized=False  # DISABLED - torch.compile takes too long for testing
     )
 
     torch.cuda.empty_cache()
