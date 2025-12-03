@@ -932,6 +932,17 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         # REVOLUTIONARY: Store all frames in VRAM with YUV420 compression (8:1 ratio!)
         vram_frames = {}  # {frame_idx: compressed_yuv420_dict}
 
+        # PRE-LOAD ALL FRAMES ONCE (workers will share!)
+        print(f"[SAM2] Pre-loading {total_frames} frames to shared VRAM (YUV420)...")
+        preloaded_frames = {}  # {frame_idx: compressed_yuv420}
+        cap_preload = cv2.VideoCapture(video_path)
+        for frame_idx in range(total_frames):
+            ret, frame = cap_preload.read()
+            if ret:
+                preloaded_frames[frame_idx] = VRAMCompressor.compress_frame(frame)
+        cap_preload.release()
+        print(f"[SAM2] All {len(preloaded_frames)} frames pre-loaded - workers will SHARE!")
+
         def process_segment(seg_idx, start_f, end_f, seg_bbox):
             """Process a single segment with ProPainter"""
             proc_start = start_f
@@ -961,23 +972,21 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
                 print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
 
-                # LOAD ONLY THIS SEGMENT'S FRAMES (per-segment loading to avoid OOM)
-                print(f"[SAM2] Loading frames {proc_start}-{proc_end} from video...")
-                seg_frames_global_crop = read_video_frames_range(video_path, proc_start, proc_end, global_crop)
-
-                # Apply segment-specific crop to loaded frames and masks
+                # GET FRAMES FROM PRE-LOADED SHARED VRAM (ZERO disk I/O!)
+                print(f"[FAST] Using {proc_end - proc_start} frames from memory (ZERO disk I/O!)")
                 seg_frames = []
                 seg_masks = []
-                for i, frame in enumerate(seg_frames_global_crop):
-                    frame_idx = proc_start + i
+                for frame_idx in range(proc_start, proc_end):
+                    # Decompress from shared preloaded frames
+                    full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
+                    # Apply global crop
+                    frame = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    # Apply segment-specific crop
                     seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                     seg_frames.append(np.ascontiguousarray(seg_frame))
                     if frame_idx < len(all_masks_cropped):
                         seg_mask = all_masks_cropped[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                         seg_masks.append(np.ascontiguousarray(seg_mask))
-
-                # Release global-cropped frames to free memory
-                del seg_frames_global_crop
 
                 if not seg_frames or not seg_masks:
                     return seg_idx, None, None, (proc_start, proc_end)
@@ -1024,14 +1033,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
                 # REVOLUTIONARY: Store in VRAM with YUV420 compression (8:1 ratio, ZERO disk I/O!)
                 print(f"[SAM2] Segment {seg_idx+1}: storing {len(output_frames)} frames in VRAM (YUV420)...")
-                cap_out = cv2.VideoCapture(video_path)
-                cap_out.set(cv2.CAP_PROP_POS_FRAMES, proc_start)
                 frames_stored = 0
                 for i in range(len(output_frames)):
                     frame_idx = proc_start + i
-                    ret, orig_frame = cap_out.read()
-                    if not ret:
-                        break
+                    # GET from shared preloaded frames (ZERO disk I/O!)
+                    orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                     # Composite segment output onto original frame
                     orig_frame[crop_y + seg_crop_y:crop_y + seg_crop_y + seg_crop_h,
                               crop_x + seg_crop_x:crop_x + seg_crop_x + seg_crop_w] = output_frames[i]
@@ -1039,7 +1045,6 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
                     processed_frames.add(frame_idx)
                     frames_stored += 1
-                cap_out.release()
                 del output_frames  # Free memory immediately!
                 print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} frames in VRAM")
 
@@ -1054,12 +1059,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         # Process segments (sequentially for GPU, parallel prep could be added)
         if len(segments) <= 1:
-            # Single segment - load frames on-demand (still per-segment to save memory)
+            # Single segment - use preloaded frames with decompression
             print(f"[SAM2] Processing as single segment...")
-            print(f"[SAM2] Loading all {total_frames} frames with global crop...")
-            seg_frames = read_video_frames_range(video_path, 0, total_frames, global_crop)
-            all_frames_contiguous = [np.ascontiguousarray(f) for f in seg_frames]
-            del seg_frames  # Free memory after conversion
+            print(f"[FAST] Using {total_frames} pre-loaded frames (ZERO disk I/O!)")
+            all_frames_contiguous = []
+            for frame_idx in range(total_frames):
+                # Decompress and apply global crop
+                full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
+                frame = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                all_frames_contiguous.append(np.ascontiguousarray(frame))
             all_masks_contiguous = [np.ascontiguousarray(m) for m in all_masks_cropped]
 
             faster_propainter_pipeline(
@@ -1149,21 +1157,16 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         # --- 13. Fill unprocessed frames (those not covered by any segment) ---
         unprocessed_count = total_frames - len(processed_frames)
         if unprocessed_count > 0:
-            print(f"[SAM2] Filling {unprocessed_count} unprocessed frames...")
-            cap = cv2.VideoCapture(video_path)
-            frame_idx = 0
-            while True:
-                ret, orig_frame = cap.read()
-                if not ret:
-                    break
+            print(f"[SAM2] Filling {unprocessed_count} unprocessed frames from pre-loaded VRAM...")
+            for frame_idx in range(total_frames):
                 # Only write frames that weren't processed by segments
                 if frame_idx not in processed_frames:
+                    # GET from shared preloaded frames (ZERO disk I/O!)
+                    orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                     # Single segment case: use final_cropped_frames if available
                     if len(segments) <= 1 and frame_idx < len(final_cropped_frames):
                         orig_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[frame_idx]
                     cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), orig_frame)
-                frame_idx += 1
-            cap.release()
         print(f"[SAM2] Total {total_frames} frames ready for encoding")
 
         # --- 15. Encode final video from frames with audio ---
@@ -1543,6 +1546,17 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         # REVOLUTIONARY: Store all frames in VRAM with YUV420 compression (8:1 ratio!)
         vram_frames = {}  # {frame_idx: compressed_yuv420_dict}
 
+        # PRE-LOAD ALL FRAMES ONCE (workers will share!)
+        print(f"[SAM2] Pre-loading {total_frames} frames to shared VRAM (YUV420)...")
+        preloaded_frames = {}  # {frame_idx: compressed_yuv420}
+        cap_preload = cv2.VideoCapture(video_path)
+        for frame_idx in range(total_frames):
+            ret, frame = cap_preload.read()
+            if ret:
+                preloaded_frames[frame_idx] = VRAMCompressor.compress_frame(frame)
+        cap_preload.release()
+        print(f"[SAM2] All {len(preloaded_frames)} frames pre-loaded - workers will SHARE!")
+
         def process_segment_local(seg_idx, start_f, end_f, seg_bbox):
             duration = end_f - start_f
             log_end = end_f - 1 if end_f > start_f else end_f
@@ -1562,23 +1576,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end-1}")
 
-            # LOAD ONLY THIS SEGMENT'S FRAMES (per-segment loading to avoid OOM)
-            print(f"[SAM2] Loading frames {proc_start}-{proc_end} from video...")
-            seg_frames_global_crop = read_video_frames_range(video_path, proc_start, proc_end, global_crop)
-
-            # Apply segment-specific crop to loaded frames and masks
+            # GET FRAMES FROM PRE-LOADED SHARED VRAM (ZERO disk I/O!)
+            print(f"[FAST] Using {proc_end - proc_start} frames from memory (ZERO disk I/O!)")
             seg_frames = []
             seg_masks = []
-            for i, frame in enumerate(seg_frames_global_crop):
-                frame_idx = proc_start + i
+            for frame_idx in range(proc_start, proc_end):
+                # Decompress from shared preloaded frames
+                full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
+                # Apply global crop
+                frame = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                # Apply segment-specific crop
                 seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                 seg_frames.append(np.ascontiguousarray(seg_frame))
                 if frame_idx < len(all_masks_cropped):
                     seg_mask = all_masks_cropped[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                     seg_masks.append(np.ascontiguousarray(seg_mask))
-
-            # Release global-cropped frames to free memory
-            del seg_frames_global_crop
             if not seg_frames or not seg_masks:
                 print(f"[SAM2] WARNING: Segment {seg_idx+1} has no frames/masks! seg_frames={len(seg_frames)}, seg_masks={len(seg_masks)}")
                 return seg_idx, None, None, (proc_start, proc_end)
@@ -1613,14 +1625,11 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             # REVOLUTIONARY: Store in VRAM with YUV420 compression (8:1 ratio, ZERO disk I/O!)
             print(f"[SAM2] Segment {seg_idx+1}: storing {len(output_frames)} frames in VRAM (YUV420)...")
-            cap_out = cv2.VideoCapture(video_path)
-            cap_out.set(cv2.CAP_PROP_POS_FRAMES, proc_start)
             frames_stored = 0
             for i in range(len(output_frames)):
                 frame_idx = proc_start + i
-                ret, orig_frame = cap_out.read()
-                if not ret:
-                    break
+                # GET from shared preloaded frames (ZERO disk I/O!)
+                orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                 # Composite segment output onto original frame
                 orig_frame[crop_y + seg_crop_y:crop_y + seg_crop_y + seg_crop_h,
                           crop_x + seg_crop_x:crop_x + seg_crop_x + seg_crop_w] = output_frames[i]
@@ -1628,7 +1637,6 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
                 processed_frames.add(frame_idx)
                 frames_stored += 1
-            cap_out.release()
             del output_frames  # Free memory immediately!
             print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} frames in VRAM")
 
@@ -1685,18 +1693,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         unprocessed_count = total_frames - len(processed_frames)
         output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
         if unprocessed_count > 0:
-            print(f"[SAM2] Filling {unprocessed_count} unprocessed frames...")
-            cap = cv2.VideoCapture(video_path)
-            frame_idx = 0
-            while True:
-                ret, orig_frame = cap.read()
-                if not ret:
-                    break
+            print(f"[SAM2] Filling {unprocessed_count} unprocessed frames from pre-loaded VRAM...")
+            for frame_idx in range(total_frames):
                 # Only write frames that weren't processed by segments
                 if frame_idx not in processed_frames:
+                    # GET from shared preloaded frames (ZERO disk I/O!)
+                    orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                     cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), orig_frame)
-                frame_idx += 1
-            cap.release()
         print(f"[SAM2] Total {total_frames} frames ready for encoding")
         ffmpeg_cmd = [
             str(FFMPEG_EXE), '-y', '-framerate', str(int(original_fps)),
