@@ -64,10 +64,10 @@ def enable_optimizations():
         # Memory allocator
         os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
-        # Inductor
-        torch._inductor.config.coordinate_descent_tuning = True
-        torch._inductor.config.triton.unique_kernel_names = True
-        torch._inductor.config.fx_graph_cache = True
+        # Inductor - DISABLED for faster testing
+        # torch._inductor.config.coordinate_descent_tuning = True
+        # torch._inductor.config.triton.unique_kernel_names = True
+        # torch._inductor.config.fx_graph_cache = True
 
         # SDPA
         torch.backends.cuda.enable_flash_sdp(True)

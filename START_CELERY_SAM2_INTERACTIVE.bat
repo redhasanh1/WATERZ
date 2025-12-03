@@ -105,7 +105,7 @@ set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
 REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (1 = sequential, safest for VRAM)
-set SEGMENT_WORKERS=1
+set SEGMENT_WORKERS=3
 
 
 
