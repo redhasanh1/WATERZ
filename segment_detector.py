@@ -318,24 +318,21 @@ def detect_segments_motion_based(
             # Compare to PREVIOUS frame (not average!)
             distance = bbox_distance(bbox, prev_bbox)
 
-            # Check if adding this bbox would make union too large (accounting for padding!)
+            # Check if adding this bbox would make union too large
             bbox_too_large = False
             if max_segment_pixels > 0 and current_bboxes:
                 test_bboxes = current_bboxes + [bbox]
                 ub = union_bbox(test_bboxes)
-                raw_pixels = (ub[2] - ub[0]) * (ub[3] - ub[1])
-                # Account for padding expansion: (1+2*0.25)^2 = 2.25x area increase
-                PADDING_FACTOR = 2.25  # SEGMENT_CROP_PAD_RATIO=0.25 -> 1.5^2
-                effective_pixels = int(raw_pixels * PADDING_FACTOR)
-                if effective_pixels > max_segment_pixels:
+                pixels = (ub[2] - ub[0]) * (ub[3] - ub[1])
+                if pixels > max_segment_pixels:
                     bbox_too_large = True
-                    print(f"[SEGMENT] Frame {frame_idx}: effective {effective_pixels:,} px (raw {raw_pixels:,}) > {max_segment_pixels:,} limit, splitting")
+                    print(f"[SEGMENT] Frame {frame_idx}: union bbox {pixels:,} pixels > {max_segment_pixels:,} limit, splitting")
 
             if distance > motion_threshold or bbox_too_large:
                 # Motion detected OR bbox too large! End current segment, start new
                 if len(current_bboxes) >= min_segment_length:
-                    seg_union = union_bbox(current_bboxes)  # Use union, not average!
-                    segments.append((current_start, frame_idx - 1, seg_union))
+                    avg_bbox = average_bbox(current_bboxes)
+                    segments.append((current_start, frame_idx - 1, avg_bbox))
                 current_start = frame_idx
                 current_bboxes = [bbox]
             else:
@@ -346,8 +343,8 @@ def detect_segments_motion_based(
 
     # Handle final segment
     if current_start is not None and len(current_bboxes) >= min_segment_length:
-        seg_union = union_bbox(current_bboxes)  # Use union, not average!
-        segments.append((current_start, len(detections_per_frame) - 1, seg_union))
+        avg_bbox = average_bbox(current_bboxes)
+        segments.append((current_start, len(detections_per_frame) - 1, avg_bbox))
 
     return segments
 

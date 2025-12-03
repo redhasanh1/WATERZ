@@ -21,8 +21,8 @@ import numpy as np
 from segment_detector import detect_segments_from_masks, merge_adjacent_segments, detect_segments, detect_segments_motion_based
 from crop_utils import calculate_crop_region
 
-# Number of parallel segment workers
-SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '4'))
+# Number of parallel segment workers (1 = sequential, safest for VRAM)
+SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '1'))
 # Parallel segment execution (inside a single video task)
 SAM2_PARALLEL_SEGMENTS = os.getenv('SAM2_PARALLEL_SEGMENTS', '1').lower() in ('1', 'true', 'yes', 'on')
 
@@ -51,8 +51,8 @@ SEGMENT_MOTION_THRESHOLD = int(os.getenv('SEGMENT_MOTION_THRESHOLD', '20'))
 SEGMENT_USE_MOTION_DETECTION = os.getenv('SEGMENT_USE_MOTION_DETECTION', '1').lower() in ('1', 'true', 'yes', 'on')
 # Max frames per segment (longer segments get split to prevent OOM)
 MAX_SEGMENT_FRAMES = int(os.getenv('MAX_SEGMENT_FRAMES', '300'))
-# Max pixels (width*height) for segment's union bbox (0=unlimited, 400000=~630x630 recommended)
-MAX_SEGMENT_PIXELS = int(os.getenv('MAX_SEGMENT_PIXELS', '400000'))
+# Max pixels (width*height) for segment's union bbox (178000 raw = ~400k after 25% padding)
+MAX_SEGMENT_PIXELS = int(os.getenv('MAX_SEGMENT_PIXELS', '178000'))
 # Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
 SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
@@ -81,7 +81,6 @@ def split_segment_by_pixels(start, end, detections, max_pixels):
     """
     Recursively split segment until each piece has union bbox < max_pixels.
     Used after BOUNDARY-SAFE extends segments and union bbox is recalculated.
-    Accounts for padding expansion (SEGMENT_CROP_PAD_RATIO).
     """
     bboxes = [detections[f] for f in range(start, end)
               if f < len(detections) and detections[f] is not None]
@@ -92,13 +91,10 @@ def split_segment_by_pixels(start, end, detections, max_pixels):
     y1 = min(b[1] for b in bboxes)
     x2 = max(b[2] for b in bboxes)
     y2 = max(b[3] for b in bboxes)
-    raw_pixels = (x2 - x1) * (y2 - y1)
-    # Account for padding expansion (1+2*ratio)^2 ~ 2.25x with 0.25 padding
-    padding_factor = (1 + 2 * SEGMENT_CROP_PAD_RATIO) ** 2
-    effective_pixels = int(raw_pixels * padding_factor)
+    pixels = (x2 - x1) * (y2 - y1)
 
-    # Stop splitting if under limit OR segment is too short (min 5 frames)
-    if effective_pixels <= max_pixels or end - start <= 5:
+    # Stop splitting if under limit OR segment is too short (min 15 frames)
+    if pixels <= max_pixels or end - start <= 15:
         return [(start, end, (x1, y1, x2, y2))]
 
     # Binary split
@@ -777,20 +773,32 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         if max(0, int(s)) < min(int(e) + 1, total_frames)
                     ]
 
-                    # --- BOUNDARY-SAFE: Ensure CONTIGUOUS coverage (no gaps!) ---
-                    # Empty-mask frames still processed but with zero mask (no inpainting)
-                    fixed_segments = []
-                    for i, (s, e, bb) in enumerate(segments):
-                        if i == 0 and s > 0:
-                            s = 0  # First segment must start at 0
-                        if i > 0:
-                            prev_end = fixed_segments[-1][1]
-                            if s > prev_end:
-                                s = prev_end  # No gaps between segments!
-                        if i == len(segments) - 1:
-                            e = total_frames  # Last segment must reach the end
-                        fixed_segments.append((s, e, bb))
-                    segments = fixed_segments
+                    # --- GAP DETECTION: Track frames with NO mask (object off-screen) ---
+                    # Instead of forcing contiguous coverage, we track gaps and copy original frames
+                    gap_frames = set()
+
+                    # Find gaps between segments
+                    if segments:
+                        # Gap at start?
+                        if segments[0][0] > 0:
+                            for f in range(0, segments[0][0]):
+                                gap_frames.add(f)
+
+                        # Gaps between segments
+                        for i in range(1, len(segments)):
+                            prev_end = segments[i-1][1]
+                            curr_start = segments[i][0]
+                            if curr_start > prev_end:
+                                for f in range(prev_end, curr_start):
+                                    gap_frames.add(f)
+
+                        # Gap at end?
+                        if segments[-1][1] < total_frames:
+                            for f in range(segments[-1][1], total_frames):
+                                gap_frames.add(f)
+
+                    if gap_frames:
+                        print(f"[SAM2] Gap frames (object off-screen): {len(gap_frames)} frames will use original video")
 
                     # Replace each segment's averaged bbox with union bbox for that segment's frames
                     # This ensures fast-moving objects are fully covered within each segment
@@ -808,14 +816,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                                 seg_max_y = max(b[3] for b in segment_bboxes)
                                 union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
 
-                                # Check if union bbox exceeds pixel limit (accounting for padding!)
+                                # Check if union bbox exceeds pixel limit
                                 pixels = (seg_max_x - seg_min_x) * (seg_max_y - seg_min_y)
-                                # With SEGMENT_CROP_PAD_RATIO padding, area expands by (1+2*ratio)^2
-                                padding_factor = (1 + 2 * SEGMENT_CROP_PAD_RATIO) ** 2  # ~2.25 with 0.25 padding
-                                effective_pixels = int(pixels * padding_factor)
-                                if MAX_SEGMENT_PIXELS > 0 and effective_pixels > MAX_SEGMENT_PIXELS:
+                                if MAX_SEGMENT_PIXELS > 0 and pixels > MAX_SEGMENT_PIXELS:
                                     # Split this segment into smaller pieces
-                                    print(f"[SAM2] Segment {s}-{e}: effective {effective_pixels:,} px (raw {pixels:,}) > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
+                                    print(f"[SAM2] Segment {s}-{e}: union {pixels:,} px > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
                                     sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_SEGMENT_PIXELS)
                                     for sub_s, sub_e, sub_bb in sub_segments:
                                         sub_pixels = (sub_bb[2] - sub_bb[0]) * (sub_bb[3] - sub_bb[1])
@@ -1326,22 +1331,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         if not sam2_result or not isinstance(sam2_result, dict):
             raise RuntimeError(f"Invalid sam2_result: {sam2_result}")
-
-        # Convert Windows paths to WSL paths if running in WSL
-        def _to_wsl_path(p: str) -> str:
-            if not p:
-                return p
-            # Handle D:\ or d:\ style paths
-            if len(p) >= 2 and p[1] == ':':
-                drive = p[0].lower()
-                return f'/mnt/{drive}' + p[2:].replace('\\', '/')
-            return p.replace('\\', '/')
-
         masks_dir = sam2_result.get('masks_dir') or os.path.join(TEMP_DIR, f"{video_id}_sam2_masks")
-        # Convert paths if we're in WSL (check if /mnt exists)
-        if os.path.exists('/mnt') and ':\\' in masks_dir:
-            masks_dir = _to_wsl_path(masks_dir)
-            video_path = _to_wsl_path(video_path)
         if not os.path.isdir(masks_dir):
             raise RuntimeError(f"Masks directory missing: {masks_dir}")
 
@@ -1472,20 +1462,32 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         if segments:
             segments = [(max(0, int(s)), min(int(e) + 1, total_frames), bb) for (s, e, bb) in segments if max(0, int(s)) < min(int(e) + 1, total_frames)]
 
-            # --- BOUNDARY-SAFE: Ensure CONTIGUOUS coverage (no gaps!) ---
-            # Empty-mask frames still processed but with zero mask (no inpainting)
-            fixed_segments = []
-            for i, (s, e, bb) in enumerate(segments):
-                if i == 0 and s > 0:
-                    s = 0  # First segment must start at 0
-                if i > 0:
-                    prev_end = fixed_segments[-1][1]
-                    if s > prev_end:
-                        s = prev_end  # No gaps between segments!
-                if i == len(segments) - 1:
-                    e = total_frames  # Last segment must reach the end
-                fixed_segments.append((s, e, bb))
-            segments = fixed_segments
+            # --- GAP DETECTION: Track frames with NO mask (object off-screen) ---
+            # Instead of forcing contiguous coverage, we track gaps and copy original frames
+            gap_frames = set()
+
+            # Find gaps between segments
+            if segments:
+                # Gap at start?
+                if segments[0][0] > 0:
+                    for f in range(0, segments[0][0]):
+                        gap_frames.add(f)
+
+                # Gaps between segments
+                for i in range(1, len(segments)):
+                    prev_end = segments[i-1][1]
+                    curr_start = segments[i][0]
+                    if curr_start > prev_end:
+                        for f in range(prev_end, curr_start):
+                            gap_frames.add(f)
+
+                # Gap at end?
+                if segments[-1][1] < total_frames:
+                    for f in range(segments[-1][1], total_frames):
+                        gap_frames.add(f)
+
+            if gap_frames:
+                print(f"[SAM2] Gap frames (object off-screen): {len(gap_frames)} frames will use original video")
 
             # Replace each segment's averaged bbox with union bbox for that segment's frames
             # This ensures fast-moving objects are fully covered within each segment
@@ -1503,14 +1505,11 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                         seg_max_y = max(b[3] for b in segment_bboxes)
                         union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
 
-                        # Check if union bbox exceeds pixel limit (accounting for padding!)
+                        # Check if union bbox exceeds pixel limit
                         pixels = (seg_max_x - seg_min_x) * (seg_max_y - seg_min_y)
-                        # With SEGMENT_CROP_PAD_RATIO padding, area expands by (1+2*ratio)^2
-                        padding_factor = (1 + 2 * SEGMENT_CROP_PAD_RATIO) ** 2  # ~2.25 with 0.25 padding
-                        effective_pixels = int(pixels * padding_factor)
-                        if MAX_SEGMENT_PIXELS > 0 and effective_pixels > MAX_SEGMENT_PIXELS:
+                        if MAX_SEGMENT_PIXELS > 0 and pixels > MAX_SEGMENT_PIXELS:
                             # Split this segment into smaller pieces
-                            print(f"[SAM2] Segment {s}-{e}: effective {effective_pixels:,} px (raw {pixels:,}) > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
+                            print(f"[SAM2] Segment {s}-{e}: union {pixels:,} px > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
                             sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_SEGMENT_PIXELS)
                             for sub_s, sub_e, sub_bb in sub_segments:
                                 sub_pixels = (sub_bb[2] - sub_bb[0]) * (sub_bb[3] - sub_bb[1])

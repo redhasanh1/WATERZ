@@ -40,7 +40,9 @@
       "Bash(git add:*)",
       "WebFetch(domain:github.com)",
       "mcp__ide__getDiagnostics",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(git commit:*)",
+      "Bash(git cherry-pick:*)"
     ],
     "deny": [],
     "ask": []
