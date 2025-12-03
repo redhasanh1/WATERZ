@@ -1397,6 +1397,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             # Replace each segment's averaged bbox with union bbox for that segment's frames
             # This ensures fast-moving objects are fully covered within each segment
+            # Also splits segments if union bbox exceeds MAX_SEGMENT_PIXELS
             if detections_per_frame:
                 updated_segments = []
                 for s, e, bb in segments:
@@ -1409,9 +1410,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                         seg_max_x = max(b[2] for b in segment_bboxes)
                         seg_max_y = max(b[3] for b in segment_bboxes)
                         union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
-                        updated_segments.append((s, e, union_bbox))
-                        if union_bbox != bb:
-                            print(f"[SAM2] Segment {len(updated_segments)}: union bbox {union_bbox} (was avg {bb})")
+
+                        # Check if union bbox exceeds pixel limit
+                        pixels = (seg_max_x - seg_min_x) * (seg_max_y - seg_min_y)
+                        if MAX_SEGMENT_PIXELS > 0 and pixels > MAX_SEGMENT_PIXELS:
+                            # Split this segment into smaller pieces
+                            print(f"[SAM2] Segment {s}-{e}: union {pixels:,} px > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
+                            sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_SEGMENT_PIXELS)
+                            for sub_s, sub_e, sub_bb in sub_segments:
+                                sub_pixels = (sub_bb[2] - sub_bb[0]) * (sub_bb[3] - sub_bb[1])
+                                print(f"[SAM2]   -> Sub-segment {sub_s}-{sub_e} ({sub_e-sub_s}f): {sub_pixels:,} px")
+                            updated_segments.extend(sub_segments)
+                        else:
+                            updated_segments.append((s, e, union_bbox))
+                            if union_bbox != bb:
+                                print(f"[SAM2] Segment {len(updated_segments)}: union bbox {union_bbox} (was avg {bb})")
                     else:
                         updated_segments.append((s, e, bb))
                 segments = updated_segments
