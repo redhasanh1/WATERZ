@@ -104,8 +104,8 @@ set USE_TORCH_COMPILE=0
 set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
-REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (2 = share preloaded frames)
-set SEGMENT_WORKERS=2
+REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (4 = share preloaded frames)
+set SEGMENT_WORKERS=4
 
 
 
@@ -131,8 +131,8 @@ REM Max frames per segment (prevents OOM on long videos - splits into chunks)
 set MAX_SEGMENT_FRAMES=300
 
 REM Max pixels (width*height) per segment's union bbox - prevents huge crops that slow processing
-REM 400000 = ~630x630, keeps per-frame under 200ms. Lower = more segments = faster per segment
-set MAX_SEGMENT_PIXELS=400000
+REM 100000 = ~315x315 after padding, keeps per-frame fast for 4 parallel workers
+set MAX_SEGMENT_PIXELS=100000
 
 REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50

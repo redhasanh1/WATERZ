@@ -81,6 +81,7 @@ def split_segment_by_pixels(start, end, detections, max_pixels):
     """
     Recursively split segment until each piece has union bbox < max_pixels.
     Used after BOUNDARY-SAFE extends segments and union bbox is recalculated.
+    Accounts for padding expansion (SEGMENT_CROP_PAD_RATIO).
     """
     bboxes = [detections[f] for f in range(start, end)
               if f < len(detections) and detections[f] is not None]
@@ -91,10 +92,13 @@ def split_segment_by_pixels(start, end, detections, max_pixels):
     y1 = min(b[1] for b in bboxes)
     x2 = max(b[2] for b in bboxes)
     y2 = max(b[3] for b in bboxes)
-    pixels = (x2 - x1) * (y2 - y1)
+    raw_pixels = (x2 - x1) * (y2 - y1)
+    # Account for padding expansion (1+2*ratio)^2 ~ 2.25x with 0.25 padding
+    padding_factor = (1 + 2 * SEGMENT_CROP_PAD_RATIO) ** 2
+    effective_pixels = int(raw_pixels * padding_factor)
 
-    # Stop splitting if under limit OR segment is too short (min 30 frames)
-    if pixels <= max_pixels or end - start <= 30:
+    # Stop splitting if under limit OR segment is too short (min 5 frames)
+    if effective_pixels <= max_pixels or end - start <= 5:
         return [(start, end, (x1, y1, x2, y2))]
 
     # Binary split
@@ -804,11 +808,14 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                                 seg_max_y = max(b[3] for b in segment_bboxes)
                                 union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
 
-                                # Check if union bbox exceeds pixel limit
+                                # Check if union bbox exceeds pixel limit (accounting for padding!)
                                 pixels = (seg_max_x - seg_min_x) * (seg_max_y - seg_min_y)
-                                if MAX_SEGMENT_PIXELS > 0 and pixels > MAX_SEGMENT_PIXELS:
+                                # With SEGMENT_CROP_PAD_RATIO padding, area expands by (1+2*ratio)^2
+                                padding_factor = (1 + 2 * SEGMENT_CROP_PAD_RATIO) ** 2  # ~2.25 with 0.25 padding
+                                effective_pixels = int(pixels * padding_factor)
+                                if MAX_SEGMENT_PIXELS > 0 and effective_pixels > MAX_SEGMENT_PIXELS:
                                     # Split this segment into smaller pieces
-                                    print(f"[SAM2] Segment {s}-{e}: union {pixels:,} px > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
+                                    print(f"[SAM2] Segment {s}-{e}: effective {effective_pixels:,} px (raw {pixels:,}) > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
                                     sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_SEGMENT_PIXELS)
                                     for sub_s, sub_e, sub_bb in sub_segments:
                                         sub_pixels = (sub_bb[2] - sub_bb[0]) * (sub_bb[3] - sub_bb[1])
@@ -1481,11 +1488,14 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                         seg_max_y = max(b[3] for b in segment_bboxes)
                         union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
 
-                        # Check if union bbox exceeds pixel limit
+                        # Check if union bbox exceeds pixel limit (accounting for padding!)
                         pixels = (seg_max_x - seg_min_x) * (seg_max_y - seg_min_y)
-                        if MAX_SEGMENT_PIXELS > 0 and pixels > MAX_SEGMENT_PIXELS:
+                        # With SEGMENT_CROP_PAD_RATIO padding, area expands by (1+2*ratio)^2
+                        padding_factor = (1 + 2 * SEGMENT_CROP_PAD_RATIO) ** 2  # ~2.25 with 0.25 padding
+                        effective_pixels = int(pixels * padding_factor)
+                        if MAX_SEGMENT_PIXELS > 0 and effective_pixels > MAX_SEGMENT_PIXELS:
                             # Split this segment into smaller pieces
-                            print(f"[SAM2] Segment {s}-{e}: union {pixels:,} px > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
+                            print(f"[SAM2] Segment {s}-{e}: effective {effective_pixels:,} px (raw {pixels:,}) > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
                             sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_SEGMENT_PIXELS)
                             for sub_s, sub_e, sub_bb in sub_segments:
                                 sub_pixels = (sub_bb[2] - sub_bb[0]) * (sub_bb[3] - sub_bb[1])
