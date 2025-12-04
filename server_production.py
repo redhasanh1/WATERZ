@@ -47,6 +47,13 @@ PROPAINTER_SCRIPT = os.path.join(SCRIPT_DIR, 'ProPainter', 'inference_propainter
 PROPAINTER_OUTPUT_ROOT = os.path.join(RESULT_DIR, 'propainter')
 PROPAINTER_MASK_ROOT = os.path.join(TEMP_DIR, 'propainter_masks')
 PROPAINTER_FLOW_BACKEND = os.getenv('PROPAINTER_FLOW_BACKEND', 'raft')  # 'raft' or 'fastflownet'
+
+# B2 + Cloudflare CDN configuration
+B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
+B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+B2_ENABLED = os.getenv('B2_UPLOAD_ENABLED', '1') == '1'
 try:
     _segment_workers_env = int(os.getenv('SEGMENT_WORKERS', '2'))
 except ValueError:
@@ -1188,14 +1195,73 @@ def performance_checkpoint(stage_name, start_time=None):
     """
     import time
     current_time = time.perf_counter()
-    
+
     if start_time is not None:
         elapsed = current_time - start_time
         print(f"[TIME]  {stage_name} completed in {elapsed:.2f} seconds")
     else:
         print(f"[RUNNING] {stage_name} started")
-    
+
     return current_time
+
+
+def upload_to_b2(local_path, remote_name=None):
+    """
+    Upload file to Backblaze B2 and return Cloudflare CDN URL.
+
+    Args:
+        local_path: Path to local file to upload
+        remote_name: Optional remote filename (defaults to basename of local_path)
+
+    Returns:
+        Cloudflare CDN URL if successful, None if failed
+    """
+    if not B2_ENABLED:
+        print(f"[B2] Upload disabled (B2_UPLOAD_ENABLED != '1')")
+        return None
+
+    try:
+        from b2sdk.v2 import B2Api, InMemoryAccountInfo
+        import time
+
+        if remote_name is None:
+            remote_name = os.path.basename(local_path)
+
+        # Add timestamp prefix to avoid collisions
+        timestamp = int(time.time())
+        remote_path = f"results/{timestamp}_{remote_name}"
+
+        print(f"[B2] Uploading {local_path} to {B2_BUCKET}/{remote_path}...")
+        upload_start = time.time()
+
+        # Initialize B2 API
+        info = InMemoryAccountInfo()
+        b2_api = B2Api(info)
+        b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+
+        # Get bucket and upload
+        bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+        file_size_mb = os.path.getsize(local_path) / (1024 * 1024)
+        b2_file = bucket.upload_local_file(local_file=local_path, file_name=remote_path)
+
+        upload_time = time.time() - upload_start
+        speed_mbps = (file_size_mb / upload_time) * 8
+
+        # Return Cloudflare CDN URL
+        cdn_url = f"{B2_CDN_URL}/{remote_path}"
+        print(f"[B2] Upload complete: {file_size_mb:.1f}MB in {upload_time:.1f}s ({speed_mbps:.1f} Mbps)")
+        print(f"[B2] CDN URL: {cdn_url}")
+
+        return cdn_url
+
+    except ImportError:
+        print(f"[B2] b2sdk not installed - run: pip install b2sdk")
+        return None
+    except Exception as e:
+        print(f"[B2] Upload failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 def _init_gpu_worker(gpu_id):
@@ -1860,51 +1926,63 @@ def trigger_finalization(redis_client, video_id, total_segments):
     final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
     print(f"[FINALIZE] ✓ Final video ready: {final_output} ({final_size_mb:.2f} MB)")
 
-    # 🔥 UPLOAD TO RAILWAY: If running on local worker, upload result to API server
+    # 🔥 UPLOAD: Try B2 + Cloudflare CDN first (faster!), fall back to Railway HTTP POST
     uploaded_path = None
-    tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
     upload_enabled = os.getenv('UPLOAD_RESULT_BACK', '1')
 
-    print(f"[FINALIZE] Upload config - TUNNEL_URL: {'SET' if os.getenv('TUNNEL_URL') else 'NOT SET'}, API_BASE_URL: {'SET' if os.getenv('API_BASE_URL') else 'NOT SET'}, UPLOAD_RESULT_BACK: {upload_enabled}")
+    # --- B2 + Cloudflare CDN Upload (PRIMARY - faster, more reliable) ---
+    if B2_ENABLED and upload_enabled == '1':
+        print(f"[FINALIZE] 📤 Uploading to B2 + Cloudflare CDN...")
+        cdn_url = upload_to_b2(final_output)
+        if cdn_url:
+            uploaded_path = cdn_url
+            redis_client.set(f"video:{video_id}:final_path", uploaded_path)
+            redis_client.set(f"video:{video_id}:uploaded", "true")
+            redis_client.set(f"video:{video_id}:cdn_url", cdn_url)
+            print(f"[FINALIZE] ✅ Result uploaded to Cloudflare CDN: {uploaded_path}")
 
-    if not tunnel:
-        print(f"[FINALIZE] ⚠️  Skipping Railway upload - TUNNEL_URL/API_BASE_URL not set")
-        print(f"[FINALIZE] 💡 Set TUNNEL_URL=https://your-railway-app.railway.app to enable auto-upload")
-    elif upload_enabled != '1':
-        print(f"[FINALIZE] ⚠️  Skipping Railway upload - UPLOAD_RESULT_BACK={upload_enabled} (set to '1' to enable)")
+    # --- Railway HTTP POST Fallback (if B2 disabled or failed) ---
+    if not uploaded_path:
+        tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
 
-    if tunnel and upload_enabled == '1':
-        try:
-            import requests
-            upload_url = tunnel.rstrip('/') + '/api/upload-result'
-            print(f"[FINALIZE] 📤 Uploading result to Railway: {upload_url}")
+        print(f"[FINALIZE] Upload config - B2: {'ENABLED' if B2_ENABLED else 'DISABLED'}, TUNNEL_URL: {'SET' if os.getenv('TUNNEL_URL') else 'NOT SET'}, UPLOAD_RESULT_BACK: {upload_enabled}")
 
-            # Quick connectivity test (15 second timeout) - fail fast if server down
-            requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
+        if not tunnel:
+            print(f"[FINALIZE] ⚠️  Skipping Railway upload - TUNNEL_URL/API_BASE_URL not set")
+        elif upload_enabled != '1':
+            print(f"[FINALIZE] ⚠️  Skipping Railway upload - UPLOAD_RESULT_BACK={upload_enabled}")
 
-            with open(final_output, 'rb') as fp:
-                resp = requests.post(
-                    upload_url,
-                    headers={'ngrok-skip-browser-warning': 'true'},
-                    files={'file': (os.path.basename(final_output), fp, 'video/mp4')},
-                    timeout=300  # 5 minutes for large videos
-                )
-            if resp.ok:
-                j = resp.json()
-                if j.get('status') == 'success' and j.get('result_url'):
-                    uploaded_path = j['result_url']
-                    print(f"[FINALIZE] ✅ Result uploaded to Railway: {uploaded_path}")
-                    # Update Redis with Railway path instead of local path
-                    redis_client.set(f"video:{video_id}:final_path", uploaded_path)
-                    redis_client.set(f"video:{video_id}:uploaded", "true")
-            else:
-                print(f"[FINALIZE WARNING] Upload to Railway failed: HTTP {resp.status_code}")
-        except Exception as up_err:
-            print(f"[FINALIZE WARNING] Upload to Railway error: {up_err}")
-            import traceback
-            traceback.print_exc()
+        if tunnel and upload_enabled == '1':
+            try:
+                import requests
+                upload_url = tunnel.rstrip('/') + '/api/upload-result'
+                print(f"[FINALIZE] 📤 Uploading result to Railway: {upload_url}")
 
-    # Store final result in Redis (local path if upload failed, Railway path if uploaded)
+                # Quick connectivity test (15 second timeout) - fail fast if server down
+                requests.head(tunnel, timeout=15, headers={'ngrok-skip-browser-warning': 'true'})
+
+                with open(final_output, 'rb') as fp:
+                    resp = requests.post(
+                        upload_url,
+                        headers={'ngrok-skip-browser-warning': 'true'},
+                        files={'file': (os.path.basename(final_output), fp, 'video/mp4')},
+                        timeout=300  # 5 minutes for large videos
+                    )
+                if resp.ok:
+                    j = resp.json()
+                    if j.get('status') == 'success' and j.get('result_url'):
+                        uploaded_path = j['result_url']
+                        print(f"[FINALIZE] ✅ Result uploaded to Railway: {uploaded_path}")
+                        redis_client.set(f"video:{video_id}:final_path", uploaded_path)
+                        redis_client.set(f"video:{video_id}:uploaded", "true")
+                else:
+                    print(f"[FINALIZE WARNING] Upload to Railway failed: HTTP {resp.status_code}")
+            except Exception as up_err:
+                print(f"[FINALIZE WARNING] Upload to Railway error: {up_err}")
+                import traceback
+                traceback.print_exc()
+
+    # Store final result in Redis (local path if all uploads failed)
     if not uploaded_path:
         redis_client.set(f"video:{video_id}:final_path", final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
