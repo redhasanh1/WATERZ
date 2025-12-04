@@ -1234,15 +1234,21 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             ]
 
             # Start FFmpeg process
+            # NOTE: Use DEVNULL for stdout/stderr to prevent pipe deadlock on long videos!
+            # (FFmpeg stderr buffer can fill up and cause deadlock)
             proc = subprocess.Popen(
                 ffmpeg_cmd,
                 stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
             )
 
             # Stream ALL frames directly to FFmpeg (processed + unprocessed)
             for frame_idx in range(total_frames):
+                # Progress logging every 100 frames
+                if frame_idx % 100 == 0:
+                    print(f"[SAM2] Encoding frame {frame_idx}/{total_frames}...")
+
                 if frame_idx in vram_frames:
                     # Processed frame from segment
                     frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
@@ -1259,11 +1265,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 proc.stdin.write(frame_bgr.tobytes())
 
             proc.stdin.close()
-            stdout, stderr = proc.communicate(timeout=300)
+            proc.wait(timeout=300)
 
             if proc.returncode != 0:
-                print(f"[ERROR] FFmpeg NVENC encoding failed: {stderr.decode()}")
-                raise RuntimeError(f"Video encoding failed: {stderr.decode()}")
+                print(f"[ERROR] FFmpeg NVENC encoding failed (code {proc.returncode})")
+                raise RuntimeError(f"Video encoding failed (code {proc.returncode})")
 
             _encode_time = _time.time() - _encode_start
             print(f"[SAM2] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s ({total_frames/_encode_time:.1f} fps)")
@@ -1842,15 +1848,20 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         ]
 
         # Start FFmpeg process
+        # NOTE: Use DEVNULL for stdout/stderr to prevent pipe deadlock on long videos!
         proc = subprocess.Popen(
             ffmpeg_cmd,
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
 
         # Stream ALL frames directly to FFmpeg (processed + unprocessed)
         for frame_idx in range(total_frames):
+            # Progress logging every 100 frames
+            if frame_idx % 100 == 0:
+                print(f"[SAM2] Encoding frame {frame_idx}/{total_frames}...")
+
             if frame_idx in vram_frames:
                 # Processed frame from segment
                 frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
@@ -1864,11 +1875,11 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             proc.stdin.write(frame_bgr.tobytes())
 
         proc.stdin.close()
-        stdout, stderr = proc.communicate(timeout=300)
+        proc.wait(timeout=300)
 
         if proc.returncode != 0:
-            print(f"[ERROR] FFmpeg NVENC encoding failed: {stderr.decode()}")
-            raise RuntimeError(f"Video encoding failed: {stderr.decode()}")
+            print(f"[ERROR] FFmpeg NVENC encoding failed (code {proc.returncode})")
+            raise RuntimeError(f"Video encoding failed (code {proc.returncode})")
 
         _encode_time = _time.time() - _encode_start
         print(f"[SAM2] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s ({total_frames/_encode_time:.1f} fps)")
