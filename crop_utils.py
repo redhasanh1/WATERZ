@@ -83,6 +83,16 @@ def calculate_crop_region(
     crop_w = (crop_w // 16) * 16
     crop_h = (crop_h // 16) * 16
 
+    # MAX CROP SAFEGUARD - prevent empty masks from causing full-frame crops
+    max_crop_w = int(os.getenv('MAX_CROP_WIDTH', '1920'))  # default 1920
+    max_crop_h = int(os.getenv('MAX_CROP_HEIGHT', '1080'))  # default 1080
+    if max_crop_w > 0 and crop_w > max_crop_w:
+        print(f"[CROP] Clamping width {crop_w} -> {max_crop_w} (MAX_CROP_WIDTH)")
+        crop_w = (max_crop_w // 16) * 16
+    if max_crop_h > 0 and crop_h > max_crop_h:
+        print(f"[CROP] Clamping height {crop_h} -> {max_crop_h} (MAX_CROP_HEIGHT)")
+        crop_h = (max_crop_h // 16) * 16
+
     # Adjust if we went out of bounds after alignment
     if crop_x + crop_w > frame_width:
         crop_x = frame_width - crop_w

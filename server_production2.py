@@ -76,6 +76,15 @@ try:
 except Exception:
     SEGMENT_CROP_PAD_RATIO = 0.25
 
+# Max crop size safeguard - prevents empty masks from causing full-frame crops (extremely slow!)
+MAX_CROP_WIDTH = int(os.getenv('MAX_CROP_WIDTH', '1920'))
+MAX_CROP_HEIGHT = int(os.getenv('MAX_CROP_HEIGHT', '1080'))
+
+# Skip ProPainter for segments with ALL empty masks (just store originals)
+SKIP_EMPTY_MASK_SEGMENTS = os.getenv('SKIP_EMPTY_MASK_SEGMENTS', '1').lower() in ('1', 'true', 'yes', 'on')
+# Minimum frames for ProPainter to work properly (expand tiny segments)
+MIN_SEGMENT_FRAMES_FOR_PROPAINTER = int(os.getenv('MIN_SEGMENT_FRAMES_FOR_PROPAINTER', '3'))
+
 
 def split_segment_by_pixels(start, end, detections, max_pixels):
     """
@@ -895,6 +904,31 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             raise RuntimeError("No valid bounding box found despite having mask content - unexpected state")
         global_bbox = [min_x, min_y, max_x, max_y]
 
+        # FIX: Update monolithic segment bbox to use global_bbox instead of full frame
+        # This prevents empty masks from causing full-frame crops (extremely slow!)
+        if len(segments) == 1 and segments[0][2] == [0, 0, width, height]:
+            segments = [(segments[0][0], segments[0][1], global_bbox)]
+            print(f"[SAM2] Fixed monolithic segment bbox: {global_bbox} (was full frame)")
+
+        # FIX: Expand tiny segments to meet ProPainter minimum
+        if MIN_SEGMENT_FRAMES_FOR_PROPAINTER > 1:
+            expanded_segments = []
+            for s, e, bb in segments:
+                duration = e - s
+                if duration < MIN_SEGMENT_FRAMES_FOR_PROPAINTER:
+                    needed = MIN_SEGMENT_FRAMES_FOR_PROPAINTER - duration
+                    # Expand equally on both sides if possible
+                    expand_left = min(needed // 2, s)
+                    expand_right = min(needed - expand_left, total_frames - e)
+                    if expand_left + expand_right < needed:
+                        # Not enough room - try to expand more on the other side
+                        expand_left = min(needed - expand_right, s)
+                    s = s - expand_left
+                    e = e + expand_right
+                    print(f"[SAM2] Expanded tiny segment: {duration}f -> {e-s}f (min={MIN_SEGMENT_FRAMES_FOR_PROPAINTER})")
+                expanded_segments.append((s, e, bb))
+            segments = expanded_segments
+
         crop_x, crop_y, crop_w, crop_h = calculate_crop_region(global_bbox, width, height, padding_ratio=0.2, min_size=128)
         print(f"[SAM2] Global crop: {crop_x},{crop_y} {crop_w}x{crop_h}")
 
@@ -990,6 +1024,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 if not seg_frames or not seg_masks:
                     return seg_idx, None, None, (proc_start, proc_end)
 
+                # FIX: Check if ALL masks in segment are empty - skip ProPainter entirely!
+                if SKIP_EMPTY_MASK_SEGMENTS:
+                    masks_with_content = sum(1 for m in seg_masks if np.sum(m > 127) > 0)
+                    if masks_with_content == 0:
+                        print(f"[SAM2] Segment {seg_idx+1}: ALL MASKS EMPTY - storing originals (skip ProPainter)")
+                        for frame_idx in range(start_f, end_f):
+                            vram_frames[frame_idx] = preloaded_frames[frame_idx]
+                        return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
+
                 # Create segment output directory
                 seg_output_dir = os.path.join(output_dir, f"segment_{seg_idx}")
                 os.makedirs(seg_output_dir, exist_ok=True)
@@ -1035,11 +1078,21 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 core_count = end_f - start_f
                 print(f"[SAM2] Segment {seg_idx+1}: storing {core_count} core frames in VRAM (skip {len(output_frames) - core_count} padding)...")
                 frames_stored = 0
+                frames_original = 0  # Track how many used original (empty mask)
                 for i in range(len(output_frames)):
                     frame_idx = proc_start + i
                     # Skip padding frames - only save core frames [start_f, end_f)
                     if frame_idx < start_f or frame_idx >= end_f:
                         continue
+
+                    # Check if this frame's mask is empty - if so, store original (no inpainting done)
+                    if i < len(seg_masks) and np.sum(seg_masks[i] > 127) == 0:
+                        # Empty mask - store original frame directly (save composite overhead)
+                        vram_frames[frame_idx] = preloaded_frames[frame_idx]
+                        frames_stored += 1
+                        frames_original += 1
+                        continue
+
                     # GET from shared preloaded frames (ZERO disk I/O!)
                     orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                     # Composite segment output onto original frame
@@ -1049,7 +1102,10 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
                     frames_stored += 1
                 del output_frames  # Free memory immediately!
-                print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames in VRAM")
+                if frames_original > 0:
+                    print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames ({frames_original} original/empty)")
+                else:
+                    print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames in VRAM")
 
                 # Return success flag and metadata (NOT frames!)
                 return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
@@ -1643,6 +1699,16 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             if not seg_frames or not seg_masks:
                 print(f"[SAM2] WARNING: Segment {seg_idx+1} has no frames/masks! seg_frames={len(seg_frames)}, seg_masks={len(seg_masks)}")
                 return seg_idx, None, None, (proc_start, proc_end)
+
+            # FIX: Check if ALL masks in segment are empty - skip ProPainter entirely!
+            if SKIP_EMPTY_MASK_SEGMENTS:
+                masks_with_content = sum(1 for m in seg_masks if np.sum(m > 127) > 0)
+                if masks_with_content == 0:
+                    print(f"[SAM2] Segment {seg_idx+1}: ALL MASKS EMPTY - storing originals (skip ProPainter)")
+                    for frame_idx in range(start_f, end_f):
+                        vram_frames[frame_idx] = preloaded_frames[frame_idx]
+                    return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
+
             seg_output_dir = os.path.join(output_dir, f"segment_{seg_idx}")
             os.makedirs(seg_output_dir, exist_ok=True)
             faster_propainter_pipeline(
@@ -1677,11 +1743,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             core_count = end_f - start_f
             print(f"[SAM2] Segment {seg_idx+1}: storing {core_count} core frames in VRAM (skip {len(output_frames) - core_count} padding)...")
             frames_stored = 0
+            frames_original = 0  # Track how many used original (empty mask)
             for i in range(len(output_frames)):
                 frame_idx = proc_start + i
                 # Skip padding frames - only save core frames [start_f, end_f)
                 if frame_idx < start_f or frame_idx >= end_f:
                     continue
+
+                # Check if this frame's mask is empty - if so, store original (no inpainting done)
+                if i < len(seg_masks) and np.sum(seg_masks[i] > 127) == 0:
+                    # Empty mask - store original frame directly (save composite overhead)
+                    vram_frames[frame_idx] = preloaded_frames[frame_idx]
+                    frames_stored += 1
+                    frames_original += 1
+                    continue
+
                 # GET from shared preloaded frames (ZERO disk I/O!)
                 orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                 # Composite segment output onto original frame
@@ -1691,7 +1767,10 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
                 frames_stored += 1
             del output_frames  # Free memory immediately!
-            print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames in VRAM")
+            if frames_original > 0:
+                print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames ({frames_original} original/empty)")
+            else:
+                print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames in VRAM")
 
             # Return success flag and metadata (NOT frames!)
             return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
