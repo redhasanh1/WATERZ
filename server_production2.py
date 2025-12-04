@@ -773,32 +773,20 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                         if max(0, int(s)) < min(int(e) + 1, total_frames)
                     ]
 
-                    # --- GAP DETECTION: Track frames with NO mask (object off-screen) ---
-                    # Instead of forcing contiguous coverage, we track gaps and copy original frames
-                    gap_frames = set()
-
-                    # Find gaps between segments
-                    if segments:
-                        # Gap at start?
-                        if segments[0][0] > 0:
-                            for f in range(0, segments[0][0]):
-                                gap_frames.add(f)
-
-                        # Gaps between segments
-                        for i in range(1, len(segments)):
-                            prev_end = segments[i-1][1]
-                            curr_start = segments[i][0]
-                            if curr_start > prev_end:
-                                for f in range(prev_end, curr_start):
-                                    gap_frames.add(f)
-
-                        # Gap at end?
-                        if segments[-1][1] < total_frames:
-                            for f in range(segments[-1][1], total_frames):
-                                gap_frames.add(f)
-
-                    if gap_frames:
-                        print(f"[SAM2] Gap frames (object off-screen): {len(gap_frames)} frames will use original video")
+                    # --- BOUNDARY-SAFE: Ensure CONTIGUOUS coverage (no gaps!) ---
+                    # Empty-mask frames still processed but with zero mask (no inpainting)
+                    fixed_segments = []
+                    for i, (s, e, bb) in enumerate(segments):
+                        if i == 0 and s > 0:
+                            s = 0  # First segment must start at 0
+                        if i > 0:
+                            prev_end = fixed_segments[-1][1]
+                            if s > prev_end:
+                                s = prev_end  # No gaps between segments!
+                        if i == len(segments) - 1:
+                            e = total_frames  # Last segment must reach the end
+                        fixed_segments.append((s, e, bb))
+                    segments = fixed_segments
 
                     # Replace each segment's averaged bbox with union bbox for that segment's frames
                     # This ensures fast-moving objects are fully covered within each segment
@@ -960,6 +948,19 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             proc_start = start_f
             proc_end = end_f
             try:
+                # Check if this segment has any mask content
+                # If all masks are empty, skip processing (no inpainting needed)
+                has_mask_content = False
+                for frame_idx in range(start_f, end_f):
+                    if frame_idx < len(all_masks_cropped):
+                        if np.sum(all_masks_cropped[frame_idx] > 127) > 0:
+                            has_mask_content = True
+                            break
+
+                if not has_mask_content:
+                    print(f"[SAM2] Segment {seg_idx+1}: skipping - no mask content (object off-screen)")
+                    return seg_idx, None, None, (start_f, end_f)
+
                 duration = end_f - start_f
                 log_end = end_f - 1 if end_f > start_f else end_f
                 # Calculate segment-specific crop within the global crop
@@ -1462,32 +1463,20 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         if segments:
             segments = [(max(0, int(s)), min(int(e) + 1, total_frames), bb) for (s, e, bb) in segments if max(0, int(s)) < min(int(e) + 1, total_frames)]
 
-            # --- GAP DETECTION: Track frames with NO mask (object off-screen) ---
-            # Instead of forcing contiguous coverage, we track gaps and copy original frames
-            gap_frames = set()
-
-            # Find gaps between segments
-            if segments:
-                # Gap at start?
-                if segments[0][0] > 0:
-                    for f in range(0, segments[0][0]):
-                        gap_frames.add(f)
-
-                # Gaps between segments
-                for i in range(1, len(segments)):
-                    prev_end = segments[i-1][1]
-                    curr_start = segments[i][0]
-                    if curr_start > prev_end:
-                        for f in range(prev_end, curr_start):
-                            gap_frames.add(f)
-
-                # Gap at end?
-                if segments[-1][1] < total_frames:
-                    for f in range(segments[-1][1], total_frames):
-                        gap_frames.add(f)
-
-            if gap_frames:
-                print(f"[SAM2] Gap frames (object off-screen): {len(gap_frames)} frames will use original video")
+            # --- BOUNDARY-SAFE: Ensure CONTIGUOUS coverage (no gaps!) ---
+            # Empty-mask frames still processed but with zero mask (no inpainting)
+            fixed_segments = []
+            for i, (s, e, bb) in enumerate(segments):
+                if i == 0 and s > 0:
+                    s = 0  # First segment must start at 0
+                if i > 0:
+                    prev_end = fixed_segments[-1][1]
+                    if s > prev_end:
+                        s = prev_end  # No gaps between segments!
+                if i == len(segments) - 1:
+                    e = total_frames  # Last segment must reach the end
+                fixed_segments.append((s, e, bb))
+            segments = fixed_segments
 
             # Replace each segment's averaged bbox with union bbox for that segment's frames
             # This ensures fast-moving objects are fully covered within each segment
@@ -1582,6 +1571,19 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         print(f"[SAM2] All {len(preloaded_frames)} frames pre-loaded - workers will SHARE!")
 
         def process_segment_local(seg_idx, start_f, end_f, seg_bbox):
+            # Check if this segment has any mask content
+            # If all masks are empty, skip processing (no inpainting needed)
+            has_mask_content = False
+            for frame_idx in range(start_f, end_f):
+                if frame_idx < len(all_masks_cropped):
+                    if np.sum(all_masks_cropped[frame_idx] > 127) > 0:
+                        has_mask_content = True
+                        break
+
+            if not has_mask_content:
+                print(f"[SAM2] Segment {seg_idx+1}: skipping - no mask content (object off-screen)")
+                return seg_idx, None, None, (start_f, end_f)
+
             duration = end_f - start_f
             log_end = end_f - 1 if end_f > start_f else end_f
             seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
