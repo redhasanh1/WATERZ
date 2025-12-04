@@ -927,7 +927,6 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         # Track segment metadata (NOT frames - those go directly to disk)
         segment_results = {}  # seg_idx -> (success, crop_info, time_info)
-        processed_frames = set()  # Track which frames have been written
 
         # REVOLUTIONARY: Store all frames in VRAM with YUV420 compression (8:1 ratio!)
         vram_frames = {}  # {frame_idx: compressed_yuv420_dict}
@@ -1032,10 +1031,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                             output_frames.append(frame)
 
                 # REVOLUTIONARY: Store in VRAM with YUV420 compression (8:1 ratio, ZERO disk I/O!)
-                print(f"[SAM2] Segment {seg_idx+1}: storing {len(output_frames)} frames in VRAM (YUV420)...")
+                # Only save CORE frames (start_f to end_f), skip padding frames
+                core_count = end_f - start_f
+                print(f"[SAM2] Segment {seg_idx+1}: storing {core_count} core frames in VRAM (skip {len(output_frames) - core_count} padding)...")
                 frames_stored = 0
                 for i in range(len(output_frames)):
                     frame_idx = proc_start + i
+                    # Skip padding frames - only save core frames [start_f, end_f)
+                    if frame_idx < start_f or frame_idx >= end_f:
+                        continue
                     # GET from shared preloaded frames (ZERO disk I/O!)
                     orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                     # Composite segment output onto original frame
@@ -1043,10 +1047,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                               crop_x + seg_crop_x:crop_x + seg_crop_x + seg_crop_w] = output_frames[i]
                     # Store in VRAM with YUV420 compression (8:1 ratio!)
                     vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
-                    processed_frames.add(frame_idx)
                     frames_stored += 1
                 del output_frames  # Free memory immediately!
-                print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} frames in VRAM")
+                print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames in VRAM")
 
                 # Return success flag and metadata (NOT frames!)
                 return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
@@ -1588,7 +1591,6 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         # Track segment metadata (NOT frames - those go directly to disk)
         segment_results = {}
-        processed_frames = set()  # Track which frames have been written
 
         # REVOLUTIONARY: Store all frames in VRAM with YUV420 compression (8:1 ratio!)
         vram_frames = {}  # {frame_idx: compressed_yuv420_dict}
@@ -1671,10 +1673,15 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 print(f"[SAM2] Segment {seg_idx+1}: ProPainter returned {len(output_frames)} frames (OK)")
 
             # REVOLUTIONARY: Store in VRAM with YUV420 compression (8:1 ratio, ZERO disk I/O!)
-            print(f"[SAM2] Segment {seg_idx+1}: storing {len(output_frames)} frames in VRAM (YUV420)...")
+            # Only save CORE frames (start_f to end_f), skip padding frames
+            core_count = end_f - start_f
+            print(f"[SAM2] Segment {seg_idx+1}: storing {core_count} core frames in VRAM (skip {len(output_frames) - core_count} padding)...")
             frames_stored = 0
             for i in range(len(output_frames)):
                 frame_idx = proc_start + i
+                # Skip padding frames - only save core frames [start_f, end_f)
+                if frame_idx < start_f or frame_idx >= end_f:
+                    continue
                 # GET from shared preloaded frames (ZERO disk I/O!)
                 orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                 # Composite segment output onto original frame
@@ -1682,10 +1689,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                           crop_x + seg_crop_x:crop_x + seg_crop_x + seg_crop_w] = output_frames[i]
                 # Store in VRAM with YUV420 compression (8:1 ratio!)
                 vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
-                processed_frames.add(frame_idx)
                 frames_stored += 1
             del output_frames  # Free memory immediately!
-            print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} frames in VRAM")
+            print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames in VRAM")
 
             # Return success flag and metadata (NOT frames!)
             return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
