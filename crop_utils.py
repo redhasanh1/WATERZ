@@ -83,6 +83,12 @@ def calculate_crop_region(
     crop_w = (crop_w // 16) * 16
     crop_h = (crop_h // 16) * 16
 
+    # Ensure minimum size after rounding (RAFT needs at least 128x128)
+    if crop_w < 128:
+        crop_w = 128
+    if crop_h < 128:
+        crop_h = 128
+
     # Adjust if we went out of bounds after alignment
     if crop_x + crop_w > frame_width:
         crop_x = frame_width - crop_w
