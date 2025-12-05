@@ -131,8 +131,8 @@ REM Max frames per segment (prevents OOM on long videos - splits into chunks)
 set MAX_SEGMENT_FRAMES=300
 
 REM Max pixels (width*height) per segment's union bbox - prevents huge crops that slow processing
-REM 400000 = ~630x630, keeps per-frame under 200ms. Lower = more segments = faster per segment
-set MAX_SEGMENT_PIXELS=400000
+REM 220000 = ~470x470 bbox → ~500k after 0.25 padding. Lower = more segments = faster per segment
+set MAX_SEGMENT_PIXELS=220000
 
 REM ⚡ MAX_CROP_PIXELS: Hard limit AFTER padding (~707x707 = 500k for ~300ms/frame)
 set MAX_CROP_PIXELS=500000
