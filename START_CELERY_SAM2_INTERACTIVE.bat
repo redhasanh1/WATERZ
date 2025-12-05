@@ -134,6 +134,9 @@ REM Max pixels (width*height) per segment's union bbox - prevents huge crops tha
 REM 400000 = ~630x630, keeps per-frame under 200ms. Lower = more segments = faster per segment
 set MAX_SEGMENT_PIXELS=400000
 
+REM ⚡ MAX_CROP_PIXELS: Hard limit AFTER padding (~707x707 = 500k for ~300ms/frame)
+set MAX_CROP_PIXELS=500000
+
 REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50
 set SEGMENT_MIN_LEN_10FPS=3

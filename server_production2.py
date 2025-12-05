@@ -53,6 +53,8 @@ SEGMENT_USE_MOTION_DETECTION = os.getenv('SEGMENT_USE_MOTION_DETECTION', '1').lo
 MAX_SEGMENT_FRAMES = int(os.getenv('MAX_SEGMENT_FRAMES', '300'))
 # Max pixels (width*height) for segment's union bbox (0=unlimited, 400000=~630x630 recommended)
 MAX_SEGMENT_PIXELS = int(os.getenv('MAX_SEGMENT_PIXELS', '400000'))
+# Max pixels AFTER padding (hard limit on final crop size, 0=unlimited)
+MAX_CROP_PIXELS = int(os.getenv('MAX_CROP_PIXELS', '500000'))  # ~707x707
 # Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
 SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
@@ -1002,6 +1004,18 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     crop_w, crop_h, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
                 )
 
+                # --- ENFORCE MAX_CROP_PIXELS (after padding) ---
+                if MAX_CROP_PIXELS > 0:
+                    crop_pixels = seg_crop_w * seg_crop_h
+                    if crop_pixels > MAX_CROP_PIXELS:
+                        scale = (MAX_CROP_PIXELS / crop_pixels) ** 0.5
+                        new_w = int(seg_crop_w * scale) // 16 * 16
+                        new_h = int(seg_crop_h * scale) // 16 * 16
+                        seg_crop_x += (seg_crop_w - new_w) // 2
+                        seg_crop_y += (seg_crop_h - new_h) // 2
+                        seg_crop_w, seg_crop_h = new_w, new_h
+                        print(f"[CROP] Reduced to {seg_crop_w}x{seg_crop_h} = {seg_crop_w*seg_crop_h} px (limit={MAX_CROP_PIXELS})")
+
                 # Determine optimization level based on movement
                 movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
                 if movement < 10:
@@ -1654,6 +1668,17 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 [seg_bbox[0] - crop_x, seg_bbox[1] - crop_y, seg_bbox[2] - crop_x, seg_bbox[3] - crop_y],
                 crop_w, crop_h, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
             )
+            # --- ENFORCE MAX_CROP_PIXELS (after padding) ---
+            if MAX_CROP_PIXELS > 0:
+                crop_pixels = seg_crop_w * seg_crop_h
+                if crop_pixels > MAX_CROP_PIXELS:
+                    scale = (MAX_CROP_PIXELS / crop_pixels) ** 0.5
+                    new_w = int(seg_crop_w * scale) // 16 * 16
+                    new_h = int(seg_crop_h * scale) // 16 * 16
+                    seg_crop_x += (seg_crop_w - new_w) // 2
+                    seg_crop_y += (seg_crop_h - new_h) // 2
+                    seg_crop_w, seg_crop_h = new_w, new_h
+                    print(f"[CROP] Reduced to {seg_crop_w}x{seg_crop_h} = {seg_crop_w*seg_crop_h} px (limit={MAX_CROP_PIXELS})")
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
             if movement < 10:
                 neighbor_length, subvideo_length = 2, 30
