@@ -53,8 +53,8 @@ SEGMENT_USE_MOTION_DETECTION = os.getenv('SEGMENT_USE_MOTION_DETECTION', '1').lo
 MAX_SEGMENT_FRAMES = int(os.getenv('MAX_SEGMENT_FRAMES', '300'))
 # Max pixels (width*height) for segment's union bbox (0=unlimited, 400000=~630x630 recommended)
 MAX_SEGMENT_PIXELS = int(os.getenv('MAX_SEGMENT_PIXELS', '400000'))
-# Max pixels AFTER padding - triggers segment splitting if exceeded (~894x894 = 800k)
-MAX_CROP_PIXELS = int(os.getenv('MAX_CROP_PIXELS', '800000'))
+# Max pixels AFTER padding - triggers segment splitting if exceeded (~775x775 = 600k)
+MAX_CROP_PIXELS = int(os.getenv('MAX_CROP_PIXELS', '600000'))
 # Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
 SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
@@ -79,10 +79,10 @@ except Exception:
     SEGMENT_CROP_PAD_RATIO = 0.25
 
 
-def split_segment_by_pixels(start, end, detections, max_pixels, padding_ratio=0.25):
+def split_segment_by_pixels(start, end, detections, max_pixels, padding_ratio=0.25, frame_width=1920, frame_height=1080):
     """
     Recursively split segment until each piece has crop < max_pixels AFTER padding.
-    Used after BOUNDARY-SAFE extends segments and union bbox is recalculated.
+    Uses calculate_crop_region for EXACT crop size (includes min_size, clamping).
     """
     bboxes = [detections[f] for f in range(start, end)
               if f < len(detections) and detections[f] is not None]
@@ -93,21 +93,23 @@ def split_segment_by_pixels(start, end, detections, max_pixels, padding_ratio=0.
     y1 = min(b[1] for b in bboxes)
     x2 = max(b[2] for b in bboxes)
     y2 = max(b[3] for b in bboxes)
+    bbox = (x1, y1, x2, y2)
 
-    # Calculate crop size AFTER padding (what actually gets processed)
-    bbox_w, bbox_h = x2 - x1, y2 - y1
-    crop_w = int(bbox_w * (1 + 2 * padding_ratio))
-    crop_h = int(bbox_h * (1 + 2 * padding_ratio))
+    # Use calculate_crop_region to get EXACT crop size (includes min_size, clamping)
+    _, _, crop_w, crop_h = calculate_crop_region(
+        bbox, frame_width, frame_height,
+        padding_ratio=padding_ratio, min_size=128
+    )
     crop_pixels = crop_w * crop_h
 
     # Stop splitting if under limit OR segment is too short (min 30 frames)
     if crop_pixels <= max_pixels or end - start <= 30:
-        return [(start, end, (x1, y1, x2, y2))]
+        return [(start, end, bbox)]
 
     # Binary split
     mid = (start + end) // 2
-    left = split_segment_by_pixels(start, mid, detections, max_pixels, padding_ratio)
-    right = split_segment_by_pixels(mid, end, detections, max_pixels, padding_ratio)
+    left = split_segment_by_pixels(start, mid, detections, max_pixels, padding_ratio, frame_width, frame_height)
+    right = split_segment_by_pixels(mid, end, detections, max_pixels, padding_ratio, frame_width, frame_height)
     return left + right
 
 
@@ -812,18 +814,21 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                                 union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
 
                                 # Check if CROP (post-padding) exceeds pixel limit
-                                bbox_w = seg_max_x - seg_min_x
-                                bbox_h = seg_max_y - seg_min_y
-                                crop_w = int(bbox_w * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
-                                crop_h = int(bbox_h * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                # Use calculate_crop_region to get EXACT crop size (includes min_size, clamping)
+                                _, _, crop_w, crop_h = calculate_crop_region(
+                                    union_bbox, width, height,
+                                    padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+                                )
                                 crop_pixels = crop_w * crop_h
                                 if MAX_CROP_PIXELS > 0 and crop_pixels > MAX_CROP_PIXELS:
                                     # Split this segment into smaller pieces
                                     print(f"[SAM2] Segment {s}-{e}: crop {crop_pixels:,} px ({crop_w}x{crop_h}) > {MAX_CROP_PIXELS:,} limit, splitting...")
-                                    sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_CROP_PIXELS, SEGMENT_CROP_PAD_RATIO)
+                                    sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_CROP_PIXELS, SEGMENT_CROP_PAD_RATIO, width, height)
                                     for sub_s, sub_e, sub_bb in sub_segments:
-                                        sub_w = int((sub_bb[2] - sub_bb[0]) * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
-                                        sub_h = int((sub_bb[3] - sub_bb[1]) * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                        _, _, sub_w, sub_h = calculate_crop_region(
+                                            sub_bb, width, height,
+                                            padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+                                        )
                                         sub_crop_px = sub_w * sub_h
                                         print(f"[SAM2]   -> Sub-segment {sub_s}-{sub_e} ({sub_e-sub_s}f): crop {sub_crop_px:,} px ({sub_w}x{sub_h})")
                                     updated_segments.extend(sub_segments)
@@ -1539,18 +1544,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                         union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
 
                         # Check if CROP (post-padding) exceeds pixel limit
-                        bbox_w = seg_max_x - seg_min_x
-                        bbox_h = seg_max_y - seg_min_y
-                        crop_w = int(bbox_w * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
-                        crop_h = int(bbox_h * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                        # Use calculate_crop_region to get EXACT crop size (includes min_size, clamping)
+                        _, _, crop_w, crop_h = calculate_crop_region(
+                            union_bbox, width, height,
+                            padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+                        )
                         crop_pixels = crop_w * crop_h
                         if MAX_CROP_PIXELS > 0 and crop_pixels > MAX_CROP_PIXELS:
                             # Split this segment into smaller pieces
                             print(f"[SAM2] Segment {s}-{e}: crop {crop_pixels:,} px ({crop_w}x{crop_h}) > {MAX_CROP_PIXELS:,} limit, splitting...")
-                            sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_CROP_PIXELS, SEGMENT_CROP_PAD_RATIO)
+                            sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_CROP_PIXELS, SEGMENT_CROP_PAD_RATIO, width, height)
                             for sub_s, sub_e, sub_bb in sub_segments:
-                                sub_w = int((sub_bb[2] - sub_bb[0]) * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
-                                sub_h = int((sub_bb[3] - sub_bb[1]) * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                _, _, sub_w, sub_h = calculate_crop_region(
+                                    sub_bb, width, height,
+                                    padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+                                )
                                 sub_crop_px = sub_w * sub_h
                                 print(f"[SAM2]   -> Sub-segment {sub_s}-{sub_e} ({sub_e-sub_s}f): crop {sub_crop_px:,} px ({sub_w}x{sub_h})")
                             updated_segments.extend(sub_segments)
