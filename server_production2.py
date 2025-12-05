@@ -51,10 +51,10 @@ SEGMENT_MOTION_THRESHOLD = int(os.getenv('SEGMENT_MOTION_THRESHOLD', '20'))
 SEGMENT_USE_MOTION_DETECTION = os.getenv('SEGMENT_USE_MOTION_DETECTION', '1').lower() in ('1', 'true', 'yes', 'on')
 # Max frames per segment (longer segments get split to prevent OOM)
 MAX_SEGMENT_FRAMES = int(os.getenv('MAX_SEGMENT_FRAMES', '300'))
-# Max pixels (width*height) for segment's union bbox (0=unlimited, 220000=~470x470 → 500k after padding)
-MAX_SEGMENT_PIXELS = int(os.getenv('MAX_SEGMENT_PIXELS', '220000'))
+# Max pixels (width*height) for segment's union bbox (0=unlimited, 180000=~424x424 → 405k after padding)
+MAX_SEGMENT_PIXELS = int(os.getenv('MAX_SEGMENT_PIXELS', '180000'))
 # Max pixels AFTER padding (hard limit on final crop size, 0=unlimited)
-MAX_CROP_PIXELS = int(os.getenv('MAX_CROP_PIXELS', '500000'))  # ~707x707
+MAX_CROP_PIXELS = int(os.getenv('MAX_CROP_PIXELS', '400000'))  # ~630x630
 # Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
 SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
