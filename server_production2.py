@@ -22,7 +22,7 @@ from segment_detector import detect_segments_from_masks, merge_adjacent_segments
 from crop_utils import calculate_crop_region
 
 # Number of parallel segment workers
-SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '4'))
+SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '2'))
 # Parallel segment execution (inside a single video task)
 SAM2_PARALLEL_SEGMENTS = os.getenv('SAM2_PARALLEL_SEGMENTS', '1').lower() in ('1', 'true', 'yes', 'on')
 
