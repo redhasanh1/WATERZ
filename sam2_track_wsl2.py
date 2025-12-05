@@ -169,9 +169,12 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, point=N
                 mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
                 mask_uint8 = (mask * 255).astype(np.uint8)
 
-                # Detect empty mask (object off-screen or lost)
-                if np.sum(mask_uint8) == 0:
-                    print(f"[SAM2] Frame {frame_idx}: Object not visible (empty mask)")
+                # Detect empty/noise mask (object off-screen or lost)
+                MIN_MASK_PIXELS = 100  # Ignore noise < 100 pixels
+                mask_pixel_count = np.sum(mask_uint8 > 127)
+                if mask_pixel_count < MIN_MASK_PIXELS:
+                    print(f"[SAM2] Frame {frame_idx}: Object not visible ({mask_pixel_count} px < {MIN_MASK_PIXELS} threshold)")
+                    mask_uint8[:] = 0  # Zero out noise
 
                 # Save mask
                 cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
