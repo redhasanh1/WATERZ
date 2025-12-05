@@ -64,7 +64,7 @@ except Exception:
     TAIL_MASK_MAX_SECONDS = 2.0
 
 # Fill short internal mask gaps (replicate nearest non-empty mask across brief gaps)
-FILL_MASK_GAPS = os.getenv('FILL_MASK_GAPS', '1').lower() in ('1', 'true', 'yes', 'on')
+FILL_MASK_GAPS = os.getenv('FILL_MASK_GAPS', '0').lower() in ('1', 'true', 'yes', 'on')
 try:
     MASK_GAP_MAX_SECONDS = float(os.getenv('MASK_GAP_MAX_SECONDS', '1.0'))
 except Exception:
@@ -840,6 +840,51 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                             split_segments.append((s, e, bb))
                     segments = split_segments
 
+                # --- POST-PROCESS: Remove empty mask frames and split segments ---
+                MIN_FRAMES_SPLIT = 5  # Min frames for segments broken by empty masks
+
+                def filter_empty_frames_from_segments(segs, masks, det_per_frame):
+                    """Remove empty mask frames, split if empty in middle."""
+                    filtered = []
+                    for s, e, bb in segs:
+                        # Find runs of non-empty frames
+                        runs = []
+                        run_start = None
+                        for f in range(s, e):
+                            has_content = f < len(masks) and np.sum(masks[f] > 127) > 0
+                            if has_content:
+                                if run_start is None:
+                                    run_start = f
+                            else:
+                                if run_start is not None:
+                                    runs.append((run_start, f))
+                                    run_start = None
+                        if run_start is not None:
+                            runs.append((run_start, e))
+
+                        # Create segments from runs
+                        is_split = len(runs) > 1
+                        min_len = MIN_FRAMES_SPLIT if is_split else SEGMENT_MIN_LEN_FULL
+                        for run_s, run_e in runs:
+                            if run_e - run_s >= min_len:
+                                # Compute bbox for this run
+                                run_bboxes = [det_per_frame[f] for f in range(run_s, run_e)
+                                              if f < len(det_per_frame) and det_per_frame[f]]
+                                if run_bboxes:
+                                    run_bb = (min(b[0] for b in run_bboxes), min(b[1] for b in run_bboxes),
+                                              max(b[2] for b in run_bboxes), max(b[3] for b in run_bboxes))
+                                else:
+                                    run_bb = bb
+                                filtered.append((run_s, run_e, run_bb))
+                                if is_split:
+                                    print(f"[SAM2] Empty-mask split: frames {run_s}-{run_e-1} ({run_e-run_s}f)")
+                    return filtered
+
+                orig_count = len(segments)
+                segments = filter_empty_frames_from_segments(segments, all_masks, detections_per_frame)
+                if len(segments) != orig_count:
+                    print(f"[SAM2] Filtered empty masks: {orig_count} -> {len(segments)} segments")
+
                 print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")
                 for idx, (start, end, bbox) in enumerate(segments):
                     print(f"[SAM2]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
@@ -1519,6 +1564,51 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 else:
                     split_segments.append((s, e, bb))
             segments = split_segments
+
+        # --- POST-PROCESS: Remove empty mask frames and split segments ---
+        MIN_FRAMES_SPLIT = 5  # Min frames for segments broken by empty masks
+
+        def filter_empty_frames_from_segments(segs, masks, det_per_frame):
+            """Remove empty mask frames, split if empty in middle."""
+            filtered = []
+            for s, e, bb in segs:
+                # Find runs of non-empty frames
+                runs = []
+                run_start = None
+                for f in range(s, e):
+                    has_content = f < len(masks) and np.sum(masks[f] > 127) > 0
+                    if has_content:
+                        if run_start is None:
+                            run_start = f
+                    else:
+                        if run_start is not None:
+                            runs.append((run_start, f))
+                            run_start = None
+                if run_start is not None:
+                    runs.append((run_start, e))
+
+                # Create segments from runs
+                is_split = len(runs) > 1
+                min_len = MIN_FRAMES_SPLIT if is_split else SEGMENT_MIN_LEN_FULL
+                for run_s, run_e in runs:
+                    if run_e - run_s >= min_len:
+                        # Compute bbox for this run
+                        run_bboxes = [det_per_frame[f] for f in range(run_s, run_e)
+                                      if f < len(det_per_frame) and det_per_frame[f]]
+                        if run_bboxes:
+                            run_bb = (min(b[0] for b in run_bboxes), min(b[1] for b in run_bboxes),
+                                      max(b[2] for b in run_bboxes), max(b[3] for b in run_bboxes))
+                        else:
+                            run_bb = bb
+                        filtered.append((run_s, run_e, run_bb))
+                        if is_split:
+                            print(f"[SAM2] Empty-mask split: frames {run_s}-{run_e-1} ({run_e-run_s}f)")
+            return filtered
+
+        orig_count = len(segments)
+        segments = filter_empty_frames_from_segments(segments, all_masks, detections_per_frame)
+        if len(segments) != orig_count:
+            print(f"[SAM2] Filtered empty masks: {orig_count} -> {len(segments)} segments")
 
         print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")
         for idx, (start, end, bbox) in enumerate(segments):
