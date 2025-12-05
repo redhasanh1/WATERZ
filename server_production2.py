@@ -51,10 +51,10 @@ SEGMENT_MOTION_THRESHOLD = int(os.getenv('SEGMENT_MOTION_THRESHOLD', '20'))
 SEGMENT_USE_MOTION_DETECTION = os.getenv('SEGMENT_USE_MOTION_DETECTION', '1').lower() in ('1', 'true', 'yes', 'on')
 # Max frames per segment (longer segments get split to prevent OOM)
 MAX_SEGMENT_FRAMES = int(os.getenv('MAX_SEGMENT_FRAMES', '300'))
-# Max pixels (width*height) for segment's union bbox (0=unlimited, 180000=~424x424 → 405k after padding)
-MAX_SEGMENT_PIXELS = int(os.getenv('MAX_SEGMENT_PIXELS', '180000'))
-# Max pixels AFTER padding (hard limit on final crop size, 0=unlimited)
-MAX_CROP_PIXELS = int(os.getenv('MAX_CROP_PIXELS', '400000'))  # ~630x630
+# Max pixels (width*height) for segment's union bbox (0=unlimited, 400000=~630x630 recommended)
+MAX_SEGMENT_PIXELS = int(os.getenv('MAX_SEGMENT_PIXELS', '400000'))
+# Max pixels AFTER padding - triggers segment splitting if exceeded (~894x894 = 800k)
+MAX_CROP_PIXELS = int(os.getenv('MAX_CROP_PIXELS', '800000'))
 # Detection mode: 'full' (preferred, uses in-memory masks) or '10fps' (dir-based)
 SAM2_SEGMENT_DETECTION_MODE = os.getenv('SAM2_SEGMENT_DETECTION_MODE', 'full').strip().lower()
 
@@ -79,9 +79,9 @@ except Exception:
     SEGMENT_CROP_PAD_RATIO = 0.25
 
 
-def split_segment_by_pixels(start, end, detections, max_pixels):
+def split_segment_by_pixels(start, end, detections, max_pixels, padding_ratio=0.25):
     """
-    Recursively split segment until each piece has union bbox < max_pixels.
+    Recursively split segment until each piece has crop < max_pixels AFTER padding.
     Used after BOUNDARY-SAFE extends segments and union bbox is recalculated.
     """
     bboxes = [detections[f] for f in range(start, end)
@@ -93,16 +93,21 @@ def split_segment_by_pixels(start, end, detections, max_pixels):
     y1 = min(b[1] for b in bboxes)
     x2 = max(b[2] for b in bboxes)
     y2 = max(b[3] for b in bboxes)
-    pixels = (x2 - x1) * (y2 - y1)
+
+    # Calculate crop size AFTER padding (what actually gets processed)
+    bbox_w, bbox_h = x2 - x1, y2 - y1
+    crop_w = int(bbox_w * (1 + 2 * padding_ratio))
+    crop_h = int(bbox_h * (1 + 2 * padding_ratio))
+    crop_pixels = crop_w * crop_h
 
     # Stop splitting if under limit OR segment is too short (min 30 frames)
-    if pixels <= max_pixels or end - start <= 30:
+    if crop_pixels <= max_pixels or end - start <= 30:
         return [(start, end, (x1, y1, x2, y2))]
 
     # Binary split
     mid = (start + end) // 2
-    left = split_segment_by_pixels(start, mid, detections, max_pixels)
-    right = split_segment_by_pixels(mid, end, detections, max_pixels)
+    left = split_segment_by_pixels(start, mid, detections, max_pixels, padding_ratio)
+    right = split_segment_by_pixels(mid, end, detections, max_pixels, padding_ratio)
     return left + right
 
 
@@ -806,15 +811,21 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                                 seg_max_y = max(b[3] for b in segment_bboxes)
                                 union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
 
-                                # Check if union bbox exceeds pixel limit
-                                pixels = (seg_max_x - seg_min_x) * (seg_max_y - seg_min_y)
-                                if MAX_SEGMENT_PIXELS > 0 and pixels > MAX_SEGMENT_PIXELS:
+                                # Check if CROP (post-padding) exceeds pixel limit
+                                bbox_w = seg_max_x - seg_min_x
+                                bbox_h = seg_max_y - seg_min_y
+                                crop_w = int(bbox_w * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                crop_h = int(bbox_h * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                crop_pixels = crop_w * crop_h
+                                if MAX_CROP_PIXELS > 0 and crop_pixels > MAX_CROP_PIXELS:
                                     # Split this segment into smaller pieces
-                                    print(f"[SAM2] Segment {s}-{e}: union {pixels:,} px > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
-                                    sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_SEGMENT_PIXELS)
+                                    print(f"[SAM2] Segment {s}-{e}: crop {crop_pixels:,} px ({crop_w}x{crop_h}) > {MAX_CROP_PIXELS:,} limit, splitting...")
+                                    sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_CROP_PIXELS, SEGMENT_CROP_PAD_RATIO)
                                     for sub_s, sub_e, sub_bb in sub_segments:
-                                        sub_pixels = (sub_bb[2] - sub_bb[0]) * (sub_bb[3] - sub_bb[1])
-                                        print(f"[SAM2]   -> Sub-segment {sub_s}-{sub_e} ({sub_e-sub_s}f): {sub_pixels:,} px")
+                                        sub_w = int((sub_bb[2] - sub_bb[0]) * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                        sub_h = int((sub_bb[3] - sub_bb[1]) * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                        sub_crop_px = sub_w * sub_h
+                                        print(f"[SAM2]   -> Sub-segment {sub_s}-{sub_e} ({sub_e-sub_s}f): crop {sub_crop_px:,} px ({sub_w}x{sub_h})")
                                     updated_segments.extend(sub_segments)
                                 else:
                                     updated_segments.append((s, e, union_bbox))
@@ -997,24 +1008,12 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             try:
                 duration = end_f - start_f
                 log_end = end_f - 1 if end_f > start_f else end_f
-                # Calculate segment-specific crop within the global crop
+                # Calculate segment-specific crop directly from seg_bbox (in original frame coords)
+                # This avoids issues when segment bbox extends beyond global crop region
                 seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
-                    [seg_bbox[0] - crop_x, seg_bbox[1] - crop_y,
-                     seg_bbox[2] - crop_x, seg_bbox[3] - crop_y],
-                    crop_w, crop_h, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+                    list(seg_bbox),  # Use segment bbox directly in frame coordinates
+                    width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
                 )
-
-                # --- ENFORCE MAX_CROP_PIXELS (after padding) ---
-                if MAX_CROP_PIXELS > 0:
-                    crop_pixels = seg_crop_w * seg_crop_h
-                    if crop_pixels > MAX_CROP_PIXELS:
-                        scale = (MAX_CROP_PIXELS / crop_pixels) ** 0.5
-                        new_w = int(seg_crop_w * scale) // 16 * 16
-                        new_h = int(seg_crop_h * scale) // 16 * 16
-                        seg_crop_x += (seg_crop_w - new_w) // 2
-                        seg_crop_y += (seg_crop_h - new_h) // 2
-                        seg_crop_w, seg_crop_h = new_w, new_h
-                        print(f"[CROP] Reduced to {seg_crop_w}x{seg_crop_h} = {seg_crop_w*seg_crop_h} px (limit={MAX_CROP_PIXELS})")
 
                 # Determine optimization level based on movement
                 movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
@@ -1038,13 +1037,12 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 for frame_idx in range(proc_start, proc_end):
                     # Decompress from shared preloaded frames
                     full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                    # Apply global crop
-                    frame = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                    # Apply segment-specific crop
-                    seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                    # Apply segment-specific crop directly (seg_crop coords are in frame coords)
+                    seg_frame = full_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                     seg_frames.append(np.ascontiguousarray(seg_frame))
-                    if frame_idx < len(all_masks_cropped):
-                        seg_mask = all_masks_cropped[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                    # Crop mask from original all_masks (not pre-cropped)
+                    if frame_idx < len(all_masks):
+                        seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                         seg_masks.append(np.ascontiguousarray(seg_mask))
 
                 if not seg_frames or not seg_masks:
@@ -1097,9 +1095,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     frame_idx = proc_start + i
                     # GET from shared preloaded frames (ZERO disk I/O!)
                     orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                    # Composite segment output onto original frame
-                    orig_frame[crop_y + seg_crop_y:crop_y + seg_crop_y + seg_crop_h,
-                              crop_x + seg_crop_x:crop_x + seg_crop_x + seg_crop_w] = output_frames[i]
+                    # Composite segment output onto original frame (seg_crop coords are in frame coords)
+                    orig_frame[seg_crop_y:seg_crop_y + seg_crop_h,
+                              seg_crop_x:seg_crop_x + seg_crop_w] = output_frames[i]
                     # Store in VRAM with YUV420 compression (8:1 ratio!)
                     vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
                     processed_frames.add(frame_idx)
@@ -1540,15 +1538,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                         seg_max_y = max(b[3] for b in segment_bboxes)
                         union_bbox = (seg_min_x, seg_min_y, seg_max_x, seg_max_y)
 
-                        # Check if union bbox exceeds pixel limit
-                        pixels = (seg_max_x - seg_min_x) * (seg_max_y - seg_min_y)
-                        if MAX_SEGMENT_PIXELS > 0 and pixels > MAX_SEGMENT_PIXELS:
+                        # Check if CROP (post-padding) exceeds pixel limit
+                        bbox_w = seg_max_x - seg_min_x
+                        bbox_h = seg_max_y - seg_min_y
+                        crop_w = int(bbox_w * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                        crop_h = int(bbox_h * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                        crop_pixels = crop_w * crop_h
+                        if MAX_CROP_PIXELS > 0 and crop_pixels > MAX_CROP_PIXELS:
                             # Split this segment into smaller pieces
-                            print(f"[SAM2] Segment {s}-{e}: union {pixels:,} px > {MAX_SEGMENT_PIXELS:,} limit, splitting...")
-                            sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_SEGMENT_PIXELS)
+                            print(f"[SAM2] Segment {s}-{e}: crop {crop_pixels:,} px ({crop_w}x{crop_h}) > {MAX_CROP_PIXELS:,} limit, splitting...")
+                            sub_segments = split_segment_by_pixels(s, e, detections_per_frame, MAX_CROP_PIXELS, SEGMENT_CROP_PAD_RATIO)
                             for sub_s, sub_e, sub_bb in sub_segments:
-                                sub_pixels = (sub_bb[2] - sub_bb[0]) * (sub_bb[3] - sub_bb[1])
-                                print(f"[SAM2]   -> Sub-segment {sub_s}-{sub_e} ({sub_e-sub_s}f): {sub_pixels:,} px")
+                                sub_w = int((sub_bb[2] - sub_bb[0]) * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                sub_h = int((sub_bb[3] - sub_bb[1]) * (1 + 2 * SEGMENT_CROP_PAD_RATIO))
+                                sub_crop_px = sub_w * sub_h
+                                print(f"[SAM2]   -> Sub-segment {sub_s}-{sub_e} ({sub_e-sub_s}f): crop {sub_crop_px:,} px ({sub_w}x{sub_h})")
                             updated_segments.extend(sub_segments)
                         else:
                             updated_segments.append((s, e, union_bbox))
@@ -1664,21 +1668,11 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         def process_segment_local(seg_idx, start_f, end_f, seg_bbox):
             duration = end_f - start_f
             log_end = end_f - 1 if end_f > start_f else end_f
+            # Calculate segment-specific crop directly from seg_bbox (in original frame coords)
             seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
-                [seg_bbox[0] - crop_x, seg_bbox[1] - crop_y, seg_bbox[2] - crop_x, seg_bbox[3] - crop_y],
-                crop_w, crop_h, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+                list(seg_bbox),  # Use segment bbox directly in frame coordinates
+                width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
             )
-            # --- ENFORCE MAX_CROP_PIXELS (after padding) ---
-            if MAX_CROP_PIXELS > 0:
-                crop_pixels = seg_crop_w * seg_crop_h
-                if crop_pixels > MAX_CROP_PIXELS:
-                    scale = (MAX_CROP_PIXELS / crop_pixels) ** 0.5
-                    new_w = int(seg_crop_w * scale) // 16 * 16
-                    new_h = int(seg_crop_h * scale) // 16 * 16
-                    seg_crop_x += (seg_crop_w - new_w) // 2
-                    seg_crop_y += (seg_crop_h - new_h) // 2
-                    seg_crop_w, seg_crop_h = new_w, new_h
-                    print(f"[CROP] Reduced to {seg_crop_w}x{seg_crop_h} = {seg_crop_w*seg_crop_h} px (limit={MAX_CROP_PIXELS})")
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
             if movement < 10:
                 neighbor_length, subvideo_length = 2, 30
@@ -1698,13 +1692,12 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             for frame_idx in range(proc_start, proc_end):
                 # Decompress from shared preloaded frames
                 full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                # Apply global crop
-                frame = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                # Apply segment-specific crop
-                seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                # Apply segment-specific crop directly (seg_crop coords are in frame coords)
+                seg_frame = full_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                 seg_frames.append(np.ascontiguousarray(seg_frame))
-                if frame_idx < len(all_masks_cropped):
-                    seg_mask = all_masks_cropped[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                # Crop mask from original all_masks (not pre-cropped)
+                if frame_idx < len(all_masks):
+                    seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                     seg_masks.append(np.ascontiguousarray(seg_mask))
             if not seg_frames or not seg_masks:
                 print(f"[SAM2] WARNING: Segment {seg_idx+1} has no frames/masks! seg_frames={len(seg_frames)}, seg_masks={len(seg_masks)}")
@@ -1745,9 +1738,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 frame_idx = proc_start + i
                 # GET from shared preloaded frames (ZERO disk I/O!)
                 orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                # Composite segment output onto original frame
-                orig_frame[crop_y + seg_crop_y:crop_y + seg_crop_y + seg_crop_h,
-                          crop_x + seg_crop_x:crop_x + seg_crop_x + seg_crop_w] = output_frames[i]
+                # Composite segment output onto original frame (seg_crop coords are in frame coords)
+                orig_frame[seg_crop_y:seg_crop_y + seg_crop_h,
+                          seg_crop_x:seg_crop_x + seg_crop_w] = output_frames[i]
                 # Store in VRAM with YUV420 compression (8:1 ratio!)
                 vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
                 processed_frames.add(frame_idx)
