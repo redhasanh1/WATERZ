@@ -5542,8 +5542,7 @@ def process_video():
                 video_id = task_id or str(uuid.uuid4())[:8]
 
                 # Create masks directory
-                masks_dir = os.path.join(TEMP_DIR, f"{video_id}_yolo_masks")
-                os.makedirs(masks_dir, exist_ok=True)
+                masks_dir = f"/tmp/{video_id}_yolo_masks"
 
                 # Chain: WSL YOLO detection → Windows ProPainter inpainting
                 # yolo.generate_masks runs in WSL (queue=wsl_yolo)
@@ -6139,8 +6138,7 @@ def sam2_process_video():
         api_base = _current_public_base()
 
         # Create masks directory
-        masks_dir = os.path.join(TEMP_DIR, f"{task_id}_sam2_masks")
-        os.makedirs(masks_dir, exist_ok=True)
+        masks_dir = f"/tmp/{task_id}_sam2_masks"
 
         # Convert points from frontend format to WSL worker format
         # Frontend sends: [{x, y, label, ...}, ...]
