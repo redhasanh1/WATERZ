@@ -330,8 +330,20 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
                 'progress': progress
             })
 
-        # Run YOLO detection
-        results = model(frame, conf=confidence_threshold, device='cuda', verbose=False)
+        # Pad frame to 640x640 for TensorRT engine (same as Windows yolo_detector.py)
+        h, w = frame.shape[:2]
+        scale = min(640.0 / w, 640.0 / h)
+        new_w, new_h = int(w * scale), int(h * scale)
+        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+        pad_w, pad_h = 640 - new_w, 640 - new_h
+        top, left = pad_h // 2, pad_w // 2
+        bottom, right = pad_h - top, pad_w - left
+        padded = cv2.copyMakeBorder(resized, top, bottom, left, right,
+                                    cv2.BORDER_CONSTANT, value=(114, 114, 114))
+
+        # Run YOLO detection on padded 640x640 image
+        results = model(padded, conf=confidence_threshold, device='cuda', verbose=False, imgsz=640)
 
         # Create mask from detections
         mask = np.zeros((height, width), dtype=np.uint8)
@@ -340,7 +352,13 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
             for box in result.boxes:
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
 
-                # Add padding
+                # Remove padding offset and scale back to original coordinates
+                x1 = (x1 - left) / scale
+                y1 = (y1 - top) / scale
+                x2 = (x2 - left) / scale
+                y2 = (y2 - top) / scale
+
+                # Add detection padding and clamp to image bounds
                 x1 = max(0, int(x1) - padding)
                 y1 = max(0, int(y1) - padding)
                 x2 = min(width, int(x2) + padding)

@@ -7,8 +7,15 @@ This server handles SAM2-based watermark removal using pre-generated masks.
 
 import os
 import sys
+
+# [CRITICAL] Enable NeuFlow v2 TensorRT for optical flow (10-70x faster than RAFT)
+# Must be set BEFORE importing watermark.py / ProPainter pipeline
+os.environ['USE_NEUFLOW'] = '1'
 import glob
 import json
+import threading
+import time
+import uuid
 from typing import List, Optional, Tuple
 from flask import Flask, request, jsonify
 from celery import Celery
@@ -161,6 +168,45 @@ class VRAMCompressor:
         b = (y + 2.032 * u_adj).clamp(0, 255)
 
         return torch.stack([b, g, r], dim=-1).byte().cpu().numpy()
+
+
+# [YOLO] EXTREME SPEED: Global in-memory frame/mask cache
+# Shared across all threads in Celery worker (threads pool)
+# Stores frames/masks in RAM for instant access (no Redis, no disk!)
+FRAME_CACHE = {}
+FRAME_CACHE_LOCK = threading.Lock()
+
+# [YOLO] Global YOLO detector (TensorRT)
+detector = None
+
+
+def get_detector():
+    """
+    Lazy load the YOLO detector (TensorRT batch engine).
+    Uses Windows TensorRT engine for maximum speed.
+    """
+    global detector
+
+    if detector is None:
+        print("=" * 60)
+        print("Loading YOLO detector (Windows TensorRT)...")
+        print("=" * 60)
+        from yolo_detector import YOLOWatermarkDetector
+        # Force TensorRT-only mode (no fallback to .pt)
+        # Will fail if engine not found - ensures maximum speed!
+        detector = YOLOWatermarkDetector(require_tensorrt=True)
+
+        # WARMUP: Initialize TensorRT context (eliminates cold start overhead!)
+        print("[WARMUP] Running warmup inference to initialize TensorRT context...")
+        dummy_batch = [np.zeros((640, 640, 3), dtype=np.uint8) for _ in range(64)]
+        _ = detector.detect_batch(dummy_batch, confidence_threshold=0.15, batch_size=64)
+        print("[OK] YOLO warmed up! TensorRT context ready for max speed.")
+
+        print("=" * 60)
+        print("[OK] YOLO detector ready!")
+        print("=" * 60)
+
+    return detector
 
 
 # Configure paths
@@ -1369,6 +1415,190 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
 
 #============================================================================
+# YOLO WINDOWS TASK (runs entirely on Windows - no WSL!)
+#============================================================================
+
+@celery.task(bind=True, name='yolo.process_video_windows')
+def process_video_yolo_windows(self, video_path, video_id=None, api_base=None):
+    """
+    YOLO watermark removal - runs entirely on Windows with batch TensorRT.
+
+    This is a port of the main branch's YOLO logic:
+    - Batch YOLO detection (64 frames at once) - ~1-2ms per frame
+    - In-memory frame/mask storage (FRAME_CACHE)
+    - Position-based segment detection
+    - Parallel ProPainter inpainting
+
+    Much faster than WSL chain (no network round-trips, no B2 upload/download).
+    """
+    import shutil
+    from pathlib import Path
+
+    try:
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Starting YOLO detection'})
+
+        # Load detector (TensorRT batch engine)
+        yolo_detector = get_detector()
+
+        # Verify video exists
+        if not os.path.exists(video_path):
+            raise RuntimeError(f"Video not found: {video_path}")
+
+        print(f"[YOLO] Processing video: {video_path}")
+
+        # Open video
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise RuntimeError(f"Failed to open video: {video_path}")
+
+        fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+
+        base_name = Path(video_path).stem
+        video_id = video_id or str(uuid.uuid4())[:8]
+
+        print(f"[YOLO] Video: {width}x{height} @ {fps} fps ({total_frames} frames)")
+
+        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': f'Loading {total_frames} frames'})
+
+        # Load all frames to memory for batch processing
+        print(f"[YOLO] Loading {total_frames} frames to memory...")
+        decode_start = time.time()
+
+        all_frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            all_frames.append(frame)
+        cap.release()
+
+        frames_processed = len(all_frames)
+        decode_time = time.time() - decode_start
+        print(f"[YOLO] Decoded {frames_processed} frames: {decode_time:.2f}s ({decode_time/frames_processed*1000:.2f}ms/frame)")
+
+        if frames_processed == 0:
+            raise RuntimeError("No frames decoded from video")
+
+        # BATCH DETECTION (EXTREME SPEED - 1-2ms per frame!)
+        self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Batch YOLO detection (1-2ms/frame)'})
+
+        print(f"[YOLO] Running batch detection on {frames_processed} frames...")
+        batch_start = time.time()
+        all_detections = yolo_detector.detect_batch(all_frames, confidence_threshold=0.15, padding=0, batch_size=64)
+        batch_duration = time.time() - batch_start
+        ms_per_frame = (batch_duration / max(frames_processed, 1)) * 1000
+        print(f"[YOLO] Batch detection: {batch_duration:.2f}s ({ms_per_frame:.2f}ms/frame)")
+
+        # Create masks and track bboxes
+        self.update_state(state='PROCESSING', meta={'progress': 30, 'status': 'Creating masks'})
+
+        zero_mask = np.zeros((height, width), dtype=np.uint8)
+        bboxes_per_frame = []
+        frames_with_watermark = 0
+        last_valid_bbox = None
+        all_masks = []
+
+        for i, detections in enumerate(all_detections):
+            if detections:
+                frames_with_watermark += 1
+                last_valid_bbox = detections[0]['bbox']
+                bboxes_per_frame.append(last_valid_bbox)
+                # Create mask from detection
+                mask = yolo_detector.create_mask(all_frames[i], detections)
+                all_masks.append(mask)
+            elif last_valid_bbox:
+                bboxes_per_frame.append(last_valid_bbox)
+                # Use previous mask (carry forward)
+                all_masks.append(all_masks[-1] if all_masks else zero_mask)
+            else:
+                bboxes_per_frame.append(None)
+                all_masks.append(zero_mask)
+
+        print(f"[YOLO] Created {len(all_masks)} masks, {frames_with_watermark} frames with watermarks")
+
+        if frames_with_watermark == 0:
+            raise RuntimeError("No watermarks detected in video")
+
+        # Store in global FRAME_CACHE for instant access by segment workers
+        cache_key = f"video_data:{base_name}"
+        with FRAME_CACHE_LOCK:
+            FRAME_CACHE[cache_key] = {
+                'frames': all_frames,
+                'masks': all_masks,
+                'bboxes': bboxes_per_frame,
+                'timestamp': time.time(),
+                'video_id': video_id,
+                'base_name': base_name
+            }
+        print(f"[YOLO] Stored {frames_processed} frames/masks in FRAME_CACHE")
+
+        # Detect segments (position-based, like main branch)
+        self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Detecting segments'})
+
+        segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
+        if segments:
+            segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
+
+        print(f"[YOLO] Detected {len(segments)} segments")
+
+        if not segments:
+            # Fallback: single segment covering all frames
+            segments = [(0, frames_processed)]
+            print(f"[YOLO] No segments detected, using full video as single segment")
+
+        # Create output directories
+        output_dir = os.path.join(RESULT_DIR, f"{base_name}_{video_id}")
+        masks_dir = os.path.join(TEMP_DIR, f"{video_id}_yolo_masks")
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(masks_dir, exist_ok=True)
+
+        # Save masks to disk for ProPainter (it needs file paths)
+        print(f"[YOLO] Saving masks to {masks_dir}...")
+        for i, mask in enumerate(all_masks):
+            cv2.imwrite(os.path.join(masks_dir, f"{i:04d}.png"), mask)
+
+        # Now call the continuation task (same as SAM2 flow)
+        # Build sam2_result dict to match expected format
+        sam2_result = {
+            'masks_dir': masks_dir,
+            'mode': 'yolo',
+            'total_frames': frames_processed,
+            'frames_with_watermark': frames_with_watermark,
+            'segments': [list(s) for s in segments],
+            'bboxes': bboxes_per_frame,
+            'width': width,
+            'height': height,
+            'fps': fps
+        }
+
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': 'Starting ProPainter inpainting'})
+
+        # Call continuation task synchronously using .apply() (same worker, uses FRAME_CACHE)
+        # .apply() executes the task synchronously in the current process
+        task_result = _continue_after_masks.apply(
+            args=[sam2_result, video_path, video_id, None, width, height, 0, api_base]
+        )
+        result = task_result.get()  # Wait for result
+
+        # Cleanup FRAME_CACHE after processing
+        with FRAME_CACHE_LOCK:
+            if cache_key in FRAME_CACHE:
+                del FRAME_CACHE[cache_key]
+                print(f"[YOLO] Cleaned up FRAME_CACHE: {cache_key}")
+
+        return result
+
+    except Exception as e:
+        print(f"[ERROR] YOLO task failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+#============================================================================
 # FLASK ROUTES
 #============================================================================
 
@@ -1416,15 +1646,13 @@ def process_yolo():
         "video_id": "abc123"  # Optional
     }
 
-    This chains:
-    1. yolo.generate_masks (WSL) - YOLO detection → masks → B2 upload
-    2. watermark._continue_after_masks (Windows) - ProPainter inpainting
+    NEW: Runs entirely on Windows with batch TensorRT (no WSL chain!)
+    - Batch YOLO detection: 64 frames at once, ~1-2ms per frame
+    - In-memory frame/mask storage (FRAME_CACHE)
+    - Much faster than WSL chain (no network round-trips)
 
     YOLO mode uses 4 parallel segment workers (vs 2 for SAM2).
     """
-    from celery import signature, chain
-    import uuid
-
     data = request.get_json()
     video_path = data.get('video_path')
     video_id = data.get('video_id') or str(uuid.uuid4())[:8]
@@ -1435,28 +1663,23 @@ def process_yolo():
     if not os.path.exists(video_path):
         return jsonify({'error': f'Video not found: {video_path}'}), 404
 
-    # Create masks directory
-    masks_dir = os.path.join(TEMP_DIR, f"{video_id}_yolo_masks")
-    os.makedirs(masks_dir, exist_ok=True)
-
     # Get API base URL for result upload
     api_base = os.getenv('TUNNEL_URL', os.getenv('API_BASE_URL', 'http://localhost:5001'))
 
-    # Chain: WSL YOLO detection → Windows ProPainter
-    s1 = signature('yolo.generate_masks', args=[video_path, masks_dir], queue='wsl_yolo')
-    s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, None, None, None, 0, api_base], queue='propainter')
+    # NEW: Run entirely on Windows (no WSL chain!)
+    result = process_video_yolo_windows.apply_async(
+        args=[video_path, video_id, api_base],
+        queue='propainter'  # Uses same queue as ProPainter (Windows GPU worker)
+    )
 
-    result = chain(s1, s2).apply_async()
-
-    print(f"[YOLO] Queued task chain: {result.id}")
+    print(f"[YOLO] Queued Windows YOLO task: {result.id}")
     print(f"  - Video: {video_path}")
-    print(f"  - Masks dir: {masks_dir}")
-    print(f"  - Queue flow: wsl_yolo → propainter")
+    print(f"  - Mode: Windows TensorRT (batch 64, ~1-2ms/frame)")
 
     return jsonify({
         'task_id': result.id,
         'status': 'queued',
-        'message': 'YOLO processing task queued (4 segment workers)',
+        'message': 'YOLO processing task queued (Windows TensorRT)',
         'mode': 'yolo'
     })
 
@@ -1669,7 +1892,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         print(f"[SAM2] Masks cropped, frames will be loaded per-segment")
 
         # --- Segment detection (FULL-FPS, boundary-safe like commit 578a2603) ---
-        print(f"[SAM2] Detecting segments from FULL-FPS in-memory masks...")
+        print(f"[{mode.upper()}] Detecting segments from FULL-FPS in-memory masks...")
         detections_per_frame = []
         for m in all_masks:
             coords = cv2.findNonZero(m)
@@ -1678,13 +1901,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 detections_per_frame.append((x, y, x + w, y + h))
             else:
                 detections_per_frame.append(None)
-        # Use motion-based detection for fast-moving objects
-        if SEGMENT_USE_MOTION_DETECTION:
+
+        # YOLO mode: Use simpler segment detection like main branch (fewer, larger segments)
+        # SAM2 mode: Use motion-based detection for fast-moving tracked objects
+        if mode == 'yolo':
+            # YOLO: Simple position-based detection (like server_production.py main branch)
+            segments = detect_segments(detections_per_frame, position_tolerance=5, min_segment_length=10)
+            if segments:
+                segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
+            print(f"[YOLO] Position-based detection: {len(segments)} segments (tolerance=5, min_len=10, max_gap=30)")
+        elif SEGMENT_USE_MOTION_DETECTION:
             segments = detect_segments_motion_based(detections_per_frame, motion_threshold=SEGMENT_MOTION_THRESHOLD, min_segment_length=SEGMENT_MIN_LEN_FULL, max_segment_pixels=MAX_SEGMENT_PIXELS)
             print(f"[SAM2] Motion-based detection: {len(segments)} segments (threshold={SEGMENT_MOTION_THRESHOLD}px, max_pixels={MAX_SEGMENT_PIXELS:,})")
         else:
             segments = detect_segments(detections_per_frame, position_tolerance=SEGMENT_POS_TOLERANCE, min_segment_length=SEGMENT_MIN_LEN_FULL)
-        if len(segments) > 1 and not SEGMENT_USE_MOTION_DETECTION:
+        if len(segments) > 1 and not SEGMENT_USE_MOTION_DETECTION and mode != 'yolo':
             segments = merge_adjacent_segments(segments, position_tolerance=SEGMENT_POS_TOLERANCE, max_gap=SEGMENT_MERGE_GAP_FULL)
 
         # Convert inclusive end → exclusive and clamp to total_frames
@@ -1933,10 +2164,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         # Process segments (parallel when enabled, like main task)
         segments_to_process = segments or [(0, total_frames, [0, 0, width, height])]
 
-        if SAM2_PARALLEL_SEGMENTS and SEGMENT_WORKERS > 1 and len(segments_to_process) > 1:
-            print(f"[SAM2] Processing {len(segments_to_process)} segments in PARALLEL (workers={min(SEGMENT_WORKERS, len(segments_to_process))})...")
+        # Use mode-specific worker count (YOLO: 4, SAM2: 2)
+        segment_workers = 4 if mode == 'yolo' else SEGMENT_WORKERS
 
-            max_workers = min(SEGMENT_WORKERS, len(segments_to_process))
+        if SAM2_PARALLEL_SEGMENTS and segment_workers > 1 and len(segments_to_process) > 1:
+            print(f"[{mode.upper()}] Processing {len(segments_to_process)} segments in PARALLEL (workers={min(segment_workers, len(segments_to_process))})...")
+
+            max_workers = min(segment_workers, len(segments_to_process))
             futures = {}
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
