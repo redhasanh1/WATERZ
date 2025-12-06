@@ -991,9 +991,8 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         crop_x, crop_y, crop_w, crop_h = calculate_crop_region(global_bbox, width, height, padding_ratio=0.2, min_size=128)
         print(f"[SAM2] Global crop: {crop_x},{crop_y} {crop_w}x{crop_h}")
 
-        # Create output directory for ProPainter
+        # Define output_dir for cleanup tracking (not created - return_frames=True skips disk I/O)
         output_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_output")
-        os.makedirs(output_dir, exist_ok=True)
 
         # --- 11. Process segments with ProPainter ---
         self.update_state(state='PROCESSING', meta={'progress': 30, 'status': f'Processing {len(segments)} segments'})
@@ -1014,13 +1013,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         global_crop = (crop_x, crop_y, crop_w, crop_h)
         print(f"[SAM2] Masks cropped, frames will be loaded per-segment")
 
-        # Create output directory upfront for write-through processing
-        final_frames_dir = os.path.join(output_dir, 'final_frames')
-        os.makedirs(final_frames_dir, exist_ok=True)
-
-        # Track segment metadata (NOT frames - those go directly to disk)
+        # Track segment metadata (NOT frames - those stay in VRAM!)
         segment_results = {}  # seg_idx -> (success, crop_info, time_info)
-        processed_frames = set()  # Track which frames have been written
+        processed_frames = set()  # Track which frames have been processed
 
         # REVOLUTIONARY: Store all frames in VRAM with YUV420 compression (8:1 ratio!)
         vram_frames = {}  # {frame_idx: compressed_yuv420_dict}
@@ -1083,15 +1078,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 if not seg_frames or not seg_masks:
                     return seg_idx, None, None, (proc_start, proc_end)
 
-                # Create segment output directory
-                seg_output_dir = os.path.join(output_dir, f"segment_{seg_idx}")
-                os.makedirs(seg_output_dir, exist_ok=True)
-
-                # Run ProPainter on segment
-                faster_propainter_pipeline(
+                # Run ProPainter on segment - ZERO DISK I/O with return_frames=True!
+                output_frames = faster_propainter_pipeline(
                     video='dummy',
                     mask='dummy',
-                    output=seg_output_dir,
+                    output=output_dir,  # Not used when return_frames=True
                     resize_ratio=1.0,
                     mask_dilation=SAM2_MASK_DILATION,
                     ref_stride=15,
@@ -1100,28 +1091,17 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     raft_iter=10,
                     mode="video_inpainting",
                     save_fps=int(original_fps),
-                    save_frames=True,
+                    save_frames=False,
                     fp16=use_fp16,
                     use_cached_models=True,
                     frames_array=seg_frames,
-                    masks_array=seg_masks
+                    masks_array=seg_masks,
+                    return_frames=True  # ZERO DISK I/O!
                 )
 
-                # Load output frames from ProPainter
-                output_frames = []
-                frames_subdir = None
-                for d in os.listdir(seg_output_dir):
-                    candidate = os.path.join(seg_output_dir, d, 'frames')
-                    if os.path.isdir(candidate):
-                        frames_subdir = candidate
-                        break
-
-                if frames_subdir:
-                    frame_files = sorted([f for f in os.listdir(frames_subdir) if f.endswith('.png')])
-                    for ff in frame_files:
-                        frame = cv2.imread(os.path.join(frames_subdir, ff))
-                        if frame is not None:
-                            output_frames.append(frame)
+                if not output_frames:
+                    print(f"[ERROR] Segment {seg_idx}: ProPainter returned no frames")
+                    return seg_idx, False, None, (proc_start, proc_end)
 
                 # REVOLUTIONARY: Store in VRAM with YUV420 compression (8:1 ratio, ZERO disk I/O!)
                 # Only save CORE frames (start_f to end_f), skip padding frames
@@ -1167,10 +1147,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 all_frames_contiguous.append(np.ascontiguousarray(frame))
             all_masks_contiguous = [np.ascontiguousarray(m) for m in all_masks_cropped]
 
-            faster_propainter_pipeline(
+            # Run ProPainter - ZERO DISK I/O with return_frames=True!
+            final_cropped_frames = faster_propainter_pipeline(
                 video=video_path,
                 mask='dummy_mask',
-                output=output_dir,
+                output=output_dir,  # Not used when return_frames=True
                 resize_ratio=1.0,
                 mask_dilation=SAM2_MASK_DILATION,
                 ref_stride=15,
@@ -1179,23 +1160,16 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 raft_iter=10,
                 mode="video_inpainting",
                 save_fps=int(original_fps),
-                save_frames=True,
+                save_frames=False,
                 fp16=use_fp16,
                 use_cached_models=True,
                 frames_array=all_frames_contiguous,
-                masks_array=all_masks_contiguous
+                masks_array=all_masks_contiguous,
+                return_frames=True  # ZERO DISK I/O!
             )
 
-            # Find output frames for streaming output
-            final_cropped_frames = []
-            for root, dirs, files in os.walk(output_dir):
-                if os.path.basename(root) == 'frames':
-                    frame_files = sorted([f for f in files if f.endswith('.png')])
-                    for ff in frame_files:
-                        frame = cv2.imread(os.path.join(root, ff))
-                        if frame is not None:
-                            final_cropped_frames.append(frame)
-                    break
+            if not final_cropped_frames:
+                raise RuntimeError("ProPainter returned no frames")
 
         else:
             # Multiple segments - process each (optionally in parallel) and merge
@@ -1381,6 +1355,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         print(f"[ERROR] SAM2 task failed: {e}")
         import traceback
         traceback.print_exc()
+        # Cleanup temp files on failure too
+        try:
+            for temp_path in [output_dir, masks_dir]:
+                if isinstance(temp_path, str) and os.path.exists(temp_path):
+                    if os.path.isdir(temp_path):
+                        shutil.rmtree(temp_path)
+                        print(f"[CLEANUP] Removed {temp_path}")
+        except Exception as cleanup_err:
+            print(f"[CLEANUP] Warning: {cleanup_err}")
         # Do not call update_state with FAILURE meta (Celery will store proper exception info)
         raise
 
@@ -1736,15 +1719,11 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         use_fp16 = torch.cuda.is_available()
         faster_propainter_pipeline = get_propainter_pipeline()
         output_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_output")
-        os.makedirs(output_dir, exist_ok=True)
+        # Don't create output_dir - not needed with return_frames=True
 
-        # Create output directory upfront for write-through processing
-        final_frames_dir = os.path.join(output_dir, 'final_frames')
-        os.makedirs(final_frames_dir, exist_ok=True)
-
-        # Track segment metadata (NOT frames - those go directly to disk)
+        # Track segment metadata (NOT frames - those stay in VRAM!)
         segment_results = {}
-        processed_frames = set()  # Track which frames have been written
+        processed_frames = set()  # Track which frames have been processed
 
         # REVOLUTIONARY: Store all frames in VRAM with YUV420 compression (8:1 ratio!)
         vram_frames = {}  # {frame_idx: compressed_yuv420_dict}
@@ -1797,31 +1776,22 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             if not seg_frames or not seg_masks:
                 print(f"[SAM2] WARNING: Segment {seg_idx+1} has no frames/masks! seg_frames={len(seg_frames)}, seg_masks={len(seg_masks)}")
                 return seg_idx, None, None, (proc_start, proc_end)
-            seg_output_dir = os.path.join(output_dir, f"segment_{seg_idx}")
-            os.makedirs(seg_output_dir, exist_ok=True)
-            faster_propainter_pipeline(
-                video='dummy', mask='dummy', output=seg_output_dir,
+
+            # Run ProPainter - ZERO DISK I/O with return_frames=True!
+            output_frames = faster_propainter_pipeline(
+                video='dummy', mask='dummy', output=output_dir,
                 resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
                 ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
-                raft_iter=10, mode="video_inpainting", save_fps=int(original_fps), save_frames=True,
-                fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks
+                raft_iter=10, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
+                fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
+                return_frames=True  # ZERO DISK I/O!
             )
-            frames_subdir = None
-            for d in os.listdir(seg_output_dir):
-                candidate = os.path.join(seg_output_dir, d, 'frames')
-                if os.path.isdir(candidate):
-                    frames_subdir = candidate
-                    break
-            output_frames = []
-            if frames_subdir:
-                frame_files = sorted([f for f in os.listdir(frames_subdir) if f.endswith('.png')])
-                for ff in frame_files:
-                    fr = cv2.imread(os.path.join(frames_subdir, ff))
-                    if fr is not None:
-                        output_frames.append(fr)
 
             expected_count = proc_end - proc_start
-            if len(output_frames) != expected_count:
+            if not output_frames:
+                print(f"[SAM2] WARNING: Segment {seg_idx+1} returned no frames!")
+                return seg_idx, None, None, (proc_start, proc_end)
+            elif len(output_frames) != expected_count:
                 print(f"[SAM2] WARNING: Segment {seg_idx+1} frame count mismatch! Expected {expected_count}, got {len(output_frames)}")
             else:
                 print(f"[SAM2] Segment {seg_idx+1}: ProPainter returned {len(output_frames)} frames (OK)")
@@ -1989,6 +1959,14 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         except Exception as e:
             print(f"[B2] Upload failed: {e}")
 
+        # Cleanup temp files on success
+        print(f"[SAM2] Cleaning up...")
+        import shutil as _shutil
+        for temp_path in [output_dir, masks_dir]:
+            if isinstance(temp_path, str) and os.path.exists(temp_path):
+                if os.path.isdir(temp_path):
+                    _shutil.rmtree(temp_path)
+
         return {
             'status': 'success', 'video_id': video_id,
             'video_path': video_path, 'output_path': cdn_url or output_path,
@@ -2000,4 +1978,14 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         print(f"[ERROR] Continue-after-masks task failed: {e}")
         import traceback
         traceback.print_exc()
+        # Cleanup temp files on failure
+        try:
+            import shutil as _shutil
+            for temp_path in [output_dir, masks_dir]:
+                if isinstance(temp_path, str) and os.path.exists(temp_path):
+                    if os.path.isdir(temp_path):
+                        _shutil.rmtree(temp_path)
+                        print(f"[CLEANUP] Removed {temp_path}")
+        except Exception as cleanup_err:
+            print(f"[CLEANUP] Warning: {cleanup_err}")
         raise

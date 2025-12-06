@@ -475,6 +475,7 @@ def pipeline(
     frames_array=None,
     masks_array=None,
     use_cached_models=True,  # Enable global model cache for true parallel speedup
+    return_frames=False,  # Return frames directly instead of writing to disk
 ):
 
     # Use fp16 precision during inference to reduce running memory cost
@@ -1702,6 +1703,18 @@ def pipeline(
     print(f"  TOTAL:                    {propainter_total_time:6.2f}s (100.0%)")
     print(f"  Per-frame avg:            {propainter_total_time/video_length*1000:6.1f}ms")
     print(f"{'='*70}\n")
+
+    # Return frames directly (ZERO disk I/O!) or save to disk
+    if return_frames:
+        # Resize and convert to BGR for OpenCV compatibility
+        result_frames = []
+        for f in comp_frames:
+            f_resized = cv2.resize(f, out_size, interpolation=cv2.INTER_CUBIC)
+            # comp_frames are RGB, convert to BGR for OpenCV
+            f_bgr = cv2.cvtColor(f_resized, cv2.COLOR_RGB2BGR)
+            result_frames.append(f_bgr)
+        torch.cuda.empty_cache()
+        return result_frames
 
     # save each frame
     if save_frames:
