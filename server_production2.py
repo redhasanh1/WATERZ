@@ -1204,67 +1204,119 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     result = process_segment(seg_idx, start_f, end_f, seg_bbox)
                     segment_results[seg_idx] = result
 
-            # --- 12. REVOLUTIONARY: Write all frames from VRAM to disk in one batch! ---
+            # --- 12. REVOLUTIONARY: Direct VRAM → FFmpeg pipe → NVENC (ZERO disk I/O!) ---
             print(f"[SAM2] Segment processing complete - {len(vram_frames)} frames stored in VRAM")
-            print(f"[SAM2] Writing all frames from VRAM to disk (ZERO intermediate I/O!)...")
-            self.update_state(state='PROCESSING', meta={'progress': 75, 'status': 'Writing frames from VRAM'})
+            print(f"[SAM2] Encoding directly from VRAM via FFmpeg pipe (ZERO disk I/O!)...")
+            self.update_state(state='PROCESSING', meta={'progress': 75, 'status': 'Encoding from VRAM (NVENC)'})
             import time as _time
-            _write_start = _time.time()
-            for frame_idx in sorted(vram_frames.keys()):
-                frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
-                cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), frame_bgr)
-            _write_time = _time.time() - _write_start
-            print(f"[SAM2] VRAM batch write complete: {len(vram_frames)} frames in {_write_time:.2f}s")
+            _encode_start = _time.time()
+
+            output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
+
+            # Get frame dimensions from first available frame
+            first_frame = VRAMCompressor.decompress_frame(
+                vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[0]
+            )
+            frame_height, frame_width = first_frame.shape[:2]
+
+            # FFmpeg command: pipe rawvideo → NVENC → MP4 with audio from original
+            ffmpeg_cmd = [
+                str(FFMPEG_EXE), '-y',
+                '-f', 'rawvideo',
+                '-vcodec', 'rawvideo',
+                '-pix_fmt', 'bgr24',
+                '-s', f'{frame_width}x{frame_height}',
+                '-r', str(int(original_fps)),
+                '-i', 'pipe:0',  # Video from stdin
+                '-i', video_path,  # Audio from original
+                '-map', '0:v:0',
+                '-map', '1:a:0?',
+                '-c:v', 'h264_nvenc',  # GPU encoding!
+                '-preset', 'p1',  # Fastest NVENC preset
+                '-b:v', '8M',
+                '-bufsize', '16M',
+                '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                output_path
+            ]
+
+            # Start FFmpeg process
+            # NOTE: Use DEVNULL for stdout/stderr to prevent pipe deadlock on long videos!
+            proc = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+            # Stream ALL frames directly to FFmpeg (processed + unprocessed)
+            for frame_idx in range(total_frames):
+                # Progress logging every 100 frames
+                if frame_idx % 100 == 0:
+                    print(f"[SAM2] Encoding frame {frame_idx}/{total_frames}...")
+
+                if frame_idx in vram_frames:
+                    # Processed frame from segment
+                    frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
+                elif frame_idx in preloaded_frames:
+                    # Unprocessed frame from preloaded
+                    frame_bgr = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
+                    # Single segment case: overlay cropped result if available
+                    if len(segments) <= 1 and frame_idx < len(final_cropped_frames):
+                        frame_bgr[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[frame_idx]
+                else:
+                    print(f"[WARNING] Frame {frame_idx} not found in VRAM, skipping")
+                    continue
+
+                proc.stdin.write(frame_bgr.tobytes())
+
+            proc.stdin.close()
+            proc.wait(timeout=300)
+
+            if proc.returncode != 0:
+                print(f"[ERROR] FFmpeg NVENC encoding failed (code {proc.returncode})")
+                raise RuntimeError(f"Video encoding failed (code {proc.returncode})")
+
+            _encode_time = _time.time() - _encode_start
+            print(f"[SAM2] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s ({total_frames/_encode_time:.1f} fps)")
 
             # Free VRAM
             import torch as _torch
             del vram_frames
             _torch.cuda.empty_cache()
 
-        # --- 13. Fill unprocessed frames (those not covered by any segment) ---
-        unprocessed_count = total_frames - len(processed_frames)
-        if unprocessed_count > 0:
-            print(f"[SAM2] Filling {unprocessed_count} unprocessed frames from pre-loaded VRAM...")
-            for frame_idx in range(total_frames):
-                # Only write frames that weren't processed by segments
-                if frame_idx not in processed_frames:
-                    # GET from shared preloaded frames (ZERO disk I/O!)
-                    orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                    # Single segment case: use final_cropped_frames if available
-                    if len(segments) <= 1 and frame_idx < len(final_cropped_frames):
-                        orig_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[frame_idx]
-                    cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), orig_frame)
-        print(f"[SAM2] Total {total_frames} frames ready for encoding")
-
-        # --- 15. Encode final video from frames with audio ---
-        print(f"[SAM2] Encoding final video with audio...")
-        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Encoding final video'})
-
-        output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
-
-        ffmpeg_cmd = [
-            str(FFMPEG_EXE),
-            '-y',
-            '-framerate', str(int(original_fps)),
-            '-i', os.path.join(final_frames_dir, '%05d.png'),
-            '-i', video_path,
-            '-map', '0:v:0',
-            '-map', '1:a:0?',
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-crf', '18',
-            '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac',
-            '-b:a', '192k',
-            output_path
-        ]
-
-        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            print(f"[ERROR] FFmpeg encoding failed: {result.stderr}")
-            raise RuntimeError(f"Video encoding failed: {result.stderr}")
-
         print(f"[SAM2] Final video: {output_path}")
+
+        # --- 15b. Upload to B2 + Cloudflare CDN (inlined - no heavy imports!) ---
+        cdn_url = None
+        try:
+            from b2sdk.v2 import B2Api, InMemoryAccountInfo
+            import time as _upload_time
+
+            B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
+            B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+            B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+            B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+
+            if os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
+                timestamp = int(_upload_time.time())
+                remote_path = f"results/{timestamp}_{os.path.basename(output_path)}"
+
+                print(f"[B2] Uploading to {B2_BUCKET}/{remote_path}...")
+                _b2_start = _upload_time.time()
+                info = InMemoryAccountInfo()
+                b2_api = B2Api(info)
+                b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+                bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+                bucket.upload_local_file(local_file=output_path, file_name=remote_path)
+                cdn_url = f"{B2_CDN_URL}/{remote_path}"
+                _b2_time = _upload_time.time() - _b2_start
+                print(f"[B2] Upload complete in {_b2_time:.1f}s - CDN URL: {cdn_url}")
+        except ImportError:
+            print(f"[B2] b2sdk not installed - skipping upload")
+        except Exception as e:
+            print(f"[B2] Upload failed: {e}")
 
         # --- 16. Cleanup temp files ---
         print(f"[SAM2] Cleaning up...")
@@ -1283,7 +1335,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             'status': 'success',
             'video_id': video_id,
             'video_path': video_path,
-            'output_path': output_path,
+            'output_path': cdn_url or output_path,
             'total_frames': total_frames,
             'masks_generated': len(all_masks),
             'masks_expanded': len(all_masks),
@@ -1799,49 +1851,117 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
                 segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
 
-        # --- REVOLUTIONARY: Write all frames from VRAM to disk in one batch! ---
+        # --- REVOLUTIONARY: Direct VRAM → FFmpeg pipe → NVENC (ZERO disk I/O!) ---
         print(f"[SAM2] Segment processing complete - {len(vram_frames)} frames stored in VRAM")
-        print(f"[SAM2] Writing all frames from VRAM to disk (ZERO intermediate I/O!)...")
+        print(f"[SAM2] Encoding directly from VRAM via FFmpeg pipe (ZERO disk I/O!)...")
         import time as _time
-        _write_start = _time.time()
-        for frame_idx in sorted(vram_frames.keys()):
-            frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
-            cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), frame_bgr)
-        _write_time = _time.time() - _write_start
-        print(f"[SAM2] VRAM batch write complete: {len(vram_frames)} frames in {_write_time:.2f}s")
+        _encode_start = _time.time()
+
+        output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
+
+        # Get frame dimensions from first available frame
+        first_frame = VRAMCompressor.decompress_frame(
+            vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[0]
+        )
+        frame_height, frame_width = first_frame.shape[:2]
+
+        # FFmpeg command: pipe rawvideo → NVENC → MP4 with audio from original
+        ffmpeg_cmd = [
+            str(FFMPEG_EXE), '-y',
+            '-f', 'rawvideo',
+            '-vcodec', 'rawvideo',
+            '-pix_fmt', 'bgr24',
+            '-s', f'{frame_width}x{frame_height}',
+            '-r', str(int(original_fps)),
+            '-i', 'pipe:0',  # Video from stdin
+            '-i', video_path,  # Audio from original
+            '-map', '0:v:0',
+            '-map', '1:a:0?',
+            '-c:v', 'h264_nvenc',  # GPU encoding!
+            '-preset', 'p1',  # Fastest NVENC preset
+            '-b:v', '8M',
+            '-bufsize', '16M',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            output_path
+        ]
+
+        # Start FFmpeg process
+        # NOTE: Use DEVNULL for stdout/stderr to prevent pipe deadlock on long videos!
+        proc = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        # Stream ALL frames directly to FFmpeg (processed + unprocessed)
+        for frame_idx in range(total_frames):
+            # Progress logging every 100 frames
+            if frame_idx % 100 == 0:
+                print(f"[SAM2] Encoding frame {frame_idx}/{total_frames}...")
+
+            if frame_idx in vram_frames:
+                # Processed frame from segment
+                frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
+            elif frame_idx in preloaded_frames:
+                # Unprocessed frame from preloaded
+                frame_bgr = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
+            else:
+                print(f"[WARNING] Frame {frame_idx} not found in VRAM, skipping")
+                continue
+
+            proc.stdin.write(frame_bgr.tobytes())
+
+        proc.stdin.close()
+        proc.wait(timeout=300)
+
+        if proc.returncode != 0:
+            print(f"[ERROR] FFmpeg NVENC encoding failed (code {proc.returncode})")
+            raise RuntimeError(f"Video encoding failed (code {proc.returncode})")
+
+        _encode_time = _time.time() - _encode_start
+        print(f"[SAM2] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s ({total_frames/_encode_time:.1f} fps)")
 
         # Free VRAM
         import torch as _torch
         del vram_frames
         _torch.cuda.empty_cache()
 
-        # --- Fill unprocessed frames (those not covered by any segment) ---
-        unprocessed_count = total_frames - len(processed_frames)
-        output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
-        if unprocessed_count > 0:
-            print(f"[SAM2] Filling {unprocessed_count} unprocessed frames from pre-loaded VRAM...")
-            for frame_idx in range(total_frames):
-                # Only write frames that weren't processed by segments
-                if frame_idx not in processed_frames:
-                    # GET from shared preloaded frames (ZERO disk I/O!)
-                    orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                    cv2.imwrite(os.path.join(final_frames_dir, f'{frame_idx:05d}.png'), orig_frame)
-        print(f"[SAM2] Total {total_frames} frames ready for encoding")
-        ffmpeg_cmd = [
-            str(FFMPEG_EXE), '-y', '-framerate', str(int(original_fps)),
-            '-i', os.path.join(final_frames_dir, '%05d.png'),
-            '-i', video_path,
-            '-map', '0:v:0', '-map', '1:a:0?',
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac', '-b:a', '192k', output_path
-        ]
-        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            raise RuntimeError(f"Video encoding failed: {result.stderr}")
+        # Upload to B2 + Cloudflare CDN (inlined - no heavy imports!)
+        cdn_url = None
+        try:
+            from b2sdk.v2 import B2Api, InMemoryAccountInfo
+            import time as _upload_time
+
+            B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
+            B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+            B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+            B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+
+            if os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
+                timestamp = int(_upload_time.time())
+                remote_path = f"results/{timestamp}_{os.path.basename(output_path)}"
+
+                print(f"[B2] Uploading to {B2_BUCKET}/{remote_path}...")
+                _b2_start = _upload_time.time()
+                info = InMemoryAccountInfo()
+                b2_api = B2Api(info)
+                b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+                bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+                bucket.upload_local_file(local_file=output_path, file_name=remote_path)
+                cdn_url = f"{B2_CDN_URL}/{remote_path}"
+                _b2_time = _upload_time.time() - _b2_start
+                print(f"[B2] Upload complete in {_b2_time:.1f}s - CDN URL: {cdn_url}")
+        except ImportError:
+            print(f"[B2] b2sdk not installed - skipping upload")
+        except Exception as e:
+            print(f"[B2] Upload failed: {e}")
 
         return {
             'status': 'success', 'video_id': video_id,
-            'video_path': video_path, 'output_path': output_path,
+            'video_path': video_path, 'output_path': cdn_url or output_path,
             'total_frames': total_frames, 'masks_generated': len(all_masks), 'masks_expanded': len(all_masks),
             'segments_processed': len(segments or []), 'width': width, 'height': height,
             'fps': original_fps, 'pipeline': 'full_fps_segments', 'message': f'SAM2 pipeline complete! Processed {len(segments or [])} segment(s)'
