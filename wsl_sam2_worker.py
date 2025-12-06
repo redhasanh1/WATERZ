@@ -236,7 +236,7 @@ def to_wsl_path(p: str) -> str:
 
 
 @celery.task(name='yolo.generate_masks', bind=True)
-def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, padding=30):
+def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, padding=30, api_base=None):
     """
     Generate masks using YOLO detection (automatic, no user clicks).
 
@@ -247,16 +247,33 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
         masks_dir: Output directory for masks
         confidence_threshold: YOLO confidence threshold
         padding: Padding around detections
+        api_base: Base URL for downloading video if path is remote
 
     Returns:
         dict with masks_url, total_frames, etc.
     """
     import cv2
     import numpy as np
+    import requests
 
     video_path_wsl = to_wsl_path(video_path)
     masks_dir_wsl = to_wsl_path(masks_dir)
     os.makedirs(masks_dir_wsl, exist_ok=True)
+
+    # If video is a Railway path (/data/...), download it from api_base
+    is_railway_path = video_path.startswith('/data/') or video_path_wsl.startswith('/data/')
+    if (is_railway_path or not os.path.exists(video_path_wsl)) and api_base:
+        filename = os.path.basename(video_path)
+        download_url = f"{api_base}/uploads/{filename}"
+        local_video = f"/tmp/{filename}"
+        print(f"[YOLO] Downloading video from {download_url}...")
+        self.update_state(state='PROCESSING', meta={'status': 'Downloading video', 'progress': 2})
+        r = requests.get(download_url, timeout=300)
+        r.raise_for_status()
+        with open(local_video, 'wb') as f:
+            f.write(r.content)
+        video_path_wsl = local_video
+        print(f"[YOLO] Downloaded {len(r.content) / 1024 / 1024:.1f} MB to {local_video}")
 
     self.update_state(state='PROCESSING', meta={'status': 'Loading YOLO model', 'progress': 5})
 
