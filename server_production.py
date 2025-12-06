@@ -6138,18 +6138,32 @@ def sam2_process_video():
 
         api_base = _current_public_base()
 
-        # Send task to SAM2 worker queue with points data
-        result = celery.send_task(
-            'watermark.process_sam2_interactive',
-            args=[video_path, task_id, points, video_width, video_height, frame_index],
-            kwargs={'api_base': api_base},  # Pass Railway URL for video download
-            task_id=job_id,
-            queue='sam2' # Explicitly route to the SAM2 worker queue
-        )
+        # Create masks directory
+        masks_dir = os.path.join(TEMP_DIR, f"{task_id}_sam2_masks")
+        os.makedirs(masks_dir, exist_ok=True)
 
-        print(f"[SAM2] Started processing job {job_id} for video {task_id}")
-        print(f"[SAM2] Points: {len(points)}, Video: {video_width}x{video_height}")
+        # Convert points from frontend format to WSL worker format
+        # Frontend sends: [{x, y, label, ...}, ...]
+        # WSL worker expects: points=[(x,y), ...], labels=[1, 1, ...]
+        wsl_points = [(int(p.get('x', 0)), int(p.get('y', 0))) for p in points]
+        wsl_labels = [int(p.get('label', 1)) for p in points]
 
+        # Chain: WSL SAM2 mask generation → Windows ProPainter inpainting
+        from celery import signature, chain
+
+        s1 = signature('sam2.generate_masks_fullfps',
+                       args=[video_path, masks_dir],
+                       kwargs={'prompt_mode': 'point', 'points': wsl_points, 'labels': wsl_labels, 'frame_idx': frame_index},
+                       queue='wsl_sam2')
+        s2 = signature('watermark._continue_after_masks',
+                       args=[video_path, task_id, points, video_width, video_height, frame_index, api_base],
+                       queue='propainter')
+
+        result = chain(s1, s2).apply_async(task_id=job_id)
+
+        print(f"[SAM2] Started WSL chain job {job_id} for video {task_id}")
+        print(f"[SAM2] Points: {len(wsl_points)}, Video: {video_width}x{video_height}")
+        print(f"[SAM2] Queue flow: wsl_sam2 -> propainter")
         return jsonify({
             'status': 'success',
             'job_id': job_id,
