@@ -79,9 +79,46 @@ def calculate_crop_region(
     crop_w = min(target_width + 2 * pad_x, frame_width - crop_x)
     crop_h = min(target_height + 2 * pad_y, frame_height - crop_y)
 
+    # Check if crop touches frame edges BEFORE rounding
+    touches_right = (crop_x + crop_w >= frame_width)
+    touches_bottom = (crop_y + crop_h >= frame_height)
+
     # Ensure dimensions are divisible by 16 for ProPainter
-    crop_w = (crop_w // 16) * 16
-    crop_h = (crop_h // 16) * 16
+    # But extend to edge if crop was meant to reach edge (no gap!)
+    if touches_right:
+        # Must reach right edge AND be divisible by 16
+        # Strategy: extend crop_w to next multiple of 16 that reaches edge, shift x left
+        crop_w = frame_width - crop_x  # Extend to edge first
+        remainder = crop_w % 16
+        if remainder != 0:
+            # Need to add (16 - remainder) pixels to make divisible
+            extra_needed = 16 - remainder
+            crop_x -= extra_needed  # Shift left
+            crop_w += extra_needed
+            if crop_x < 0:
+                crop_x = 0
+                crop_w = frame_width  # Full width if we can't shift enough
+                # Re-round to divisible by 16 if full width isn't
+                if crop_w % 16 != 0:
+                    crop_w = (crop_w // 16) * 16
+    else:
+        crop_w = (crop_w // 16) * 16
+
+    if touches_bottom:
+        # Must reach bottom edge AND be divisible by 16
+        crop_h = frame_height - crop_y  # Extend to edge first
+        remainder = crop_h % 16
+        if remainder != 0:
+            extra_needed = 16 - remainder
+            crop_y -= extra_needed  # Shift up
+            crop_h += extra_needed
+            if crop_y < 0:
+                crop_y = 0
+                crop_h = frame_height  # Full height if we can't shift enough
+                if crop_h % 16 != 0:
+                    crop_h = (crop_h // 16) * 16
+    else:
+        crop_h = (crop_h // 16) * 16
 
     # Adjust if we went out of bounds after alignment
     if crop_x + crop_w > frame_width:
