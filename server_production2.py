@@ -1549,6 +1549,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         if not os.path.isdir(masks_dir):
             raise RuntimeError(f"Masks directory missing: {masks_dir}")
 
+
+        # If video is a Railway path (/data/...), download it from api_base
+        if video_path.startswith('/data/') and api_base:
+            filename = os.path.basename(video_path)
+            download_url = f"{api_base}/uploads/{filename}"
+            local_video = os.path.join(TEMP_DIR, filename)
+            print(f"[RECEIVER] Downloading video from {download_url}...")
+            self.update_state(state='PROCESSING', meta={'progress': 8, 'status': 'Downloading video'})
+            r = requests.get(download_url, timeout=300)
+            r.raise_for_status()
+            with open(local_video, 'wb') as f:
+                f.write(r.content)
+            video_path = local_video
+            print(f"[RECEIVER] Downloaded {len(r.content) / 1024 / 1024:.1f} MB to {local_video}")
+
         # Video metadata
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
