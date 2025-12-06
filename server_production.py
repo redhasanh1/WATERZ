@@ -6151,7 +6151,7 @@ def sam2_process_video():
 
         s1 = signature('sam2.generate_masks_fullfps',
                        args=[video_path, masks_dir],
-                       kwargs={'prompt_mode': 'point', 'points': wsl_points, 'labels': wsl_labels, 'frame_idx': frame_index},
+                       kwargs={'prompt_mode': 'point', 'points': wsl_points, 'labels': wsl_labels, 'frame_idx': frame_index, 'api_base': api_base},
                        queue='wsl_sam2')
         s2 = signature('watermark._continue_after_masks',
                        args=[video_path, task_id, points, video_width, video_height, frame_index, api_base],

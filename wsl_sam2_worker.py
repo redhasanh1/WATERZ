@@ -34,18 +34,19 @@ sys.path.insert(0, BASE_DIR)
 
 
 @celery.task(name='sam2.generate_masks_fullfps', bind=True)
-def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, bbox=None, frame_idx=0):
+def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, bbox=None, frame_idx=0, api_base=None):
     """
     Generate SAM2 masks at full FPS inside WSL2.
 
     Args:
-        video_path (str): Windows or WSL path to video
+        video_path (str): Windows or WSL path to video (or remote path like /data/uploads/...)
         masks_dir (str): Windows or WSL path for output masks
         prompt_mode (str): 'point' or 'bbox'
         points (list): List of (x, y) tuples if prompt_mode is 'point' (supports multiple clicks!)
         labels (list): List of labels (1=foreground, 0=background) for each point
         bbox (list): [x1, y1, x2, y2] if prompt_mode is 'bbox'
         frame_idx (int): starting frame index
+        api_base (str): Base URL for downloading video if path is remote
     Returns:
         dict: {status, masks_dir, masks_saved, total_frames}
     """
@@ -53,6 +54,7 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     import cv2
     import numpy as np
     from pathlib import Path
+    import requests
 
     # Import helper module from repo (runs under WSL)
     import sam2_track_wsl2 as sam2w
@@ -75,6 +77,20 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     video_path_wsl = to_wsl_path(video_path)
     masks_dir_wsl = to_wsl_path(masks_dir)
     temp_frames_dir = to_wsl_path('/tmp/sam2_frames')
+
+    # If video doesn't exist locally, download it from api_base
+    if not os.path.exists(video_path_wsl) and api_base:
+        filename = os.path.basename(video_path)
+        download_url = f"{api_base}/uploads/{filename}"
+        local_video = f"/tmp/{filename}"
+        print(f"[WSL] Downloading video from {download_url}...")
+        self.update_state(state='PROCESSING', meta={'status': 'Downloading video', 'progress': 2})
+        r = requests.get(download_url, timeout=300)
+        r.raise_for_status()
+        with open(local_video, 'wb') as f:
+            f.write(r.content)
+        video_path_wsl = local_video
+        print(f"[WSL] Downloaded {len(r.content) / 1024 / 1024:.1f} MB to {local_video}")
 
     os.makedirs(masks_dir_wsl, exist_ok=True)
 
