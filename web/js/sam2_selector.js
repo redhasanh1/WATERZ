@@ -21,6 +21,7 @@ class SAM2Selector {
         // Multi-object selection state
         this.selections = []; // Array of {id, points, mask}
         this.currentSelectionId = 0;
+        this.currentSelection = null; // Active selection being built with multiple clicks
         this.isLoading = false;
 
         // All objects use green color
@@ -186,27 +187,39 @@ class SAM2Selector {
     }
 
     /**
-     * Add point and create new selection
+     * Add point to current selection (accumulates multiple clicks)
      */
     async addPoint(x, y, label) {
-        // Create new selection for this click
-        const selectionId = this.currentSelectionId++;
-        const points = [{x, y, label}];
+        // Create new selection if none exists, or add to existing
+        if (!this.currentSelection) {
+            this.currentSelection = {
+                id: this.currentSelectionId++,
+                points: [],
+                mask: null
+            };
+        }
 
-        console.log(`[SAM2Selector] Creating selection #${selectionId} at (${x}, ${y})`);
+        // Add new point to current selection
+        this.currentSelection.points.push({x, y, label});
 
-        // Request mask from server for this single point
-        const mask = await this.requestMask(points);
+        console.log(`[SAM2Selector] Added point #${this.currentSelection.points.length} at (${x}, ${y}) to selection #${this.currentSelection.id}`);
+
+        // Request mask from server with ALL accumulated points
+        const mask = await this.requestMask(this.currentSelection.points);
 
         if (mask) {
-            // Add to selections array
-            this.selections.push({
-                id: selectionId,
-                points: points,
-                mask: mask
-            });
+            // Update current selection's mask
+            this.currentSelection.mask = mask;
 
-            console.log(`[SAM2Selector] Added selection #${selectionId}, total: ${this.selections.length}`);
+            // Update selections array (replace if exists, add if new)
+            const existingIndex = this.selections.findIndex(s => s.id === this.currentSelection.id);
+            if (existingIndex >= 0) {
+                this.selections[existingIndex] = {...this.currentSelection};
+            } else {
+                this.selections.push({...this.currentSelection});
+            }
+
+            console.log(`[SAM2Selector] Updated selection #${this.currentSelection.id} with ${this.currentSelection.points.length} points`);
 
             // Callback for selection changes
             if (this.options.onPointsChange) {
@@ -430,6 +443,7 @@ class SAM2Selector {
      */
     reset() {
         this.selections = [];
+        this.currentSelection = null; // Clear current selection too
         this.currentSelectionId = 0;
         this.draw();
 
