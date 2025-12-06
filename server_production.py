@@ -5970,6 +5970,29 @@ def get_stats():
     })
 
 
+
+@app.route('/api/sam2/status/<task_id>', methods=['GET', 'OPTIONS'])
+def sam2_status(task_id):
+    """Check SAM2 job status - polls Celery task result."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    try:
+        result = celery.AsyncResult(task_id)
+        if result.state == 'PENDING':
+            return jsonify({'status': 'processing', 'progress': 0, 'message': 'Waiting in queue...'})
+        elif result.state == 'PROCESSING':
+            info = result.info or {}
+            return jsonify({'status': 'processing', 'progress': info.get('progress', 50), 'message': info.get('status', 'Processing...')})
+        elif result.state == 'SUCCESS':
+            data = result.result or {}
+            return jsonify({'status': 'completed', 'result_url': data.get('result_url')})
+        elif result.state == 'FAILURE':
+            return jsonify({'status': 'failed', 'error': str(result.info)})
+        else:
+            return jsonify({'status': 'processing', 'progress': 25, 'message': f'{result.state}'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 @app.route('/api/sam2/result/<request_id>', methods=['GET'])
 def sam2_get_result(request_id):
     """Poll for the result of a SAM2 selection task."""
