@@ -202,3 +202,148 @@ def upload_masks_to_b2(masks_dir, video_path):
     print(f"[B2] Local masks cleaned up")
 
     return masks_url
+
+
+def to_wsl_path(p: str) -> str:
+    """Convert Windows path to WSL path."""
+    if not isinstance(p, str):
+        return p
+    if p.startswith('/mnt/') or p.startswith('/'):
+        return p
+    if len(p) >= 2 and p[1] == ':' and p[0].isalpha():
+        drive = p[0].lower()
+        rest = p[2:].replace('\\', '/')
+        rest = rest.lstrip('/')
+        return f"/mnt/{drive}/{rest}"
+    return p.replace('\\', '/')
+
+
+@celery.task(name='yolo.generate_masks', bind=True)
+def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, padding=30):
+    """
+    Generate masks using YOLO detection (automatic, no user clicks).
+
+    Uses TensorRT engine if available (20-30x faster), falls back to PyTorch.
+
+    Args:
+        video_path: Path to video file
+        masks_dir: Output directory for masks
+        confidence_threshold: YOLO confidence threshold
+        padding: Padding around detections
+
+    Returns:
+        dict with masks_url, total_frames, etc.
+    """
+    import cv2
+    import numpy as np
+
+    video_path_wsl = to_wsl_path(video_path)
+    masks_dir_wsl = to_wsl_path(masks_dir)
+    os.makedirs(masks_dir_wsl, exist_ok=True)
+
+    self.update_state(state='PROCESSING', meta={'status': 'Loading YOLO model', 'progress': 5})
+
+    # Try TensorRT engine first (20-30x faster), fall back to PyTorch
+    from ultralytics import YOLO
+
+    trt_engine_path = '/mnt/d/watermarkz/runs/detect/new_sora_watermark/weights/best_fp16_batch_wsl.engine'
+    pt_model_path = '/mnt/d/watermarkz/runs/detect/new_sora_watermark/weights/best.pt'
+
+    using_tensorrt = False
+    if os.path.exists(trt_engine_path):
+        try:
+            model = YOLO(trt_engine_path, task='detect')
+            print(f"[YOLO] Loaded TensorRT engine: {trt_engine_path}")
+            print(f"[YOLO] Expected: ~1-2ms/frame (20-30x faster than PyTorch)")
+            using_tensorrt = True
+        except Exception as e:
+            print(f"[YOLO] TensorRT load failed: {e}, falling back to PyTorch")
+
+    if not using_tensorrt:
+        if not os.path.exists(pt_model_path):
+            raise RuntimeError(f"YOLO model not found: {pt_model_path}")
+        model = YOLO(pt_model_path)
+        print(f"[YOLO] Loaded PyTorch model: {pt_model_path}")
+        print(f"[YOLO] TIP: Run build_yolo_trt_wsl.sh to build TensorRT engine for 20-30x speedup")
+
+    # Open video
+    self.update_state(state='PROCESSING', meta={'status': 'Opening video', 'progress': 10})
+    cap = cv2.VideoCapture(video_path_wsl)
+    if not cap.isOpened():
+        raise RuntimeError(f"Failed to open video: {video_path_wsl}")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    print(f"[YOLO] Video: {total_frames} frames @ {fps:.1f} fps, {width}x{height}")
+
+    # Process frames
+    masks_saved = 0
+    frame_idx = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Update progress every 10 frames
+        if frame_idx % 10 == 0:
+            progress = 10 + int(80 * frame_idx / total_frames)
+            self.update_state(state='PROCESSING', meta={
+                'status': f'Detecting frame {frame_idx}/{total_frames}',
+                'progress': progress
+            })
+
+        # Run YOLO detection
+        results = model(frame, conf=confidence_threshold, device='cuda', verbose=False)
+
+        # Create mask from detections
+        mask = np.zeros((height, width), dtype=np.uint8)
+
+        for result in results:
+            for box in result.boxes:
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+
+                # Add padding
+                x1 = max(0, int(x1) - padding)
+                y1 = max(0, int(y1) - padding)
+                x2 = min(width, int(x2) + padding)
+                y2 = min(height, int(y2) + padding)
+
+                # Fill mask
+                mask[y1:y2, x1:x2] = 255
+
+        # Save mask
+        mask_path = os.path.join(masks_dir_wsl, f"{frame_idx:05d}.png")
+        cv2.imwrite(mask_path, mask)
+        masks_saved += 1
+        frame_idx += 1
+
+    cap.release()
+    print(f"[YOLO] Generated {masks_saved} masks")
+
+    # Cleanup VRAM
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+    # Upload to B2
+    self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
+    masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
+
+    return {
+        'status': 'success',
+        'masks_url': masks_url,
+        'masks_dir': None,
+        'masks_saved': int(masks_saved),
+        'total_frames': int(total_frames),
+        'fps': float(fps),
+        'mode': 'yolo',  # Tell receiver this was YOLO mode (use 4 workers)
+    }

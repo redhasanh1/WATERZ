@@ -1405,6 +1405,62 @@ def process_sam2():
     })
 
 
+@app.route('/api/process_yolo', methods=['POST'])
+def process_yolo():
+    """
+    API endpoint to process video with YOLO detection (automatic, no user clicks).
+
+    POST data:
+    {
+        "video_path": "D:\\watermarkz\\uploads\\video.mp4",
+        "video_id": "abc123"  # Optional
+    }
+
+    This chains:
+    1. yolo.generate_masks (WSL) - YOLO detection → masks → B2 upload
+    2. watermark._continue_after_masks (Windows) - ProPainter inpainting
+
+    YOLO mode uses 4 parallel segment workers (vs 2 for SAM2).
+    """
+    from celery import signature, chain
+    import uuid
+
+    data = request.get_json()
+    video_path = data.get('video_path')
+    video_id = data.get('video_id') or str(uuid.uuid4())[:8]
+
+    if not video_path:
+        return jsonify({'error': 'Missing video_path'}), 400
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': f'Video not found: {video_path}'}), 404
+
+    # Create masks directory
+    masks_dir = os.path.join(TEMP_DIR, f"{video_id}_yolo_masks")
+    os.makedirs(masks_dir, exist_ok=True)
+
+    # Get API base URL for result upload
+    api_base = os.getenv('TUNNEL_URL', os.getenv('API_BASE_URL', 'http://localhost:5001'))
+
+    # Chain: WSL YOLO detection → Windows ProPainter
+    s1 = signature('yolo.generate_masks', args=[video_path, masks_dir], queue='wsl_yolo')
+    s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, None, None, None, 0, api_base], queue='propainter')
+
+    result = chain(s1, s2).apply_async()
+
+    print(f"[YOLO] Queued task chain: {result.id}")
+    print(f"  - Video: {video_path}")
+    print(f"  - Masks dir: {masks_dir}")
+    print(f"  - Queue flow: wsl_yolo → propainter")
+
+    return jsonify({
+        'task_id': result.id,
+        'status': 'queued',
+        'message': 'YOLO processing task queued (4 segment workers)',
+        'mode': 'yolo'
+    })
+
+
 @app.route('/api/task/<task_id>', methods=['GET'])
 def get_task_status(task_id):
     """Get status of a Celery task"""
@@ -1451,6 +1507,17 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         if not sam2_result or not isinstance(sam2_result, dict):
             raise RuntimeError(f"Invalid sam2_result: {sam2_result}")
+
+        # Determine mode and adjust SEGMENT_WORKERS
+        # YOLO mode: 4 workers (faster, simpler masks)
+        # SAM2 mode: 2 workers (more complex tracking)
+        mode = sam2_result.get('mode', 'sam2')
+        if mode == 'yolo':
+            os.environ['SEGMENT_WORKERS'] = '4'
+            print(f"[MODE] YOLO mode detected - using 4 segment workers")
+        else:
+            os.environ['SEGMENT_WORKERS'] = '2'
+            print(f"[MODE] SAM2 mode detected - using 2 segment workers")
 
         # Check for B2 URL (new flow) or local path (legacy)
         masks_url = sam2_result.get('masks_url')

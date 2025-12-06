@@ -47,7 +47,14 @@
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production2.py D:/watermarkz/wsl_sam2_worker.py D:/watermarkz/sam2_track_wsl2.py)",
       "Bash(git push:*)",
       "Bash(wsl -e cat:*)",
-      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production2.py D:/watermarkz/wsl_sam2_worker.py)"
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production2.py D:/watermarkz/wsl_sam2_worker.py)",
+      "Bash(ls:*)",
+      "Bash(git -C \"D:\\watermarkz\" show 63dff3ea --stat)",
+      "Bash(git -C \"D:\\watermarkz\" diff 63dff3ea~1 63dff3ea)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/wsl_sam2_worker.py D:/watermarkz/build_yolo_trt_engine_wsl.py)",
+      "Bash(wsl -e sed:*)",
+      "Bash(wsl bash -c \"sed -i ''s/\\r$//'' /mnt/d/watermarkz/build_yolo_trt_wsl.sh /mnt/d/watermarkz/sender.sh\")",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production.py)"
     ],
     "deny": [],
     "ask": []

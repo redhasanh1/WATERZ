@@ -5520,8 +5520,11 @@ def process_video():
             if ext in image_exts:
                 result = celery.send_task('watermark.remove_image', args=[video_path])
             else:
-                # Use distributed processing for videos (multiple workers collaborate on segments)
-                # Build a Celery canvas chain on the server side to avoid any in-task blocking
+                # Use WSL sender/receiver architecture for YOLO mode
+                # Chain: WSL YOLO detection → Windows ProPainter
+                from celery import signature, chain
+                import uuid
+
                 def _current_public_base():
                     env_url = os.getenv('TUNNEL_URL')
                     if env_url:
@@ -5536,14 +5539,24 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
+                video_id = task_id or str(uuid.uuid4())[:8]
 
-                # Call prepare_video_task which creates the chord internally
-                # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize
-                # prepare_video will use cached video if broadcast succeeded
-                result = prepare_video_task.apply_async(
-                    args=[video_path],
-                    kwargs={'api_base': base, 'temp_base': base}
-                )
+                # Create masks directory
+                masks_dir = os.path.join(TEMP_DIR, f"{video_id}_yolo_masks")
+                os.makedirs(masks_dir, exist_ok=True)
+
+                # Chain: WSL YOLO detection → Windows ProPainter inpainting
+                # yolo.generate_masks runs in WSL (queue=wsl_yolo)
+                # watermark._continue_after_masks runs in Windows (queue=propainter)
+                print(f"[YOLO] Using WSL sender/receiver chain")
+                print(f"  - Video: {video_path}")
+                print(f"  - Masks dir: {masks_dir}")
+                print(f"  - Queue flow: wsl_yolo → propainter")
+
+                s1 = signature('yolo.generate_masks', args=[video_path, masks_dir], queue='wsl_yolo')
+                s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, None, None, None, 0, base], queue='propainter')
+
+                result = chain(s1, s2).apply_async()
             print(f"[OK] Task queued with ID: {result.id}")
 
             # Deduct 1 credit from user's balance after successful task creation
