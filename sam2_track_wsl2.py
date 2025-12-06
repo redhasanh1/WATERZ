@@ -104,9 +104,13 @@ def extract_frames(video_path, output_dir):
     return frame_idx, fps
 
 
-def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, point=None, bbox=None, frame_idx_start=0):
+def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=None, labels=None, bbox=None, frame_idx_start=0):
     """
     Pure PyTorch SAM2 tracking - works for both point and bbox prompts
+
+    Args:
+        points: List of (x, y) tuples for multiple click points
+        labels: List of labels (1=foreground, 0=background) for each point
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     enable_optimizations()
@@ -139,11 +143,16 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, point=N
             obj_id=1,
             box=box_array
         )
-    elif point is not None:
-        # point format: (x, y)
-        points_array = np.array([[point[0], point[1]]], dtype=np.float32)
-        labels_array = np.array([1], dtype=np.int32)  # 1 = foreground
-        print(f"[SAM2-PyTorch] Adding point prompt: {point} on frame {frame_idx_start}")
+    elif points is not None and len(points) > 0:
+        # points format: list of (x, y) tuples
+        # labels format: list of 1 (foreground) or 0 (background)
+        points_array = np.array([[p[0], p[1]] for p in points], dtype=np.float32)
+        if labels is not None and len(labels) == len(points):
+            labels_array = np.array(labels, dtype=np.int32)
+        else:
+            # Default all to foreground (1) if labels not provided
+            labels_array = np.ones(len(points), dtype=np.int32)
+        print(f"[SAM2-PyTorch] Adding {len(points)} point prompt(s): {points} on frame {frame_idx_start}")
         _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
             inference_state=inference_state,
             frame_idx=frame_idx_start,
@@ -152,7 +161,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, point=N
             labels=labels_array
         )
     else:
-        raise ValueError("Must provide either point or bbox")
+        raise ValueError("Must provide either points or bbox")
 
     print(f"[SAM2-PyTorch] Propagating {total_frames} frames...")
 

@@ -30,7 +30,7 @@ sys.path.insert(0, BASE_DIR)
 
 
 @celery.task(name='sam2.generate_masks_fullfps', bind=True)
-def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', point=None, bbox=None, frame_idx=0):
+def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, bbox=None, frame_idx=0):
     """
     Generate SAM2 masks at full FPS inside WSL2.
 
@@ -38,7 +38,8 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
         video_path (str): Windows or WSL path to video
         masks_dir (str): Windows or WSL path for output masks
         prompt_mode (str): 'point' or 'bbox'
-        point (tuple/list): (x, y) if prompt_mode is 'point'
+        points (list): List of (x, y) tuples if prompt_mode is 'point' (supports multiple clicks!)
+        labels (list): List of labels (1=foreground, 0=background) for each point
         bbox (list): [x1, y1, x2, y2] if prompt_mode is 'bbox'
         frame_idx (int): starting frame index
     Returns:
@@ -95,20 +96,24 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
 
     # Run tracking (PyTorch-only in-process; TensorRT hybrid can be added later)
     self.update_state(state='PROCESSING', meta={'status': 'Tracking SAM2', 'progress': 20})
-    if prompt_mode == 'point' and point is not None:
-        pt = (int(point[0]), int(point[1]))
+    if prompt_mode == 'point' and points is not None and len(points) > 0:
+        # Convert points to list of (x, y) tuples
+        pts = [(int(p[0]), int(p[1])) for p in points]
+        # Labels default to all foreground (1) if not provided
+        lbls = labels if labels is not None else [1] * len(pts)
+        print(f"[WSL-SAM2] Using {len(pts)} point(s): {pts}")
         masks_saved = sam2w.track_video_pytorch_only(
             temp_frames_dir, total_frames, masks_dir_wsl,
-            point=pt, bbox=None, frame_idx_start=int(frame_idx)
+            points=pts, labels=lbls, bbox=None, frame_idx_start=int(frame_idx)
         )
     elif prompt_mode == 'bbox' and bbox is not None:
         bb = [int(x) for x in bbox[:4]]
         masks_saved = sam2w.track_video_pytorch_only(
             temp_frames_dir, total_frames, masks_dir_wsl,
-            point=None, bbox=bb, frame_idx_start=int(frame_idx)
+            points=None, labels=None, bbox=bb, frame_idx_start=int(frame_idx)
         )
     else:
-        raise ValueError('Invalid prompt: provide point or bbox')
+        raise ValueError('Invalid prompt: provide points or bbox')
 
     # Force VRAM cleanup after tracking
     import gc

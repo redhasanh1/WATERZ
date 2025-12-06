@@ -579,14 +579,26 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         from celery import signature, chain
         prompt_mode = os.getenv('SAM2_PROMPT_MODE', 'point').strip().lower()
         if prompt_mode == 'point':
-            cx = int(np.clip(np.mean(xy[:, 0]), 0, (video_width or width) - 1))
-            cy = int(np.clip(np.mean(xy[:, 1]), 0, (video_height or height) - 1))
-            print(f"[SAM2] Using POINT prompt: ({cx},{cy})")
-            point_arg = (cx, cy)
+            # Extract ALL points with labels for multi-click support
+            px_w = video_width or width
+            px_h = video_height or height
+            points_arg = []
+            labels_arg = []
+            for i, (x, y) in enumerate(xy):
+                px = int(np.clip(x, 0, px_w - 1))
+                py = int(np.clip(y, 0, px_h - 1))
+                points_arg.append((px, py))
+                # Try to get label from original points array (default=1 for foreground)
+                if isinstance(points, list) and i < len(points) and isinstance(points[i], dict):
+                    labels_arg.append(int(points[i].get('label', 1)))
+                else:
+                    labels_arg.append(1)
+            print(f"[SAM2] Using {len(points_arg)} POINT prompt(s): {points_arg}")
             bbox_arg = None
         else:
             print(f"[SAM2] Using BBOX prompt: {bbox_str}")
-            point_arg = None
+            points_arg = None
+            labels_arg = None
             bbox_arg = [int(x) for x in bbox]
 
         if os.getenv('USE_WSL_CELERY', '1').lower() in ('1','true','yes','on'):
@@ -602,7 +614,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     print(f"[SAM2] Using cached {SAM2_TRACK_FPS}fps tracking video: {video_downsampled_path}")
                 track_src = video_downsampled_path
 
-            s1 = signature('sam2.generate_masks_fullfps', args=[track_src, masks_dir, prompt_mode, point_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
+            s1 = signature('sam2.generate_masks_fullfps', args=[track_src, masks_dir, prompt_mode, points_arg, labels_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
             s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='sam2')
             # Replace current task with the chained workflow to avoid blocking (.get) inside a task
             raise self.replace(chain(s1, s2))
@@ -613,14 +625,25 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             from celery import signature, chain
             prompt_mode = os.getenv('SAM2_PROMPT_MODE', 'point').strip().lower()
             if prompt_mode == 'point':
-                cx = int(np.clip(np.mean(xy[:, 0]), 0, (video_width or width) - 1))
-                cy = int(np.clip(np.mean(xy[:, 1]), 0, (video_height or height) - 1))
-                point_arg = (cx, cy)
+                # Extract ALL points with labels for multi-click support
+                px_w = video_width or width
+                px_h = video_height or height
+                points_arg = []
+                labels_arg = []
+                for i, (x, y) in enumerate(xy):
+                    px = int(np.clip(x, 0, px_w - 1))
+                    py = int(np.clip(y, 0, px_h - 1))
+                    points_arg.append((px, py))
+                    if isinstance(points, list) and i < len(points) and isinstance(points[i], dict):
+                        labels_arg.append(int(points[i].get('label', 1)))
+                    else:
+                        labels_arg.append(1)
                 bbox_arg = None
             else:
-                point_arg = None
+                points_arg = None
+                labels_arg = None
                 bbox_arg = [int(x) for x in bbox]
-            s1 = signature('sam2.generate_masks_fullfps', args=[video_path, masks_dir, prompt_mode, point_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
+            s1 = signature('sam2.generate_masks_fullfps', args=[video_path, masks_dir, prompt_mode, points_arg, labels_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
             s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='sam2')
             raise self.replace(chain(s1, s2))
 
@@ -628,6 +651,13 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             wsl_video = _to_wsl_path(video_path)
             wsl_masks = _to_wsl_path(masks_dir)
             if prompt_mode == 'point':
+                # CLI fallback only supports single point - use first point
+                if len(xy) > 1:
+                    print(f"[SAM2-WSL2] WARNING: CLI mode only supports 1 point, but {len(xy)} provided. Using first point only.")
+                px_w = video_width or width
+                px_h = video_height or height
+                cx = int(np.clip(xy[0, 0], 0, px_w - 1))
+                cy = int(np.clip(xy[0, 1], 0, px_h - 1))
                 prompt_flag = f'--point {cx},{cy}'
             else:
                 prompt_flag = f'--bbox {bbox_str}'
