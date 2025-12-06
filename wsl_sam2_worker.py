@@ -78,8 +78,9 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     masks_dir_wsl = to_wsl_path(masks_dir)
     temp_frames_dir = to_wsl_path('/tmp/sam2_frames')
 
-    # If video doesn't exist locally, download it from api_base
-    if not os.path.exists(video_path_wsl) and api_base:
+    # If video doesn't exist locally OR is a Railway path (/data/...), download it from api_base
+    is_railway_path = video_path.startswith('/data/') or video_path_wsl.startswith('/data/')
+    if (is_railway_path or not os.path.exists(video_path_wsl)) and api_base:
         filename = os.path.basename(video_path)
         download_url = f"{api_base}/uploads/{filename}"
         local_video = f"/tmp/{filename}"
