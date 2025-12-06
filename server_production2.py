@@ -615,7 +615,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 track_src = video_downsampled_path
 
             s1 = signature('sam2.generate_masks_fullfps', args=[track_src, masks_dir, prompt_mode, points_arg, labels_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
-            s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='sam2')
+            s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='propainter')
             # Replace current task with the chained workflow to avoid blocking (.get) inside a task
             raise self.replace(chain(s1, s2))
 
@@ -644,7 +644,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 labels_arg = None
                 bbox_arg = [int(x) for x in bbox]
             s1 = signature('sam2.generate_masks_fullfps', args=[video_path, masks_dir, prompt_mode, points_arg, labels_arg, bbox_arg, frame_index_full], queue='wsl_sam2')
-            s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='sam2')
+            s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, points, video_width, video_height, frame_index, api_base], queue='propainter')
             raise self.replace(chain(s1, s2))
 
         if not use_wsl_celery:
@@ -1445,13 +1445,40 @@ if __name__ == '__main__':
 @celery.task(bind=True, name='watermark._continue_after_masks')
 def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=None, video_width=None, video_height=None, frame_index=0, api_base=None):
     try:
-        import cv2, glob, numpy as np, os, json
+        import cv2, glob, numpy as np, os, json, zipfile, requests
         from watermark import expand_masks_10fps  # not used but keep import parity
         from urllib.parse import urljoin
 
         if not sam2_result or not isinstance(sam2_result, dict):
             raise RuntimeError(f"Invalid sam2_result: {sam2_result}")
-        masks_dir = sam2_result.get('masks_dir') or os.path.join(TEMP_DIR, f"{video_id}_sam2_masks")
+
+        # Check for B2 URL (new flow) or local path (legacy)
+        masks_url = sam2_result.get('masks_url')
+        masks_dir = sam2_result.get('masks_dir')
+
+        if masks_url and not masks_dir:
+            # Download masks from B2 CDN
+            print(f"[B2] Downloading masks from {masks_url}...")
+            self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Downloading masks from B2'})
+
+            zip_path = os.path.join(TEMP_DIR, f"{video_id}_masks.zip")
+            r = requests.get(masks_url, timeout=120)
+            r.raise_for_status()
+            with open(zip_path, 'wb') as f:
+                f.write(r.content)
+
+            # Extract masks
+            masks_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_masks")
+            os.makedirs(masks_dir, exist_ok=True)
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(masks_dir)
+            os.remove(zip_path)
+
+            mask_count = len([f for f in os.listdir(masks_dir) if f.endswith('.png')])
+            print(f"[B2] Extracted {mask_count} masks to {masks_dir}")
+        elif not masks_dir:
+            masks_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_masks")
+
         if not os.path.isdir(masks_dir):
             raise RuntimeError(f"Masks directory missing: {masks_dir}")
 

@@ -40,7 +40,14 @@
       "Bash(git add:*)",
       "WebFetch(domain:github.com)",
       "mcp__ide__getDiagnostics",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(git show:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production2.py)",
+      "Bash(git commit:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production2.py D:/watermarkz/wsl_sam2_worker.py D:/watermarkz/sam2_track_wsl2.py)",
+      "Bash(git push:*)",
+      "Bash(wsl -e cat:*)",
+      "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production2.py D:/watermarkz/wsl_sam2_worker.py)"
     ],
     "deny": [],
     "ask": []

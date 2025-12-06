@@ -9,6 +9,10 @@ so the Windows Celery task can immediately consume them without extra copies.
 import os
 import sys
 import json
+import glob
+import time
+import zipfile
+import shutil
 from celery import Celery
 
 # Resolve base dir assuming this file resides in repo root
@@ -126,10 +130,75 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     except ImportError:
         pass
 
+    # Upload masks to B2 CDN
+    self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
+    masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
+
     return {
         'status': 'success',
-        'masks_dir': masks_dir,
+        'masks_url': masks_url,
+        'masks_dir': None,  # No local path - use B2 URL
         'masks_saved': int(masks_saved),
         'total_frames': int(total_frames),
         'fps': float(fps),  # tracking fps (10 or full), used for expansion on Windows
     }
+
+
+def upload_masks_to_b2(masks_dir, video_path):
+    """
+    Zip and upload masks to B2 CDN, return CDN URL.
+    Cleans up local masks after upload.
+    """
+    from b2sdk.v2 import B2Api, InMemoryAccountInfo
+
+    B2_KEY_ID = os.getenv('B2_KEY_ID')
+    B2_APP_KEY = os.getenv('B2_APP_KEY')
+    B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+    B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+
+    if not B2_KEY_ID or not B2_APP_KEY:
+        print("[B2] Warning: B2 credentials not set, returning local path")
+        return None
+
+    # Extract video_id from path for naming
+    video_basename = os.path.basename(video_path)
+    video_id = os.path.splitext(video_basename)[0]
+    # Remove any suffix like _tracking_10fps
+    if '_tracking_' in video_id:
+        video_id = video_id.split('_tracking_')[0]
+
+    # Zip masks
+    zip_path = f"/tmp/{video_id}_masks.zip"
+    mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
+    print(f"[B2] Zipping {len(mask_files)} masks...")
+
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for mask_file in mask_files:
+            zf.write(mask_file, os.path.basename(mask_file))
+
+    zip_size_mb = os.path.getsize(zip_path) / (1024 * 1024)
+    print(f"[B2] Zip created: {zip_size_mb:.1f} MB")
+
+    # Upload to B2
+    print(f"[B2] Uploading to {B2_BUCKET}...")
+    upload_start = time.time()
+
+    info = InMemoryAccountInfo()
+    b2_api = B2Api(info)
+    b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+    bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+
+    timestamp = int(time.time())
+    remote_path = f"masks/{timestamp}_{video_id}_masks.zip"
+    bucket.upload_local_file(local_file=zip_path, file_name=remote_path)
+
+    masks_url = f"{B2_CDN_URL}/{remote_path}"
+    upload_time = time.time() - upload_start
+    print(f"[B2] Upload complete in {upload_time:.1f}s: {masks_url}")
+
+    # Cleanup local files
+    shutil.rmtree(masks_dir, ignore_errors=True)
+    os.remove(zip_path)
+    print(f"[B2] Local masks cleaned up")
+
+    return masks_url

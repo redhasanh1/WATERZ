@@ -129,8 +129,12 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
 
     torch.cuda.empty_cache()
 
-    # Initialize state
-    inference_state = predictor.init_state(video_path=frames_dir)
+    # Initialize state - use lazy loading to avoid OOM on long videos
+    inference_state = predictor.init_state(
+        video_path=frames_dir,
+        offload_video_to_cpu=True,      # Keep frames on CPU, move to GPU only when needed
+        async_loading_frames=True,       # Lazy load frames instead of pre-allocating all at once
+    )
 
     # Add prompt (point or bbox) to initialize tracking
     if bbox is not None:
