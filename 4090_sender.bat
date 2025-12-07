@@ -32,7 +32,7 @@ echo [B2] Upload enabled to %B2_BUCKET%
 echo.
 
 REM Start WSL Celery worker
-echo Starting WSL SAM2 worker on queue: wsl_sam2
+echo Starting WSL worker on queues: wsl_sam2, wsl_yolo
 echo.
 
-wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export B2_CDN_URL='%B2_CDN_URL%' && celery -A wsl_sam2_worker worker -Q wsl_sam2 --loglevel=info --pool=solo"
+wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export B2_CDN_URL='%B2_CDN_URL%' && celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo"

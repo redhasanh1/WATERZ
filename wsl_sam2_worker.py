@@ -277,6 +277,14 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
 
     self.update_state(state='PROCESSING', meta={'status': 'Loading YOLO model', 'progress': 5})
 
+    # Check video dimensions first (TensorRT engine needs 640x640, fails on portrait/landscape)
+    cap_check = cv2.VideoCapture(video_path_wsl)
+    vid_w = int(cap_check.get(cv2.CAP_PROP_FRAME_WIDTH))
+    vid_h = int(cap_check.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap_check.release()
+    aspect_ratio = max(vid_w, vid_h) / max(1, min(vid_w, vid_h))
+    can_use_trt = aspect_ratio < 1.5  # TensorRT needs roughly square input
+
     # Try TensorRT engine first (20-30x faster), fall back to PyTorch
     from ultralytics import YOLO
 
@@ -284,7 +292,7 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
     pt_model_path = '/mnt/d/watermarkz/runs/detect/new_sora_watermark/weights/best.pt'
 
     using_tensorrt = False
-    if os.path.exists(trt_engine_path):
+    if can_use_trt and os.path.exists(trt_engine_path):
         try:
             model = YOLO(trt_engine_path, task='detect')
             print(f"[YOLO] Loaded TensorRT engine: {trt_engine_path}")
@@ -292,6 +300,8 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
             using_tensorrt = True
         except Exception as e:
             print(f"[YOLO] TensorRT load failed: {e}, falling back to PyTorch")
+    elif not can_use_trt:
+        print(f"[YOLO] Video {vid_w}x{vid_h} (aspect {aspect_ratio:.1f}) - using PyTorch (TRT needs ~square)")
 
     if not using_tensorrt:
         if not os.path.exists(pt_model_path):
