@@ -57,7 +57,12 @@
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production.py)",
       "Bash(git pull:*)",
       "Bash(\"$LOCALAPPDATA/Programs/Python/Python312/python.exe\" -m py_compile D:/watermarkz/server_production.py D:/watermarkz/wsl_sam2_worker.py)",
-      "Bash(./BUILD_FP16_BATCH.bat)"
+      "Bash(./BUILD_FP16_BATCH.bat)",
+      "Bash(cd:*)",
+      "Bash(set SEGMENT_WORKERS=4)",
+      "Bash(cmd /c \"cd /d D:\\watermarkz && set SEGMENT_WORKERS=4 && C:\\Users\\has\\AppData\\Local\\Programs\\Python\\Python312\\python.exe TEST_FIRST_HASAN.py\")",
+      "Bash(cmd /c \"C:\\Users\\has\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pip install flask-session\")",
+      "Bash(cmd /c \"cd /d D:\\watermarkz && set REDIS_URL=redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930 && set YOLO_REQUIRE_TENSORRT=1 && set USE_NEUFLOW=1 && set SEGMENT_WORKERS=4 && C:\\Users\\has\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4\")"
     ],
     "deny": [],
     "ask": []

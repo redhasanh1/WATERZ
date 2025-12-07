@@ -8,6 +8,15 @@ echo TENSORRT MODE: NeuFlow v2 TensorRT FP16 (4 execution contexts, pure GPU)
 echo ============================================================
 echo.
 
+REM ✅ AUTO-LOAD REDIS_URL from redis_url.txt
+if exist redis_url.txt (
+    for /f "usebackq tokens=*" %%A in ("redis_url.txt") do set REDIS_URL=%%A
+    echo [REDIS] Loaded from redis_url.txt
+) else (
+    echo [REDIS] WARNING: redis_url.txt not found!
+    set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
+)
+
 REM Activate Visual Studio 2022 C++ environment (required for torch.compile)
 if exist "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
     call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1

@@ -115,8 +115,8 @@ set USE_TORCH_COMPILE=0
 set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
-REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (2 = share preloaded frames)
-set SEGMENT_WORKERS=2
+REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers with CUDA streams (4 = like hasan)
+set SEGMENT_WORKERS=4
 
 REM Prefer point prompt for SAM2 tracking (higher quality); set to bbox to force bbox mode
 set SAM2_PROMPT_MODE=point

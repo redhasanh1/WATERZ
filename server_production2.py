@@ -17,12 +17,14 @@ import threading
 import time
 import uuid
 from typing import List, Optional, Tuple
+from contextlib import nullcontext
 from flask import Flask, request, jsonify
 from celery import Celery
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
 import numpy as np
+import torch
 
 # Segment detection for parallel processing
 from segment_detector import detect_segments_from_masks, merge_adjacent_segments, detect_segments, detect_segments_motion_based
@@ -1071,124 +1073,137 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         print(f"[SAM2] Per-segment loading mode (low VRAM) - {total_frames} frames total")
 
         def process_segment(seg_idx, start_f, end_f, seg_bbox):
-            """Process a single segment with ProPainter - loads frames per-segment (low VRAM)"""
+            """Process a single segment with ProPainter - loads frames per-segment (low VRAM)
+            Uses dedicated CUDA stream for parallel execution (like hasan branch)"""
             proc_start = start_f
             proc_end = end_f
+
+            # Create dedicated CUDA stream for this segment (enables TRUE parallel GPU execution)
+            cuda_stream = None
+            if torch.cuda.is_available():
+                cuda_stream = torch.cuda.Stream()
+
             try:
-                duration = end_f - start_f
-                log_end = end_f - 1 if end_f > start_f else end_f
-                # Calculate segment-specific crop directly from seg_bbox (in original frame coords)
-                seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
-                    list(seg_bbox),  # Use segment bbox directly in frame coordinates
-                    width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
-                )
+                # Run entire segment processing on dedicated CUDA stream
+                with torch.cuda.stream(cuda_stream) if cuda_stream else nullcontext():
+                    duration = end_f - start_f
+                    log_end = end_f - 1 if end_f > start_f else end_f
+                    # Calculate segment-specific crop directly from seg_bbox (in original frame coords)
+                    seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
+                        list(seg_bbox),  # Use segment bbox directly in frame coordinates
+                        width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+                    )
 
-                # Hasan branch used FIXED values for speed (not resolution-based)
-                subvideo_length = 120  # Hasan: 120 fixed (larger batch = faster)
-                neighbor_length = 10   # Hasan: 10 (more temporal context)
-                ref_stride = 10        # Hasan: 10 (not 15)
+                    # Hasan branch used FIXED values for speed (not resolution-based)
+                    subvideo_length = 120  # Hasan: 120 fixed (larger batch = faster)
+                    neighbor_length = 10   # Hasan: 10 (more temporal context)
+                    ref_stride = 10        # Hasan: 10 (not 15)
 
-                # Temporal padding for context
-                pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
-                pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
-                proc_start = start_f - pad_left
-                proc_end = end_f + pad_right
+                    # Temporal padding for context
+                    pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
+                    pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
+                    proc_start = start_f - pad_left
+                    proc_end = end_f + pad_right
 
-                print(f"[{mode.upper()}] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
+                    print(f"[{mode.upper()}] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
 
-                # LOAD FRAMES DIRECTLY FROM VIDEO - CROPPED IMMEDIATELY (like hasan branch!)
-                # This minimizes VRAM: only segment+padding frames, already cropped
-                print(f"[{mode.upper()}] Loading {proc_end - proc_start} frames from video (cropped to {seg_crop_w}x{seg_crop_h})")
-                seg_frames = []
-                seg_masks = []
-                full_frames_for_paste = []  # Keep full frames ONLY for segment range (paste-back)
+                    # LOAD FRAMES DIRECTLY FROM VIDEO - CROPPED IMMEDIATELY (like hasan branch!)
+                    # This minimizes VRAM: only segment+padding frames, already cropped
+                    print(f"[{mode.upper()}] Loading {proc_end - proc_start} frames from video (cropped to {seg_crop_w}x{seg_crop_h})")
+                    seg_frames = []
+                    seg_masks = []
+                    full_frames_for_paste = []  # Keep full frames ONLY for segment range (paste-back)
 
-                cap_seg = cv2.VideoCapture(video_path)
-                cap_seg.set(cv2.CAP_PROP_POS_FRAMES, proc_start)
+                    cap_seg = cv2.VideoCapture(video_path)
+                    cap_seg.set(cv2.CAP_PROP_POS_FRAMES, proc_start)
 
-                for frame_idx in range(proc_start, proc_end):
-                    ret, full_frame = cap_seg.read()
-                    if not ret:
-                        break
-                    # Crop frame IMMEDIATELY (before storing) - saves VRAM!
-                    cropped_frame = full_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                    seg_frames.append(np.ascontiguousarray(cropped_frame))
+                    for frame_idx in range(proc_start, proc_end):
+                        ret, full_frame = cap_seg.read()
+                        if not ret:
+                            break
+                        # Crop frame IMMEDIATELY (before storing) - saves VRAM!
+                        cropped_frame = full_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                        seg_frames.append(np.ascontiguousarray(cropped_frame))
 
-                    # Keep full frame ONLY for core segment frames (for paste-back)
-                    if start_f <= frame_idx < end_f:
-                        full_frames_for_paste.append((frame_idx, full_frame))
+                        # Keep full frame ONLY for core segment frames (for paste-back)
+                        if start_f <= frame_idx < end_f:
+                            full_frames_for_paste.append((frame_idx, full_frame))
 
-                    # Crop mask
-                    if frame_idx < len(all_masks):
-                        seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                        seg_masks.append(np.ascontiguousarray(seg_mask))
+                        # Crop mask
+                        if frame_idx < len(all_masks):
+                            seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                            seg_masks.append(np.ascontiguousarray(seg_mask))
 
-                cap_seg.release()
+                    cap_seg.release()
 
-                if not seg_frames or not seg_masks:
-                    return seg_idx, None, None, (proc_start, proc_end)
+                    if not seg_frames or not seg_masks:
+                        return seg_idx, None, None, (proc_start, proc_end)
 
-                # Run ProPainter on segment - ZERO DISK I/O with return_frames=True!
-                output_frames = faster_propainter_pipeline(
-                    video='dummy',
-                    mask='dummy',
-                    output=output_dir,  # Not used when return_frames=True
-                    resize_ratio=1.0,
-                    mask_dilation=SAM2_MASK_DILATION,
-                    ref_stride=ref_stride,  # Hasan: 10
-                    neighbor_length=neighbor_length,
-                    subvideo_length=subvideo_length,
-                    raft_iter=10,
-                    mode="video_inpainting",
-                    save_fps=int(original_fps),
-                    save_frames=False,
-                    fp16=use_fp16,
-                    use_cached_models=True,
-                    frames_array=seg_frames,
-                    masks_array=seg_masks,
-                    return_frames=True  # ZERO DISK I/O!
-                )
+                    # Run ProPainter on segment - ZERO DISK I/O with return_frames=True!
+                    output_frames = faster_propainter_pipeline(
+                        video='dummy',
+                        mask='dummy',
+                        output=output_dir,  # Not used when return_frames=True
+                        resize_ratio=1.0,
+                        mask_dilation=SAM2_MASK_DILATION,
+                        ref_stride=ref_stride,  # Hasan: 10
+                        neighbor_length=neighbor_length,
+                        subvideo_length=subvideo_length,
+                        raft_iter=10,
+                        mode="video_inpainting",
+                        save_fps=int(original_fps),
+                        save_frames=False,
+                        fp16=use_fp16,
+                        use_cached_models=True,
+                        frames_array=seg_frames,
+                        masks_array=seg_masks,
+                        return_frames=True  # ZERO DISK I/O!
+                    )
 
-                if not output_frames:
-                    print(f"[ERROR] Segment {seg_idx}: ProPainter returned no frames")
-                    return seg_idx, False, None, (proc_start, proc_end)
+                    if not output_frames:
+                        print(f"[ERROR] Segment {seg_idx}: ProPainter returned no frames")
+                        return seg_idx, False, None, (proc_start, proc_end)
 
-                # Composite ProPainter output onto original frames (paste-back)
-                # Only save CORE frames (start_f to end_f), skip padding frames
-                core_count = end_f - start_f
-                print(f"[{mode.upper()}] Segment {seg_idx+1}: compositing {core_count} core frames...")
-                frames_stored = 0
+                    # Composite ProPainter output onto original frames (paste-back)
+                    # Only save CORE frames (start_f to end_f), skip padding frames
+                    core_count = end_f - start_f
+                    print(f"[{mode.upper()}] Segment {seg_idx+1}: compositing {core_count} core frames...")
+                    frames_stored = 0
 
-                # Use the full frames we kept for paste-back
-                paste_idx = 0
-                for i in range(len(output_frames)):
-                    frame_idx = proc_start + i
-                    # Skip padding frames - only save core frames [start_f, end_f)
-                    if frame_idx < start_f or frame_idx >= end_f:
-                        continue
+                    # Use the full frames we kept for paste-back
+                    paste_idx = 0
+                    for i in range(len(output_frames)):
+                        frame_idx = proc_start + i
+                        # Skip padding frames - only save core frames [start_f, end_f)
+                        if frame_idx < start_f or frame_idx >= end_f:
+                            continue
 
-                    # Get original full frame from our saved list
-                    if paste_idx < len(full_frames_for_paste):
-                        saved_frame_idx, orig_frame = full_frames_for_paste[paste_idx]
-                        paste_idx += 1
+                        # Get original full frame from our saved list
+                        if paste_idx < len(full_frames_for_paste):
+                            saved_frame_idx, orig_frame = full_frames_for_paste[paste_idx]
+                            paste_idx += 1
 
-                        # Composite segment output onto original frame
-                        orig_frame[seg_crop_y:seg_crop_y + seg_crop_h,
-                                  seg_crop_x:seg_crop_x + seg_crop_w] = output_frames[i]
-                        # Store as raw numpy (no compression - simpler, faster!)
-                        vram_frames[frame_idx] = orig_frame
-                        processed_frames.add(frame_idx)
-                        frames_stored += 1
+                            # Composite segment output onto original frame
+                            orig_frame[seg_crop_y:seg_crop_y + seg_crop_h,
+                                      seg_crop_x:seg_crop_x + seg_crop_w] = output_frames[i]
+                            # Store as raw numpy (no compression - simpler, faster!)
+                            vram_frames[frame_idx] = orig_frame
+                            processed_frames.add(frame_idx)
+                            frames_stored += 1
 
-                # Free memory immediately!
-                del output_frames
-                del full_frames_for_paste
-                del seg_frames
-                del seg_masks
-                print(f"[{mode.upper()}] Segment {seg_idx+1}: stored {frames_stored} core frames")
+                    # Free memory immediately!
+                    del output_frames
+                    del full_frames_for_paste
+                    del seg_frames
+                    del seg_masks
+                    print(f"[{mode.upper()}] Segment {seg_idx+1}: stored {frames_stored} core frames")
 
-                # Return success flag and metadata (NOT frames!)
-                return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
+                    # Synchronize CUDA stream before returning
+                    if cuda_stream:
+                        cuda_stream.synchronize()
+
+                    # Return success flag and metadata (NOT frames!)
+                    return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
 
             except Exception as e:
                 print(f"[ERROR] Segment {seg_idx} failed: {e}")

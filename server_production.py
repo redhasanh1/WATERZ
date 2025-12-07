@@ -229,6 +229,8 @@ except Exception as e:
     if not GPU_AVAILABLE:
         print(f"[INFO] FFmpeg not available (API-only mode): {e}")
 
+print("[DEBUG] FFmpeg init done, continuing...")
+
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
 # Stores frames/masks in RAM for instant access (no Redis, no disk!)
@@ -242,7 +244,9 @@ FRAME_CACHE_LOCK = threading.Lock()
 # from mytimer import timer_decorator  
 # from pre_post_process import crop_video_mask, merge_videos_with_mask
 
+print("[DEBUG] Creating Flask app...")
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web'))
+print("[DEBUG] Flask app created, adding CORS...")
 # CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
 CORS(
     app,
@@ -255,8 +259,11 @@ CORS(
 # ----------------------------------------------------------------------------
 # Database Connection Pool (for user authentication)
 # ----------------------------------------------------------------------------
+print("[DEBUG] Checking database connection...")
 db_pool = None
-if AUTH_ENABLED:
+# Skip database for local Celery workers (only needed for web auth)
+_is_celery_worker = 'celery' in sys.argv[0].lower() or any('celery' in arg.lower() for arg in sys.argv)
+if AUTH_ENABLED and not _is_celery_worker:
     try:
         DATABASE_URL = os.getenv('DATABASE_URL')
         if DATABASE_URL:
@@ -276,6 +283,10 @@ if AUTH_ENABLED:
     except Exception as e:
         print(f"[ERROR] Failed to initialize database pool: {e}")
         AUTH_ENABLED = False
+else:
+    if _is_celery_worker:
+        print("[OK] Skipping database for Celery worker (not needed)")
+print("[DEBUG] Database check done")
 
 @contextmanager
 def get_db():
@@ -368,27 +379,41 @@ def require_credits(min_credits=1):
 # ----------------------------------------------------------------------------
 # Redis URL Definition (needed for Session and Celery)
 # ----------------------------------------------------------------------------
-REDIS_URL = os.getenv('REDIS_URL')
-if not REDIS_URL:
-    print("[WARNING] REDIS_URL not found in environment. Session and Celery may fail.")
+# Priority: 1) redis_url.txt (local dev), 2) REDIS_URL env var (Railway)
+REDIS_URL = None
+_redis_url_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'redis_url.txt')
+if os.path.exists(_redis_url_file):
+    with open(_redis_url_file, 'r') as f:
+        REDIS_URL = f.read().strip()
+    print(f"[OK] Loaded Redis URL from redis_url.txt")
 else:
-    print(f"[OK] Using REDIS_URL from environment for Session config: {REDIS_URL}")
+    REDIS_URL = os.getenv('REDIS_URL')
+    if REDIS_URL:
+        print(f"[OK] Using REDIS_URL from environment")
+    else:
+        print("[WARNING] REDIS_URL not found. Session and Celery may fail.")
 
 
 # ----------------------------------------------------------------------------
 # Flask Session Configuration (using Redis for multi-worker stability)
 # ----------------------------------------------------------------------------
-from flask_session import Session
+# Skip session setup for Celery workers (not needed, avoids Redis connection hang)
+if not _is_celery_worker:
+    from flask_session import Session
 
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
-app.config['SESSION_TYPE'] = 'redis'
-app.config['SESSION_PERMANENT'] = True
-app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
-app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
+    app.config['SESSION_TYPE'] = 'redis'
+    app.config['SESSION_PERMANENT'] = True
+    app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
+    app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
-# Initialize the session extension
-Session(app)
+    # Initialize the session extension
+    Session(app)
+    print("[OK] Flask session initialized")
+else:
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
+    print("[OK] Skipping Flask session for Celery worker")
 
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
