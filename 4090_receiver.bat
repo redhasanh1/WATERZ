@@ -78,8 +78,10 @@ set FORCE_TRT_RAFT=0
 set USE_NEUFLOW=1
 
 REM  RFCNET TENSORRT (DCNv4): 1.6-2.3x speedup on flow completion
+REM  DISABLED: TensorRT DCNv4 plugin not built (dcnv4_plugin.dll missing)
+REM  Set to 1 when rfcnet_dcnv4_fp16.engine is built
 set RFCNET_TORCHTRT=0
-set FORCE_TRT_RFCNET=1
+set FORCE_TRT_RFCNET=0
 
 REM  TRANSFORMER TENSORRT: DISABLED (optional optimization)
 set FORCE_TRT_TRANSFORMER=0

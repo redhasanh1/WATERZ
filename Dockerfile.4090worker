@@ -1,0 +1,184 @@
+# ============================================================
+# 4090 ProPainter Worker - TensorRT Accelerated
+# SAM2 Interactive Mode (masks from user clicks, NO YOLO)
+# ============================================================
+
+# ============================================================
+# Stage 1: Build DCNv4 TensorRT Plugin + PyTorch Extension
+# ============================================================
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install build tools and Python
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    python3.11 \
+    python3.11-dev \
+    python3.11-venv \
+    python3-pip \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+# Install PyTorch for DCNv4 compilation
+RUN pip install --no-cache-dir \
+    torch==2.4.1+cu124 \
+    torchvision==0.19.1+cu124 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# Install TensorRT 10.x with C++ headers (from NVIDIA repo, no version pinning)
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libnvinfer-dev \
+    libnvinfer-plugin-dev \
+    libnvonnxparsers-dev \
+    && rm -rf /var/lib/apt/lists/* cuda-keyring_1.1-1_all.deb
+
+# ---- Build DCNv4 TensorRT Plugin ----
+WORKDIR /build
+COPY dcnv4_tensorrt_plugin/ /build/dcnv4_tensorrt_plugin/
+
+WORKDIR /build/dcnv4_tensorrt_plugin
+RUN mkdir -p build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release \
+             -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
+             -DTENSORRT_ROOT=/usr && \
+    make -j$(nproc)
+
+# NOTE: DCNv4 PyTorch extension skipped - requires CUDA runtime (GPU)
+# We use TensorRT RFCNet (FORCE_TRT_RFCNET=1) so PyTorch fallback not needed
+
+# ============================================================
+# Stage 2: Runtime Image
+# ============================================================
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# System packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libglib2.0-0 \
+    libgl1-mesa-glx \
+    libgomp1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.docker.txt .
+RUN pip install --no-cache-dir \
+    torch==2.4.1+cu124 \
+    torchvision==0.19.1+cu124 \
+    --index-url https://download.pytorch.org/whl/cu124 \
+    && pip install --no-cache-dir -r requirements.docker.txt
+
+# Copy built DCNv4 TensorRT plugin from builder
+COPY --from=builder /build/dcnv4_tensorrt_plugin/build/libdcnv4_plugin.so /app/dcnv4_plugin/
+
+# ---- Core Python Files ----
+COPY server_production.py .
+COPY server_production2.py .
+COPY segment_detector.py .
+COPY crop_utils.py .
+COPY yolo_detector.py .
+
+# ---- ProPainter Pipeline (entire directory) ----
+COPY faster-propainter-main/ ./faster-propainter-main/
+
+# ---- Model Weights ----
+COPY faster-propainter-main/weights/ProPainter.pth ./faster-propainter-main/weights/
+COPY faster-propainter-main/weights/recurrent_flow_completion.pth ./faster-propainter-main/weights/
+COPY faster-propainter-main/weights/raft-things.pth ./faster-propainter-main/weights/
+
+# ---- ONNX Models (for TRT engine building on first run) ----
+COPY faster-propainter-main/models/neuflow_things.onnx ./faster-propainter-main/models/
+COPY faster-propainter-main/engines/rfcnet/rfcnet.onnx ./faster-propainter-main/engines/rfcnet/
+
+# ---- Symlink for weights (server_production.py looks in /app/weights/) ----
+RUN ln -sf /app/faster-propainter-main/weights /app/weights
+
+# ---- Entrypoint Script ----
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# ============================================================
+# Environment Variables (from 4090_receiver.bat)
+# ============================================================
+
+# TensorRT Acceleration
+# FORCE_TRT_RFCNET=0: Use PyTorch fallback for RFCNet (DCNv4 TensorRT plugin not ready)
+ENV FORCE_TRT_RFCNET=0
+ENV USE_NEUFLOW=1
+ENV FORCE_TRT_RAFT=0
+ENV FORCE_TRT_TRANSFORMER=0
+
+# FP8 Optimizations (RTX 40xx SM89)
+ENV ENABLE_FP8_TRANSFORMER=1
+ENV ENABLE_FP8_ENCODER=1
+ENV ENABLE_FP8_DECODER=1
+ENV ENABLE_FP8_RFCNET=1
+
+# DCNv4 TensorRT Plugin
+ENV ENABLE_DCNV4_RFCNET=1
+ENV LD_LIBRARY_PATH=/app/dcnv4_plugin:${LD_LIBRARY_PATH:-}
+ENV PYTHONPATH=/app:/app/faster-propainter-main:${PYTHONPATH:-}
+
+# API Base URL (for constructing URLs to video/frame files)
+ENV API_BASE_URL=https://markremoverai.com
+
+# Disabled features
+ENV ENABLE_SAGE_ATTENTION=0
+ENV ENABLE_FLASH_ATTENTION=0
+ENV ENABLE_NVDEC=0
+ENV USE_TORCH_COMPILE=0
+ENV ENABLE_TOKEN_MERGING=0
+
+# SAM2 Interactive Mode (NO YOLO - masks from user clicks)
+ENV USE_INTERACTIVE_SAM2=1
+ENV USE_SAM2_TRACKING=0
+ENV YOLO_REQUIRE_TENSORRT=0
+
+# Segment detection
+ENV SAM2_USE_SEGMENTS=1
+ENV SAM2_PARALLEL_SEGMENTS=1
+ENV SAM2_SEGMENT_DETECTION_MODE=full
+ENV SEGMENT_USE_MOTION_DETECTION=1
+ENV SEGMENT_MOTION_THRESHOLD=8
+ENV MAX_SEGMENT_FRAMES=300
+ENV MAX_SEGMENT_PIXELS=400000
+ENV MAX_CROP_PIXELS=600000
+ENV SAM2_MASK_DILATION=4
+
+# Celery worker config
+ENV CELERY_POOL=threads
+ENV CELERY_CONCURRENCY=4
+ENV SEGMENT_WORKERS=2
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+# UNIFIED WORKER: Same as 4090_receiver.bat - handles BOTH celery (YOLO chord) AND propainter (SAM2)
+CMD ["celery", "-A", "server_production2.celery", "worker", "-Q", "celery,propainter", "--loglevel=info", "--pool=threads", "--concurrency=4"]

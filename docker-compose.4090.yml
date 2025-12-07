@@ -1,0 +1,33 @@
+version: '3.8'
+
+# ============================================================
+# 4090 ProPainter Worker - Docker Compose
+# SAM2 Interactive Mode (NO YOLO)
+# ============================================================
+
+services:
+  propainter-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.4090worker
+    image: watermarkz/propainter-worker:4090-trt
+    runtime: nvidia
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      # Persist built TensorRT engines between restarts
+      - trt-engines:/app/faster-propainter-main/models
+      - trt-engines-rfcnet:/app/faster-propainter-main/engines/rfcnet
+    restart: unless-stopped
+
+volumes:
+  trt-engines:
+  trt-engines-rfcnet:

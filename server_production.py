@@ -1588,20 +1588,15 @@ def background_encoder_worker():
         try:
             redis_client = celery.backend.client
 
-            # Configure pubsub with NO timeout and keepalive
+            # Configure pubsub with NO timeout (keepalive disabled for Docker/Railway compatibility)
             pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
             pubsub.connection_pool.connection_kwargs['socket_timeout'] = None
-            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = True
-            pubsub.connection_pool.connection_kwargs['socket_keepalive_options'] = {
-                1: 60,   # TCP_KEEPIDLE
-                2: 10,   # TCP_KEEPINTVL
-                3: 6     # TCP_KEEPCNT
-            }
+            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = False
 
             pubsub.subscribe('segment_ready')
 
             print("[BACKGROUND ENCODER] Listening for segment completion signals...")
-            print("[BACKGROUND ENCODER] Socket keepalive enabled - NO timeout!")
+            print("[BACKGROUND ENCODER] Redis pubsub connected (keepalive disabled for compatibility)")
             print("[BACKGROUND ENCODER] PARALLEL MODE: Up to 4 concurrent NVENC streams!")
 
             # Create thread pool for parallel encoding (4 matches SEGMENT_WORKERS)
@@ -1759,8 +1754,13 @@ def encode_segment_background(redis_client, data):
         redis_client.hset(segment_key, 'status', 'encoded')
 
         # Cleanup file list and frames after successful encoding
+        # Windows file lock fix - retry with delay (FFmpeg may still hold handle)
         if os.path.exists(file_list_path):
-            os.remove(file_list_path)
+            try:
+                time.sleep(0.1)
+                os.remove(file_list_path)
+            except PermissionError:
+                pass  # Cleanup later
 
         # Note: Don't cleanup shared_cleaned_dir yet - other segments may need it!
         # Final cleanup happens after all segments are encoded
@@ -1984,6 +1984,8 @@ def start_redis_download_poller():
                         continue
 
                     download_url = download_url.decode('utf-8') if isinstance(download_url, bytes) else download_url
+                    # Fix: www.markremoverai.com doesn't resolve in DNS, only markremoverai.com works
+                    download_url = download_url.replace('://www.markremoverai.com', '://markremoverai.com')
 
                     # Check if we already have this video cached
                     cache_dir = os.path.join(TEMP_DIR, 'video_cache')
@@ -2628,7 +2630,10 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                     ]
 
                 mask_duration = time.time() - mask_start
-                print(f"   Mask creation: {mask_duration:.3f}s ({frames_processed/mask_duration:.1f} masks/sec)")
+                if mask_duration > 0:
+                    print(f"   Mask creation: {mask_duration:.3f}s ({frames_processed/mask_duration:.1f} masks/sec)")
+                else:
+                    print(f"   Mask creation: <1ms (INSTANT!)")
 
             # [INIT] EXTREME SPEED: Store in global memory (INSTANT!)
             print(f"⚡ Storing {frames_processed} frames/masks in memory (INSTANT!)...")

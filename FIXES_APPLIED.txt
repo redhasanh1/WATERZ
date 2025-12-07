@@ -1,0 +1,107 @@
+================================================================================
+FIXES APPLIED - 4090 Receiver Worker
+================================================================================
+Last Updated: 2025-12-07
+
+================================================================================
+FIX #1: FORCE_TRT_RFCNET disabled (DCNv4 plugin missing)
+================================================================================
+STATUS: WORKED
+
+File: D:\watermarkz\4090_receiver.bat
+
+Problem:
+  RuntimeError: ProPainter assets missing
+  [ERROR] FORCE_TRT_RFCNET=1 but TensorRT DCNv4 files missing
+
+Fix Applied:
+  FORCE_TRT_RFCNET=0 (was 1)
+  RFCNET_TORCHTRT=0 (was 1)
+
+================================================================================
+FIX #2: Division by zero in mask timing
+================================================================================
+STATUS: WORKED
+
+File: D:\watermarkz\server_production.py (line 2626)
+
+Problem:
+  ZeroDivisionError: float division by zero
+
+Fix Applied:
+  Added check: if mask_duration > 0 before division
+
+================================================================================
+FIX #3: API_BASE_URL environment variable missing
+================================================================================
+STATUS: WORKED
+
+Problem:
+  AttributeError: NoneType has no attribute rstrip
+
+Fix Applied:
+  export API_BASE_URL=https://markremoverai.com (NO www\!)
+
+================================================================================
+FIX #4: NVENC Session Limit (4 parallel streams)
+================================================================================
+STATUS: NOT FIXED - STILL AN ISSUE
+
+Problem:
+  [h264_nvenc] OpenEncodeSessionEx failed
+  RTX 4090 limited to ~3 concurrent NVENC sessions
+
+================================================================================
+FIX #5: Temporal padding for better inpainting quality
+================================================================================
+STATUS: COMMITTED (commit 89642693)
+
+File: D:\watermarkz\server_production.py (line 2912)
+
+Fix Applied:
+  neighbor_padding = 10 (was 5)
+
+================================================================================
+FIX #6: Windows file lock error on temp file cleanup
+================================================================================
+STATUS: WORKED
+
+File: D:\watermarkz\server_production.py (line ~1756)
+
+Problem:
+  PermissionError: [WinError 32] file in use
+
+Fix Applied:
+  Added try-except with time.sleep(0.1) around os.remove()
+
+================================================================================
+FIX #7: REDIS_URL must read from redis_url.txt
+================================================================================
+STATUS: WORKED
+
+Problem:
+  Worker not receiving tasks - using localhost instead of Railway Redis
+
+Fix Applied:
+  export REDIS_URL=$(cat redis_url.txt)
+
+================================================================================
+FIX #8: DNS resolution error for www.markremoverai.com
+================================================================================
+STATUS: WORKED
+
+File: D:\watermarkz\server_production.py (line ~1987)
+
+Problem:
+  Failed to resolve www.markremoverai.com
+
+Fix Applied:
+  download_url = download_url.replace("://www.markremoverai.com", "://markremoverai.com")
+
+================================================================================
+WORKING STARTUP COMMAND
+================================================================================
+
+cd /d/watermarkz && export REDIS_URL=$(cat redis_url.txt) && export API_BASE_URL="https://markremoverai.com" && export USE_NEUFLOW=1 && export ENABLE_FP8_TRANSFORMER=1 && export ENABLE_DCNV4_RFCNET=1 && "$LOCALAPPDATA/Programs/Python/Python312/python.exe" -u -m celery   -A server_production2.celery worker   -Q celery,propainter --pool=threads --concurrency=4
+
+================================================================================

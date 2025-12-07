@@ -27,6 +27,15 @@ class YOLOWatermarkDetector:
             model_path: Path to custom YOLOv8 model, or None to use batch TensorRT engine
             require_tensorrt: Ignored - always uses batch TensorRT engine (no fallbacks)
         """
+        # Check if YOLO is disabled (for Docker workers where masks are pre-provided)
+        if os.getenv('YOLO_REQUIRE_TENSORRT', '1') == '0':
+            print("[YOLO] YOLO_REQUIRE_TENSORRT=0 - running in DUMMY mode (masks pre-provided)")
+            self.model = None
+            self.use_yolo = False
+            self._require_tensorrt = False
+            self._using_tensorrt = False
+            return
+
         try:
             print("Loading YOLOv8 watermark detection model...")
             from ultralytics import YOLO
