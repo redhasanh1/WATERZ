@@ -2908,8 +2908,8 @@ def process_segment_task(self, segment_data):
         frames_copied = 0
 
         # 🔥 TEMPORAL CONTEXT FIX: Define padding BEFORE if/else so both paths have access
-        # neighbor_length=10 means ±5 frames needed for temporal context
-        neighbor_padding = 5
+        # neighbor_length=10 in ProPainter needs ±10 frames external padding for proper temporal context
+        neighbor_padding = 10
         padded_start = max(0, start_frame - neighbor_padding)
         # 🔥 CLAMP padded_end to video length (fixes last segment artifacts!)
         total_frames_video = segment_data.get('total_frames', end_frame + neighbor_padding + 1)
