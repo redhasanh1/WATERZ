@@ -2744,6 +2744,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 'temp_base_url': temp_base_url,
                 'api_base': api_base_url,
                 'upload_filename': os.path.basename(video_path),
+                'total_frames': frames_processed,  # For clamping padded_end on last segment
             })
 
         result = {
@@ -2910,7 +2911,9 @@ def process_segment_task(self, segment_data):
         # neighbor_length=10 means ±5 frames needed for temporal context
         neighbor_padding = 5
         padded_start = max(0, start_frame - neighbor_padding)
-        padded_end = end_frame + neighbor_padding  # May be recalculated with total_frames later
+        # 🔥 CLAMP padded_end to video length (fixes last segment artifacts!)
+        total_frames_video = segment_data.get('total_frames', end_frame + neighbor_padding + 1)
+        padded_end = min(end_frame + neighbor_padding, total_frames_video - 1)
 
         # Initialize memory arrays (used by both paths, empty for multi-PC disk-based mode)
         segment_frames_memory = []
