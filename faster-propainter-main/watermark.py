@@ -532,9 +532,11 @@ def pipeline(
             masks_dilated = []
 
             for mask_np in masks_array:
-                # Ensure grayscale
-                if len(mask_np.shape) == 3:
+                # Ensure grayscale (handle both 3-channel BGR and 1-channel with extra dim)
+                if len(mask_np.shape) == 3 and mask_np.shape[2] >= 3:
                     mask_np = cv2.cvtColor(mask_np, cv2.COLOR_BGR2GRAY)
+                elif len(mask_np.shape) == 3 and mask_np.shape[2] == 1:
+                    mask_np = mask_np[:, :, 0]  # Squeeze single channel dimension
 
                 # Resize if needed
                 if size is not None:
