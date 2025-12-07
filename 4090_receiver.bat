@@ -11,21 +11,21 @@ REM   - Runs ProPainter inpainting
 REM   - Uploads result to B2
 REM ============================================================
 
-REM ✅ AUTO-LOAD REDIS_URL from redis_url.txt
+REM AUTO-LOAD REDIS_URL from redis_url.txt
 if exist redis_url.txt (
-    for /f "usebackq tokens=*" %%A in ("redis_url.txt") do set REDIS_URL=%%A
-    echo [REDIS] Loaded from redis_url.txt: %REDIS_URL%
+    set /p REDIS_URL=<redis_url.txt
+    echo [REDIS] Loaded from redis_url.txt
 ) else (
     echo [REDIS] Using default localhost (redis_url.txt not found)
     set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
 )
 
-REM ✅ AUTO-LOAD TUNNEL_URL from tunnel_url.txt (root) or web\tunnel_url.txt (needed for video download)
+REM AUTO-LOAD TUNNEL_URL from tunnel_url.txt (root) or web\tunnel_url.txt (needed for video download)
 if "%TUNNEL_URL%"=="" (
     if exist "tunnel_url.txt" (
-        for /f "usebackq delims=" %%i in ("tunnel_url.txt") do set "TUNNEL_URL=%%i"
+        set /p TUNNEL_URL=<tunnel_url.txt
     ) else if exist "web\tunnel_url.txt" (
-        for /f "usebackq delims=" %%i in ("web\tunnel_url.txt") do set "TUNNEL_URL=%%i"
+        set /p TUNNEL_URL=<web\tunnel_url.txt
     )
 )
 if not "%TUNNEL_URL%"=="" (
@@ -69,7 +69,7 @@ REM Use explicit Python path to avoid Windows Store stub
 set PYTHON_PATH=%LOCALAPPDATA%\Programs\Python\Python312\python.exe
 if not exist "%PYTHON_PATH%" set PYTHON_PATH=python
 
-REM ⚡ SAM2 INTERACTIVE MODE - NO YOLO DETECTION!
+REM  SAM2 INTERACTIVE MODE - NO YOLO DETECTION!
 set YOLO_REQUIRE_TENSORRT=0
 set USE_INTERACTIVE_SAM2=1
 
@@ -77,45 +77,45 @@ REM Use NeuFlow v2 ONNX (10-70x faster than RAFT!)
 set FORCE_TRT_RAFT=0
 set USE_NEUFLOW=1
 
-REM ⚡ RFCNET TENSORRT (DCNv4): 1.6-2.3x speedup on flow completion
+REM  RFCNET TENSORRT (DCNv4): 1.6-2.3x speedup on flow completion
 set RFCNET_TORCHTRT=0
 set FORCE_TRT_RFCNET=1
 
-REM ⚡ TRANSFORMER TENSORRT: DISABLED (optional optimization)
+REM  TRANSFORMER TENSORRT: DISABLED (optional optimization)
 set FORCE_TRT_TRANSFORMER=0
 
-REM ❌ SAGEATTENTION: DISABLED (incompatible with ProPainter's sparse transformer!)
+REM  SAGEATTENTION: DISABLED (incompatible with ProPainter's sparse transformer!)
 set ENABLE_SAGE_ATTENTION=0
 set SAGE_CUDA_ARCH=89
 
-REM ⚡ FLASH ATTENTION: DISABLED (manual attention is faster!)
+REM  FLASH ATTENTION: DISABLED (manual attention is faster!)
 set ENABLE_FLASH_ATTENTION=0
 
-REM ⚡ FP8 TRANSFORMER: 1.3-1.5x speedup on Linear layers
+REM  FP8 TRANSFORMER: 1.3-1.5x speedup on Linear layers
 set ENABLE_FP8_TRANSFORMER=1
 
-REM ❌ TOKEN MERGING: DISABLED (quality takes priority)
+REM  TOKEN MERGING: DISABLED (quality takes priority)
 set ENABLE_TOKEN_MERGING=0
 
-REM ⚡ FP8 ENCODER/DECODER: 1.3-1.5x speedup
+REM  FP8 ENCODER/DECODER: 1.3-1.5x speedup
 set ENABLE_FP8_ENCODER=1
 set ENABLE_FP8_DECODER=1
 
-REM ⚡ FP8 RFCNET: 1.3-1.5x speedup
+REM  FP8 RFCNET: 1.3-1.5x speedup
 set ENABLE_FP8_RFCNET=1
 
-REM ⚡ DCNv4 RFCNET: 3x speedup on deformable convolution
+REM  DCNv4 RFCNET: 3x speedup on deformable convolution
 set ENABLE_DCNV4_RFCNET=1
 
-REM ❌ NVDEC VIDEO DECODER: DISABLED
+REM  NVDEC VIDEO DECODER: DISABLED
 set ENABLE_NVDEC=0
 
-REM ⚡ TORCH COMPILE: DISABLED (not thread-safe)
+REM  TORCH COMPILE: DISABLED (not thread-safe)
 set USE_TORCH_COMPILE=0
 set TORCH_CUDAGRAPHS=0
 set TORCHINDUCTOR_CUDAGRAPHS=0
 
-REM ⚡ SEGMENT_WORKERS: Number of parallel ProPainter segment workers (2 = share preloaded frames)
+REM  SEGMENT_WORKERS: Number of parallel ProPainter segment workers (2 = share preloaded frames)
 set SEGMENT_WORKERS=2
 
 REM Prefer point prompt for SAM2 tracking (higher quality); set to bbox to force bbox mode
@@ -152,7 +152,7 @@ set SEGMENT_POS_TOLERANCE=50
 set SEGMENT_MIN_LEN_10FPS=3
 set SEGMENT_MERGE_GAP_10FPS=6
 
-REM ⚡ SAM2 TRACKING: NOT USED IN INTERACTIVE MODE (masks provided by user)
+REM  SAM2 TRACKING: NOT USED IN INTERACTIVE MODE (masks provided by user)
 set USE_SAM2_TRACKING=0
 
 REM Windows-side FPS downsample for WSL speed (faster but less accurate for fast objects)
@@ -180,21 +180,14 @@ set CELERY_POOL=threads
 set CELERY_CONCURRENCY=4
 
 echo.
-echo [STARTING] server_production.py worker for YOLO chord tasks...
-echo NOTE: A new window will open for YOLO worker
+echo ============================================================
+echo UNIFIED WORKER - SAM2 + YOLO in ONE process
+echo ============================================================
+echo   - Queues: celery (YOLO chord), propainter (SAM2)
+echo   - Single process = less VRAM, simpler management
+echo ============================================================
 echo.
 
-REM Start server_production.py worker in NEW WINDOW for YOLO chord tasks
-REM Same command as START_CELERY_TRT.bat
-start "YOLO Chord Worker" /D "%~dp0" "%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
-
-REM Give YOLO worker time to initialize
-echo Waiting 5 seconds for YOLO worker to start...
-timeout /t 5 /nobreak >nul
-
-echo.
-echo [STARTING] server_production2.py worker for SAM2/propainter queue...
-echo.
-
-REM Start server_production2.py worker for SAM2 (foreground)
-"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q propainter --loglevel=info --pool=threads --concurrency=4
+REM UNIFIED WORKER: server_production2 imports server_production tasks
+REM Handles both SAM2 interactive AND YOLO chord in ONE worker
+"%PYTHON_PATH%" -u -m celery -A server_production2.celery worker -Q celery,propainter --loglevel=info --pool=threads --concurrency=4

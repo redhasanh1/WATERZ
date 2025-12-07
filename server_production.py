@@ -132,8 +132,9 @@ try:
     GPU_AVAILABLE = True
     print("[OK] GPU/CUDA initialized successfully - worker mode enabled")
 except Exception as e:
-    print(f"[INFO] Running in API-only mode (no GPU): {e}")
-    print("[INFO] This is normal for Railway deployment - local workers handle GPU processing")
+    #GPU init failed silently
+    #Railway mode info suppressed
+    pass
 
 from flask import Flask, request, send_file, jsonify, send_from_directory
 from flask_cors import CORS
@@ -195,10 +196,30 @@ except ImportError as e:
     print(f"[WARNING] Authentication disabled - missing dependencies: {e}")
     print("[INFO] Install with: pip install google-auth google-auth-oauthlib bcrypt psycopg2-binary")
 
-# [INIT] FFmpeg/FFprobe path detection with fallback
+# [INIT] FFmpeg/FFprobe path detection (check common locations, no download)
 def get_ffmpeg_executables():
-    """Get FFmpeg and FFprobe paths with fallback to static-ffmpeg."""
-    # Try system PATH first (best performance)
+    """Get FFmpeg and FFprobe paths - check common locations first, then PATH."""
+
+    # Common FFmpeg install locations on Windows
+    common_locations = [
+        os.path.join(SCRIPT_DIR, 'ffmpeg'),  # Local project folder
+        r'C:\ffmpeg\bin',                     # Common install location
+        r'C:\ffmpeg',                         # Another common location
+        r'C:\Program Files\ffmpeg\bin',
+        r'C:\Program Files (x86)\ffmpeg\bin',
+        os.path.expandvars(r'%LOCALAPPDATA%\Programs\ffmpeg\bin'),
+        os.path.expandvars(r'%USERPROFILE%\ffmpeg\bin'),
+    ]
+
+    # Check common locations first
+    for location in common_locations:
+        ffmpeg_path = os.path.join(location, 'ffmpeg.exe')
+        ffprobe_path = os.path.join(location, 'ffprobe.exe')
+        if os.path.exists(ffmpeg_path) and os.path.exists(ffprobe_path):
+            print(f"[OK] Using FFmpeg from: {location}", flush=True)
+            return ffmpeg_path, ffprobe_path
+
+    # Try system PATH
     ffmpeg_path = shutil.which('ffmpeg')
     ffprobe_path = shutil.which('ffprobe')
 
@@ -206,19 +227,10 @@ def get_ffmpeg_executables():
         print(f"[OK] Using system FFmpeg: {ffmpeg_path}")
         return ffmpeg_path, ffprobe_path
 
-    # Fallback to static-ffmpeg (includes BOTH ffmpeg and ffprobe!)
-    try:
-        from static_ffmpeg import run
-        ffmpeg_path, ffprobe_path = run.get_or_fetch_platform_executables_else_raise()
-        print(f"[OK] Using static-ffmpeg: {ffmpeg_path}")
-        print(f"[OK] FFprobe available: {ffprobe_path}")
-        return ffmpeg_path, ffprobe_path
-    except ImportError:
-        print("[ERROR] static-ffmpeg not installed and no system FFmpeg found")
-        raise RuntimeError("FFmpeg/FFprobe not available. Install via: pip install static-ffmpeg")
-    except Exception as e:
-        print(f"[ERROR] Failed to get static-ffmpeg executables: {e}")
-        raise RuntimeError(f"FFmpeg/FFprobe initialization failed: {e}")
+    # Skip static_ffmpeg download - it can hang indefinitely
+    print("[WARNING] FFmpeg not found! Video encoding will fail.")
+    print("[WARNING] Install FFmpeg to C:\\ffmpeg\\bin or D:\\watermarkz\\ffmpeg\\")
+    return None, None
 
 # Initialize FFmpeg paths at module level (before Celery workers start)
 # FFmpeg only needed on local workers (video processing), not on Railway API
@@ -228,6 +240,8 @@ except Exception as e:
     FFMPEG_EXE, FFPROBE_EXE = None, None
     if not GPU_AVAILABLE:
         print(f"[INFO] FFmpeg not available (API-only mode): {e}")
+
+print("[DEBUG] FFmpeg init complete, creating Flask app...", flush=True)
 
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
@@ -251,11 +265,13 @@ CORS(
     allow_headers=["Content-Type", "ngrok-skip-browser-warning"],
     expose_headers=["Content-Disposition"]
 )
+print("[DEBUG] Flask app + CORS created", flush=True)
 
 # ----------------------------------------------------------------------------
 # Database Connection Pool (for user authentication)
 # ----------------------------------------------------------------------------
 db_pool = None
+print("[DEBUG] About to check database init...", flush=True)
 # Skip database init for GPU workers (they don't need auth, and it can hang)
 if AUTH_ENABLED and not GPU_AVAILABLE:
     try:
@@ -277,6 +293,8 @@ if AUTH_ENABLED and not GPU_AVAILABLE:
     except Exception as e:
         print(f"[ERROR] Failed to initialize database pool: {e}")
         AUTH_ENABLED = False
+
+print("[DEBUG] Database init block passed (skipped for GPU)", flush=True)
 
 @contextmanager
 def get_db():
@@ -366,6 +384,8 @@ def require_credits(min_credits=1):
         return decorated_function
     return decorator
 
+print("[DEBUG] Decorator definitions complete", flush=True)
+print("[DEBUG] About to check REDIS_URL...", flush=True)
 # ----------------------------------------------------------------------------
 # Redis URL Definition (needed for Session and Celery)
 # ----------------------------------------------------------------------------
