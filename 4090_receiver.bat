@@ -176,40 +176,27 @@ set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
 REM ============================================================
-REM WORKER MODE SELECTION
+REM DUAL WORKER MODE - SAM2 + YOLO in parallel
 REM ============================================================
-REM SAM2 mode: solo pool (1 task at a time) - safest for VRAM
-REM YOLO mode: threads pool with 4 workers - FAST parallel processing!
-REM
-REM To run YOLO parallel mode (like server_production.py):
-REM   set WORKER_MODE=yolo
-REM   OR run: 4090_receiver.bat yolo
+REM   - SAM2 worker: server_production2.py on queue propainter (solo)
+REM   - YOLO worker: server_production.py on queue yolo (4 threads)
 REM ============================================================
 
-REM Check for command-line argument or environment variable
-if "%1"=="yolo" set WORKER_MODE=yolo
-if "%WORKER_MODE%"=="" set WORKER_MODE=sam2
+echo.
+echo ============================================================
+echo 4090 RECEIVER - Dual Worker Mode
+echo   - SAM2: server_production2 on propainter (solo)
+echo   - YOLO: server_production on yolo (4 threads, FAST!)
+echo ============================================================
+echo.
 
-if "%WORKER_MODE%"=="yolo" (
-    echo.
-    echo ============================================================
-    echo YOLO PARALLEL MODE - Fast 4-worker processing!
-    echo   - Queue: yolo
-    echo   - Pool: threads with 4 workers
-    echo   - Uses Celery chord for parallel segments
-    echo   - Background encoder for streaming NVENC
-    echo ============================================================
-    echo.
-    set YOLO_REQUIRE_TENSORRT=1
-    "%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q yolo --loglevel=info --pool=threads --concurrency=4
-) else (
-    echo.
-    echo ============================================================
-    echo SAM2 MODE - Solo worker for interactive masks
-    echo   - Queue: propainter
-    echo   - Pool: solo (1 task at a time)
-    echo   - Uses ThreadPoolExecutor for parallel segments
-    echo ============================================================
-    echo.
-    "%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q propainter --loglevel=info --pool=solo
-)
+REM Start YOLO worker in background (server_production.py with 4 threads)
+echo [STARTING] YOLO worker (server_production.py, 4 threads)...
+start /B "" "%PYTHON_PATH%" -m celery -A server_production.celery worker -Q yolo --loglevel=info --pool=threads --concurrency=4
+
+REM Small delay to let YOLO worker initialize
+timeout /t 2 /nobreak >nul
+
+REM Start SAM2 worker in foreground (server_production2.py with 4 threads for YOLO parallel)
+echo [STARTING] SAM2 worker (server_production2.py, 4 threads)...
+"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q propainter --loglevel=info --pool=threads --concurrency=4

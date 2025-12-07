@@ -385,6 +385,389 @@ def clear_gpu_memory():
     except:
         pass
 
+
+#============================================================================
+# YOLO MODE: Fast ProPainter segment processing (ported from server_production.py)
+# Uses ProcessPoolExecutor for process isolation (no GPU contention)
+#============================================================================
+
+def _init_gpu_worker(gpu_id):
+    """
+    Initialize worker process with specific GPU assignment.
+    Each worker gets exclusive access to one GPU.
+    """
+    import os
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    print(f"Worker initialized with GPU {gpu_id}")
+
+
+def _process_propainter_segment_yolo(seg_idx, total_segments, segment, context):
+    """
+    Process a single smart-cropped segment with faster-propainter (YOLO mode).
+    Uses disk-based I/O for process isolation.
+
+    Returns a tuple (seg_idx, seg_cleaned_dir, crop_info, temp_dirs_to_cleanup).
+    """
+    import cv2
+    import shutil
+    from crop_utils import calculate_crop_region, estimate_speedup
+
+    start_frame, end_frame, seg_bbox = segment
+    seg_duration = end_frame - start_frame  # end_frame is exclusive
+
+    base_name = context['base_name']
+    unique_suffix = context['unique_suffix']
+    width = context['width']
+    height = context['height']
+    mask_dir = context['mask_dir']
+    original_frames_dir = context['original_frames_dir']
+    fps = context.get('fps', 30)
+
+    seg_label = f"{seg_idx + 1}/{total_segments}"
+    print(f"\n[YOLO SEGMENT] Processing segment {seg_label}: frames {start_frame}-{end_frame} ({seg_duration} frames)")
+
+    crop_x, crop_y, crop_w, crop_h = calculate_crop_region(seg_bbox, width, height, padding_ratio=0.2, min_size=128)
+    speedup = estimate_speedup((width, height), (crop_w, crop_h))
+    print(f"   [CROP] Crop region: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h} (estimated {speedup:.1f}x speedup)")
+
+    seg_prefix = f"{base_name}_{unique_suffix}_seg{seg_idx}"
+    seg_frames_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_frames")
+    seg_cropped_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cropped")
+    seg_mask_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_masks")
+    seg_output_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_output")
+    seg_cleaned_dir = os.path.join(TEMP_DIR, f"{seg_prefix}_cleaned")
+
+    for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+        os.makedirs(path, exist_ok=True)
+
+    try:
+        # DEBUG: Check mask directory status
+        print(f"   [DEBUG] mask_dir = {mask_dir}")
+        print(f"   [DEBUG] mask_dir exists = {os.path.isdir(mask_dir)}")
+        if os.path.isdir(mask_dir):
+            mask_files = sorted([f for f in os.listdir(mask_dir) if f.endswith('.png')])
+            print(f"   [DEBUG] mask_dir has {len(mask_files)} PNG files")
+            if mask_files:
+                print(f"   [DEBUG] First 5 masks: {mask_files[:5]}")
+                print(f"   [DEBUG] Last 5 masks: {mask_files[-5:]}")
+        print(f"   [DEBUG] Checking frame range: {start_frame} to {end_frame-1}")
+
+        # Copy frames AND masks together (ensures 1:1 matching - fixes index out of range error!)
+        # Only copy frames that have corresponding masks to prevent mismatch in ProPainter
+        frames_copied = 0
+        print(f"   [COPY] Copying frames + masks for segment (frames {start_frame}-{end_frame-1})...")
+        for frame_idx in range(start_frame, end_frame):
+            # Check mask exists first
+            mask_file = f"{frame_idx:05d}.png"
+            mask_src = os.path.join(mask_dir, mask_file)
+            if not os.path.exists(mask_src):
+                continue  # Skip frame if no mask - keeps them 1:1 matched
+
+            # Check frame exists
+            frame_src = os.path.join(original_frames_dir, f"{frame_idx:04d}.png")
+            if not os.path.exists(frame_src):
+                print(f"[WARNING] Frame {frame_idx} ({frame_idx:04d}.png) not found, skipping")
+                continue
+
+            # Read and validate mask
+            mask = cv2.imread(mask_src, cv2.IMREAD_GRAYSCALE)
+            if mask is None:
+                continue
+
+            # Copy frame to segment dir
+            dst_frame = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+            shutil.copy2(frame_src, dst_frame)
+
+            # Crop frame for ProPainter
+            frame = cv2.imread(frame_src)
+            if frame is not None:
+                cropped_frame = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                cv2.imwrite(os.path.join(seg_cropped_dir, f"{frames_copied:04d}.png"), cropped_frame)
+
+            # Crop and save mask (same index as frame!)
+            cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+            cv2.imwrite(os.path.join(seg_mask_dir, f"{frames_copied:04d}.png"), cropped_mask)
+
+            frames_copied += 1
+
+        if frames_copied == 0:
+            raise RuntimeError(f"No frames with masks copied for segment {seg_idx}")
+
+        print(f"   [OK] Copied {frames_copied} frame+mask pairs (1:1 matched)")
+
+        # Update seg_duration to actual frames copied (may be less if masks were missing)
+        seg_duration = frames_copied
+
+        # Run ProPainter pipeline
+        print(f"   [PAINT] Running faster-propainter pipeline on cropped segment...")
+        try:
+            faster_propainter_pipeline = get_propainter_pipeline()
+
+            import torch
+            use_fp16 = torch.cuda.is_available()
+
+            print(f"   [RUNNING] Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, FP16={use_fp16}")
+
+            faster_propainter_pipeline(
+                video=seg_cropped_dir,
+                mask=seg_mask_dir,
+                output=seg_output_dir,
+                resize_ratio=1.0,
+                mask_dilation=4,
+                ref_stride=10,
+                neighbor_length=10,
+                subvideo_length=120,
+                raft_iter=10,
+                mode="video_inpainting",
+                save_frames=True,
+                fp16=use_fp16
+            )
+
+            print(f"   [OK] faster-propainter segment {seg_idx+1} completed")
+
+        except Exception as exc:
+            print(f"[ERROR] faster-propainter failed on segment {seg_idx}: {exc}")
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(f"faster-propainter failed on segment {seg_idx}: {exc}") from exc
+
+        # Find output frames
+        seg_propainter_frames = os.path.join(seg_output_dir, os.path.basename(seg_cropped_dir), 'frames')
+        if not os.path.exists(seg_propainter_frames):
+            raise RuntimeError(f"ProPainter output frames not found for segment {seg_idx}")
+
+        # Merge cleaned region back to full frames
+        print(f"   [MERGE] Merging cleaned region back to full frames...")
+        try:
+            import torch
+            if torch.cuda.is_available():
+                for frame_idx in range(seg_duration):
+                    frame_file = f"{frame_idx:04d}.png"
+                    orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                    clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+
+                    if clean is not None and orig is not None:
+                        orig_gpu = torch.from_numpy(orig).cuda()
+                        clean_gpu = torch.from_numpy(clean).cuda()
+                        orig_gpu[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = clean_gpu
+                        result_frame = orig_gpu.cpu().numpy()
+                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+                    elif orig is not None:
+                        cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), orig)
+                print(f"   [OK] GPU merge completed")
+            else:
+                raise RuntimeError("CUDA not available")
+        except Exception as e:
+            # Fallback to CPU merge
+            print(f"   [WARNING] GPU merge failed ({e}), falling back to CPU...")
+            for frame_idx in range(seg_duration):
+                frame_file = f"{frame_idx:04d}.png"
+                orig = cv2.imread(os.path.join(seg_frames_dir, frame_file))
+                clean = cv2.imread(os.path.join(seg_propainter_frames, frame_file))
+                if clean is not None and orig is not None:
+                    result_frame = orig.copy()
+                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = clean
+                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), result_frame)
+                elif orig is not None:
+                    cv2.imwrite(os.path.join(seg_cleaned_dir, frame_file), orig)
+
+        # Return cleaned frames directory for later encoding
+        temp_dirs = [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir]
+        return seg_idx, seg_cleaned_dir, {'fps': fps, 'crop': (crop_x, crop_y, crop_w, crop_h)}, temp_dirs
+
+    except Exception as e:
+        # Cleanup on error
+        for path in [seg_frames_dir, seg_cropped_dir, seg_mask_dir, seg_output_dir, seg_cleaned_dir]:
+            shutil.rmtree(path, ignore_errors=True)
+        raise
+
+
+#============================================================================
+# YOLO SEGMENT CELERY TASK (for parallel processing via chord)
+#============================================================================
+
+@celery.task(bind=True, name='watermark.process_yolo_segment_local')
+def process_yolo_segment_local_task(self, segment_data):
+    """
+    Process a single YOLO segment via Celery task (for chord parallelism).
+    This runs on the propainter queue with --pool=threads for TRUE parallel execution.
+    """
+    try:
+        seg_idx = segment_data['seg_idx']
+        total_segments = segment_data['total_segments']
+        segment = segment_data['segment']  # (start, end, bbox)
+        context = segment_data['context']
+
+        print(f"[YOLO TASK] Processing segment {seg_idx+1}/{total_segments}")
+        self.update_state(state='PROCESSING', meta={'progress': 0, 'status': f'Segment {seg_idx+1}/{total_segments}'})
+
+        # Call the existing segment processing function
+        result = _process_propainter_segment_yolo(seg_idx, total_segments, segment, context)
+
+        print(f"[YOLO TASK] Segment {seg_idx+1}/{total_segments} complete")
+        return {
+            'seg_idx': result[0],
+            'cleaned_dir': result[1],
+            'crop_info': result[2],
+            'temp_dirs': result[3]
+        }
+    except Exception as e:
+        print(f"[ERROR] YOLO segment {seg_idx} failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.finalize_yolo_local')
+def finalize_yolo_local_task(self, segment_results, finalize_data):
+    """
+    Finalize YOLO processing: encode segments to final video and upload to B2.
+    Called by chord after all segments complete.
+    """
+    import subprocess
+    import shutil
+
+    video_id = finalize_data['video_id']
+    video_path = finalize_data['video_path']
+    base_name = finalize_data['base_name']
+    unique_suffix = finalize_data['unique_suffix']
+    original_frames_dir = finalize_data['original_frames_dir']
+    fps = finalize_data['fps']
+    total_segments = finalize_data['total_segments']
+
+    print(f"\n[YOLO FINALIZE] Encoding video from {total_segments} segments...")
+    self.update_state(state='PROCESSING', meta={'progress': 75, 'status': 'Encoding (NVENC)'})
+
+    # Sort results by segment index
+    sorted_results = sorted(segment_results, key=lambda x: x['seg_idx'])
+    segment_cleaned_dirs = [r['cleaned_dir'] for r in sorted_results]
+    segment_temp_dirs = [r['temp_dirs'] for r in sorted_results]
+
+    # Check for failed segments
+    if any(d is None for d in segment_cleaned_dirs):
+        raise RuntimeError("One or more segments failed ProPainter processing")
+
+    output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
+
+    try:
+        # For single segment, encode directly
+        if len(segment_cleaned_dirs) == 1:
+            seg_cleaned_dir = segment_cleaned_dirs[0]
+            encode_cmd = [
+                str(FFMPEG_EXE), '-y',
+                '-framerate', str(int(fps)),
+                '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+                '-i', video_path,
+                '-map', '0:v:0',
+                '-map', '1:a:0?',
+                '-c:v', 'h264_nvenc',
+                '-preset', 'p1',
+                '-b:v', '8M',
+                '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                output_path
+            ]
+            subprocess.run(encode_cmd, capture_output=True, check=True)
+        else:
+            # Multiple segments: encode each then concat
+            segment_videos = []
+            for seg_idx, seg_cleaned_dir in enumerate(segment_cleaned_dirs):
+                seg_video = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_seg{seg_idx}.mp4")
+                encode_cmd = [
+                    str(FFMPEG_EXE), '-y',
+                    '-framerate', str(int(fps)),
+                    '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
+                    '-c:v', 'h264_nvenc',
+                    '-preset', 'p1',
+                    '-b:v', '8M',
+                    '-pix_fmt', 'yuv420p',
+                    seg_video
+                ]
+                subprocess.run(encode_cmd, capture_output=True, check=True)
+                segment_videos.append(seg_video)
+
+            # Concat segments
+            concat_list = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_concat.txt")
+            with open(concat_list, 'w') as f:
+                for v in segment_videos:
+                    f.write(f"file '{v}'\n")
+
+            concat_cmd = [
+                str(FFMPEG_EXE), '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', concat_list,
+                '-i', video_path,
+                '-map', '0:v:0',
+                '-map', '1:a:0?',
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                output_path
+            ]
+            subprocess.run(concat_cmd, capture_output=True, check=True)
+
+            # Cleanup segment videos
+            for v in segment_videos:
+                try:
+                    os.remove(v)
+                except:
+                    pass
+            try:
+                os.remove(concat_list)
+            except:
+                pass
+
+        print(f"[YOLO FINALIZE] Video saved: {output_path}")
+
+        # Cleanup temp directories
+        shutil.rmtree(original_frames_dir, ignore_errors=True)
+        for temp_dirs in segment_temp_dirs:
+            if temp_dirs:
+                for d in temp_dirs:
+                    shutil.rmtree(d, ignore_errors=True)
+        for d in segment_cleaned_dirs:
+            if d:
+                shutil.rmtree(d, ignore_errors=True)
+
+        # Upload to B2
+        B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
+        B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+        B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+        B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+        b2_url = None
+        if B2_KEY_ID and B2_APP_KEY:
+            try:
+                import b2sdk.v2 as b2
+                info = b2.InMemoryAccountInfo()
+                b2_api = b2.B2Api(info)
+                b2_api.authorize_account('production', B2_KEY_ID, B2_APP_KEY)
+                bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+
+                result_filename = os.path.basename(output_path)
+                b2_path = f"results/{result_filename}"
+                bucket.upload_local_file(output_path, b2_path)
+                b2_url = f"{B2_CDN_URL}/{b2_path}"
+                print(f"[B2] Uploaded result: {b2_url}")
+            except Exception as e:
+                print(f"[B2] Upload failed: {e}")
+
+        return {
+            'status': 'success',
+            'output_path': output_path,
+            'b2_url': b2_url,
+            'segments': total_segments,
+            'mode': 'yolo'
+        }
+
+    except Exception as e:
+        print(f"[ERROR] YOLO finalize failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
 #============================================================================
 # YOLO DETECTOR (for YOLO mode - separate from SAM2)
 #============================================================================
@@ -2112,15 +2495,16 @@ def process_yolo():
     # Get API base URL for result upload
     api_base = os.getenv('TUNNEL_URL', os.getenv('API_BASE_URL', 'http://localhost:5001'))
 
-    # NEW: Run entirely on Windows (no WSL chain!)
-    result = process_video_yolo_windows.apply_async(
-        args=[video_path, video_id, api_base],
-        queue='propainter'  # Uses same queue as ProPainter (Windows GPU worker)
+    # Use server_production.py's fast YOLO task (4 thread workers!)
+    result = celery.send_task(
+        'watermark.remove_video',
+        args=[video_path],
+        queue='yolo'  # Goes to server_production.py worker (4 threads)
     )
 
-    print(f"[YOLO] Queued Windows YOLO task: {result.id}")
+    print(f"[YOLO] Queued YOLO task: {result.id}")
     print(f"  - Video: {video_path}")
-    print(f"  - Mode: Windows TensorRT (batch 64, ~1-2ms/frame)")
+    print(f"  - Mode: server_production.py (4 threads, FAST!)")
 
     return jsonify({
         'task_id': result.id,
@@ -2541,9 +2925,99 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         if len(segments) != orig_count:
             print(f"[SAM2] Filtered empty masks: {orig_count} -> {len(segments)} segments")
 
-        print(f"[SAM2] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")
+        print(f"[{mode.upper()}] Detected {len(segments)} segments (FULL-FPS, boundary-safe)")
         for idx, (start, end, bbox) in enumerate(segments):
-            print(f"[SAM2]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
+            print(f"[{mode.upper()}]   Segment {idx+1}: frames {start}-{end-1} ({end-start}f) bbox={bbox}")
+
+        #============================================================================
+        # YOLO MODE: Use Celery chord for TRUE parallel segment processing
+        # Each segment task runs on a separate Celery thread = no contention!
+        #============================================================================
+        if mode == 'yolo':
+            import subprocess
+            import shutil
+            from celery import chord, group
+
+            num_workers = int(os.getenv('SEGMENT_WORKERS', '4'))
+            print(f"[YOLO] Using Celery chord ({num_workers} parallel Celery threads)")
+
+            # Extract original frames to disk (required for segment processing)
+            unique_suffix = video_id or str(uuid.uuid4())[:8]
+            base_name = os.path.splitext(os.path.basename(video_path))[0]
+            original_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{unique_suffix}_originals")
+            os.makedirs(original_frames_dir, exist_ok=True)
+
+            print(f"[YOLO] Extracting {total_frames} frames to disk...")
+            self.update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Extracting frames'})
+
+            extract_cmd = [
+                str(FFMPEG_EXE), '-i', video_path,
+                '-qscale:v', '2',
+                '-start_number', '0',
+                os.path.join(original_frames_dir, '%04d.png')
+            ]
+            subprocess.run(extract_cmd, capture_output=True, check=True)
+
+            # Build segment context for workers
+            segment_context = {
+                'base_name': base_name,
+                'unique_suffix': unique_suffix,
+                'width': width,
+                'height': height,
+                'fps': original_fps,
+                'mask_dir': masks_dir,
+                'original_frames_dir': original_frames_dir,
+            }
+
+            # Build segment task data for chord
+            segment_tasks_data = []
+            for seg_idx, seg in enumerate(segments):
+                segment_tasks_data.append({
+                    'seg_idx': seg_idx,
+                    'total_segments': len(segments),
+                    'segment': seg,  # (start, end, bbox)
+                    'context': segment_context,
+                })
+
+            print(f"[YOLO] Dispatching {len(segments)} segments via Celery chord...")
+            self.update_state(state='PROCESSING', meta={'progress': 30, 'status': f'Dispatching {len(segments)} parallel tasks'})
+
+            # Create chord: segment tasks run in parallel, then finalize
+            # IMPORTANT: Must set queue='propainter' or tasks go to wrong queue!
+            segment_sigs = [
+                process_yolo_segment_local_task.s(seg_data).set(queue='propainter')
+                for seg_data in segment_tasks_data
+            ]
+
+            # Prepare finalize data
+            finalize_data = {
+                'video_id': video_id,
+                'video_path': video_path,
+                'base_name': base_name,
+                'unique_suffix': unique_suffix,
+                'original_frames_dir': original_frames_dir,
+                'fps': original_fps,
+                'total_segments': len(segments),
+            }
+
+            # Create and run chord synchronously (wait for all segments + finalize)
+            # IMPORTANT: Finalize task must also go to propainter queue!
+            workflow = chord(segment_sigs)(finalize_yolo_local_task.s(finalize_data=finalize_data).set(queue='propainter'))
+
+            print(f"[YOLO] Chord dispatched! Waiting for {len(segments)} segments...")
+
+            # Return chord task ID for tracking
+            return {
+                'chord_id': f'yolo_chord_{video_id}',
+                'status': 'processing',
+                'message': f'YOLO chord: {len(segments)} segments processing in parallel',
+                'mode': 'yolo',
+                'finalize_task_id': workflow.id
+            }
+
+        #============================================================================
+        # SAM2 MODE: Use in-memory VRAM processing with ThreadPoolExecutor
+        #============================================================================
 
         # Now reuse the same merging + ProPainter logic as the main task
         # For brevity, call back into process_sam2_interactive_task's internal pipeline is not trivial; so inline minimal subset
@@ -2658,8 +3132,10 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         # Process segments (parallel when enabled, like main task)
         segments_to_process = segments or [(0, total_frames, [0, 0, width, height])]
 
-        # Use mode-specific worker count (YOLO: 4, SAM2: 2)
-        segment_workers = 4 if mode == 'yolo' else SEGMENT_WORKERS
+        # Use mode-specific worker count
+        # YOLO: 1 (sequential - no GPU contention, each segment ~3-7s)
+        # SAM2: 2 (parallel with CUDA streams)
+        segment_workers = 1 if mode == 'yolo' else SEGMENT_WORKERS
 
         if SAM2_PARALLEL_SEGMENTS and segment_workers > 1 and len(segments_to_process) > 1:
             print(f"[{mode.upper()}] Processing {len(segments_to_process)} segments in PARALLEL (workers={min(segment_workers, len(segments_to_process))})...")
