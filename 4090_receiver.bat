@@ -176,7 +176,25 @@ set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
 REM Use thread pool with 4 workers for TRUE parallel segment processing
-REM -Q propainter ensures this worker handles ProPainter tasks from 4090_sender
 set CELERY_POOL=threads
 set CELERY_CONCURRENCY=4
+
+echo.
+echo [STARTING] server_production.py worker for YOLO chord tasks...
+echo NOTE: A new window will open for YOLO worker
+echo.
+
+REM Start server_production.py worker in NEW WINDOW for YOLO chord tasks
+REM Same command as START_CELERY_TRT.bat
+start "YOLO Chord Worker" /D "%~dp0" "%PYTHON_PATH%" -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4
+
+REM Give YOLO worker time to initialize
+echo Waiting 5 seconds for YOLO worker to start...
+timeout /t 5 /nobreak >nul
+
+echo.
+echo [STARTING] server_production2.py worker for SAM2/propainter queue...
+echo.
+
+REM Start server_production2.py worker for SAM2 (foreground)
 "%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q propainter --loglevel=info --pool=threads --concurrency=4

@@ -2201,17 +2201,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         # REVOLUTIONARY: Store all frames in VRAM with YUV420 compression (8:1 ratio!)
         vram_frames = {}  # {frame_idx: compressed_yuv420_dict}
-
-        # PRE-LOAD ALL FRAMES ONCE (workers will share!)
-        print(f"[SAM2] Pre-loading {total_frames} frames to shared VRAM (YUV420)...")
         preloaded_frames = {}  # {frame_idx: compressed_yuv420}
-        cap_preload = cv2.VideoCapture(video_path)
-        for frame_idx in range(total_frames):
-            ret, frame = cap_preload.read()
-            if ret:
-                preloaded_frames[frame_idx] = VRAMCompressor.compress_frame(frame)
-        cap_preload.release()
-        print(f"[SAM2] All {len(preloaded_frames)} frames pre-loaded - workers will SHARE!")
+
+        # YOLO MODE: Skip VRAM pre-load - chord tasks use disk-based processing
+        if mode == 'yolo':
+            print(f"[YOLO] Skipping VRAM pre-load - chord tasks handle their own frames")
+        else:
+            # SAM2 MODE: PRE-LOAD ALL FRAMES ONCE (workers will share!)
+            print(f"[SAM2] Pre-loading {total_frames} frames to shared VRAM (YUV420)...")
+            cap_preload = cv2.VideoCapture(video_path)
+            for frame_idx in range(total_frames):
+                ret, frame = cap_preload.read()
+                if ret:
+                    preloaded_frames[frame_idx] = VRAMCompressor.compress_frame(frame)
+            cap_preload.release()
+            print(f"[SAM2] All {len(preloaded_frames)} frames pre-loaded - workers will SHARE!")
 
         def process_segment_local(seg_idx, start_f, end_f, seg_bbox):
             duration = end_f - start_f
@@ -2295,21 +2299,107 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             # Return success flag and metadata (NOT frames!)
             return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
 
+        def process_segment_disk(seg_idx, start_f, end_f, seg_bbox):
+            """DISK-based segment processing (like START_CELERY_TRT) - no VRAM!"""
+            duration = end_f - start_f
+            log_end = end_f - 1 if end_f > start_f else end_f
+            seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
+                list(seg_bbox), width, height, padding_ratio=0.2, min_size=128
+            )
+            movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
+            neighbor_length, subvideo_length = (2, 30) if movement < 10 else (3, 60)
+            pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
+            pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
+            proc_start = start_f - pad_left
+            proc_end = end_f + pad_right
+
+            print(f"[YOLO] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}")
+
+            # READ FRAMES FROM VIDEO FILE (disk-based!)
+            seg_frames = []
+            seg_masks = []
+            cap_seg = cv2.VideoCapture(video_path)
+            cap_seg.set(cv2.CAP_PROP_POS_FRAMES, proc_start)
+            for frame_idx in range(proc_start, proc_end):
+                ret, frame = cap_seg.read()
+                if ret:
+                    seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                    seg_frames.append(np.ascontiguousarray(seg_frame))
+                    if frame_idx < len(all_masks):
+                        seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                        seg_masks.append(np.ascontiguousarray(seg_mask))
+            cap_seg.release()
+
+            if not seg_frames or not seg_masks:
+                print(f"[YOLO] WARNING: Segment {seg_idx+1} has no frames/masks!")
+                return seg_idx, None, None, (proc_start, proc_end)
+
+            # Run ProPainter
+            output_frames = faster_propainter_pipeline(
+                video='dummy', mask='dummy', output=output_dir,
+                resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
+                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                raft_iter=10, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
+                fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
+                return_frames=True
+            )
+
+            if not output_frames:
+                print(f"[YOLO] WARNING: Segment {seg_idx+1} returned no frames!")
+                return seg_idx, None, None, (proc_start, proc_end)
+
+            # SAVE OUTPUT FRAMES TO DISK (shared directory)
+            # Re-read original frames and composite output onto them
+            cap_orig = cv2.VideoCapture(video_path)
+            frames_saved = 0
+            for i, out_frame in enumerate(output_frames):
+                frame_idx = proc_start + i
+                if frame_idx < start_f or frame_idx >= end_f:
+                    continue  # Skip padding
+                cap_orig.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, orig_frame = cap_orig.read()
+                if ret:
+                    orig_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w] = out_frame
+                    out_path = os.path.join(shared_cleaned_dir, f"{frame_idx:06d}.png")
+                    cv2.imwrite(out_path, orig_frame)
+                    processed_frames.add(frame_idx)
+                    frames_saved += 1
+            cap_orig.release()
+            del output_frames
+            print(f"[YOLO] Segment {seg_idx+1}: saved {frames_saved} frames to disk")
+
+            return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
+
         # Process segments (parallel when enabled, like main task)
         segments_to_process = segments or [(0, total_frames, [0, 0, width, height])]
 
-        # YOLO MODE: Process SEQUENTIALLY (no chord = no VRAM explosion!)
-        # Same path as SAM2 with 1 worker - process one segment at a time
-        if mode == 'yolo':
-            print(f"[YOLO] Processing {len(segments_to_process)} segments SEQUENTIALLY (no VRAM explosion)...")
-            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Processing {len(segments_to_process)} segments sequentially'})
-            for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
-                print(f"[YOLO] Segment {seg_idx+1}/{len(segments_to_process)}...")
-                segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
-                # Clear VRAM between segments
-                import torch as _torch
-                _torch.cuda.empty_cache()
-            # Falls through to FFmpeg encoding below (same as SAM2)
+        # YOLO MODE: Forward to server_production.py's prepare_video task (EXACT same flow as START_CELERY_TRT!)
+        # This ensures YOLO detection, mask creation, and segment processing all happen consistently
+        if mode == 'yolo' and len(segments_to_process) > 1:
+            print(f"[YOLO] Forwarding to server_production.py prepare_video task (START_CELERY_TRT flow)...")
+            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': 'Forwarding to YOLO pipeline'})
+
+            # Get API base URL for video download
+            api_base_url = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or ''
+            temp_base_url = os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL') or ''
+
+            # Call server_production.py's prepare_video task - same as START_CELERY_TRT
+            from celery import signature
+            task = signature('prepare_video', args=[video_path], kwargs={
+                'api_base': api_base_url,
+                'temp_base': temp_base_url
+            })
+            result = task.apply_async()
+
+            print(f"[YOLO] Forwarded to prepare_video task: {result.id}")
+            print(f"   This uses the EXACT same code path as START_CELERY_TRT!")
+
+            return {
+                'status': 'processing',
+                'task_id': result.id,
+                'video_id': video_id,
+                'message': 'YOLO: Forwarded to server_production.py pipeline'
+            }
 
         # SAM2 MODE: Use ThreadPoolExecutor (2 workers, VRAM sharing)
         elif SAM2_PARALLEL_SEGMENTS and SEGMENT_WORKERS > 1 and len(segments_to_process) > 1:

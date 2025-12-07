@@ -256,7 +256,8 @@ CORS(
 # Database Connection Pool (for user authentication)
 # ----------------------------------------------------------------------------
 db_pool = None
-if AUTH_ENABLED:
+# Skip database init for GPU workers (they don't need auth, and it can hang)
+if AUTH_ENABLED and not GPU_AVAILABLE:
     try:
         DATABASE_URL = os.getenv('DATABASE_URL')
         if DATABASE_URL:
@@ -378,17 +379,22 @@ else:
 # ----------------------------------------------------------------------------
 # Flask Session Configuration (using Redis for multi-worker stability)
 # ----------------------------------------------------------------------------
-from flask_session import Session
-
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
-app.config['SESSION_TYPE'] = 'redis'
-app.config['SESSION_PERMANENT'] = True
-app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
-app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
-
-# Initialize the session extension
-Session(app)
+# Skip Flask-Session for GPU workers (they don't need web sessions)
+if not GPU_AVAILABLE:
+    try:
+        from flask_session import Session
+        app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
+        app.config['SESSION_TYPE'] = 'redis'
+        app.config['SESSION_PERMANENT'] = True
+        app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
+        app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
+        app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+        Session(app)
+        print("[OK] Flask-Session initialized with Redis")
+    except ImportError:
+        print("[WARNING] flask_session not installed - sessions disabled")
+else:
+    print("[OK] Skipping Flask-Session (GPU worker mode)")
 
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
@@ -2900,6 +2906,19 @@ def process_segment_task(self, segment_data):
         import requests
         frames_copied = 0
 
+        # 🔥 TEMPORAL CONTEXT FIX: Define padding BEFORE if/else so both paths have access
+        # neighbor_length=10 means ±5 frames needed for temporal context
+        neighbor_padding = 5
+        padded_start = max(0, start_frame - neighbor_padding)
+        padded_end = end_frame + neighbor_padding  # May be recalculated with total_frames later
+
+        # Initialize memory arrays (used by both paths, empty for multi-PC disk-based mode)
+        segment_frames_memory = []
+        segment_masks_memory = []
+
+        # Cache key for FRAME_CACHE lookup (defined here so both paths can access)
+        cache_key = f"video_data:{base_name}"
+
         if is_multi_pc:
             # Multi-PC mode: Each worker downloads video directly (faster, no tunnel congestion)
             print(f"   📦 Multi-PC mode: downloading video directly for frames {start_frame}-{end_frame}...")
@@ -2937,9 +2956,10 @@ def process_segment_task(self, segment_data):
                         ret, frame = cap2.read()
                         if not ret:
                             break
-                        if current_frame > end_frame:
+                        # 🔥 FIX: Use padded ranges for neighbor context (same as single-PC mode)
+                        if current_frame > padded_end:
                             break
-                        if current_frame >= start_frame:
+                        if current_frame >= padded_start:
                             dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
                             cv2.imwrite(dst, frame)
                             frames_copied += 1
@@ -2956,15 +2976,8 @@ def process_segment_task(self, segment_data):
             self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Loading frames'})
 
             # [INIT] EXTREME SPEED: Try FRAME_CACHE first (pure memory, INSTANT!)
-            cache_key = f"video_data:{base_name}"
+            # cache_key and segment_frames_memory already initialized before if/else block
             memory_hits = 0
-            segment_frames_memory = []  # Store frames in memory (skip disk!)
-
-            # 🔥 TEMPORAL CONTEXT FIX: Extract with neighbor padding for ProPainter
-            # neighbor_length=10 means ±5 frames needed for temporal context
-            neighbor_padding = 5
-            padded_start = max(0, start_frame - neighbor_padding)
-            padded_end = end_frame + neighbor_padding  # Will be recalculated with total_frames from cache
 
             if cache_key in FRAME_CACHE:
                 # INSTANT access to frames in memory!
@@ -3489,20 +3502,33 @@ def process_segment_task(self, segment_data):
                     # Crop mask to ROI
                     cropped_mask = segment_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
 
-                    # Convert mask to 3-channel float [0, 1] for alpha blending
-                    if len(cropped_mask.shape) == 2:
-                        # Grayscale mask - convert to 3 channels
-                        mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
+                    # 🔥 DEFENSIVE CHECK: Skip if cropped mask is empty or wrong shape
+                    if cropped_mask.size == 0 or cropped_mask.shape[0] == 0 or cropped_mask.shape[1] == 0:
+                        # Empty mask - just paste cleaned crop directly
+                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cleaned_crop
+                    elif cropped_mask.shape[:2] != cleaned_crop.shape[:2]:
+                        # Shape mismatch - resize mask to match
+                        cropped_mask = cv2.resize(cropped_mask, (cleaned_crop.shape[1], cleaned_crop.shape[0]))
+                        mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0 if len(cropped_mask.shape) == 2 else cropped_mask.astype(float) / 255.0
+                        roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
+                        cleaned_crop_float = cleaned_crop.astype(float)
+                        blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
                     else:
-                        mask_3ch = cropped_mask.astype(float) / 255.0
+                        # Convert mask to 3-channel float [0, 1] for alpha blending
+                        if len(cropped_mask.shape) == 2:
+                            # Grayscale mask - convert to 3 channels
+                            mask_3ch = cv2.cvtColor(cropped_mask, cv2.COLOR_GRAY2BGR).astype(float) / 255.0
+                        else:
+                            mask_3ch = cropped_mask.astype(float) / 255.0
 
-                    # Alpha composite: blend cleaned region using mask as alpha
-                    roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
-                    cleaned_crop_float = cleaned_crop.astype(float)
-                    blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+                        # Alpha composite: blend cleaned region using mask as alpha
+                        roi = result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].astype(float)
+                        cleaned_crop_float = cleaned_crop.astype(float)
+                        blended = (cleaned_crop_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
 
-                    # Paste blended result back
-                    result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
+                        # Paste blended result back
+                        result_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = blended
 
                 # Save back to shared buffer
                 cv2.imwrite(shared_frame_path, result_frame)
