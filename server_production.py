@@ -4839,7 +4839,7 @@ def get_status(task_id):
                     response['current_task_id'] = chord_id  # Frontend will switch to this task_id
                     return jsonify(response), 409  # HTTP 409 Conflict - task superseded
 
-                result_path = result_data.get('path')
+                result_path = result_data.get('path') or result_data.get('output_path')
                 if not result_path:
                     print(f"[ERROR] Task {task_id} SUCCESS but no path in result: {result_data}")
                     return jsonify({'error': 'Invalid result format - missing path'}), 500
