@@ -229,8 +229,6 @@ except Exception as e:
     if not GPU_AVAILABLE:
         print(f"[INFO] FFmpeg not available (API-only mode): {e}")
 
-print("[DEBUG] FFmpeg init done, continuing...")
-
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
 # Stores frames/masks in RAM for instant access (no Redis, no disk!)
@@ -244,9 +242,7 @@ FRAME_CACHE_LOCK = threading.Lock()
 # from mytimer import timer_decorator  
 # from pre_post_process import crop_video_mask, merge_videos_with_mask
 
-print("[DEBUG] Creating Flask app...")
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web'))
-print("[DEBUG] Flask app created, adding CORS...")
 # CORS: allow cross-origin calls to /api/* and accept the ngrok header if present
 CORS(
     app,
@@ -259,11 +255,8 @@ CORS(
 # ----------------------------------------------------------------------------
 # Database Connection Pool (for user authentication)
 # ----------------------------------------------------------------------------
-print("[DEBUG] Checking database connection...")
 db_pool = None
-# Skip database for local Celery workers (only needed for web auth)
-_is_celery_worker = 'celery' in sys.argv[0].lower() or any('celery' in arg.lower() for arg in sys.argv)
-if AUTH_ENABLED and not _is_celery_worker:
+if AUTH_ENABLED:
     try:
         DATABASE_URL = os.getenv('DATABASE_URL')
         if DATABASE_URL:
@@ -283,10 +276,6 @@ if AUTH_ENABLED and not _is_celery_worker:
     except Exception as e:
         print(f"[ERROR] Failed to initialize database pool: {e}")
         AUTH_ENABLED = False
-else:
-    if _is_celery_worker:
-        print("[OK] Skipping database for Celery worker (not needed)")
-print("[DEBUG] Database check done")
 
 @contextmanager
 def get_db():
@@ -379,41 +368,27 @@ def require_credits(min_credits=1):
 # ----------------------------------------------------------------------------
 # Redis URL Definition (needed for Session and Celery)
 # ----------------------------------------------------------------------------
-# Priority: 1) redis_url.txt (local dev), 2) REDIS_URL env var (Railway)
-REDIS_URL = None
-_redis_url_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'redis_url.txt')
-if os.path.exists(_redis_url_file):
-    with open(_redis_url_file, 'r') as f:
-        REDIS_URL = f.read().strip()
-    print(f"[OK] Loaded Redis URL from redis_url.txt")
+REDIS_URL = os.getenv('REDIS_URL')
+if not REDIS_URL:
+    print("[WARNING] REDIS_URL not found in environment. Session and Celery may fail.")
 else:
-    REDIS_URL = os.getenv('REDIS_URL')
-    if REDIS_URL:
-        print(f"[OK] Using REDIS_URL from environment")
-    else:
-        print("[WARNING] REDIS_URL not found. Session and Celery may fail.")
+    print(f"[OK] Using REDIS_URL from environment for Session config: {REDIS_URL}")
 
 
 # ----------------------------------------------------------------------------
 # Flask Session Configuration (using Redis for multi-worker stability)
 # ----------------------------------------------------------------------------
-# Skip session setup for Celery workers (not needed, avoids Redis connection hang)
-if not _is_celery_worker:
-    from flask_session import Session
+from flask_session import Session
 
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
-    app.config['SESSION_TYPE'] = 'redis'
-    app.config['SESSION_PERMANENT'] = True
-    app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
-    app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
-    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_PERMANENT'] = True
+app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
+app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
-    # Initialize the session extension
-    Session(app)
-    print("[OK] Flask session initialized")
-else:
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
-    print("[OK] Skipping Flask session for Celery worker")
+# Initialize the session extension
+Session(app)
 
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
@@ -4864,7 +4839,7 @@ def get_status(task_id):
                     response['current_task_id'] = chord_id  # Frontend will switch to this task_id
                     return jsonify(response), 409  # HTTP 409 Conflict - task superseded
 
-                result_path = result_data.get('path') or result_data.get('output_path')
+                result_path = result_data.get('path')
                 if not result_path:
                     print(f"[ERROR] Task {task_id} SUCCESS but no path in result: {result_data}")
                     return jsonify({'error': 'Invalid result format - missing path'}), 500
@@ -5545,8 +5520,11 @@ def process_video():
             if ext in image_exts:
                 result = celery.send_task('watermark.remove_image', args=[video_path])
             else:
-                # Use distributed processing for videos (multiple workers collaborate on segments)
-                # Build a Celery canvas chain on the server side to avoid any in-task blocking
+                # Use WSL sender/receiver architecture for YOLO mode
+                # Chain: WSL YOLO detection → Windows ProPainter
+                from celery import signature, chain
+                import uuid
+
                 def _current_public_base():
                     env_url = os.getenv('TUNNEL_URL')
                     if env_url:
@@ -5561,14 +5539,23 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
+                video_id = task_id or str(uuid.uuid4())[:8]
 
-                # Call prepare_video_task which creates the chord internally
-                # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize
-                # prepare_video will use cached video if broadcast succeeded
-                result = prepare_video_task.apply_async(
-                    args=[video_path],
-                    kwargs={'api_base': base, 'temp_base': base}
-                )
+                # Create masks directory
+                masks_dir = f"/tmp/{video_id}_yolo_masks"
+
+                # Chain: WSL YOLO detection → Windows ProPainter inpainting
+                # yolo.generate_masks runs in WSL (queue=wsl_yolo)
+                # watermark._continue_after_masks runs in Windows (queue=propainter)
+                print(f"[YOLO] Using WSL sender/receiver chain")
+                print(f"  - Video: {video_path}")
+                print(f"  - Masks dir: {masks_dir}")
+                print(f"  - Queue flow: wsl_yolo → propainter")
+
+                s1 = signature('yolo.generate_masks', args=[video_path, masks_dir], queue='wsl_yolo')
+                s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, None, None, None, 0, base], queue='propainter')
+
+                result = chain(s1, s2).apply_async()
             print(f"[OK] Task queued with ID: {result.id}")
 
             # Deduct 1 credit from user's balance after successful task creation
@@ -5982,6 +5969,29 @@ def get_stats():
     })
 
 
+
+@app.route('/api/sam2/status/<task_id>', methods=['GET', 'OPTIONS'])
+def sam2_status(task_id):
+    """Check SAM2 job status - polls Celery task result."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    try:
+        result = celery.AsyncResult(task_id)
+        if result.state == 'PENDING':
+            return jsonify({'status': 'processing', 'progress': 0, 'message': 'Waiting in queue...'})
+        elif result.state == 'PROCESSING':
+            info = result.info or {}
+            return jsonify({'status': 'processing', 'progress': info.get('progress', 50), 'message': info.get('status', 'Processing...')})
+        elif result.state == 'SUCCESS':
+            data = result.result or {}
+            return jsonify({'status': 'completed', 'result_url': data.get('result_url')})
+        elif result.state == 'FAILURE':
+            return jsonify({'status': 'failed', 'error': str(result.info)})
+        else:
+            return jsonify({'status': 'processing', 'progress': 25, 'message': f'{result.state}'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 @app.route('/api/sam2/result/<request_id>', methods=['GET'])
 def sam2_get_result(request_id):
     """Poll for the result of a SAM2 selection task."""
@@ -6127,18 +6137,31 @@ def sam2_process_video():
 
         api_base = _current_public_base()
 
-        # Send task to SAM2 worker queue with points data
-        result = celery.send_task(
-            'watermark.process_sam2_interactive',
-            args=[video_path, task_id, points, video_width, video_height, frame_index],
-            kwargs={'api_base': api_base},  # Pass Railway URL for video download
-            task_id=job_id,
-            queue='sam2' # Explicitly route to the SAM2 worker queue
-        )
+        # Create masks directory
+        masks_dir = f"/tmp/{task_id}_sam2_masks"
 
-        print(f"[SAM2] Started processing job {job_id} for video {task_id}")
-        print(f"[SAM2] Points: {len(points)}, Video: {video_width}x{video_height}")
+        # Convert points from frontend format to WSL worker format
+        # Frontend sends: [{x, y, label, ...}, ...]
+        # WSL worker expects: points=[(x,y), ...], labels=[1, 1, ...]
+        wsl_points = [(int(p.get('x', 0)), int(p.get('y', 0))) for p in points]
+        wsl_labels = [int(p.get('label', 1)) for p in points]
 
+        # Chain: WSL SAM2 mask generation → Windows ProPainter inpainting
+        from celery import signature, chain
+
+        s1 = signature('sam2.generate_masks_fullfps',
+                       args=[video_path, masks_dir],
+                       kwargs={'prompt_mode': 'point', 'points': wsl_points, 'labels': wsl_labels, 'frame_idx': frame_index, 'api_base': api_base},
+                       queue='wsl_sam2')
+        s2 = signature('watermark._continue_after_masks',
+                       args=[video_path, task_id, points, video_width, video_height, frame_index, api_base],
+                       queue='propainter')
+
+        result = chain(s1, s2).apply_async(task_id=job_id)
+
+        print(f"[SAM2] Started WSL chain job {job_id} for video {task_id}")
+        print(f"[SAM2] Points: {len(wsl_points)}, Video: {video_width}x{video_height}")
+        print(f"[SAM2] Queue flow: wsl_sam2 -> propainter")
         return jsonify({
             'status': 'success',
             'job_id': job_id,
