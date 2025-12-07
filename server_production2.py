@@ -11,7 +11,7 @@ import glob
 import json
 from typing import List, Optional, Tuple
 from flask import Flask, request, jsonify
-from celery import Celery
+from celery import Celery, chord
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
@@ -1495,6 +1495,335 @@ if __name__ == '__main__':
 
 
 #============================================================================
+# YOLO CHORD TASKS (for 4-worker parallel processing)
+#============================================================================
+
+@celery.task(bind=True, name='watermark.process_yolo_segment')
+def process_yolo_segment_task(self, segment_data):
+    """
+    Process one YOLO segment - runs as separate Celery task for TRUE parallelism.
+    Each segment runs on its own Celery thread worker = no GPU contention.
+    """
+    import cv2, numpy as np, os, torch
+    from crop_utils import calculate_crop_region
+
+    seg_idx = segment_data['seg_idx']
+    start_f = segment_data['start_f']
+    end_f = segment_data['end_f']
+    seg_bbox = segment_data['seg_bbox']
+    video_path = segment_data['video_path']
+    video_id = segment_data['video_id']
+    width = segment_data['width']
+    height = segment_data['height']
+    total_frames = segment_data['total_frames']
+    original_fps = segment_data['original_fps']
+    masks_url = segment_data['masks_url']
+    total_segments = segment_data['total_segments']
+
+    print(f"\n[YOLO-SEG] Worker processing segment {seg_idx+1}/{total_segments}: frames {start_f}-{end_f-1}")
+    self.update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
+
+    # Download video if needed
+    import requests
+    if video_path.startswith('/data/') or video_path.startswith('http'):
+        api_base = segment_data.get('api_base')
+        if api_base and not video_path.startswith('http'):
+            filename = os.path.basename(video_path)
+            download_url = f"{api_base}/uploads/{filename}"
+        else:
+            download_url = video_path
+        local_video = os.path.join(TEMP_DIR, f"{video_id}_seg{seg_idx}.mp4")
+        if not os.path.exists(local_video):
+            print(f"[YOLO-SEG] Downloading video from {download_url}...")
+            r = requests.get(download_url, timeout=300)
+            r.raise_for_status()
+            with open(local_video, 'wb') as f:
+                f.write(r.content)
+        video_path = local_video
+
+    # Download masks if needed
+    import zipfile
+    masks_dir = os.path.join(TEMP_DIR, f"{video_id}_masks_seg{seg_idx}")
+    if not os.path.exists(masks_dir) or not os.listdir(masks_dir):
+        os.makedirs(masks_dir, exist_ok=True)
+        print(f"[YOLO-SEG] Downloading masks from {masks_url}...")
+        zip_path = os.path.join(TEMP_DIR, f"{video_id}_masks_seg{seg_idx}.zip")
+        r = requests.get(masks_url, timeout=120)
+        r.raise_for_status()
+        with open(zip_path, 'wb') as f:
+            f.write(r.content)
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(masks_dir)
+        os.remove(zip_path)
+
+    # Read masks for this segment
+    import glob
+    mask_files = sorted(glob.glob(os.path.join(masks_dir, "*.png")))
+    all_masks = [cv2.imread(mf, cv2.IMREAD_GRAYSCALE) for mf in mask_files]
+
+    # Calculate segment-specific crop
+    seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
+        list(seg_bbox), width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+    )
+
+    # Temporal padding
+    pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
+    pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
+    proc_start = start_f - pad_left
+    proc_end = end_f + pad_right
+
+    duration = end_f - start_f
+    print(f"[YOLO-SEG] Segment {seg_idx+1}: frames {start_f}-{end_f-1} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end-1}")
+
+    # Load frames for this segment
+    cap = cv2.VideoCapture(video_path)
+    seg_frames = []
+    seg_masks = []
+    for frame_idx in range(proc_start, proc_end):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if ret:
+            seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+            seg_frames.append(np.ascontiguousarray(seg_frame))
+            if frame_idx < len(all_masks):
+                seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                seg_masks.append(np.ascontiguousarray(seg_mask))
+    cap.release()
+
+    if not seg_frames or not seg_masks:
+        print(f"[YOLO-SEG] WARNING: Segment {seg_idx+1} has no frames/masks!")
+        return {'seg_idx': seg_idx, 'success': False, 'error': 'No frames/masks'}
+
+    # Run ProPainter
+    print(f"[YOLO-SEG] Running ProPainter on {len(seg_frames)} frames...")
+    self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'ProPainter segment {seg_idx+1}'})
+
+    faster_propainter_pipeline = get_propainter_pipeline()
+    use_fp16 = torch.cuda.is_available()
+
+    # Determine neighbor_length based on movement
+    movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
+    neighbor_length, subvideo_length = (2, 30) if movement < 10 else (3, 60)
+
+    output_dir = os.path.join(TEMP_DIR, f"{video_id}_seg{seg_idx}_output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    output_frames = faster_propainter_pipeline(
+        video='dummy', mask='dummy', output=output_dir,
+        resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
+        ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+        raft_iter=10, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
+        fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
+        return_frames=True
+    )
+
+    if not output_frames:
+        print(f"[YOLO-SEG] WARNING: Segment {seg_idx+1} returned no frames!")
+        return {'seg_idx': seg_idx, 'success': False, 'error': 'ProPainter returned no frames'}
+
+    print(f"[YOLO-SEG] Segment {seg_idx+1}: ProPainter returned {len(output_frames)} frames")
+
+    # Save output frames to shared directory (keyed by frame index)
+    output_frames_dir = os.path.join(TEMP_DIR, f"{video_id}_all_output_frames")
+    os.makedirs(output_frames_dir, exist_ok=True)
+
+    frames_saved = 0
+    for i, frame in enumerate(output_frames):
+        frame_idx = proc_start + i
+        # Only save core frames [start_f, end_f), skip padding
+        if frame_idx < start_f or frame_idx >= end_f:
+            continue
+        frame_path = os.path.join(output_frames_dir, f"{frame_idx:06d}.png")
+        cv2.imwrite(frame_path, frame)
+        frames_saved += 1
+
+    # Store crop info for compositing
+    crop_info = {
+        'seg_crop_x': seg_crop_x, 'seg_crop_y': seg_crop_y,
+        'seg_crop_w': seg_crop_w, 'seg_crop_h': seg_crop_h,
+        'start_f': start_f, 'end_f': end_f
+    }
+
+    print(f"[YOLO-SEG] Segment {seg_idx+1} complete: saved {frames_saved} frames")
+
+    # Cleanup segment-specific files
+    import shutil
+    for path in [output_dir, masks_dir]:
+        if os.path.exists(path):
+            shutil.rmtree(path, ignore_errors=True)
+
+    return {
+        'seg_idx': seg_idx,
+        'success': True,
+        'crop_info': crop_info,
+        'frames_saved': frames_saved,
+        'output_frames_dir': output_frames_dir
+    }
+
+
+@celery.task(bind=True, name='watermark.finalize_yolo')
+def finalize_yolo_task(self, segment_results, video_data):
+    """
+    Combine all YOLO segment results and encode final video.
+    Runs after all segment tasks complete (via chord callback).
+    """
+    import cv2, numpy as np, os, subprocess, time as _time
+
+    video_id = video_data['video_id']
+    video_path = video_data['video_path']
+    width = video_data['width']
+    height = video_data['height']
+    total_frames = video_data['total_frames']
+    original_fps = video_data['original_fps']
+    api_base = video_data.get('api_base')
+
+    print(f"\n[YOLO-FINAL] Combining {len(segment_results)} segment results...")
+    self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Encoding final video'})
+
+    # Download video if needed
+    import requests
+    if video_path.startswith('/data/') and api_base:
+        filename = os.path.basename(video_path)
+        download_url = f"{api_base}/uploads/{filename}"
+        local_video = os.path.join(TEMP_DIR, f"{video_id}_final.mp4")
+        if not os.path.exists(local_video):
+            print(f"[YOLO-FINAL] Downloading video from {download_url}...")
+            r = requests.get(download_url, timeout=300)
+            r.raise_for_status()
+            with open(local_video, 'wb') as f:
+                f.write(r.content)
+        video_path = local_video
+
+    # Collect all processed frames
+    output_frames_dir = os.path.join(TEMP_DIR, f"{video_id}_all_output_frames")
+    processed_frames = {}
+    if os.path.exists(output_frames_dir):
+        for f in os.listdir(output_frames_dir):
+            if f.endswith('.png'):
+                frame_idx = int(f.split('.')[0])
+                processed_frames[frame_idx] = os.path.join(output_frames_dir, f)
+
+    print(f"[YOLO-FINAL] Found {len(processed_frames)} processed frames")
+
+    # Collect crop info from segments
+    crop_infos = {}
+    for result in segment_results:
+        if result and result.get('success') and result.get('crop_info'):
+            seg_idx = result['seg_idx']
+            crop_infos[seg_idx] = result['crop_info']
+
+    # Encode final video with FFmpeg pipe
+    output_path = os.path.join(RESULT_DIR, f"{video_id}_yolo_removed.mp4")
+
+    ffmpeg_cmd = [
+        str(FFMPEG_EXE), '-y',
+        '-f', 'rawvideo',
+        '-vcodec', 'rawvideo',
+        '-pix_fmt', 'bgr24',
+        '-s', f'{width}x{height}',
+        '-r', str(int(original_fps)),
+        '-i', 'pipe:0',
+        '-i', video_path,
+        '-map', '0:v:0',
+        '-map', '1:a:0?',
+        '-c:v', 'h264_nvenc',
+        '-preset', 'p1',
+        '-b:v', '8M',
+        '-bufsize', '16M',
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        output_path
+    ]
+
+    proc = subprocess.Popen(
+        ffmpeg_cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    # Stream frames to FFmpeg
+    cap = cv2.VideoCapture(video_path)
+    _encode_start = _time.time()
+
+    for frame_idx in range(total_frames):
+        if frame_idx % 100 == 0:
+            print(f"[YOLO-FINAL] Encoding frame {frame_idx}/{total_frames}...")
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, orig_frame = cap.read()
+        if not ret:
+            continue
+
+        # Check if this frame was processed
+        if frame_idx in processed_frames:
+            # Load processed segment frame and composite onto original
+            seg_frame = cv2.imread(processed_frames[frame_idx])
+            if seg_frame is not None:
+                # Find which segment this frame belongs to
+                for seg_idx, crop_info in crop_infos.items():
+                    if crop_info['start_f'] <= frame_idx < crop_info['end_f']:
+                        cx, cy = crop_info['seg_crop_x'], crop_info['seg_crop_y']
+                        cw, ch = crop_info['seg_crop_w'], crop_info['seg_crop_h']
+                        orig_frame[cy:cy+ch, cx:cx+cw] = seg_frame
+                        break
+
+        proc.stdin.write(orig_frame.tobytes())
+
+    cap.release()
+    proc.stdin.close()
+    proc.wait(timeout=300)
+
+    _encode_time = _time.time() - _encode_start
+    print(f"[YOLO-FINAL] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s")
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg encoding failed (code {proc.returncode})")
+
+    # Upload to B2
+    cdn_url = None
+    try:
+        from b2sdk.v2 import B2Api, InMemoryAccountInfo
+
+        B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
+        B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+        B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+        B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+
+        if os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
+            timestamp = int(_time.time())
+            remote_path = f"results/{timestamp}_{os.path.basename(output_path)}"
+
+            print(f"[B2] Uploading to {B2_BUCKET}/{remote_path}...")
+            info = InMemoryAccountInfo()
+            b2_api = B2Api(info)
+            b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+            bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+            bucket.upload_local_file(local_file=output_path, file_name=remote_path)
+            cdn_url = f"{B2_CDN_URL}/{remote_path}"
+            print(f"[B2] Upload complete - CDN URL: {cdn_url}")
+    except Exception as e:
+        print(f"[B2] Upload failed: {e}")
+
+    # Cleanup
+    import shutil
+    if os.path.exists(output_frames_dir):
+        shutil.rmtree(output_frames_dir, ignore_errors=True)
+
+    return {
+        'status': 'success',
+        'video_id': video_id,
+        'output_path': cdn_url or output_path,
+        'total_frames': total_frames,
+        'segments_processed': len(segment_results),
+        'width': width,
+        'height': height,
+        'fps': original_fps
+    }
+
+
+#============================================================================
 # CONTINUATION TASK (runs after WSL mask generation)
 #============================================================================
 
@@ -1933,7 +2262,70 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         # Process segments (parallel when enabled, like main task)
         segments_to_process = segments or [(0, total_frames, [0, 0, width, height])]
 
-        if SAM2_PARALLEL_SEGMENTS and SEGMENT_WORKERS > 1 and len(segments_to_process) > 1:
+        # YOLO MODE: Use Celery chord for TRUE 4-worker parallelism!
+        if mode == 'yolo' and len(segments_to_process) > 1:
+            print(f"[YOLO] Dispatching {len(segments_to_process)} segments via Celery chord (4 parallel workers)...")
+            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments_to_process)} parallel tasks'})
+
+            # Prepare segment task data
+            segment_tasks_data = []
+            for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
+                segment_tasks_data.append({
+                    'seg_idx': seg_idx,
+                    'start_f': start_f,
+                    'end_f': end_f,
+                    'seg_bbox': seg_bbox,
+                    'video_path': video_path,
+                    'video_id': video_id,
+                    'width': width,
+                    'height': height,
+                    'total_frames': total_frames,
+                    'original_fps': original_fps,
+                    'masks_url': masks_url,
+                    'total_segments': len(segments_to_process),
+                    'api_base': api_base
+                })
+
+            # Prepare video data for finalize task
+            video_data = {
+                'video_id': video_id,
+                'video_path': video_path,
+                'width': width,
+                'height': height,
+                'total_frames': total_frames,
+                'original_fps': original_fps,
+                'api_base': api_base
+            }
+
+            # Create chord: segments run in parallel, finalize runs when ALL complete
+            segment_sigs = [
+                process_yolo_segment_task.s(seg_data).set(queue='propainter')
+                for seg_data in segment_tasks_data
+            ]
+            workflow = chord(segment_sigs)(
+                finalize_yolo_task.s(video_data=video_data).set(queue='propainter')
+            )
+
+            print(f"[YOLO] Chord dispatched! {len(segments_to_process)} segments will run in parallel across 4 workers")
+            print(f"   Finalize callback ID: {workflow.id}")
+
+            # Free VRAM before returning (chord will handle processing)
+            del preloaded_frames
+            del vram_frames
+            import torch as _torch
+            _torch.cuda.empty_cache()
+
+            # Return chord ID for tracking
+            return {
+                'status': 'processing',
+                'chord_id': f'yolo_{video_id}',
+                'finalize_task_id': workflow.id,
+                'segments': len(segments_to_process),
+                'message': f'YOLO chord: {len(segments_to_process)} segments dispatched'
+            }
+
+        # SAM2 MODE: Use ThreadPoolExecutor (2 workers, VRAM sharing)
+        elif SAM2_PARALLEL_SEGMENTS and SEGMENT_WORKERS > 1 and len(segments_to_process) > 1:
             print(f"[SAM2] Processing {len(segments_to_process)} segments in PARALLEL (workers={min(SEGMENT_WORKERS, len(segments_to_process))})...")
 
             max_workers = min(SEGMENT_WORKERS, len(segments_to_process))

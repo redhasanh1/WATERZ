@@ -175,8 +175,8 @@ set TORCHINDUCTOR_FX_GRAPH_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
-REM Use solo pool (1 task at a time) - safest for VRAM on big videos
+REM Use thread pool with 4 workers for TRUE parallel segment processing
 REM -Q propainter ensures this worker handles ProPainter tasks from 4090_sender
-set CELERY_POOL=solo
-set CELERY_CONCURRENCY=1
-"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q propainter --loglevel=info --pool=solo
+set CELERY_POOL=threads
+set CELERY_CONCURRENCY=4
+"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q propainter --loglevel=info --pool=threads --concurrency=4
