@@ -2567,3 +2567,17 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         except Exception as cleanup_err:
             print(f"[CLEANUP] Warning: {cleanup_err}")
         raise
+
+
+# =============================================================================
+# UNIFIED WORKER: Import server_production tasks to handle YOLO chord in same worker
+# =============================================================================
+# This allows running ONE Celery worker that handles both:
+# - SAM2 interactive tasks (propainter queue)
+# - YOLO chord tasks (celery/default queue)
+try:
+    import server_production
+    # server_production tasks are now registered when imported
+    print("[UNIFIED] server_production tasks imported - single worker handles both SAM2 and YOLO!")
+except Exception as e:
+    print(f"[UNIFIED] Warning: Could not import server_production: {e}")
