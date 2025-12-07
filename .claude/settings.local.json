@@ -62,7 +62,14 @@
       "Bash(set SEGMENT_WORKERS=4)",
       "Bash(cmd /c \"cd /d D:\\watermarkz && set SEGMENT_WORKERS=4 && C:\\Users\\has\\AppData\\Local\\Programs\\Python\\Python312\\python.exe TEST_FIRST_HASAN.py\")",
       "Bash(cmd /c \"C:\\Users\\has\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pip install flask-session\")",
-      "Bash(cmd /c \"cd /d D:\\watermarkz && set REDIS_URL=redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930 && set YOLO_REQUIRE_TENSORRT=1 && set USE_NEUFLOW=1 && set SEGMENT_WORKERS=4 && C:\\Users\\has\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4\")"
+      "Bash(cmd /c \"cd /d D:\\watermarkz && set REDIS_URL=redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930 && set YOLO_REQUIRE_TENSORRT=1 && set USE_NEUFLOW=1 && set SEGMENT_WORKERS=4 && C:\\Users\\has\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m celery -A server_production.celery worker --loglevel=info --pool=threads --concurrency=4\")",
+      "Bash(wsl bash:*)",
+      "Bash(git -C \"D:\\watermarkz\" log --oneline 1d5412379bd5ad020b11b800e8fdd063b890f019~2..HEAD -- server_production.py)",
+      "Bash(git -C \"D:\\watermarkz\" show 1d5412379bd5ad020b11b800e8fdd063b890f019 --stat)",
+      "Bash(git -C \"D:\\watermarkz\" log --oneline -10 1d5412379bd5ad020b11b800e8fdd063b890f019 -- server_production.py)",
+      "Bash(git -C \"D:\\watermarkz\" checkout eb8e42c3 -- server_production.py)",
+      "Bash(git -C \"D:\\watermarkz\" add server_production.py)",
+      "Bash(git -C \"D:\\watermarkz\" commit -m \"$(cat <<''EOF''\nrevert: Restore server_production.py to WSL receiver working state (eb8e42c3)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []

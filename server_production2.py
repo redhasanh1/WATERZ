@@ -386,6 +386,398 @@ def clear_gpu_memory():
         pass
 
 #============================================================================
+# YOLO DETECTOR (for YOLO mode - separate from SAM2)
+#============================================================================
+
+# Global YOLO detector (lazy loaded)
+_yolo_detector = None
+
+def get_yolo_detector():
+    """
+    Lazy load the YOLO detector (TensorRT if available).
+    Used by YOLO mode Celery workers for fast watermark detection.
+    """
+    global _yolo_detector
+
+    if _yolo_detector is None:
+        print("=" * 60)
+        print("Loading YOLO detector...")
+        print("=" * 60)
+        from yolo_detector import YOLOWatermarkDetector
+        import numpy as np
+        # Force TensorRT-only mode (no fallback to .pt) for max speed
+        require_trt = os.getenv('YOLO_REQUIRE_TENSORRT', '0') == '1'
+        _yolo_detector = YOLOWatermarkDetector(require_tensorrt=require_trt)
+
+        # WARMUP: Initialize TensorRT context (eliminates cold start overhead!)
+        print("[WARMUP] Running warmup inference to initialize TensorRT context...")
+        dummy_batch = [np.zeros((640, 640, 3), dtype=np.uint8) for _ in range(64)]
+        _ = _yolo_detector.detect_batch(dummy_batch, confidence_threshold=0.15, batch_size=64)
+        print("[OK] YOLO warmed up! TensorRT context ready for max speed.")
+
+        print("=" * 60)
+        print("[OK] YOLO detector ready!")
+        print("=" * 60)
+
+    return _yolo_detector
+
+#============================================================================
+# BACKGROUND ENCODER (for YOLO mode - encodes segments as they complete)
+# Workers signal when segments ready → Background thread encodes immediately
+# Encoding happens continuously as segments complete (not all at once at end)
+#============================================================================
+
+_yolo_encoder_thread = None
+
+def start_yolo_background_encoder(**kwargs):
+    """
+    Start background encoding thread when worker process initializes.
+    This runs ONCE per worker process.
+    """
+    global _yolo_encoder_thread
+
+    print("[YOLO BACKGROUND ENCODER INIT] Worker process starting, initializing background encoder...")
+
+    if _yolo_encoder_thread is None or not _yolo_encoder_thread.is_alive():
+        print("[YOLO BACKGROUND ENCODER] Starting real-time encoding thread...")
+        _yolo_encoder_thread = threading.Thread(
+            target=yolo_background_encoder_worker,
+            daemon=True,  # Dies with worker process
+            name="YoloBackgroundEncoder"
+        )
+        _yolo_encoder_thread.start()
+        print("[YOLO BACKGROUND ENCODER] Thread active - will encode segments as they complete!")
+    else:
+        print("[YOLO BACKGROUND ENCODER] Thread already running")
+
+
+def yolo_background_encoder_worker():
+    """
+    Background thread that encodes segments in real-time as they complete.
+    Uses Redis pub/sub to receive segment completion notifications.
+    PARALLEL ENCODING: Encodes multiple segments simultaneously using ThreadPoolExecutor.
+    """
+    import json
+    import traceback
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Track videos being processed
+    video_futures = {}  # {video_id: {seg_idx: future, ...}}
+    video_metadata = {}  # {video_id: {'total_segments': N, 'redis_client': client}}
+
+    while True:  # Auto-reconnect loop
+        try:
+            redis_client = celery.backend.client
+
+            # Configure pubsub with NO timeout and keepalive
+            pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
+            pubsub.connection_pool.connection_kwargs['socket_timeout'] = None
+            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = True
+            pubsub.connection_pool.connection_kwargs['socket_keepalive_options'] = {
+                1: 60,   # TCP_KEEPIDLE
+                2: 10,   # TCP_KEEPINTVL
+                3: 6     # TCP_KEEPCNT
+            }
+
+            pubsub.subscribe('yolo_segment_ready')
+
+            print("[YOLO BACKGROUND ENCODER] Listening for segment completion signals...")
+            print("[YOLO BACKGROUND ENCODER] Socket keepalive enabled - NO timeout!")
+            print("[YOLO BACKGROUND ENCODER] PARALLEL MODE: Up to 4 concurrent NVENC streams!")
+
+            # Create thread pool for parallel encoding (4 matches SEGMENT_WORKERS)
+            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="YoloEncoderThread") as executor:
+                for message in pubsub.listen():
+                    if message['type'] == 'message':
+                        try:
+                            data = json.loads(message['data'])
+                            video_id = data['video_id']
+                            seg_idx = data['seg_idx']
+                            total_segments = data['total_segments']
+
+                            # Initialize tracking for new video
+                            if video_id not in video_futures:
+                                video_futures[video_id] = {}
+                                video_metadata[video_id] = {
+                                    'total_segments': total_segments,
+                                    'redis_client': redis_client
+                                }
+
+                            print(f"[YOLO BACKGROUND ENCODER] Segment {seg_idx+1}/{total_segments} ready for video {video_id} - submitting to parallel encoder!")
+
+                            # Submit encoding to thread pool (NON-BLOCKING!)
+                            future = executor.submit(yolo_encode_segment_background, redis_client, data)
+                            video_futures[video_id][seg_idx] = future
+
+                            # Check if all segments have been submitted for this video
+                            if len(video_futures[video_id]) == total_segments:
+                                print(f"[YOLO BACKGROUND ENCODER] All {total_segments} segments submitted for {video_id} - waiting for completion...")
+
+                                # Wait for all encoding futures to complete
+                                completed_count = 0
+                                failed_segments = []
+
+                                for seg_idx_done, future in video_futures[video_id].items():
+                                    try:
+                                        future.result()  # Block until this segment completes
+                                        completed_count += 1
+                                        print(f"[YOLO BACKGROUND ENCODER] Segment {seg_idx_done+1} encoded! Progress: {completed_count}/{total_segments}")
+                                    except Exception as e:
+                                        print(f"[YOLO BACKGROUND ENCODER ERROR] Segment {seg_idx_done+1} failed: {e}")
+                                        traceback.print_exc()
+                                        failed_segments.append(seg_idx_done)
+
+                                # Finalize if all segments succeeded
+                                if not failed_segments:
+                                    print(f"[YOLO BACKGROUND ENCODER] All {total_segments} segments encoded for {video_id}! Triggering finalization...")
+                                    yolo_trigger_finalization(redis_client, video_id, total_segments)
+                                    print(f"[YOLO BACKGROUND ENCODER] Video {video_id} finalized!")
+                                else:
+                                    print(f"[YOLO BACKGROUND ENCODER ERROR] Video {video_id} had {len(failed_segments)} failed segments: {failed_segments}")
+
+                                # Cleanup tracking
+                                del video_futures[video_id]
+                                del video_metadata[video_id]
+
+                        except Exception as e:
+                            print(f"[YOLO BACKGROUND ENCODER ERROR] Failed to process segment: {e}")
+                            traceback.print_exc()
+
+        except Exception as e:
+            print(f"[YOLO BACKGROUND ENCODER] Connection lost: {e}")
+            traceback.print_exc()
+            print("[YOLO BACKGROUND ENCODER] Reconnecting in 2 seconds...")
+            _time.sleep(2)
+            # Loop continues - auto-reconnect!
+
+
+def yolo_encode_segment_background(redis_client, data):
+    """
+    Encode a segment using GPU NVENC (same encoding as before, just in background).
+    Called by background encoder thread continuously as segments complete.
+    """
+    import subprocess
+    import time as _time
+
+    video_id = data['video_id']
+    seg_idx = data['seg_idx']
+    total_segments = data['total_segments']
+
+    # Get segment metadata from Redis
+    segment_key = f"yolo_video:{video_id}:segment:{seg_idx}"
+    segment_info_raw = redis_client.hgetall(segment_key)
+
+    if not segment_info_raw:
+        raise RuntimeError(f"Segment metadata not found in Redis: {segment_key}")
+
+    # Decode bytes to strings (Redis returns bytes)
+    segment_info = {
+        k.decode() if isinstance(k, bytes) else k:
+        v.decode() if isinstance(v, bytes) else v
+        for k, v in segment_info_raw.items()
+    }
+
+    cleaned_dir = segment_info.get('cleaned_dir')
+    fps = float(segment_info.get('fps', 30))
+    frame_count = int(segment_info.get('frame_count', 0))
+    base_name = segment_info.get('base_name', 'video')
+    start_frame = int(segment_info.get('start_frame', 0))
+    end_frame = int(segment_info.get('end_frame', frame_count - 1))
+
+    if not cleaned_dir or not os.path.exists(cleaned_dir):
+        raise RuntimeError(f"Cleaned frames directory not found: {cleaned_dir}")
+
+    # Create output path
+    seg_video_path = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_seg{seg_idx}.mp4")
+
+    print(f"[YOLO ENCODER] Encoding segment {seg_idx}: frames {start_frame}-{end_frame} ({frame_count} frames) @ {fps} fps...")
+    encode_start = _time.time()
+
+    # Create file list for this segment's frames only
+    file_list_path = os.path.join(TEMP_DIR, f"yolo_encode_seg{seg_idx}_{video_id}.txt")
+    with open(file_list_path, 'w') as f:
+        for global_idx in range(start_frame, end_frame + 1):
+            frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
+            if os.path.exists(frame_path):
+                abs_path = os.path.abspath(frame_path).replace('\\', '/')
+                f.write(f"file '{abs_path}'\n")
+                f.write(f"duration {1/fps}\n")
+        # Last frame needs to be repeated for proper duration
+        last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
+        if os.path.exists(last_frame_path):
+            abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
+            f.write(f"file '{abs_path}'\n")
+
+    # Encode with NVENC using file list (concat demuxer)
+    encode_cmd = [
+        str(FFMPEG_EXE), '-y',
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', file_list_path,
+        '-c:v', 'h264_nvenc',
+        '-preset', 'p4',  # Balanced speed/quality
+        '-b:v', '8M',
+        '-pix_fmt', 'yuv420p',
+        '-profile:v', 'main',
+        seg_video_path
+    ]
+
+    try:
+        result = subprocess.run(encode_cmd, capture_output=True, check=True, text=True, timeout=300)
+        encode_duration = _time.time() - encode_start
+
+        encoded_size_mb = os.path.getsize(seg_video_path) / (1024 * 1024)
+        fps_actual = frame_count / encode_duration if encode_duration > 0 else 0
+
+        print(f"[YOLO ENCODER] [OK] Encoded: {encoded_size_mb:.2f} MB in {encode_duration:.2f}s ({fps_actual:.1f} fps)")
+
+        # Store encoded path in Redis
+        redis_client.hset(segment_key, 'encoded_path', seg_video_path)
+        redis_client.hset(segment_key, 'status', 'encoded')
+
+        # Cleanup file list after successful encoding
+        if os.path.exists(file_list_path):
+            os.remove(file_list_path)
+
+    except subprocess.CalledProcessError as e:
+        print(f"[YOLO ENCODER ERROR] Encoding failed for segment {seg_idx}!")
+        print(f"   stderr: {e.stderr}")
+        raise
+    except subprocess.TimeoutExpired:
+        print(f"[YOLO ENCODER ERROR] Encoding timed out after 300s for segment {seg_idx}")
+        raise
+
+
+def yolo_trigger_finalization(redis_client, video_id, total_segments):
+    """
+    Concatenate all encoded segments and merge audio.
+    Called automatically when all segments are encoded.
+    """
+    import subprocess
+    import shutil
+
+    print(f"\n[YOLO FINALIZE] Starting finalization for video {video_id}")
+
+    # Collect all segment video paths from Redis (in order)
+    segment_paths = []
+    for seg_idx in range(total_segments):
+        segment_key = f"yolo_video:{video_id}:segment:{seg_idx}"
+        encoded_path_raw = redis_client.hget(segment_key, 'encoded_path')
+
+        # Decode bytes to string
+        encoded_path = encoded_path_raw.decode() if isinstance(encoded_path_raw, bytes) else encoded_path_raw
+
+        if not encoded_path or not os.path.exists(encoded_path):
+            raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
+
+        segment_paths.append(encoded_path)
+
+    print(f"[YOLO FINALIZE] Found {len(segment_paths)} encoded segments")
+
+    # Get video metadata (decode bytes)
+    base_name_raw = redis_client.get(f"yolo_video:{video_id}:base_name")
+    base_name = base_name_raw.decode() if isinstance(base_name_raw, bytes) else (base_name_raw or 'video')
+
+    video_path_raw = redis_client.get(f"yolo_video:{video_id}:video_path")
+    video_path = video_path_raw.decode() if isinstance(video_path_raw, bytes) else video_path_raw
+
+    # Create concat list
+    concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_yolo_concat.txt")
+    with open(concat_list_path, 'w') as f:
+        for seg_path in segment_paths:
+            abs_path = os.path.abspath(seg_path).replace('\\', '/')
+            f.write(f"file '{abs_path}'\n")
+
+    # Concatenate with copy codec (instant - no re-encoding)
+    temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_yolo_processed.mp4")
+
+    concat_cmd = [
+        str(FFMPEG_EXE), '-y', '-f', 'concat', '-safe', '0',
+        '-i', concat_list_path,
+        '-c', 'copy',  # No re-encoding - instant!
+        temp_processed
+    ]
+
+    print(f"[YOLO FINALIZE] Concatenating segments with copy codec...")
+    subprocess.run(concat_cmd, capture_output=True, check=True, text=True, timeout=60)
+    concat_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
+    print(f"[YOLO FINALIZE] Concatenated: {concat_size_mb:.2f} MB")
+
+    # Merge audio from original
+    final_output = os.path.join(RESULT_DIR, f"{base_name}_yolo_propainter.mp4")
+
+    if video_path and os.path.exists(video_path):
+        # Check if original has audio
+        check_audio_cmd = [
+            str(FFPROBE_EXE), '-v', 'error', '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            video_path
+        ]
+        has_audio_check = subprocess.run(check_audio_cmd, capture_output=True, text=True, timeout=10)
+        has_audio = 'audio' in has_audio_check.stdout
+
+        if has_audio:
+            print(f"[YOLO FINALIZE] Merging audio from original...")
+            merge_cmd = [
+                str(FFMPEG_EXE), '-y',
+                '-i', temp_processed,
+                '-i', video_path,
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-c:v', 'copy',
+                '-c:a', 'copy',
+                '-shortest',
+                final_output
+            ]
+            subprocess.run(merge_cmd, capture_output=True, check=True, text=True, timeout=300)
+            if os.path.exists(temp_processed):
+                os.remove(temp_processed)
+            print(f"[YOLO FINALIZE] Audio merged")
+        else:
+            os.rename(temp_processed, final_output)
+            print(f"[YOLO FINALIZE] No audio in original")
+    else:
+        os.rename(temp_processed, final_output)
+        print(f"[YOLO FINALIZE] Using processed video only")
+
+    # Cleanup
+    if os.path.exists(concat_list_path):
+        os.remove(concat_list_path)
+    for seg_path in segment_paths:
+        if os.path.exists(seg_path):
+            os.remove(seg_path)
+
+    # Cleanup shared frame directory after finalization
+    segment_key = f"yolo_video:{video_id}:segment:0"
+    shared_cleaned_dir_raw = redis_client.hget(segment_key, 'cleaned_dir')
+    if shared_cleaned_dir_raw:
+        shared_cleaned_dir = shared_cleaned_dir_raw.decode() if isinstance(shared_cleaned_dir_raw, bytes) else shared_cleaned_dir_raw
+        if shared_cleaned_dir and os.path.exists(shared_cleaned_dir):
+            print(f"[YOLO FINALIZE] Cleaning up shared frame buffer: {shared_cleaned_dir}")
+            shutil.rmtree(shared_cleaned_dir, ignore_errors=True)
+
+    final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
+    print(f"[YOLO FINALIZE] Final video ready: {final_output} ({final_size_mb:.2f} MB)")
+
+    # Store final result in Redis
+    redis_client.set(f"yolo_video:{video_id}:final_path", final_output)
+    redis_client.set(f"yolo_video:{video_id}:status", "complete")
+
+    # Update distributed tracking to mark all segments complete
+    tracking_key = f"yolo_segments:{video_id}"
+    total_segments_bytes = redis_client.get(f"{tracking_key}:total")
+    if total_segments_bytes:
+        redis_client.set(tracking_key, int(total_segments_bytes))
+        print(f"[YOLO FINALIZE] Marked all {int(total_segments_bytes)} segments complete in Redis tracking")
+
+
+# Register background encoder to start when Celery worker initializes
+from celery.signals import worker_process_init
+worker_process_init.connect(start_yolo_background_encoder)
+
+#============================================================================
 # CELERY TASK: SAM2 Interactive Mode - FULL FPS Pipeline
 #
 # Optimizations:
@@ -1738,6 +2130,55 @@ def process_yolo():
     })
 
 
+@app.route('/api/process_yolo_parallel', methods=['POST'])
+def process_yolo_parallel():
+    """
+    API endpoint to process video with YOLO + Celery chord pattern (FAST parallel mode).
+
+    POST data:
+    {
+        "video_path": "D:\\watermarkz\\uploads\\video.mp4",
+        "video_id": "abc123"  # Optional
+    }
+
+    This uses the NEW parallel processing pattern:
+    - Celery chord dispatches segments to multiple workers
+    - Background encoder encodes segments as they complete
+    - 4 parallel workers = ~13s for 300 frames (vs 38s sequential)
+    """
+    data = request.get_json()
+    video_path = data.get('video_path')
+    video_id = data.get('video_id') or str(uuid.uuid4())[:8]
+
+    if not video_path:
+        return jsonify({'error': 'Missing video_path'}), 400
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': f'Video not found: {video_path}'}), 404
+
+    # Get API base URL for result upload
+    api_base = os.getenv('TUNNEL_URL', os.getenv('API_BASE_URL', 'http://localhost:5001'))
+
+    # Use new parallel YOLO task with chord pattern
+    result = yolo_prepare_video_task.apply_async(
+        args=[video_path],
+        kwargs={'api_base': api_base, 'video_id': video_id},
+        queue='yolo'  # Uses dedicated yolo queue with threads pool
+    )
+
+    print(f"[YOLO PARALLEL] Queued parallel YOLO task: {result.id}")
+    print(f"  - Video: {video_path}")
+    print(f"  - Mode: Celery chord + background encoder (4 parallel segments)")
+
+    return jsonify({
+        'task_id': result.id,
+        'status': 'queued',
+        'message': 'YOLO parallel processing task queued (chord + background encoder)',
+        'mode': 'yolo_parallel',
+        'video_id': video_id,
+    })
+
+
 @app.route('/api/task/<task_id>', methods=['GET'])
 def get_task_status(task_id):
     """Get status of a Celery task"""
@@ -2384,4 +2825,433 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                         print(f"[CLEANUP] Removed {temp_path}")
         except Exception as cleanup_err:
             print(f"[CLEANUP] Warning: {cleanup_err}")
+        raise
+
+
+#============================================================================
+# YOLO MODE CELERY TASKS
+# Fast parallel processing with Celery chord pattern (like server_production.py)
+#============================================================================
+
+from celery import chord
+
+@celery.task(bind=True, name='watermark.yolo_prepare_video', queue='yolo')
+def yolo_prepare_video_task(self, video_path, api_base=None, video_id=None):
+    """
+    YOLO Mode Phase 1: Prepare video for distributed processing
+    - Run YOLO detection on all frames
+    - Generate masks with GPU batch processing
+    - Detect segments (handles moving watermarks)
+    - Dispatch segment tasks via Celery chord
+    """
+    try:
+        import json
+        import time as _time
+        import shutil
+
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Preparing video (YOLO mode)'})
+
+        detector = get_yolo_detector()
+        if not _check_propainter_assets():
+            raise RuntimeError("ProPainter assets missing")
+
+        # Download video if needed
+        from pathlib import PureWindowsPath, Path
+        base_name = PureWindowsPath(video_path).name if '\\' in video_path else os.path.basename(video_path)
+        UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
+        local_video_path = os.path.join(UPLOAD_DIR, base_name)
+
+        if os.path.exists(local_video_path):
+            print(f"[YOLO] Video already exists locally: {local_video_path}")
+            video_path = local_video_path
+        elif not os.path.exists(video_path):
+            tunnel = api_base or os.getenv('TUNNEL_URL')
+            if tunnel:
+                import requests
+                from urllib.parse import urljoin
+                download_url = urljoin(tunnel.rstrip('/') + '/', f'uploads/{base_name}')
+                print(f"[YOLO] Downloading video: {download_url}")
+                r = requests.get(download_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=60)
+                r.raise_for_status()
+                os.makedirs(UPLOAD_DIR, exist_ok=True)
+                with open(local_video_path, 'wb') as f:
+                    f.write(r.content)
+                video_path = local_video_path
+            else:
+                raise Exception(f"Video not found: {video_path}")
+
+        print(f"[YOLO] Preparing video: {video_path}")
+        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Analyzing video'})
+
+        # Open video
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise Exception(f"Failed to open video: {video_path}")
+
+        fps = int(cap.get(cv2.CAP_PROP_FPS) or 24)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+
+        base_name = Path(video_path).stem
+        video_id = video_id or uuid.uuid4().hex[:8]
+
+        print(f"[YOLO] Video: {width}x{height} @ {fps} fps ({total_frames} frames)")
+
+        # Store video metadata in Redis
+        redis_client = celery.backend.client
+        redis_client.set(f"yolo_video:{video_id}:base_name", base_name)
+        redis_client.set(f"yolo_video:{video_id}:video_path", video_path)
+
+        # Load all frames for batch detection
+        print(f"[YOLO] Loading {total_frames} frames for batch detection...")
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Loading frames'})
+
+        all_frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            all_frames.append(frame)
+        cap.release()
+        frames_processed = len(all_frames)
+
+        # Batch YOLO detection (748 fps on RTX 4090!)
+        print(f"[YOLO] Running batch detection on {frames_processed} frames...")
+        self.update_state(state='PROCESSING', meta={'progress': 20, 'status': 'Detecting watermarks (batch)'})
+
+        batch_start = _time.time()
+        all_detections = detector.detect_batch(all_frames, confidence_threshold=0.15, padding=0, batch_size=64)
+        batch_duration = _time.time() - batch_start
+        print(f"[YOLO] Batch detection: {batch_duration:.3f}s ({frames_processed/batch_duration:.1f} fps)")
+
+        # Process detections
+        zero_mask = np.zeros((height, width), dtype=np.uint8)
+        bboxes_per_frame = []
+        frames_with_watermark = 0
+        last_valid_bbox = None
+        all_masks = []
+
+        for i, detections in enumerate(all_detections):
+            if detections:
+                frames_with_watermark += 1
+                last_valid_bbox = detections[0]['bbox']
+                bboxes_per_frame.append(last_valid_bbox)
+            elif last_valid_bbox:
+                bboxes_per_frame.append(last_valid_bbox)
+            else:
+                bboxes_per_frame.append(None)
+
+        # Create masks (GPU batch if available)
+        print(f"[YOLO] Creating {frames_processed} masks...")
+        self.update_state(state='PROCESSING', meta={'progress': 30, 'status': 'Creating masks'})
+
+        if hasattr(detector, 'use_gpu_masks') and detector.use_gpu_masks:
+            all_masks = detector.create_masks_batch_gpu(all_frames, all_detections)
+        else:
+            all_masks = [
+                detector.create_mask(frame, dets) if dets else zero_mask
+                for frame, dets in zip(all_frames, all_detections)
+            ]
+
+        print(f"[YOLO] Detection complete: {frames_with_watermark}/{frames_processed} frames with watermarks")
+
+        # Detect segments
+        segments = detect_segments(bboxes_per_frame, position_tolerance=5, min_segment_length=10)
+        if segments:
+            segments = merge_adjacent_segments(segments, position_tolerance=5, max_gap=30)
+            print(f"[YOLO] Detected {len(segments)} segments")
+        else:
+            segments = [(0, frames_processed-1, last_valid_bbox if last_valid_bbox else [0,0,width,height])]
+            print("[YOLO] No segments detected - processing entire video as one segment")
+
+        # Store frames and masks in shared directory for segment workers
+        shared_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_frames")
+        shared_mask_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_masks")
+        shared_cleaned_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_cleaned")
+        os.makedirs(shared_frames_dir, exist_ok=True)
+        os.makedirs(shared_mask_dir, exist_ok=True)
+        os.makedirs(shared_cleaned_dir, exist_ok=True)
+
+        print(f"[YOLO] Writing {frames_processed} frames and masks to disk...")
+        self.update_state(state='PROCESSING', meta={'progress': 40, 'status': 'Saving frames/masks'})
+
+        for i in range(frames_processed):
+            cv2.imwrite(os.path.join(shared_frames_dir, f"{i:04d}.png"), all_frames[i])
+            cv2.imwrite(os.path.join(shared_mask_dir, f"{i:04d}.png"), all_masks[i])
+
+        # Free memory
+        del all_frames
+        del all_masks
+
+        # Prepare segment task data
+        segment_tasks_data = []
+        api_base_url = api_base or os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL')
+
+        for seg_idx, (start_frame, end_frame, bbox) in enumerate(segments):
+            segment_tasks_data.append({
+                'seg_idx': seg_idx,
+                'start_frame': start_frame,
+                'end_frame': end_frame,
+                'bbox': list(bbox) if bbox else [0,0,width,height],
+                'video_id': video_id,
+                'base_name': base_name,
+                'width': width,
+                'height': height,
+                'fps': fps,
+                'video_path': video_path,
+                'shared_frames_dir': shared_frames_dir,
+                'shared_mask_dir': shared_mask_dir,
+                'shared_cleaned_dir': shared_cleaned_dir,
+                'total_segments': len(segments),
+            })
+
+        print(f"[YOLO] Dispatching {len(segments)} segment tasks via chord...")
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments)} parallel tasks'})
+
+        # Store tracking info
+        redis_client.set(f"yolo_segments:{video_id}:total", len(segments))
+
+        # Create chord: segments in parallel, finalize when all complete
+        segment_sigs = [yolo_process_segment_task.s(seg_data) for seg_data in segment_tasks_data]
+        prepare_result = {
+            'video_id': video_id,
+            'base_name': base_name,
+            'video_path': video_path,
+            'total_segments': len(segments),
+            'width': width,
+            'height': height,
+            'fps': fps,
+            'shared_cleaned_dir': shared_cleaned_dir,
+        }
+
+        workflow = chord(segment_sigs)(yolo_finalize_video_task.s(prepare_result=prepare_result))
+
+        print(f"[YOLO] Chord dispatched! Finalize callback ID: {workflow.id}")
+
+        return {
+            'chord_id': f'yolo_distributed_{video_id}',
+            'status': 'processing',
+            'message': f'Chord workflow: {len(segments)} segments -> finalize callback',
+            'video_id': video_id,
+        }
+
+    except Exception as e:
+        print(f"[YOLO ERROR] Prepare task failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.yolo_process_segment', queue='yolo')
+def yolo_process_segment_task(self, segment_data):
+    """
+    YOLO Mode Phase 2: Process one segment
+    - Load frames and masks from shared storage
+    - Run ProPainter inpainting
+    - Write cleaned frames to shared cleaned directory
+    - Signal background encoder via Redis pub/sub
+    """
+    try:
+        import json
+        import time as _time
+
+        seg_idx = segment_data['seg_idx']
+        total_segments = segment_data['total_segments']
+        start_frame = segment_data['start_frame']
+        end_frame = segment_data['end_frame']
+        bbox = segment_data['bbox']
+        video_id = segment_data['video_id']
+        base_name = segment_data['base_name']
+        width = segment_data['width']
+        height = segment_data['height']
+        fps = segment_data['fps']
+        shared_frames_dir = segment_data['shared_frames_dir']
+        shared_mask_dir = segment_data['shared_mask_dir']
+        shared_cleaned_dir = segment_data['shared_cleaned_dir']
+
+        print(f"\n[YOLO SEGMENT] Processing segment {seg_idx+1}/{total_segments}: frames {start_frame}-{end_frame}")
+        self.update_state(state='STARTED', meta={'progress': 0, 'status': f'Processing segment {seg_idx+1}'})
+
+        seg_start = _time.time()
+
+        # Calculate crop region
+        crop_x, crop_y, crop_w, crop_h = calculate_crop_region(bbox, width, height, padding_ratio=0.2, min_size=128)
+        print(f"   [CROP] Crop region: {crop_w}x{crop_h} @ ({crop_x},{crop_y})")
+
+        # Temporal padding for ProPainter context
+        neighbor_padding = 5
+        padded_start = max(0, start_frame - neighbor_padding)
+        padded_end = end_frame + neighbor_padding
+
+        # Load frames and masks with padding
+        print(f"   [LOAD] Loading frames {padded_start}-{padded_end}...")
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Loading frames'})
+
+        seg_frames = []
+        seg_masks = []
+        full_frames = []  # Keep full frames for paste-back
+
+        for frame_idx in range(padded_start, padded_end + 1):
+            frame_path = os.path.join(shared_frames_dir, f"{frame_idx:04d}.png")
+            mask_path = os.path.join(shared_mask_dir, f"{frame_idx:04d}.png")
+
+            if os.path.exists(frame_path):
+                full_frame = cv2.imread(frame_path)
+                if full_frame is not None:
+                    # Crop frame for ProPainter
+                    cropped = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    seg_frames.append(np.ascontiguousarray(cropped))
+
+                    # Keep full frame only for core segment (paste-back)
+                    if start_frame <= frame_idx <= end_frame:
+                        full_frames.append((frame_idx, full_frame))
+
+            if os.path.exists(mask_path):
+                mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                if mask is not None:
+                    cropped_mask = mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                    seg_masks.append(np.ascontiguousarray(cropped_mask))
+
+        if not seg_frames or not seg_masks:
+            raise RuntimeError(f"No frames/masks loaded for segment {seg_idx}")
+
+        print(f"   [OK] Loaded {len(seg_frames)} frames, {len(seg_masks)} masks")
+
+        # Run ProPainter
+        print(f"   [PROPAINTER] Running inpainting on {len(seg_frames)} frames...")
+        self.update_state(state='PROCESSING', meta={'progress': 30, 'status': 'Running ProPainter'})
+
+        pipeline = get_propainter_pipeline()
+        use_fp16 = torch.cuda.is_available()
+
+        output_frames = pipeline(
+            video='dummy',
+            mask='dummy',
+            output=TEMP_DIR,
+            resize_ratio=1.0,
+            mask_dilation=SAM2_MASK_DILATION,
+            ref_stride=10,
+            neighbor_length=10,
+            subvideo_length=120,
+            raft_iter=10,
+            mode="video_inpainting",
+            save_fps=fps,
+            save_frames=False,
+            fp16=use_fp16,
+            use_cached_models=True,
+            frames_array=seg_frames,
+            masks_array=seg_masks,
+            return_frames=True
+        )
+
+        if not output_frames:
+            raise RuntimeError(f"ProPainter returned no frames for segment {seg_idx}")
+
+        print(f"   [OK] ProPainter returned {len(output_frames)} frames")
+
+        # Composite and save to shared cleaned directory
+        print(f"   [COMPOSITE] Pasting results onto original frames...")
+        self.update_state(state='PROCESSING', meta={'progress': 70, 'status': 'Compositing frames'})
+
+        frames_saved = 0
+        paste_idx = 0
+
+        for i in range(len(output_frames)):
+            frame_idx = padded_start + i
+            # Only save core frames (skip padding)
+            if frame_idx < start_frame or frame_idx > end_frame:
+                continue
+
+            if paste_idx < len(full_frames):
+                saved_frame_idx, orig_frame = full_frames[paste_idx]
+                paste_idx += 1
+
+                # Paste cropped result onto original frame
+                orig_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = output_frames[i]
+
+                # Save to shared cleaned directory (global frame index)
+                output_path = os.path.join(shared_cleaned_dir, f"{frame_idx:04d}.png")
+                cv2.imwrite(output_path, orig_frame)
+                frames_saved += 1
+
+        print(f"   [OK] Saved {frames_saved} cleaned frames to {shared_cleaned_dir}")
+
+        # Free memory
+        del output_frames
+        del seg_frames
+        del seg_masks
+        del full_frames
+        clear_gpu_memory()
+
+        seg_duration = _time.time() - seg_start
+        print(f"   [DONE] Segment {seg_idx+1} complete in {seg_duration:.2f}s")
+
+        # Store segment metadata in Redis for background encoder
+        redis_client = celery.backend.client
+        segment_key = f"yolo_video:{video_id}:segment:{seg_idx}"
+        redis_client.hset(segment_key, mapping={
+            'cleaned_dir': shared_cleaned_dir,
+            'fps': str(fps),
+            'frame_count': str(frames_saved),
+            'base_name': base_name,
+            'start_frame': str(start_frame),
+            'end_frame': str(end_frame),
+            'status': 'processed',
+        })
+
+        # Signal background encoder that this segment is ready
+        signal_data = json.dumps({
+            'video_id': video_id,
+            'seg_idx': seg_idx,
+            'total_segments': total_segments,
+        })
+        redis_client.publish('yolo_segment_ready', signal_data)
+        print(f"   [SIGNAL] Published yolo_segment_ready for segment {seg_idx}")
+
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': f'Segment {seg_idx+1} complete'})
+
+        return {
+            'status': 'success',
+            'seg_idx': seg_idx,
+            'frames_processed': frames_saved,
+            'duration': seg_duration,
+        }
+
+    except Exception as e:
+        print(f"[YOLO SEGMENT ERROR] Segment {segment_data.get('seg_idx', '?')} failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@celery.task(bind=True, name='watermark.yolo_finalize_video', queue='yolo')
+def yolo_finalize_video_task(self, segment_results, prepare_result):
+    """
+    YOLO Mode Phase 3: Finalize video
+    Returns immediately - actual encoding/finalization happens in background encoder thread
+    """
+    try:
+        video_id = prepare_result['video_id']
+        base_name = prepare_result['base_name']
+        total_segments = prepare_result['total_segments']
+
+        print(f"\n[YOLO FINALIZE TASK] All segments complete! Background encoder handling finalization for: {base_name}")
+        print(f"[YOLO FINALIZE TASK] Encoding + concatenation happening asynchronously in background")
+
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Background encoding in progress'})
+
+        return {
+            'status': 'background_encoding',
+            'message': f'Segments complete. Encoding + finalization in progress (background thread)',
+            'video_id': video_id,
+            'total_segments': total_segments,
+            'check_status_key': f'yolo_video:{video_id}:status',
+            'final_path_key': f'yolo_video:{video_id}:final_path',
+        }
+
+    except Exception as e:
+        print(f"[YOLO FINALIZE ERROR] Failed: {e}")
+        import traceback
+        traceback.print_exc()
         raise

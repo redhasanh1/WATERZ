@@ -175,8 +175,41 @@ set TORCHINDUCTOR_FX_GRAPH_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE=0
 set TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE=0
 
-REM Use solo pool (1 task at a time) - safest for VRAM on big videos
-REM -Q propainter ensures this worker handles ProPainter tasks from 4090_sender
-set CELERY_POOL=solo
-set CELERY_CONCURRENCY=1
-"%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q propainter --loglevel=info --pool=solo
+REM ============================================================
+REM WORKER MODE SELECTION
+REM ============================================================
+REM SAM2 mode: solo pool (1 task at a time) - safest for VRAM
+REM YOLO mode: threads pool with 4 workers - FAST parallel processing!
+REM
+REM To run YOLO parallel mode (like server_production.py):
+REM   set WORKER_MODE=yolo
+REM   OR run: 4090_receiver.bat yolo
+REM ============================================================
+
+REM Check for command-line argument or environment variable
+if "%1"=="yolo" set WORKER_MODE=yolo
+if "%WORKER_MODE%"=="" set WORKER_MODE=sam2
+
+if "%WORKER_MODE%"=="yolo" (
+    echo.
+    echo ============================================================
+    echo YOLO PARALLEL MODE - Fast 4-worker processing!
+    echo   - Queue: yolo
+    echo   - Pool: threads with 4 workers
+    echo   - Uses Celery chord for parallel segments
+    echo   - Background encoder for streaming NVENC
+    echo ============================================================
+    echo.
+    set YOLO_REQUIRE_TENSORRT=1
+    "%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q yolo --loglevel=info --pool=threads --concurrency=4
+) else (
+    echo.
+    echo ============================================================
+    echo SAM2 MODE - Solo worker for interactive masks
+    echo   - Queue: propainter
+    echo   - Pool: solo (1 task at a time)
+    echo   - Uses ThreadPoolExecutor for parallel segments
+    echo ============================================================
+    echo.
+    "%PYTHON_PATH%" -m celery -A server_production2.celery worker -Q propainter --loglevel=info --pool=solo
+)

@@ -5552,7 +5552,7 @@ def process_video():
                 print(f"  - Masks dir: {masks_dir}")
                 print(f"  - Queue flow: wsl_yolo → propainter")
 
-                s1 = signature('yolo.generate_masks', args=[video_path, masks_dir], queue='wsl_yolo')
+                s1 = signature('yolo.generate_masks', args=[video_path, masks_dir], kwargs={'api_base': base}, queue='wsl_yolo')
                 s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, None, None, None, 0, base], queue='propainter')
 
                 result = chain(s1, s2).apply_async()
