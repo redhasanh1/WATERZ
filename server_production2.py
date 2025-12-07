@@ -1059,44 +1059,34 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         global_crop = (crop_x, crop_y, crop_w, crop_h)
         print(f"[SAM2] Masks cropped, frames will be loaded per-segment")
 
-        # Track segment metadata (NOT frames - those stay in VRAM!)
+        # Track segment metadata
         segment_results = {}  # seg_idx -> (success, crop_info, time_info)
         processed_frames = set()  # Track which frames have been processed
 
-        # REVOLUTIONARY: Store all frames in VRAM with YUV420 compression (8:1 ratio!)
-        vram_frames = {}  # {frame_idx: compressed_yuv420_dict}
+        # Store final composited frames (raw numpy - no compression overhead!)
+        # Only filled as segments are processed
+        vram_frames = {}  # {frame_idx: numpy_bgr_frame}
 
-        # PRE-LOAD ALL FRAMES ONCE (workers will share!)
-        print(f"[SAM2] Pre-loading {total_frames} frames to shared VRAM (YUV420)...")
-        preloaded_frames = {}  # {frame_idx: compressed_yuv420}
-        cap_preload = cv2.VideoCapture(video_path)
-        for frame_idx in range(total_frames):
-            ret, frame = cap_preload.read()
-            if ret:
-                preloaded_frames[frame_idx] = VRAMCompressor.compress_frame(frame)
-        cap_preload.release()
-        print(f"[SAM2] All {len(preloaded_frames)} frames pre-loaded - workers will SHARE!")
+        # NO PRE-LOADING! Load frames per-segment to minimize VRAM (like hasan branch)
+        print(f"[SAM2] Per-segment loading mode (low VRAM) - {total_frames} frames total")
 
         def process_segment(seg_idx, start_f, end_f, seg_bbox):
-            """Process a single segment with ProPainter"""
+            """Process a single segment with ProPainter - loads frames per-segment (low VRAM)"""
             proc_start = start_f
             proc_end = end_f
             try:
                 duration = end_f - start_f
                 log_end = end_f - 1 if end_f > start_f else end_f
                 # Calculate segment-specific crop directly from seg_bbox (in original frame coords)
-                # This avoids issues when segment bbox extends beyond global crop region
                 seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
                     list(seg_bbox),  # Use segment bbox directly in frame coordinates
                     width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
                 )
 
-                # Determine optimization level based on movement
-                movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
-                if movement < 10:
-                    neighbor_length, subvideo_length = 2, 30
-                else:
-                    neighbor_length, subvideo_length = 3, 60
+                # Hasan branch used FIXED values for speed (not resolution-based)
+                subvideo_length = 120  # Hasan: 120 fixed (larger batch = faster)
+                neighbor_length = 10   # Hasan: 10 (more temporal context)
+                ref_stride = 10        # Hasan: 10 (not 15)
 
                 # Temporal padding for context
                 pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
@@ -1104,22 +1094,36 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 proc_start = start_f - pad_left
                 proc_end = end_f + pad_right
 
-                print(f"[SAM2] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
+                print(f"[{mode.upper()}] Segment {seg_idx+1}: frames {start_f}-{log_end} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end}")
 
-                # GET FRAMES FROM PRE-LOADED SHARED VRAM (ZERO disk I/O!)
-                print(f"[FAST] Using {proc_end - proc_start} frames from memory (ZERO disk I/O!)")
+                # LOAD FRAMES DIRECTLY FROM VIDEO - CROPPED IMMEDIATELY (like hasan branch!)
+                # This minimizes VRAM: only segment+padding frames, already cropped
+                print(f"[{mode.upper()}] Loading {proc_end - proc_start} frames from video (cropped to {seg_crop_w}x{seg_crop_h})")
                 seg_frames = []
                 seg_masks = []
+                full_frames_for_paste = []  # Keep full frames ONLY for segment range (paste-back)
+
+                cap_seg = cv2.VideoCapture(video_path)
+                cap_seg.set(cv2.CAP_PROP_POS_FRAMES, proc_start)
+
                 for frame_idx in range(proc_start, proc_end):
-                    # Decompress from shared preloaded frames
-                    full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                    # Apply segment-specific crop directly (seg_crop coords are in frame coords)
-                    seg_frame = full_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                    seg_frames.append(np.ascontiguousarray(seg_frame))
-                    # Crop mask from original all_masks (not pre-cropped)
+                    ret, full_frame = cap_seg.read()
+                    if not ret:
+                        break
+                    # Crop frame IMMEDIATELY (before storing) - saves VRAM!
+                    cropped_frame = full_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                    seg_frames.append(np.ascontiguousarray(cropped_frame))
+
+                    # Keep full frame ONLY for core segment frames (for paste-back)
+                    if start_f <= frame_idx < end_f:
+                        full_frames_for_paste.append((frame_idx, full_frame))
+
+                    # Crop mask
                     if frame_idx < len(all_masks):
                         seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
                         seg_masks.append(np.ascontiguousarray(seg_mask))
+
+                cap_seg.release()
 
                 if not seg_frames or not seg_masks:
                     return seg_idx, None, None, (proc_start, proc_end)
@@ -1131,7 +1135,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     output=output_dir,  # Not used when return_frames=True
                     resize_ratio=1.0,
                     mask_dilation=SAM2_MASK_DILATION,
-                    ref_stride=15,
+                    ref_stride=ref_stride,  # Hasan: 10
                     neighbor_length=neighbor_length,
                     subvideo_length=subvideo_length,
                     raft_iter=10,
@@ -1149,27 +1153,39 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     print(f"[ERROR] Segment {seg_idx}: ProPainter returned no frames")
                     return seg_idx, False, None, (proc_start, proc_end)
 
-                # REVOLUTIONARY: Store in VRAM with YUV420 compression (8:1 ratio, ZERO disk I/O!)
+                # Composite ProPainter output onto original frames (paste-back)
                 # Only save CORE frames (start_f to end_f), skip padding frames
                 core_count = end_f - start_f
-                print(f"[SAM2] Segment {seg_idx+1}: storing {core_count} core frames in VRAM (skip {len(output_frames) - core_count} padding)...")
+                print(f"[{mode.upper()}] Segment {seg_idx+1}: compositing {core_count} core frames...")
                 frames_stored = 0
+
+                # Use the full frames we kept for paste-back
+                paste_idx = 0
                 for i in range(len(output_frames)):
                     frame_idx = proc_start + i
                     # Skip padding frames - only save core frames [start_f, end_f)
                     if frame_idx < start_f or frame_idx >= end_f:
                         continue
-                    # GET from shared preloaded frames (ZERO disk I/O!)
-                    orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                    # Composite segment output onto original frame (seg_crop coords are in frame coords)
-                    orig_frame[seg_crop_y:seg_crop_y + seg_crop_h,
-                              seg_crop_x:seg_crop_x + seg_crop_w] = output_frames[i]
-                    # Store in VRAM with YUV420 compression (8:1 ratio!)
-                    vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
-                    processed_frames.add(frame_idx)
-                    frames_stored += 1
-                del output_frames  # Free memory immediately!
-                print(f"[SAM2] Segment {seg_idx+1}: stored {frames_stored} core frames in VRAM")
+
+                    # Get original full frame from our saved list
+                    if paste_idx < len(full_frames_for_paste):
+                        saved_frame_idx, orig_frame = full_frames_for_paste[paste_idx]
+                        paste_idx += 1
+
+                        # Composite segment output onto original frame
+                        orig_frame[seg_crop_y:seg_crop_y + seg_crop_h,
+                                  seg_crop_x:seg_crop_x + seg_crop_w] = output_frames[i]
+                        # Store as raw numpy (no compression - simpler, faster!)
+                        vram_frames[frame_idx] = orig_frame
+                        processed_frames.add(frame_idx)
+                        frames_stored += 1
+
+                # Free memory immediately!
+                del output_frames
+                del full_frames_for_paste
+                del seg_frames
+                del seg_masks
+                print(f"[{mode.upper()}] Segment {seg_idx+1}: stored {frames_stored} core frames")
 
                 # Return success flag and metadata (NOT frames!)
                 return seg_idx, True, (seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h), (proc_start, proc_end)
@@ -1182,27 +1198,41 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         # Process segments (sequentially for GPU, parallel prep could be added)
         if len(segments) <= 1:
-            # Single segment - use preloaded frames with decompression
-            print(f"[SAM2] Processing as single segment...")
-            print(f"[FAST] Using {total_frames} pre-loaded frames (ZERO disk I/O!)")
+            # Single segment - load frames directly from video (cropped)
+            print(f"[{mode.upper()}] Processing as single segment...")
+            print(f"[{mode.upper()}] Loading {total_frames} frames from video (cropped to {crop_w}x{crop_h})")
+
             all_frames_contiguous = []
+            full_frames_for_final = []  # Keep full frames for paste-back
+
+            cap_single = cv2.VideoCapture(video_path)
             for frame_idx in range(total_frames):
-                # Decompress and apply global crop
-                full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                frame = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                all_frames_contiguous.append(np.ascontiguousarray(frame))
+                ret, full_frame = cap_single.read()
+                if not ret:
+                    break
+                # Crop immediately
+                cropped = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                all_frames_contiguous.append(np.ascontiguousarray(cropped))
+                full_frames_for_final.append(full_frame)
+            cap_single.release()
+
             all_masks_contiguous = [np.ascontiguousarray(m) for m in all_masks_cropped]
 
-            # Run ProPainter - ZERO DISK I/O with return_frames=True!
+            # Hasan branch used FIXED values for speed
+            subvideo_length = 120  # Hasan: 120 fixed
+            neighbor_length = 10   # Hasan: 10
+            ref_stride = 10        # Hasan: 10
+
+            # Run ProPainter
             final_cropped_frames = faster_propainter_pipeline(
                 video=video_path,
                 mask='dummy_mask',
-                output=output_dir,  # Not used when return_frames=True
+                output=output_dir,
                 resize_ratio=1.0,
                 mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=15,
-                neighbor_length=10,
-                subvideo_length=120,
+                ref_stride=ref_stride,
+                neighbor_length=neighbor_length,
+                subvideo_length=subvideo_length,
                 raft_iter=10,
                 mode="video_inpainting",
                 save_fps=int(original_fps),
@@ -1211,11 +1241,21 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 use_cached_models=True,
                 frames_array=all_frames_contiguous,
                 masks_array=all_masks_contiguous,
-                return_frames=True  # ZERO DISK I/O!
+                return_frames=True
             )
 
             if not final_cropped_frames:
                 raise RuntimeError("ProPainter returned no frames")
+
+            # Composite back onto full frames and store
+            for i, cropped_result in enumerate(final_cropped_frames):
+                if i < len(full_frames_for_final):
+                    full_frames_for_final[i][crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = cropped_result
+                    vram_frames[i] = full_frames_for_final[i]
+                    processed_frames.add(i)
+
+            del all_frames_contiguous
+            del final_cropped_frames
 
         else:
             # Multiple segments - process each (optionally in parallel) and merge
@@ -1254,87 +1294,86 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     result = process_segment(seg_idx, start_f, end_f, seg_bbox)
                     segment_results[seg_idx] = result
 
-            # --- 12. REVOLUTIONARY: Direct VRAM → FFmpeg pipe → NVENC (ZERO disk I/O!) ---
-            print(f"[SAM2] Segment processing complete - {len(vram_frames)} frames stored in VRAM")
-            print(f"[SAM2] Encoding directly from VRAM via FFmpeg pipe (ZERO disk I/O!)...")
-            self.update_state(state='PROCESSING', meta={'progress': 75, 'status': 'Encoding from VRAM (NVENC)'})
-            import time as _time
-            _encode_start = _time.time()
+        # --- 12. Encode from stored frames → FFmpeg pipe → NVENC ---
+        # (Common path for both single-segment and multi-segment)
+        print(f"[{mode.upper()}] Segment processing complete - {len(vram_frames)} frames stored")
+        print(f"[{mode.upper()}] Encoding via FFmpeg pipe (NVENC)...")
+        self.update_state(state='PROCESSING', meta={'progress': 75, 'status': 'Encoding (NVENC)'})
+        import time as _time
+        _encode_start = _time.time()
 
-            output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
+        output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
 
-            # Get frame dimensions from first available frame
-            first_frame = VRAMCompressor.decompress_frame(
-                vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[0]
-            )
-            frame_height, frame_width = first_frame.shape[:2]
+        # Get frame dimensions (use original video dimensions)
+        frame_height, frame_width = height, width
 
-            # FFmpeg command: pipe rawvideo → NVENC → MP4 with audio from original
-            ffmpeg_cmd = [
-                str(FFMPEG_EXE), '-y',
-                '-f', 'rawvideo',
-                '-vcodec', 'rawvideo',
-                '-pix_fmt', 'bgr24',
-                '-s', f'{frame_width}x{frame_height}',
-                '-r', str(int(original_fps)),
-                '-i', 'pipe:0',  # Video from stdin
-                '-i', video_path,  # Audio from original
-                '-map', '0:v:0',
-                '-map', '1:a:0?',
-                '-c:v', 'h264_nvenc',  # GPU encoding!
-                '-preset', 'p1',  # Fastest NVENC preset
-                '-b:v', '8M',
-                '-bufsize', '16M',
-                '-pix_fmt', 'yuv420p',
-                '-c:a', 'aac',
-                '-b:a', '192k',
-                output_path
-            ]
+        # FFmpeg command: pipe rawvideo → NVENC → MP4 with audio from original
+        ffmpeg_cmd = [
+            str(FFMPEG_EXE), '-y',
+            '-f', 'rawvideo',
+            '-vcodec', 'rawvideo',
+            '-pix_fmt', 'bgr24',
+            '-s', f'{frame_width}x{frame_height}',
+            '-r', str(int(original_fps)),
+            '-i', 'pipe:0',  # Video from stdin
+            '-i', video_path,  # Audio from original
+            '-map', '0:v:0',
+            '-map', '1:a:0?',
+            '-c:v', 'h264_nvenc',  # GPU encoding!
+            '-preset', 'p1',  # Fastest NVENC preset
+            '-b:v', '8M',
+            '-bufsize', '16M',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            output_path
+        ]
 
-            # Start FFmpeg process
-            # NOTE: Use DEVNULL for stdout/stderr to prevent pipe deadlock on long videos!
-            proc = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+        # Start FFmpeg process
+        proc = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
 
-            # Stream ALL frames directly to FFmpeg (processed + unprocessed)
-            for frame_idx in range(total_frames):
-                # Progress logging every 100 frames
-                if frame_idx % 100 == 0:
-                    print(f"[SAM2] Encoding frame {frame_idx}/{total_frames}...")
+        # For frames not in vram_frames, read from original video
+        cap_encode = cv2.VideoCapture(video_path)
 
-                if frame_idx in vram_frames:
-                    # Processed frame from segment
-                    frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
-                elif frame_idx in preloaded_frames:
-                    # Unprocessed frame from preloaded
-                    frame_bgr = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-                    # Single segment case: overlay cropped result if available
-                    if len(segments) <= 1 and frame_idx < len(final_cropped_frames):
-                        frame_bgr[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = final_cropped_frames[frame_idx]
-                else:
-                    print(f"[WARNING] Frame {frame_idx} not found in VRAM, skipping")
+        # Stream ALL frames directly to FFmpeg (processed + unprocessed)
+        for frame_idx in range(total_frames):
+            # Progress logging every 100 frames
+            if frame_idx % 100 == 0:
+                print(f"[{mode.upper()}] Encoding frame {frame_idx}/{total_frames}...")
+
+            if frame_idx in vram_frames:
+                # Processed frame from segment - already composited
+                frame_bgr = vram_frames[frame_idx]
+            else:
+                # Unprocessed frame - read from original video
+                ret, frame_bgr = cap_encode.read()
+                if not ret:
+                    print(f"[WARNING] Frame {frame_idx} read failed, skipping")
                     continue
 
-                proc.stdin.write(frame_bgr.tobytes())
+            proc.stdin.write(frame_bgr.tobytes())
 
-            proc.stdin.close()
-            proc.wait(timeout=300)
+        cap_encode.release()
 
-            if proc.returncode != 0:
-                print(f"[ERROR] FFmpeg NVENC encoding failed (code {proc.returncode})")
-                raise RuntimeError(f"Video encoding failed (code {proc.returncode})")
+        proc.stdin.close()
+        proc.wait(timeout=300)
 
-            _encode_time = _time.time() - _encode_start
-            print(f"[SAM2] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s ({total_frames/_encode_time:.1f} fps)")
+        if proc.returncode != 0:
+            print(f"[ERROR] FFmpeg NVENC encoding failed (code {proc.returncode})")
+            raise RuntimeError(f"Video encoding failed (code {proc.returncode})")
 
-            # Free VRAM
-            import torch as _torch
-            del vram_frames
-            _torch.cuda.empty_cache()
+        _encode_time = _time.time() - _encode_start
+        print(f"[SAM2] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s ({total_frames/_encode_time:.1f} fps)")
+
+        # Free VRAM
+        import torch as _torch
+        del vram_frames
+        _torch.cuda.empty_cache()
 
         print(f"[SAM2] Final video: {output_path}")
 
@@ -2087,11 +2126,10 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 list(seg_bbox),  # Use segment bbox directly in frame coordinates
                 width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
             )
-            movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
-            if movement < 10:
-                neighbor_length, subvideo_length = 2, 30
-            else:
-                neighbor_length, subvideo_length = 3, 60
+            # Hasan branch used FIXED values for speed (not resolution-based)
+            subvideo_length = 120  # Hasan: 120 fixed (larger batch = faster)
+            neighbor_length = 10   # Hasan: 10 (more temporal context)
+            ref_stride = 10        # Hasan: 10 (not 15)
             pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
             pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
             proc_start = start_f - pad_left
@@ -2121,7 +2159,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             output_frames = faster_propainter_pipeline(
                 video='dummy', mask='dummy', output=output_dir,
                 resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                ref_stride=ref_stride, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
                 raft_iter=10, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
                 fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
                 return_frames=True  # ZERO DISK I/O!
