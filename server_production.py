@@ -5520,11 +5520,8 @@ def process_video():
             if ext in image_exts:
                 result = celery.send_task('watermark.remove_image', args=[video_path])
             else:
-                # Use WSL sender/receiver architecture for YOLO mode
-                # Chain: WSL YOLO detection → Windows ProPainter
-                from celery import signature, chain
-                import uuid
-
+                # Use distributed processing for videos (multiple workers collaborate on segments)
+                # Build a Celery canvas chain on the server side to avoid any in-task blocking
                 def _current_public_base():
                     env_url = os.getenv('TUNNEL_URL')
                     if env_url:
@@ -5539,23 +5536,14 @@ def process_video():
                     return 'http://localhost:9000'
 
                 base = _current_public_base()
-                video_id = task_id or str(uuid.uuid4())[:8]
 
-                # Create masks directory
-                masks_dir = f"/tmp/{video_id}_yolo_masks"
-
-                # Chain: WSL YOLO detection → Windows ProPainter inpainting
-                # yolo.generate_masks runs in WSL (queue=wsl_yolo)
-                # watermark._continue_after_masks runs in Windows (queue=propainter)
-                print(f"[YOLO] Using WSL sender/receiver chain")
-                print(f"  - Video: {video_path}")
-                print(f"  - Masks dir: {masks_dir}")
-                print(f"  - Queue flow: wsl_yolo → propainter")
-
-                s1 = signature('yolo.generate_masks', args=[video_path, masks_dir], kwargs={'api_base': base}, queue='wsl_yolo')
-                s2 = signature('watermark._continue_after_masks', args=[video_path, video_id, None, None, None, 0, base], queue='propainter')
-
-                result = chain(s1, s2).apply_async()
+                # Call prepare_video_task which creates the chord internally
+                # This creates: prepare -> chord([segment1, segment2, ...]) -> finalize
+                # prepare_video will use cached video if broadcast succeeded
+                result = prepare_video_task.apply_async(
+                    args=[video_path],
+                    kwargs={'api_base': base, 'temp_base': base}
+                )
             print(f"[OK] Task queued with ID: {result.id}")
 
             # Deduct 1 credit from user's balance after successful task creation
@@ -5969,29 +5957,6 @@ def get_stats():
     })
 
 
-
-@app.route('/api/sam2/status/<task_id>', methods=['GET', 'OPTIONS'])
-def sam2_status(task_id):
-    """Check SAM2 job status - polls Celery task result."""
-    if request.method == 'OPTIONS':
-        return ('', 204)
-    try:
-        result = celery.AsyncResult(task_id)
-        if result.state == 'PENDING':
-            return jsonify({'status': 'processing', 'progress': 0, 'message': 'Waiting in queue...'})
-        elif result.state == 'PROCESSING':
-            info = result.info or {}
-            return jsonify({'status': 'processing', 'progress': info.get('progress', 50), 'message': info.get('status', 'Processing...')})
-        elif result.state == 'SUCCESS':
-            data = result.result or {}
-            return jsonify({'status': 'completed', 'result_url': data.get('result_url')})
-        elif result.state == 'FAILURE':
-            return jsonify({'status': 'failed', 'error': str(result.info)})
-        else:
-            return jsonify({'status': 'processing', 'progress': 25, 'message': f'{result.state}'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
-
 @app.route('/api/sam2/result/<request_id>', methods=['GET'])
 def sam2_get_result(request_id):
     """Poll for the result of a SAM2 selection task."""
@@ -6137,31 +6102,18 @@ def sam2_process_video():
 
         api_base = _current_public_base()
 
-        # Create masks directory
-        masks_dir = f"/tmp/{task_id}_sam2_masks"
+        # Send task to SAM2 worker queue with points data
+        result = celery.send_task(
+            'watermark.process_sam2_interactive',
+            args=[video_path, task_id, points, video_width, video_height, frame_index],
+            kwargs={'api_base': api_base},  # Pass Railway URL for video download
+            task_id=job_id,
+            queue='sam2' # Explicitly route to the SAM2 worker queue
+        )
 
-        # Convert points from frontend format to WSL worker format
-        # Frontend sends: [{x, y, label, ...}, ...]
-        # WSL worker expects: points=[(x,y), ...], labels=[1, 1, ...]
-        wsl_points = [(int(p.get('x', 0)), int(p.get('y', 0))) for p in points]
-        wsl_labels = [int(p.get('label', 1)) for p in points]
+        print(f"[SAM2] Started processing job {job_id} for video {task_id}")
+        print(f"[SAM2] Points: {len(points)}, Video: {video_width}x{video_height}")
 
-        # Chain: WSL SAM2 mask generation → Windows ProPainter inpainting
-        from celery import signature, chain
-
-        s1 = signature('sam2.generate_masks_fullfps',
-                       args=[video_path, masks_dir],
-                       kwargs={'prompt_mode': 'point', 'points': wsl_points, 'labels': wsl_labels, 'frame_idx': frame_index, 'api_base': api_base},
-                       queue='wsl_sam2')
-        s2 = signature('watermark._continue_after_masks',
-                       args=[video_path, task_id, points, video_width, video_height, frame_index, api_base],
-                       queue='propainter')
-
-        result = chain(s1, s2).apply_async(task_id=job_id)
-
-        print(f"[SAM2] Started WSL chain job {job_id} for video {task_id}")
-        print(f"[SAM2] Points: {len(wsl_points)}, Video: {video_width}x{video_height}")
-        print(f"[SAM2] Queue flow: wsl_sam2 -> propainter")
         return jsonify({
             'status': 'success',
             'job_id': job_id,
