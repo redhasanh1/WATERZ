@@ -1556,17 +1556,12 @@ def process_yolo_segment_task(self, segment_data):
             zf.extractall(masks_dir)
         os.remove(zip_path)
 
-    # Read masks for this segment
-    import glob
-    mask_files = sorted(glob.glob(os.path.join(masks_dir, "*.png")))
-    all_masks = [cv2.imread(mf, cv2.IMREAD_GRAYSCALE) for mf in mask_files]
-
-    # Calculate segment-specific crop
+    # Calculate segment-specific crop (hardcode 0.2 to match server_production.py)
     seg_crop_x, seg_crop_y, seg_crop_w, seg_crop_h = calculate_crop_region(
-        list(seg_bbox), width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
+        list(seg_bbox), width, height, padding_ratio=0.2, min_size=128
     )
 
-    # Temporal padding
+    # Temporal padding - calculate FIRST so we know which masks to load
     pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
     pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
     proc_start = start_f - pad_left
@@ -1575,7 +1570,12 @@ def process_yolo_segment_task(self, segment_data):
     duration = end_f - start_f
     print(f"[YOLO-SEG] Segment {seg_idx+1}: frames {start_f}-{end_f-1} ({duration}f), crop={seg_crop_w}x{seg_crop_h}, pad=+/-{SEGMENT_TEMPORAL_PAD} => proc {proc_start}-{proc_end-1}")
 
-    # Load frames for this segment
+    # Get mask files list (sorted by frame number)
+    import glob
+    mask_files = sorted(glob.glob(os.path.join(masks_dir, "*.png")))
+
+    # Load frames AND masks for this segment ONLY (not all masks!)
+    # This prevents 4x memory explosion when 4 chord tasks run concurrently
     cap = cv2.VideoCapture(video_path)
     seg_frames = []
     seg_masks = []
@@ -1585,9 +1585,12 @@ def process_yolo_segment_task(self, segment_data):
         if ret:
             seg_frame = frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
             seg_frames.append(np.ascontiguousarray(seg_frame))
-            if frame_idx < len(all_masks):
-                seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
-                seg_masks.append(np.ascontiguousarray(seg_mask))
+            # Load mask for this frame ONLY (not all masks!)
+            if frame_idx < len(mask_files):
+                mask = cv2.imread(mask_files[frame_idx], cv2.IMREAD_GRAYSCALE)
+                if mask is not None:
+                    seg_mask = mask[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                    seg_masks.append(np.ascontiguousarray(seg_mask))
     cap.release()
 
     if not seg_frames or not seg_masks:
@@ -1844,6 +1847,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         if mode == 'yolo':
             os.environ['SEGMENT_WORKERS'] = '4'
             print(f"[MODE] YOLO mode detected - using 4 segment workers")
+            # YOLO mode uses 0.2 padding (matches server_production.py)
+            global SEGMENT_CROP_PAD_RATIO
+            SEGMENT_CROP_PAD_RATIO = 0.2
         else:
             os.environ['SEGMENT_WORKERS'] = '2'
             print(f"[MODE] SAM2 mode detected - using 2 segment workers")
@@ -2035,10 +2041,40 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 fixed_segments.append((s, e, bb))
             segments = fixed_segments
 
+            # Merge tiny segments (< 15 frames) into neighbors for better inpainting quality
+            MIN_MERGE_FRAMES = 15
+            if len(segments) > 1:
+                merged_segments = []
+                for seg in segments:
+                    duration = seg[1] - seg[0]
+                    if duration < MIN_MERGE_FRAMES and merged_segments:
+                        # Extend previous segment to absorb this tiny one
+                        prev = merged_segments[-1]
+                        # YOLO: keep prev bbox (per-frame masks don't need union)
+                        # SAM2: union bboxes (interpolation needs full coverage)
+                        if mode == 'yolo':
+                            merged_segments[-1] = (prev[0], seg[1], prev[2])
+                        else:
+                            union_bb = (
+                                min(prev[2][0], seg[2][0]),
+                                min(prev[2][1], seg[2][1]),
+                                max(prev[2][2], seg[2][2]),
+                                max(prev[2][3], seg[2][3])
+                            )
+                            merged_segments[-1] = (prev[0], seg[1], union_bb)
+                        print(f"[SAM2] Merged tiny segment ({duration}f) into previous segment")
+                    else:
+                        merged_segments.append(seg)
+                if len(merged_segments) < len(segments):
+                    print(f"[SAM2] Merged {len(segments)} segments → {len(merged_segments)} (absorbed tiny segments)")
+                segments = merged_segments
+
             # Replace each segment's averaged bbox with union bbox for that segment's frames
             # This ensures fast-moving objects are fully covered within each segment
             # Also splits segments if union bbox exceeds MAX_SEGMENT_PIXELS
-            if detections_per_frame:
+            # YOLO mode: skip union bbox (already has per-frame masks, union creates huge crops)
+            # SAM2 mode: compute union bbox (interpolated masks need full coverage)
+            if mode != 'yolo' and detections_per_frame:
                 updated_segments = []
                 for s, e, bb in segments:
                     # Compute union of all bboxes in this segment's frame range
@@ -2262,67 +2298,18 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         # Process segments (parallel when enabled, like main task)
         segments_to_process = segments or [(0, total_frames, [0, 0, width, height])]
 
-        # YOLO MODE: Use Celery chord for TRUE 4-worker parallelism!
-        if mode == 'yolo' and len(segments_to_process) > 1:
-            print(f"[YOLO] Dispatching {len(segments_to_process)} segments via Celery chord (4 parallel workers)...")
-            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Dispatching {len(segments_to_process)} parallel tasks'})
-
-            # Prepare segment task data
-            segment_tasks_data = []
+        # YOLO MODE: Process SEQUENTIALLY (no chord = no VRAM explosion!)
+        # Same path as SAM2 with 1 worker - process one segment at a time
+        if mode == 'yolo':
+            print(f"[YOLO] Processing {len(segments_to_process)} segments SEQUENTIALLY (no VRAM explosion)...")
+            self.update_state(state='PROCESSING', meta={'progress': 50, 'status': f'Processing {len(segments_to_process)} segments sequentially'})
             for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
-                segment_tasks_data.append({
-                    'seg_idx': seg_idx,
-                    'start_f': start_f,
-                    'end_f': end_f,
-                    'seg_bbox': seg_bbox,
-                    'video_path': video_path,
-                    'video_id': video_id,
-                    'width': width,
-                    'height': height,
-                    'total_frames': total_frames,
-                    'original_fps': original_fps,
-                    'masks_url': masks_url,
-                    'total_segments': len(segments_to_process),
-                    'api_base': api_base
-                })
-
-            # Prepare video data for finalize task
-            video_data = {
-                'video_id': video_id,
-                'video_path': video_path,
-                'width': width,
-                'height': height,
-                'total_frames': total_frames,
-                'original_fps': original_fps,
-                'api_base': api_base
-            }
-
-            # Create chord: segments run in parallel, finalize runs when ALL complete
-            segment_sigs = [
-                process_yolo_segment_task.s(seg_data).set(queue='propainter')
-                for seg_data in segment_tasks_data
-            ]
-            workflow = chord(segment_sigs)(
-                finalize_yolo_task.s(video_data=video_data).set(queue='propainter')
-            )
-
-            print(f"[YOLO] Chord dispatched! {len(segments_to_process)} segments will run in parallel across 4 workers")
-            print(f"   Finalize callback ID: {workflow.id}")
-
-            # Free VRAM before returning (chord will handle processing)
-            del preloaded_frames
-            del vram_frames
-            import torch as _torch
-            _torch.cuda.empty_cache()
-
-            # Return chord ID for tracking
-            return {
-                'status': 'processing',
-                'chord_id': f'yolo_{video_id}',
-                'finalize_task_id': workflow.id,
-                'segments': len(segments_to_process),
-                'message': f'YOLO chord: {len(segments_to_process)} segments dispatched'
-            }
+                print(f"[YOLO] Segment {seg_idx+1}/{len(segments_to_process)}...")
+                segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
+                # Clear VRAM between segments
+                import torch as _torch
+                _torch.cuda.empty_cache()
+            # Falls through to FFmpeg encoding below (same as SAM2)
 
         # SAM2 MODE: Use ThreadPoolExecutor (2 workers, VRAM sharing)
         elif SAM2_PARALLEL_SEGMENTS and SEGMENT_WORKERS > 1 and len(segments_to_process) > 1:
