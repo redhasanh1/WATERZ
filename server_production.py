@@ -4894,6 +4894,17 @@ def get_status(task_id):
                     response['current_task_id'] = chord_id  # Frontend will switch to this task_id
                     return jsonify(response), 409  # HTTP 409 Conflict - task superseded
 
+                # Check if this task forwarded to another task (YOLO forwarding pattern)
+                if 'task_id' in result_data and result_data.get('status') == 'processing':
+                    new_task_id = result_data['task_id']
+                    print(f"[POLL] Task forwarded to: {new_task_id}")
+                    response['state'] = 'PROCESSING'
+                    response['progress'] = result_data.get('message', 'Processing...')
+                    response['info'] = {'progress': 30, 'status': result_data.get('message', 'Processing...')}
+                    response['stale'] = True
+                    response['current_task_id'] = new_task_id
+                    return jsonify(response), 409
+
                 result_path = result_data.get('path')
                 if not result_path:
                     print(f"[ERROR] Task {task_id} SUCCESS but no path in result: {result_data}")
