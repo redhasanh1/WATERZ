@@ -1911,6 +1911,20 @@ def trigger_finalization(redis_client, video_id, total_segments):
             cdn_url = f"{B2_CDN_URL}/{remote_path}"
             _b2_time = _upload_time.time() - _b2_start
             print(f"[FINALIZE] B2 upload complete in {_b2_time:.1f}s - CDN URL: {cdn_url}")
+
+            # Notify Railway server of the CDN URL
+            tunnel = os.getenv('TUNNEL_URL') or os.getenv('API_BASE_URL')
+            if tunnel:
+                try:
+                    import requests
+                    notify_url = tunnel.rstrip('/') + '/api/notify-result'
+                    resp = requests.post(notify_url, json={'video_id': video_id, 'cdn_url': cdn_url}, timeout=10)
+                    if resp.ok:
+                        print(f"[FINALIZE] ✅ Notified Railway server of CDN URL")
+                    else:
+                        print(f"[FINALIZE] ⚠️ Railway notification failed: HTTP {resp.status_code}")
+                except Exception as notify_err:
+                    print(f"[FINALIZE] ⚠️ Railway notification error: {notify_err}")
     except ImportError:
         print(f"[FINALIZE] b2sdk not installed - skipping B2 upload")
     except Exception as e:
@@ -5875,6 +5889,32 @@ def upload_result():
 
         return jsonify({'status': 'success', 'result_url': f'/results/{safe_name}'})
     except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/notify-result', methods=['POST', 'OPTIONS'])
+def notify_result():
+    """Worker notifies server of completed CDN URL (no file upload needed)"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    try:
+        data = request.json
+        video_id = data.get('video_id')
+        cdn_url = data.get('cdn_url')
+
+        if not video_id or not cdn_url:
+            return jsonify({'status': 'error', 'message': 'Missing video_id or cdn_url'}), 400
+
+        print(f"[NOTIFY-RESULT] Received CDN URL for video {video_id}: {cdn_url}")
+
+        redis_client = celery.backend.client
+        redis_client.set(f"video:{video_id}:final_path", cdn_url)
+        redis_client.set(f"video:{video_id}:status", "complete")
+
+        print(f"[NOTIFY-RESULT] ✅ Stored CDN URL in Redis for video {video_id}")
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        print(f"[NOTIFY-RESULT] Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
