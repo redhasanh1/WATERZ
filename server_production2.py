@@ -17,6 +17,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
 import numpy as np
 
+# Enable TensorRT optimizations for 4090 (MUST be set before watermark.py import)
+os.environ['USE_NEUFLOW'] = '1'        # NeuFlow TRT optical flow (~3GB vs ~11GB VRAM)
+os.environ['FORCE_TRT_RFCNET'] = '1'   # RFCNet TRT for flow completion
+os.environ['ENABLE_DCNV4_RFCNET'] = '1' # DCNv4 plugin for RFCNet TRT
+
 # Segment detection for parallel processing
 from segment_detector import detect_segments_from_masks, merge_adjacent_segments, detect_segments, detect_segments_motion_based
 from crop_utils import calculate_crop_region

@@ -1,0 +1,169 @@
+================================================================================
+FIXES APPLIED - December 8, 2025
+================================================================================
+
+PROBLEM:
+--------
+CUDA OOM errors during optical flow processing. Server was using PyTorch RAFT
+(~11GB VRAM) instead of NeuFlow TRT (~3GB VRAM), causing out of memory crashes.
+
+Error seen in logs:
+  [VALIDATION] Active optical flow model: PyTorch RAFT (fallback)
+  torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 11.30 GiB.
+
+ROOT CAUSES:
+------------
+1. server_production2.py was missing USE_NEUFLOW=1 environment variable
+2. server_production2.py was missing FORCE_TRT_RFCNET=1 environment variable
+3. server_production2.py was missing ENABLE_DCNV4_RFCNET=1 environment variable
+4. NeuFlow engine built today (44MB) was incompatible - needed the Nov 7 version (26MB)
+5. cuBLAS 13 DLL was missing for TensorRT 10.13 (needed shim from cuBLAS 12)
+
+================================================================================
+FIX 1: Enable TensorRT in server_production2.py
+================================================================================
+
+File: D:\watermarkz\server_production2.py
+
+Added after line 18 (after numpy import, BEFORE watermark.py import):
+
+  # Enable TensorRT optimizations for 4090 (MUST be set before watermark.py import)
+  os.environ['USE_NEUFLOW'] = '1'        # NeuFlow TRT optical flow (~3GB vs ~11GB VRAM)
+  os.environ['FORCE_TRT_RFCNET'] = '1'   # RFCNet TRT for flow completion
+  os.environ['ENABLE_DCNV4_RFCNET'] = '1' # DCNv4 plugin for RFCNet TRT
+
+IMPORTANT: These MUST be set BEFORE watermark.py is imported because watermark.py
+reads these env vars at import time (line 193).
+
+================================================================================
+FIX 2: Build NeuFlow Engine (CUDNN Only - No CUBLAS)
+================================================================================
+
+The NeuFlow engine built with CUBLAS tactics (44MB) was incompatible.
+The working Nov 7 version (26MB) was built with CUDNN-only tactics.
+
+KEY INSIGHT: The 44MB vs 26MB size difference was due to tactic sources:
+  - 44MB = CUDNN + CUBLAS + EDGE_MASK_CONVOLUTIONS (BROKEN - needs cublas64_13.dll)
+  - 26MB = CUDNN only (WORKING - no cuBLAS dependency)
+
+Build command (CUDNN only, matches working version):
+
+  D:\watermarkz\TensorRT-10.13.3.9\bin\trtexec.exe ^
+    --onnx=D:\watermarkz\faster-propainter-main\models\neuflow_things.onnx ^
+    --saveEngine=D:\watermarkz\faster-propainter-main\models\neuflow_things_fp16.engine ^
+    --fp16 ^
+    --memPoolSize=workspace:4096 ^
+    --tacticSources=+CUDNN ^
+    --builderOptimizationLevel=5
+
+Build results:
+  - Engine size: 26.6 MB (matches working 26MB backup)
+  - Build time: ~10 minutes
+  - Throughput: 315 qps
+  - GPU latency: 2.68 ms mean
+
+Output: D:\watermarkz\faster-propainter-main\models\neuflow_things_fp16.engine (26.6MB)
+
+================================================================================
+FIX 3: Build RFCNet DCNv4 TensorRT Engine
+================================================================================
+
+Built fresh RFCNet DCNv4 TensorRT engine (11.8MB) using:
+
+  python build_rfcnet_trt_engine.py \
+    --onnx engines/rfcnet/rfcnet_dcnv4.onnx \
+    --engine engines/rfcnet/rfcnet_dcnv4_fp16.engine \
+    --fp16 --workspace 4
+
+Output: D:\watermarkz\engines\rfcnet\rfcnet_dcnv4_fp16.engine (11.8MB)
+
+================================================================================
+FIX 4: cuBLAS 13 DLL Shim for TensorRT 10.13
+================================================================================
+
+TensorRT 10.13.3.9 looks for cublas64_13.dll but CUDA 12.6 only has cublas64_12.dll.
+Created shim by copying the DLLs:
+
+  Copy-Item 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin\cublas64_12.dll' `
+            'D:\watermarkz\TensorRT-10.13.3.9\lib\cublas64_13.dll'
+
+  Copy-Item 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin\cublasLt64_12.dll' `
+            'D:\watermarkz\TensorRT-10.13.3.9\lib\cublasLt64_13.dll'
+
+================================================================================
+FINAL WORKING CONFIGURATION
+================================================================================
+
+Component               | File                                              | Size    | Date
+------------------------|---------------------------------------------------|---------|------------
+NeuFlow TRT Engine      | faster-propainter-main/models/neuflow_things_fp16.engine | 26.6 MB | Dec 8
+RFCNet DCNv4 TRT Engine | engines/rfcnet/rfcnet_dcnv4_fp16.engine          | 11.8 MB | Dec 8
+DCNv4 CUDA Extension    | DCNv4/DCNv4_op/DCNv4/ext.cp312-win_amd64.pyd     | 32.9 MB | Nov 7
+
+Environment Variables (set in server_production2.py):
+  USE_NEUFLOW=1
+  FORCE_TRT_RFCNET=1
+  ENABLE_DCNV4_RFCNET=1
+
+cuBLAS Shim (in TensorRT lib folder):
+  cublas64_13.dll (copy of cublas64_12.dll)
+  cublasLt64_13.dll (copy of cublasLt64_12.dll)
+
+================================================================================
+VERIFICATION
+================================================================================
+
+After restart, server logs should show:
+
+  [VALIDATION] Active optical flow model: NeuFlow v2 TensorRT FP16
+  [OK] Using NeuFlow v2 TensorRT for optical flow (10-70x faster than RAFT)
+
+NOT:
+  [VALIDATION] Active optical flow model: PyTorch RAFT (fallback)
+
+================================================================================
+BACKUP LOCATIONS
+================================================================================
+
+Working backup (Nov 7):
+  D:\watermarkz\backupskep\
+    - neuflow_things_fp16.engine (26MB) - WORKING
+    - ext.cp312-win_amd64.pyd (32.9MB) - WORKING
+    - rfcnet_fp16.engine (0 bytes) - NOT USED
+
+Failed Dec 8 builds (for reference):
+  D:\watermarkz\backups_dec8_failed\
+    - neuflow_things_fp16.engine (44MB) - INCOMPATIBLE
+    - rfcnet_fp16.engine (23MB)
+    - ext.cp312-win_amd64.pyd (32.9MB)
+
+================================================================================
+LESSONS LEARNED
+================================================================================
+
+1. NeuFlow engine size matters - 26MB works, 44MB doesn't (different tactic sources)
+2. Environment variables MUST be set before watermark.py import
+3. TensorRT 10.13 needs cuBLAS 13 DLLs - can shim with cuBLAS 12
+4. Always keep working backups before rebuilding TensorRT engines
+5. The 4090_receiver.bat has the correct env vars - server_production2.py needs them too
+6. Use CUDNN-only tactics for NeuFlow to avoid cuBLAS dependency:
+     --tacticSources=+CUDNN (NOT +CUDNN,+CUBLAS,+EDGE_MASK_CONVOLUTIONS)
+7. RFCNet DCNv4 CAN use CUBLAS (because we have the shim), but NeuFlow should not
+
+================================================================================
+HOW TO REBUILD ENGINES (FUTURE REFERENCE)
+================================================================================
+
+NeuFlow TRT (CUDNN only - ~26MB):
+  D:\watermarkz\TensorRT-10.13.3.9\bin\trtexec.exe ^
+    --onnx=D:\watermarkz\faster-propainter-main\models\neuflow_things.onnx ^
+    --saveEngine=D:\watermarkz\faster-propainter-main\models\neuflow_things_fp16.engine ^
+    --fp16 --memPoolSize=workspace:4096 --tacticSources=+CUDNN --builderOptimizationLevel=5
+
+RFCNet DCNv4 TRT (~12MB):
+  python build_rfcnet_trt_engine.py ^
+    --onnx engines/rfcnet/rfcnet_dcnv4.onnx ^
+    --engine engines/rfcnet/rfcnet_dcnv4_fp16.engine ^
+    --fp16 --workspace 4
+
+================================================================================
