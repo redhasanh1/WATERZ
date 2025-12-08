@@ -151,6 +151,39 @@ LESSONS LEARNED
 7. RFCNet DCNv4 CAN use CUBLAS (because we have the shim), but NeuFlow should not
 
 ================================================================================
+DOCKER WITH TENSORRT SUPPORT
+================================================================================
+
+A new Docker image with TensorRT support has been created. It includes the ONNX
+models and builds TRT engines on first run.
+
+Files created:
+  - Dockerfile.4090worker.trt    - TensorRT-enabled Docker image
+  - requirements.docker.trt.txt  - Dependencies for TRT image
+  - docker-entrypoint.sh         - Entrypoint that builds engines on first run
+
+Build the image:
+  docker build -f Dockerfile.4090worker.trt -t propainter-trt .
+
+Run with volume for cached engines:
+  docker run --gpus all \
+    -e REDIS_URL="redis://:password@host:6379/0" \
+    -v propainter-engines:/app/engines \
+    -v propainter-models:/app/faster-propainter-main/models \
+    propainter-trt
+
+First run: Builds TRT engines (~15 minutes), then starts worker
+Subsequent runs: Uses cached engines, starts immediately
+
+Engine files (built inside container):
+  - /app/faster-propainter-main/models/neuflow_things_fp16.engine (~26MB)
+  - /app/engines/rfcnet/rfcnet_dcnv4_fp16.engine (~12MB)
+
+ONNX files (baked into image):
+  - /app/faster-propainter-main/models/neuflow_things.onnx
+  - /app/engines/rfcnet/rfcnet_dcnv4.onnx
+
+================================================================================
 HOW TO REBUILD ENGINES (FUTURE REFERENCE)
 ================================================================================
 

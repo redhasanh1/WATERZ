@@ -1,0 +1,183 @@
+================================================================================
+DOCKER TENSORRT FIXES - December 8, 2025
+================================================================================
+
+GOAL: Create Docker image with TensorRT support that builds 3 components:
+  1. DCNv4 TensorRT Plugin (compiled during docker build)
+  2. NeuFlow TRT Engine (built on first run)
+  3. RFCNet DCNv4 TRT Engine (built on first run)
+
+================================================================================
+ISSUE 1: watermark.py not found
+================================================================================
+Error: COPY watermark.py . failed - file not found
+
+Fix: watermark.py is inside faster-propainter-main/, not root.
+     Removed the COPY line since it's already included when we copy
+     the faster-propainter-main/ directory.
+
+File: Dockerfile.4090worker.trt
+Change: Removed "COPY watermark.py ."
+
+================================================================================
+ISSUE 2: libgl1-mesa-glx package not available
+================================================================================
+Error: Package 'libgl1-mesa-glx' has no installation candidate
+
+Fix: Package renamed in newer Ubuntu. Use 'libgl1' instead.
+
+File: Dockerfile.4090worker.trt
+Change: libgl1-mesa-glx -> libgl1
+
+================================================================================
+ISSUE 3: CMakeCache.txt conflict from Windows build
+================================================================================
+Error: The source "/app/dcnv4_tensorrt_plugin/CMakeLists.txt" does not match
+       the source "D:/watermarkz/dcnv4_tensorrt_plugin/CMakeLists.txt"
+
+Fix: The dcnv4_tensorrt_plugin/build/ directory had CMakeCache from Windows.
+     Use a different build directory name for Linux.
+
+File: Dockerfile.4090worker.trt
+Change: mkdir -p build -> rm -rf build_linux && mkdir -p build_linux
+        cd build -> cd build_linux
+
+================================================================================
+ISSUE 4: RFCNet ONNX parsing failed - DCNv4Plugin not found
+================================================================================
+Error: creator && "Plugin not found, are the plugin name, version, and
+       namespace correct?"
+
+Fix: trtexec needs --plugins flag to load the DCNv4 plugin when building
+     RFCNet engine.
+
+File: docker-entrypoint.sh
+Change: Added --plugins="$DCNV4_PLUGIN" to trtexec command for RFCNet
+
+================================================================================
+ISSUE 5: RFCNet build failed - dynamic shapes not specified
+================================================================================
+Error: IShuffleLayer /model/Reshape: reshape wildcard -1 has no integer
+       solution. Reshaping [1,8,128,1,1] to [-1,128,128,1].
+
+Fix: RFCNet ONNX has dynamic dimensions. Need to specify min/opt/max shapes.
+
+File: docker-entrypoint.sh
+Change: Added shape profiles to trtexec:
+  --minShapes=masked_flows:1x8x2x256x256,masks:1x8x1x256x256 \
+  --optShapes=masked_flows:1x8x2x480x640,masks:1x8x1x480x640 \
+  --maxShapes=masked_flows:1x16x2x720x1280,masks:1x16x1x720x1280
+
+================================================================================
+ISSUE 6: TensorRT engine platform mismatch (CRITICAL!)
+================================================================================
+Error: Serialization assertion plan->header.pad == expectedPlatformTag failed.
+       Platform specific tag mismatch detected. TensorRT plan files are only
+       supported on the target runtime platform they were created on.
+
+Root Cause:
+  - Windows trtexec built neuflow_things_fp16.engine on Windows
+  - That .engine file was in faster-propainter-main/models/ when docker build ran
+  - Docker COPY baked the Windows engine into the image
+  - Docker volume mounted over /app/faster-propainter-main/models/
+  - Volume got populated with the baked-in Windows engine
+  - Linux Docker tried to load Windows engine -> FAILED
+
+Fix: Delete the Windows engine from the Docker volume and rebuild for Linux.
+
+Commands:
+  # Delete Windows-built NeuFlow engine from volume
+  docker run --rm \
+    -v propainter-models:/app/faster-propainter-main/models \
+    --entrypoint /bin/bash \
+    propainter-trt \
+    -c "rm -f /app/faster-propainter-main/models/neuflow_things_fp16.engine"
+
+  # Run again - will rebuild for Linux
+  docker run --gpus all \
+    -e REDIS_URL="redis://..." \
+    -v propainter-engines:/app/engines \
+    -v propainter-models:/app/faster-propainter-main/models \
+    propainter-trt
+
+PREVENTION: Add .dockerignore to exclude *.engine files from docker build:
+  echo "*.engine" >> .dockerignore
+  echo "**/*.engine" >> .dockerignore
+
+================================================================================
+FINAL WORKING CONFIGURATION
+================================================================================
+
+Files created:
+  - Dockerfile.4090worker.trt      # TensorRT Docker image
+  - requirements.docker.trt.txt    # Python dependencies
+  - docker-entrypoint.sh           # Entrypoint with TRT engine builds
+
+Build commands (inside container):
+
+1. DCNv4 Plugin (during docker build):
+   cmake .. -DCMAKE_BUILD_TYPE=Release -DTENSORRT_DIR=/usr/src/tensorrt \
+            -DCMAKE_CUDA_ARCHITECTURES="75;80;89" -GNinja && ninja
+
+2. NeuFlow TRT Engine (first run, ~10 min):
+   trtexec \
+     --onnx=/app/faster-propainter-main/models/neuflow_things.onnx \
+     --saveEngine=/app/faster-propainter-main/models/neuflow_things_fp16.engine \
+     --fp16 --memPoolSize=workspace:4096 --tacticSources=+CUDNN \
+     --builderOptimizationLevel=5
+
+3. RFCNet DCNv4 TRT Engine (first run, ~5 min):
+   trtexec \
+     --onnx=/app/engines/rfcnet/rfcnet_dcnv4.onnx \
+     --saveEngine=/app/engines/rfcnet/rfcnet_dcnv4_fp16.engine \
+     --fp16 --memPoolSize=workspace:4096 --builderOptimizationLevel=5 \
+     --plugins=/app/libdcnv4_plugin.so \
+     --minShapes=masked_flows:1x8x2x256x256,masks:1x8x1x256x256 \
+     --optShapes=masked_flows:1x8x2x480x640,masks:1x8x1x480x640 \
+     --maxShapes=masked_flows:1x16x2x720x1280,masks:1x16x1x720x1280
+
+================================================================================
+HOW TO USE
+================================================================================
+
+# Build the image
+docker build -f Dockerfile.4090worker.trt -t propainter-trt .
+
+# Run (first time builds engines ~15 min, subsequent runs instant)
+docker run --gpus all \
+  -e REDIS_URL="redis://default:PASSWORD@HOST:PORT" \
+  -v propainter-engines:/app/engines \
+  -v propainter-models:/app/faster-propainter-main/models \
+  propainter-trt
+
+# Test with mounted entrypoint (for development)
+docker run --gpus all \
+  -e REDIS_URL="redis://..." \
+  -v $(pwd)/docker-entrypoint.sh:/app/docker-entrypoint.sh \
+  -v propainter-engines:/app/engines \
+  -v propainter-models:/app/faster-propainter-main/models \
+  propainter-trt
+
+================================================================================
+VERIFICATION
+================================================================================
+
+Worker logs should show:
+  [VALIDATION] Active optical flow model: NeuFlow v2 TensorRT FP16
+  [OK] Using NeuFlow v2 TensorRT for optical flow (10-70x faster than RAFT)
+
+NOT:
+  [VALIDATION] Active optical flow model: PyTorch RAFT (fallback)
+
+================================================================================
+LESSONS LEARNED
+================================================================================
+
+1. TensorRT engines are PLATFORM SPECIFIC - Windows engines don't work on Linux
+2. Docker volumes get populated from image contents on first mount
+3. Need --plugins flag for trtexec when ONNX has custom ops (DCNv4)
+4. Need --minShapes/--optShapes/--maxShapes for dynamic ONNX models
+5. Use separate build directories (build_linux vs build) to avoid CMake conflicts
+6. Add *.engine to .dockerignore to prevent baking platform-specific engines
+
+================================================================================

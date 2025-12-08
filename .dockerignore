@@ -52,13 +52,21 @@ tests/
 test_*.py
 *_test.py
 
-# Build artifacts (keep only the engines we need)
+# Build artifacts
 *.pt
-*.onnx
 *.pth
 *.safetensors
-# Keep the TensorRT engine we need
-!runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine
+
+# TensorRT engines - EXCLUDE! (platform-specific, must be built in container)
+*.engine
+**/*.engine
+
+# ONNX models - KEEP these for TRT engine building
+!faster-propainter-main/models/neuflow_things.onnx
+!engines/rfcnet/rfcnet_dcnv4.onnx
+
+# Keep YOLO weights
+!runs/detect/new_sora_watermark/weights/best.pt
 
 # Node.js (if any)
 node_modules/

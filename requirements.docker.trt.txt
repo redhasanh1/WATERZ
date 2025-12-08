@@ -1,0 +1,47 @@
+# Docker dependencies for 4090 ProPainter Worker - TensorRT Edition
+# TensorRT ENABLED - NeuFlow + RFCNet for 10-70x faster optical flow
+# SAM2 Interactive Mode - NO YOLO
+
+# Celery/Redis (redis 4.5.4 works - 4.5.5 is explicitly excluded by celery!)
+celery[redis]==5.3.6
+redis==4.5.4
+
+# Web/API
+flask>=3.0.0
+flask-cors
+requests
+python-dotenv
+
+# Image/Video Processing
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+scipy>=1.11.0
+scikit-image>=0.22.0
+imageio>=2.33.0
+imageio-ffmpeg>=0.4.9
+av>=12.0.0
+
+# ML/DL (PyTorch comes pre-installed in TensorRT container)
+einops>=0.7.0
+timm>=0.9.0
+omegaconf>=2.3.0
+ultralytics>=8.0.0
+
+# TensorRT Python bindings (already in container, but ensure compatible version)
+# tensorrt is pre-installed in nvcr.io/nvidia/tensorrt container
+
+# ONNX for model loading
+onnx>=1.14.0
+onnxruntime-gpu>=1.16.0
+
+# Storage (B2 uploads)
+b2sdk
+
+# Utilities
+tqdm
+matplotlib
+Pillow
+pyyaml
+addict
+yapf
+future
