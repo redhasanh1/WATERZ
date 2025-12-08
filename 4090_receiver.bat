@@ -73,13 +73,13 @@ REM  SAM2 INTERACTIVE MODE - NO YOLO DETECTION!
 set YOLO_REQUIRE_TENSORRT=0
 set USE_INTERACTIVE_SAM2=1
 
-REM Use NeuFlow v2 ONNX (10-70x faster than RAFT!)
+REM NeuFlow TRT DISABLED - using PyTorch RAFT fallback
 set FORCE_TRT_RAFT=0
-set USE_NEUFLOW=1
+set USE_NEUFLOW=0
 
-REM  RFCNET TENSORRT (DCNv4): 1.6-2.3x speedup on flow completion
+REM  RFCNET TENSORRT (DCNv4): DISABLED for compatibility testing
 set RFCNET_TORCHTRT=0
-set FORCE_TRT_RFCNET=1
+set FORCE_TRT_RFCNET=0
 
 REM  TRANSFORMER TENSORRT: DISABLED (optional optimization)
 set FORCE_TRT_TRANSFORMER=0
@@ -104,7 +104,7 @@ set ENABLE_FP8_DECODER=1
 REM  FP8 RFCNET: 1.3-1.5x speedup
 set ENABLE_FP8_RFCNET=1
 
-REM  DCNv4 RFCNET: 3x speedup on deformable convolution
+REM  DCNv4 RFCNET: 3x speedup on deformable convolution (PyTorch)
 set ENABLE_DCNV4_RFCNET=1
 
 REM  NVDEC VIDEO DECODER: DISABLED

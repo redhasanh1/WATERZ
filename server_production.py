@@ -6033,7 +6033,7 @@ def sam2_status(task_id):
             return jsonify({'status': 'processing', 'progress': info.get('progress', 50), 'message': info.get('status', 'Processing...')})
         elif result.state == 'SUCCESS':
             data = result.result or {}
-            return jsonify({'status': 'completed', 'result_url': data.get('result_url')})
+            return jsonify({'status': 'completed', 'result_url': data.get('output_path') or data.get('result_url')})
         elif result.state == 'FAILURE':
             return jsonify({'status': 'failed', 'error': str(result.info)})
         else:

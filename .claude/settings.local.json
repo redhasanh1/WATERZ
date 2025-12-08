@@ -80,7 +80,18 @@
       "Bash(curl:*)",
       "Bash(\"D:/watermarkz/ffmpeg/ffmpeg.exe\" -version)",
       "Bash(\"D:/watermarkz/ffmpeg/ffprobe.exe\" -version:*)",
-      "Bash(printf:*)"
+      "Bash(printf:*)",
+      "Bash(./4090_receiver.bat)",
+      "Bash(git -C \"D:\\watermarkz\" show d1bc2699:4090_receiver.bat)",
+      "Bash(git -C \"D:\\watermarkz\" stash show:*)",
+      "Bash(git -C \"D:\\watermarkz\" log revert-to-working --oneline -10)",
+      "Bash(git -C \"D:\\watermarkz\" diff finalbranch revert-to-working --stat)",
+      "Bash(git -C \"D:\\watermarkz\" show revert-to-working:Dockerfile.4090worker)",
+      "Bash(git -C \"D:\\watermarkz\" show revert-to-working:4090_receiver.bat)",
+      "Bash(git -C \"D:\\watermarkz\" show revert-to-working:FIXES_APPLIED.txt)",
+      "Bash(git -C \"D:\\watermarkz\" show revert-to-working:requirements.docker.txt)",
+      "Bash(git -C \"D:\\watermarkz\" show revert-to-working:entrypoint.sh)",
+      "Bash(git -C \"D:\\watermarkz\" show revert-to-working:docker-compose.4090.yml)"
     ],
     "deny": [],
     "ask": []
