@@ -1589,15 +1589,11 @@ def background_encoder_worker():
         try:
             redis_client = celery.backend.client
 
-            # Configure pubsub with NO timeout and keepalive
+            # Configure pubsub with NO timeout
+            # NOTE: socket_keepalive_options disabled - causes "Invalid argument" error in WSL2/Docker
             pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
             pubsub.connection_pool.connection_kwargs['socket_timeout'] = None
-            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = True
-            pubsub.connection_pool.connection_kwargs['socket_keepalive_options'] = {
-                1: 60,   # TCP_KEEPIDLE
-                2: 10,   # TCP_KEEPINTVL
-                3: 6     # TCP_KEEPCNT
-            }
+            pubsub.connection_pool.connection_kwargs['socket_keepalive'] = False  # Disabled for WSL2 compatibility
 
             pubsub.subscribe('segment_ready')
 
@@ -2214,9 +2210,9 @@ def get_detector():
         print("=" * 60)
         from yolo_detector import YOLOWatermarkDetector
         import numpy as np
-        # Force TensorRT-only mode (no fallback to .pt)
-        # Will fail if engine not found - ensures maximum speed!
-        detector = YOLOWatermarkDetector(require_tensorrt=True)
+        # Use env var to control TensorRT requirement (default: True for speed)
+        require_trt = os.getenv('YOLO_REQUIRE_TENSORRT', '1') == '1'
+        detector = YOLOWatermarkDetector(require_tensorrt=require_trt)
 
         # WARMUP: Initialize TensorRT context (eliminates cold start overhead!)
         print("[WARMUP] Running warmup inference to initialize TensorRT context...")

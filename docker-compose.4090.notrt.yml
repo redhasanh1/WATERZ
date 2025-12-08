@@ -1,0 +1,28 @@
+version: '3.8'
+
+# ============================================================
+# 4090 ProPainter Worker - PyTorch Only (No TensorRT)
+# ============================================================
+# Build: docker-compose -f docker-compose.4090.notrt.yml build
+# Run:   docker-compose -f docker-compose.4090.notrt.yml up -d
+# ============================================================
+
+services:
+  propainter-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.4090worker.notrt
+    container_name: propainter-worker-notrt
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - REDIS_URL=${REDIS_URL}
+    volumes:
+      # Mount redis_url.txt for auto-loading Redis connection
+      - ./redis_url.txt:/app/redis_url.txt:ro
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
