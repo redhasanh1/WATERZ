@@ -2084,7 +2084,9 @@
                             statusText.style.color = '#10b981';
 
                             if (statusData.result_url) {
-                                const resultUrl = `${API_BASE_URL}${statusData.result_url}`;
+                                const resultUrl = statusData.result_url.startsWith('http')
+                                    ? statusData.result_url
+                                    : `${API_BASE_URL}${statusData.result_url}`;
                                 removeExistingDownloadLink();
 
                                 let downloadLinkElement = null;
@@ -2148,7 +2150,9 @@
 
                         const resultData = statusData.result || {};
                         if (resultData.result_url) {
-                            const resultUrl = `${API_BASE_URL}${resultData.result_url}`;
+                            const resultUrl = resultData.result_url.startsWith('http')
+                                ? resultData.result_url
+                                : `${API_BASE_URL}${resultData.result_url}`;
 
                             removeExistingDownloadLink();
 
