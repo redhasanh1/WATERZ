@@ -194,6 +194,56 @@
             background: rgba(102, 126, 234, 0.7);
         }
 
+        /* Video Timeline Thumbnail Styles */
+        .thumbnail-item {
+            flex-shrink: 0;
+            height: 100%;
+            border-right: 1px solid rgba(255,255,255,0.1);
+            background-size: cover;
+            background-position: center;
+            transition: opacity 0.2s;
+        }
+        .thumbnail-item:hover {
+            opacity: 0.8;
+        }
+        .thumbnail-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            width: 100%;
+            color: #666;
+            font-size: 0.8rem;
+        }
+        .time-marker {
+            font-size: 0.65rem;
+            color: #666;
+            font-family: monospace;
+        }
+        .keyframe-marker {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: auto;
+            cursor: pointer;
+            z-index: 5;
+            transition: transform 0.15s ease;
+        }
+        .keyframe-marker:hover {
+            transform: translate(-50%, -50%) scale(1.2);
+        }
+        .keyframe-marker svg {
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+        }
+        #thumbnailContainer::-webkit-scrollbar {
+            display: none;
+        }
+        #addKeyframeBtn:hover, #clearKeyframesBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover {
+            background: rgba(102,126,234,0.25);
+            border-color: #667eea;
+            color: #fff;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -1236,6 +1286,59 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Professional Video Timeline with Thumbnails -->
+                        <div id="videoTimelineContainer" class="video-timeline-container" style="display: none; margin-top: 1.5rem; background: #1a1a2e; border-radius: 12px; padding: 1rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid rgba(102,126,234,0.2);">
+                            <!-- Timeline Header -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                <span style="font-size: 0.9rem; font-weight: 600; color: #9aa4b2; text-transform: uppercase; letter-spacing: 0.5px;">Timeline</span>
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button id="addKeyframeBtn" style="display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.8rem; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); border-radius: 6px; color: #a0a0c0; font-size: 0.8rem; cursor: pointer;" title="Add keyframe at current position (K)">
+                                        <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><path d="M6 0L12 8L6 16L0 8L6 0Z"/></svg>
+                                        Add Marker
+                                    </button>
+                                    <button id="clearKeyframesBtn" style="padding: 0.4rem 0.8rem; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); border-radius: 6px; color: #a0a0c0; font-size: 0.8rem; cursor: pointer;" title="Clear all keyframes">
+                                        Clear All
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Thumbnail Track -->
+                            <div id="thumbnailTrack" style="position: relative; height: 60px; background: #0f0f1e; border-radius: 8px; overflow: hidden; cursor: pointer;">
+                                <div id="thumbnailContainer" style="display: flex; height: 100%; overflow-x: auto; scrollbar-width: none;">
+                                    <!-- Thumbnails inserted dynamically -->
+                                </div>
+
+                                <!-- Playhead Overlay -->
+                                <div id="videoTimelineOutput" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;">
+                                    <div id="timelinePlayhead" style="position: absolute; top: 0; height: 100%; transform: translateX(-50%); pointer-events: auto; cursor: ew-resize; z-index: 10; left: 0%;">
+                                        <div style="position: absolute; top: -2px; left: 50%; transform: translateX(-50%); color: #667eea;">
+                                            <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor"><path d="M7 10L0 0H14L7 10Z"/></svg>
+                                        </div>
+                                        <div style="position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 2px; height: calc(100% - 8px); background: linear-gradient(180deg, #667eea 0%, #764ba2 100%); box-shadow: 0 0 8px rgba(102,126,234,0.6);"></div>
+                                        <div id="playheadTime" style="position: absolute; bottom: -22px; left: 50%; transform: translateX(-50%); background: rgba(102,126,234,0.9); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-family: monospace; white-space: nowrap;">00:00.00</div>
+                                    </div>
+
+                                    <!-- Keyframe Markers Container -->
+                                    <div id="keyframeMarkersContainer" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;">
+                                        <!-- Diamond markers inserted dynamically -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Time Scale -->
+                            <div id="timeScale" style="display: flex; justify-content: space-between; padding: 0.25rem 0; margin-top: 0.25rem;">
+                                <!-- Time markers inserted dynamically -->
+                            </div>
+
+                            <!-- Zoom Controls -->
+                            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05);">
+                                <button id="zoomOutBtn" style="width: 24px; height: 24px; border: 1px solid rgba(102,126,234,0.3); background: rgba(102,126,234,0.1); color: #a0a0c0; border-radius: 4px; cursor: pointer; font-size: 1rem;">-</button>
+                                <span id="zoomLevel" style="font-size: 0.75rem; color: #666; min-width: 40px; text-align: center;">100%</span>
+                                <button id="zoomInBtn" style="width: 24px; height: 24px; border: 1px solid rgba(102,126,234,0.3); background: rgba(102,126,234,0.1); color: #a0a0c0; border-radius: 4px; cursor: pointer; font-size: 1rem;">+</button>
+                            </div>
+                        </div>
+
                         <!-- Mask Selection Controls -->
                         <div id="maskSelectionControls" style="display: none; margin-top: 2rem; padding: 2rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%); border-radius: 16px; border: 2px solid rgba(102, 126, 234, 0.2);">
                             <h3 style="text-align: center; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.4rem; font-weight: 700;">
@@ -2588,9 +2691,34 @@
     <!-- SAM2 Timeline and Selection Scripts -->
     
     <script src="js/sam2_selector.js"></script>
+    <script src="js/video_timeline.js"></script>
 
     <script>
-      // Video Timeline - Using built-in scrubber in video controls (no frame thumbnails)
+      // Video Timeline Initialization
+      (function() {
+        const video = document.getElementById('previewVideo');
+        if (video) {
+          video.addEventListener('loadedmetadata', function() {
+            if (!window.videoTimeline && video.duration && video.duration !== Infinity) {
+              console.log('[Timeline] Initializing VideoTimeline...');
+              window.videoTimeline = new VideoTimeline(video, {
+                thumbnailWidth: 80,
+                thumbnailHeight: 60,
+                maxThumbnails: 50,
+                onSeek: function(time) {
+                  console.log('[Timeline] Seek to:', time);
+                },
+                onKeyframeAdd: function(keyframe) {
+                  console.log('[Timeline] Keyframe added:', keyframe);
+                },
+                onKeyframeRemove: function(keyframe) {
+                  console.log('[Timeline] Keyframe removed:', keyframe);
+                }
+              });
+            }
+          });
+        }
+      })();
     </script>
 
     <script>
