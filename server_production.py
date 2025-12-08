@@ -4767,8 +4767,10 @@ def get_status(task_id):
                         final_path_raw = redis_client.get(f"video:{video_id}:final_path")
                         if final_path_raw:
                             final_path = final_path_raw.decode()
-                            # Check if path is web path or local path
-                            if final_path.startswith('/results/'):
+                            # Check if path is CDN URL, web path, or local path
+                            if final_path.startswith('http'):
+                                result_url = final_path  # CDN URL - return as-is
+                            elif final_path.startswith('/results/'):
                                 result_url = final_path
                             else:
                                 filename = os.path.basename(final_path)
@@ -4842,8 +4844,10 @@ def get_status(task_id):
                             final_path_raw = redis_client.get(f"video:{video_id}:final_path")
                             if final_path_raw:
                                 final_path = final_path_raw.decode()
-                                # Check if path is already a web path (from Railway upload)
-                                if final_path.startswith('/results/'):
+                                # Check if path is CDN URL, web path, or local path
+                                if final_path.startswith('http'):
+                                    result_url = final_path  # CDN URL - return as-is
+                                elif final_path.startswith('/results/'):
                                     result_url = final_path
                                 else:
                                     # Local path - extract filename
