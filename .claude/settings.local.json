@@ -1,10 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C \"D:\\watermarkz\" push --force-with-lease)",
-      "Bash(git -C \"D:\\watermarkz\" commit -m \"$(cat <<''EOF''\nfix: Notify Railway server of CDN URL after B2 upload\n\n- Add /api/notify-result endpoint to receive CDN URL from worker\n- Worker POSTs CDN URL to Railway after B2 upload completes\n- Railway stores CDN URL in Redis so frontend can fetch it\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git -C \"D:\\watermarkz\" push)",
-      "Bash(git -C \"D:\\watermarkz\" commit -m \"chore: force Railway rebuild with docstring update\")"
+      "Bash(powershell -Command \"Get-ChildItem D:\\watermarkz\\backupskep | Select-Object Name, Length, LastWriteTime\")",
+      "Bash(powershell:*)",
+      "Bash(git -C \"D:\\watermarkz\" diff 3d1db624 HEAD -- server_production2.py --stat)",
+      "Bash(git -C \"D:\\watermarkz\" diff 3d1db624 -- server_production2.py)",
+      "Bash(git -C \"D:\\watermarkz\" diff 3d1db624 -- server_production.py)",
+      "Bash(git -C \"D:\\watermarkz\" checkout:*)",
+      "Bash(git -C \"D:\\watermarkz\" status -- server_production.py server_production2.py)",
+      "WebSearch",
+      "Bash(git -C \"D:\\watermarkz\" show 3d1db624:4090_receiver.bat)",
+      "Bash(git -C \"D:\\watermarkz\" log --all --oneline --follow -- \"faster-propainter-main/models/neuflow_things_fp16.engine\")",
+      "Bash(git -C \"D:\\watermarkz\" log --all --oneline --follow -- \"faster-propainter-main/tools/build_neuflow_tensorrt.py\")",
+      "Bash(git -C \"D:\\watermarkz\" show d8913568:faster-propainter-main/tools/build_neuflow_tensorrt.py)"
     ],
     "deny": [],
     "ask": []
