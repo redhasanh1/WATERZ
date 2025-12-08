@@ -5,6 +5,7 @@ Production Server for Watermark Removal SaaS
 - Keeps your PC usable while serving customers
 - Designed for $1Mi/month scale
 - ALL FILES STAY ON D DRIVE (inside watermarkz folder)
+- B2/CDN upload with Railway notification (2025-12-07)
 """
 
 import sys
