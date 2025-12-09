@@ -60,6 +60,23 @@ def catch_all(path):
         return send_from_directory('web', path)
     return send_file('web/index.html')  # Fallback to index
 
+
+@app.after_request
+def add_security_headers(response):
+    """Add CSP headers - allow media from workers.dev for demo video"""
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com https://static.cloudflareinsights.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: https:; "
+        "media-src 'self' data: https://markz.humblewoslayer.workers.dev; "
+        "connect-src 'self' https:; "
+        "frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net;"
+    )
+    return response
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     print("=" * 60)
