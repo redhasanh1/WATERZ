@@ -3225,6 +3225,23 @@
 })();
 </script>
 <script>
+// Check for OAuth callback and save user data to localStorage
+(function(){
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('auth_success') === '1') {
+    const userData = {
+      id: params.get('user_id'),
+      email: params.get('email'),
+      name: params.get('name'),
+      credits: parseInt(params.get('credits') || '0')
+    };
+    localStorage.setItem('user', JSON.stringify(userData));
+    // Clean up URL
+    window.history.replaceState({}, '', '/');
+  }
+})();
+</script>
+<script>
 // Check for logged-in user and show nav
 (function(){
   try {

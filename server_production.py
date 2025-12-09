@@ -680,8 +680,16 @@ def auth_google_callback():
             session['name'] = name
             session.permanent = True
 
-        # Redirect to main page
-        return redirect('/')
+        # Redirect to main page with user data for frontend localStorage
+        from urllib.parse import urlencode
+        params = urlencode({
+            'auth_success': '1',
+            'user_id': user_id,
+            'email': email,
+            'name': name,
+            'credits': credits
+        })
+        return redirect(f'/?{params}')
 
     except Exception as e:
         import traceback
