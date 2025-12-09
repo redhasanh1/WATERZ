@@ -244,6 +244,227 @@
             color: #fff;
         }
 
+        /* Step Indicator - Outside card */
+        .step-indicator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 15px;
+            padding-left: 5px;
+        }
+        .step-number {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        .step-text {
+            color: var(--text-primary);
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        /* Timeline Navigation Buttons */
+        .timeline-nav-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+            font-size: 1.3rem;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        .timeline-nav-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 25px rgba(102, 126, 234, 0.5);
+        }
+        .timeline-nav-btn:active {
+            transform: scale(0.95);
+        }
+        .timeline-nav-btn svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* Thumbnail Strip */
+        .thumbnail-strip {
+            flex: 1;
+            display: flex;
+            gap: 2px;
+            overflow-x: auto;
+            padding: 8px 4px;
+            scroll-behavior: smooth;
+            border-radius: 12px;
+            background: #fff;
+            box-shadow: inset 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .thumbnail-strip::-webkit-scrollbar {
+            height: 10px;
+        }
+        .thumbnail-strip::-webkit-scrollbar-track {
+            background: #e8e8f0;
+            border-radius: 5px;
+        }
+        .thumbnail-strip::-webkit-scrollbar-thumb {
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+        }
+        .thumbnail-strip::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(90deg, #5a6fd6, #6a4190);
+        }
+
+        /* Frame Thumbnails */
+        .frame-thumb {
+            flex-shrink: 0;
+            width: 32px;
+            height: 24px;
+            border-radius: 4px;
+            overflow: hidden;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.15s;
+            position: relative;
+            background: #e8e8e8;
+        }
+        .frame-thumb:hover {
+            border-color: #667eea;
+            transform: translateY(-4px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+        .frame-thumb.active {
+            border-color: #764ba2;
+            box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.3), 0 8px 20px rgba(118, 75, 162, 0.3);
+            transform: translateY(-4px);
+        }
+        .frame-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .frame-thumb .frame-num {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            font-size: 0.5rem;
+            padding: 1px;
+            text-align: center;
+            font-weight: 500;
+        }
+        .frame-thumb.loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #e8e8e8, #f5f5f5);
+        }
+        .frame-thumb.loading::after {
+            content: '';
+            width: 12px;
+            height: 12px;
+            border: 2px solid #ddd;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: thumbSpin 0.8s linear infinite;
+        }
+        @keyframes thumbSpin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrubber/Progress Bar */
+        .timeline-scrubber-container {
+            margin-top: 15px;
+            padding: 0 10px;
+        }
+        .timeline-scrubber-track {
+            position: relative;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .timeline-scrubber-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.1s ease-out;
+        }
+        .timeline-scrubber-thumb {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 50%;
+            border: 3px solid #fff;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.5);
+            cursor: grab;
+            left: 0%;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .timeline-scrubber-thumb:hover {
+            transform: translate(-50%, -50%) scale(1.2);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.6);
+        }
+        .timeline-scrubber-thumb:active,
+        .timeline-scrubber-thumb.dragging {
+            cursor: grabbing;
+            transform: translate(-50%, -50%) scale(1.15);
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.7);
+        }
+
+        /* Timeline Section */
+        .timeline-section {
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%);
+            border-radius: 16px;
+            margin-top: 1.5rem;
+            border: 1px solid rgba(102, 126, 234, 0.15);
+        }
+        .timeline-label {
+            text-align: center;
+            color: #667eea;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .timeline-nav-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .timeline-loading-text {
+            text-align: center;
+            color: #667eea;
+            font-size: 0.85rem;
+            margin-top: 10px;
+            font-weight: 500;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -1240,6 +1461,12 @@
                     <div class="preview-container" id="previewContainer" style="text-align: center;">
                         <img id="previewImage" class="preview-image" alt="Video preview showing selected objects to remove" style="display: none; max-width: 100%; max-height: 900px;">
                         <div id="videoContainer" style="position: relative; display: inline-block; max-width: 100%; overflow: hidden;">
+                            <!-- Step Indicator - Outside video card -->
+                            <div class="step-indicator" id="stepIndicator" style="display: none;">
+                                <span class="step-number">1</span>
+                                <span class="step-text">Choose a Frame</span>
+                            </div>
+
                             <div style="text-align:left; color: var(--text-secondary); font-weight: 600; margin: 0 0 6px 2px;">Preview</div>
 
                             <!-- Professional Video Player Container -->
@@ -1288,55 +1515,45 @@
                         </div>
 
                         <!-- Professional Video Timeline with Thumbnails -->
-                        <div id="videoTimelineContainer" class="video-timeline-container" style="display: none; margin-top: 1.5rem; background: #1a1a2e; border-radius: 12px; padding: 1rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid rgba(102,126,234,0.2);">
-                            <!-- Timeline Header -->
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                                <span style="font-size: 0.9rem; font-weight: 600; color: #9aa4b2; text-transform: uppercase; letter-spacing: 0.5px;">Timeline</span>
-                                <div style="display: flex; gap: 0.5rem;">
-                                    <button id="addKeyframeBtn" style="display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.8rem; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); border-radius: 6px; color: #a0a0c0; font-size: 0.8rem; cursor: pointer;" title="Add keyframe at current position (K)">
-                                        <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><path d="M6 0L12 8L6 16L0 8L6 0Z"/></svg>
-                                        Add Marker
-                                    </button>
-                                    <button id="clearKeyframesBtn" style="padding: 0.4rem 0.8rem; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); border-radius: 6px; color: #a0a0c0; font-size: 0.8rem; cursor: pointer;" title="Clear all keyframes">
-                                        Clear All
-                                    </button>
+                        <div id="videoTimelineContainer" class="timeline-section" style="display: none;">
+                            <div class="timeline-label">Select a frame to edit</div>
+
+                            <div class="timeline-nav-row">
+                                <!-- Left Arrow -->
+                                <button class="timeline-nav-btn" id="timelinePrevBtn" title="Previous frame">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M15 18l-6-6 6-6"/>
+                                    </svg>
+                                </button>
+
+                                <!-- Thumbnail Strip -->
+                                <div class="thumbnail-strip" id="thumbnailStrip">
+                                    <!-- Thumbnails generated by JS -->
+                                </div>
+
+                                <!-- Right Arrow -->
+                                <button class="timeline-nav-btn" id="timelineNextBtn" title="Next frame">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M9 18l6-6-6-6"/>
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div class="timeline-loading-text" id="timelineLoadingText">Loading frames...</div>
+
+                            <!-- Progress/Scrubber Bar -->
+                            <div class="timeline-scrubber-container">
+                                <div class="timeline-scrubber-track" id="timelineScrubberTrack">
+                                    <div class="timeline-scrubber-progress" id="timelineScrubberProgress"></div>
+                                    <div class="timeline-scrubber-thumb" id="timelineScrubberThumb"></div>
                                 </div>
                             </div>
 
-                            <!-- Thumbnail Track -->
-                            <div id="thumbnailTrack" style="position: relative; height: 60px; background: #0f0f1e; border-radius: 8px; overflow: hidden; cursor: pointer;">
-                                <div id="thumbnailContainer" style="display: flex; height: 100%; overflow-x: auto; scrollbar-width: none;">
-                                    <!-- Thumbnails inserted dynamically -->
-                                </div>
-
-                                <!-- Playhead Overlay -->
-                                <div id="videoTimelineOutput" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;">
-                                    <div id="timelinePlayhead" style="position: absolute; top: 0; height: 100%; transform: translateX(-50%); pointer-events: auto; cursor: ew-resize; z-index: 10; left: 0%;">
-                                        <div style="position: absolute; top: -2px; left: 50%; transform: translateX(-50%); color: #667eea;">
-                                            <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor"><path d="M7 10L0 0H14L7 10Z"/></svg>
-                                        </div>
-                                        <div style="position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 2px; height: calc(100% - 8px); background: linear-gradient(180deg, #667eea 0%, #764ba2 100%); box-shadow: 0 0 8px rgba(102,126,234,0.6);"></div>
-                                        <div id="playheadTime" style="position: absolute; bottom: -22px; left: 50%; transform: translateX(-50%); background: rgba(102,126,234,0.9); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-family: monospace; white-space: nowrap;">00:00.00</div>
-                                    </div>
-
-                                    <!-- Keyframe Markers Container -->
-                                    <div id="keyframeMarkersContainer" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;">
-                                        <!-- Diamond markers inserted dynamically -->
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Time Scale -->
-                            <div id="timeScale" style="display: flex; justify-content: space-between; padding: 0.25rem 0; margin-top: 0.25rem;">
-                                <!-- Time markers inserted dynamically -->
-                            </div>
-
-                            <!-- Zoom Controls -->
-                            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05);">
-                                <button id="zoomOutBtn" style="width: 24px; height: 24px; border: 1px solid rgba(102,126,234,0.3); background: rgba(102,126,234,0.1); color: #a0a0c0; border-radius: 4px; cursor: pointer; font-size: 1rem;">-</button>
-                                <span id="zoomLevel" style="font-size: 0.75rem; color: #666; min-width: 40px; text-align: center;">100%</span>
-                                <button id="zoomInBtn" style="width: 24px; height: 24px; border: 1px solid rgba(102,126,234,0.3); background: rgba(102,126,234,0.1); color: #a0a0c0; border-radius: 4px; cursor: pointer; font-size: 1rem;">+</button>
-                            </div>
+                            <!-- Keyboard hint -->
+                            <p style="text-align: center; margin-top: 12px; color: #888; font-size: 0.85rem;">
+                                Use <kbd style="background: #f0f0f0; padding: 3px 8px; border-radius: 5px; font-family: monospace;">&#8592;</kbd>
+                                <kbd style="background: #f0f0f0; padding: 3px 8px; border-radius: 5px; font-family: monospace;">&#8594;</kbd> to navigate
+                            </p>
                         </div>
 
                         <!-- Mask Selection Controls -->
@@ -2691,33 +2908,211 @@
     <!-- SAM2 Timeline and Selection Scripts -->
     
     <script src="js/sam2_selector.js"></script>
-    <script src="js/video_timeline.js"></script>
 
     <script>
-      // Video Timeline Initialization
+      // New 30fps Video Timeline with Colorful Thumbnails
       (function() {
         const video = document.getElementById('previewVideo');
-        if (video) {
-          video.addEventListener('loadedmetadata', function() {
-            if (!window.videoTimeline && video.duration && video.duration !== Infinity) {
-              console.log('[Timeline] Initializing VideoTimeline...');
-              window.videoTimeline = new VideoTimeline(video, {
-                thumbnailWidth: 80,
-                thumbnailHeight: 60,
-                maxThumbnails: 50,
-                onSeek: function(time) {
-                  console.log('[Timeline] Seek to:', time);
-                },
-                onKeyframeAdd: function(keyframe) {
-                  console.log('[Timeline] Keyframe added:', keyframe);
-                },
-                onKeyframeRemove: function(keyframe) {
-                  console.log('[Timeline] Keyframe removed:', keyframe);
-                }
-              });
-            }
-          });
+        const thumbnailStrip = document.getElementById('thumbnailStrip');
+        const loadingText = document.getElementById('timelineLoadingText');
+        const prevBtn = document.getElementById('timelinePrevBtn');
+        const nextBtn = document.getElementById('timelineNextBtn');
+        const scrubberTrack = document.getElementById('timelineScrubberTrack');
+        const scrubberProgress = document.getElementById('timelineScrubberProgress');
+        const scrubberThumb = document.getElementById('timelineScrubberThumb');
+        const stepIndicator = document.getElementById('stepIndicator');
+        const timelineContainer = document.getElementById('videoTimelineContainer');
+
+        if (!video || !thumbnailStrip) return;
+
+        let frames = [];
+        let currentFrame = 0;
+        let isDragging = false;
+        const FPS = 30;
+        const FRAME_INTERVAL = 1 / FPS; // Every frame at 30fps!
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         }
+
+        function updateTimeDisplay() {
+            const frameIndex = Math.round(video.currentTime / FRAME_INTERVAL);
+            currentFrame = Math.max(0, Math.min(frameIndex, frames.length - 1));
+
+            document.querySelectorAll('.frame-thumb').forEach((thumb, i) => {
+                thumb.classList.toggle('active', i === currentFrame);
+            });
+
+            const activeThumb = document.querySelector('.frame-thumb.active');
+            if (activeThumb) {
+                activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            }
+
+            // Update scrubber position
+            if (!isDragging && video.duration) {
+                const percent = (video.currentTime / video.duration) * 100;
+                if (scrubberProgress) scrubberProgress.style.width = percent + '%';
+                if (scrubberThumb) scrubberThumb.style.left = percent + '%';
+            }
+        }
+
+        async function generateFrames() {
+            const duration = video.duration;
+            if (!duration || duration === Infinity) return;
+
+            const frameCount = Math.ceil(duration / FRAME_INTERVAL);
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 48;
+            const ctx = canvas.getContext('2d');
+
+            // Clear strip and create placeholders
+            thumbnailStrip.innerHTML = '';
+            frames = [];
+
+            for (let i = 0; i < frameCount; i++) {
+                const div = document.createElement('div');
+                div.className = 'frame-thumb loading';
+                div.dataset.index = i;
+                div.onclick = () => seekToFrame(i);
+                thumbnailStrip.appendChild(div);
+                frames.push({ element: div, time: i * FRAME_INTERVAL });
+            }
+
+            // Extract thumbnails
+            const originalTime = video.currentTime;
+            const wasMuted = video.muted;
+            video.muted = true;
+
+            for (let i = 0; i < frameCount; i++) {
+                if (loadingText) loadingText.textContent = `Loading frame ${i + 1} of ${frameCount}...`;
+
+                try {
+                    await seekTo(i * FRAME_INTERVAL);
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+
+                    frames[i].element.className = 'frame-thumb';
+                    frames[i].element.innerHTML = `
+                        <img src="${dataUrl}" alt="Frame ${i + 1}">
+                        <div class="frame-num">${i + 1}</div>
+                    `;
+                } catch (e) {
+                    frames[i].element.className = 'frame-thumb';
+                    frames[i].element.innerHTML = `<div class="frame-num">${i + 1}</div>`;
+                }
+            }
+
+            video.currentTime = originalTime;
+            video.muted = wasMuted;
+            if (loadingText) loadingText.textContent = `${frameCount} frames ready`;
+
+            if (frames.length > 0) {
+                frames[0].element.classList.add('active');
+            }
+        }
+
+        function seekTo(time) {
+            return new Promise((resolve) => {
+                const handler = () => {
+                    video.removeEventListener('seeked', handler);
+                    resolve();
+                };
+                video.addEventListener('seeked', handler);
+                video.currentTime = time;
+                setTimeout(resolve, 300);
+            });
+        }
+
+        function seekToFrame(index) {
+            if (index < 0 || index >= frames.length) return;
+            currentFrame = index;
+            video.currentTime = frames[index].time;
+            updateTimeDisplay();
+        }
+
+        // Scrubber drag functionality
+        function seekFromScrubber(clientX) {
+            if (!scrubberTrack) return;
+            const rect = scrubberTrack.getBoundingClientRect();
+            const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            const time = percent * video.duration;
+            video.currentTime = time;
+            if (scrubberProgress) scrubberProgress.style.width = (percent * 100) + '%';
+            if (scrubberThumb) scrubberThumb.style.left = (percent * 100) + '%';
+        }
+
+        // Event listeners
+        video.addEventListener('loadedmetadata', function() {
+            if (video.duration && video.duration !== Infinity) {
+                // Show step indicator and timeline
+                if (stepIndicator) stepIndicator.style.display = 'flex';
+                if (timelineContainer) timelineContainer.style.display = 'block';
+                generateFrames();
+            }
+        });
+        video.addEventListener('timeupdate', updateTimeDisplay);
+
+        if (prevBtn) prevBtn.addEventListener('click', () => seekToFrame(currentFrame - 1));
+        if (nextBtn) nextBtn.addEventListener('click', () => seekToFrame(currentFrame + 1));
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.key === 'ArrowLeft') { e.preventDefault(); seekToFrame(currentFrame - 1); }
+            else if (e.key === 'ArrowRight') { e.preventDefault(); seekToFrame(currentFrame + 1); }
+        });
+
+        // Scrubber events
+        if (scrubberTrack) {
+            scrubberTrack.addEventListener('click', (e) => seekFromScrubber(e.clientX));
+        }
+        if (scrubberThumb) {
+            scrubberThumb.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                isDragging = true;
+                scrubberThumb.classList.add('dragging');
+                video.pause();
+            });
+        }
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) seekFromScrubber(e.clientX);
+        });
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                if (scrubberThumb) scrubberThumb.classList.remove('dragging');
+            }
+        });
+
+        // Touch support
+        if (scrubberThumb) {
+            scrubberThumb.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                isDragging = true;
+                scrubberThumb.classList.add('dragging');
+                video.pause();
+            });
+        }
+        document.addEventListener('touchmove', (e) => {
+            if (isDragging && e.touches[0]) seekFromScrubber(e.touches[0].clientX);
+        });
+        document.addEventListener('touchend', () => {
+            if (isDragging) {
+                isDragging = false;
+                if (scrubberThumb) scrubberThumb.classList.remove('dragging');
+            }
+        });
+
+        // Export for external use
+        window.videoTimeline = {
+            seekToFrame: seekToFrame,
+            getCurrentFrame: () => currentFrame,
+            getFrameCount: () => frames.length,
+            clearMaskIndicators: () => {}
+        };
       })();
     </script>
 
