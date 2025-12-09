@@ -684,8 +684,10 @@ def auth_google_callback():
         return redirect('/')
 
     except Exception as e:
+        import traceback
         print(f"[ERROR] Google OAuth callback failed: {e}")
-        return jsonify({'error': 'Authentication failed'}), 500
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'Authentication failed: {str(e)}'}), 500
 
 
 @app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
