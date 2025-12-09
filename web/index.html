@@ -142,15 +142,6 @@
             --text-secondary: #9aa4b2;
         }
 
-        /* Comparison Section Styling */
-        .comparison-section {
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%);
-        }
-
-        html[data-theme="dark"] .comparison-section {
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%);
-        }
-
         /* Dark mode fix for upload box */
         html[data-theme="dark"] .demo-card {
             background-image: linear-gradient(var(--bg-card), var(--bg-card)), var(--gradient-rainbow);
@@ -1327,7 +1318,6 @@
 
                 <ul class="nav-menu" id="navMenu">
                     <li><a href="#how-to">How It Works</a></li>
-                    <li><a href="#comparison">Examples</a></li>
                     <li><a href="premium.html#pricing">Pricing</a></li>
                 </ul>
             </div>
@@ -1718,66 +1708,6 @@
         </div>
     </section>
 
-    <!-- Before/After Comparison Section -->
-<section id="comparison" class="comparison-section" style="padding: 4rem 2rem; margin: 2rem 0;">
-        <div class="container">
-            <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 1rem; background: var(--gradient-rainbow); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                See the Difference
-            </h2>
-            <p style="text-align: center; color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 3rem;">
-                Drag the slider to compare before and after. Objects disappear seamlessly.
-            </p>
-
-            <div style="max-width: 1000px; margin: 0 auto;">
-                <!-- Video Comparison Container -->
-                <div id="comparison-container" style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-                    <!-- Before Video (Background - original with watermark) -->
-    <video id="before-video" style="width: 100%; display: block;" muted loop playsinline autoplay preload="metadata" controlslist="nodownload nofullscreen noremoteplayback" disablepictureinpicture aria-label="Before video showing object to be removed">
-        <source src="/s2.mp4" type="video/mp4">
-                    </video>
-
-                    <!-- After Video (Overlay - cleaned version, clipped by slider) -->
-    <div id="after-container" style="position: absolute; top: 0; right: 0; width: 50%; height: 100%; overflow: hidden;">
-        <video id="after-video" style="position: absolute; top: 0; right: 0; width: 100%; height: 100%; object-fit: cover;" muted loop playsinline autoplay preload="metadata" controlslist="nodownload nofullscreen noremoteplayback" disablepictureinpicture aria-label="After video with object removed">
-            <source src="/s2removed.mp4" type="video/mp4">
-                        </video>
-                    </div>
-
-                    <!-- Slider Handle -->
-                    <div id="slider-handle" style="position: absolute; top: 0; left: 50%; width: 3px; height: 100%; background: white; cursor: ew-resize; z-index: 10; box-shadow: 0 0 10px rgba(255,255,255,0.5);">
-                        <!-- Handle Circle -->
-                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 32px; background: white; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
-                            <svg style="width: 16px; height: 16px; color: #667eea;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
-                            </svg>
-                        </div>
-                    </div>
-
-                    <!-- Before/After Labels -->
-                    <div style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 6px; color: white; font-weight: 600; font-size: 0.7rem; z-index: 5;">
-                        BEFORE
-                    </div>
-                    <div style="position: absolute; top: 10px; right: 10px; background: rgba(102,126,234,0.9); padding: 4px 8px; border-radius: 6px; color: white; font-weight: 600; font-size: 0.7rem; z-index: 5;">
-                        AFTER
-                    </div>
-
-                </div>
-
-                <!-- Video Controls -->
-                <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
-                    <button id="play-pause-btn" style="padding: 0.6rem 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; transition: transform 0.2s ease; font-size: 0.9rem;">
-                        <svg id="btn-play-icon" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 6px;" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M8 5v14l11-7z"></path>
-                        </svg>
-                        <span id="btn-text">Play</span>
-                    </button>
-                    <input type="range" id="video-scrubber" min="0" max="100" value="0" style="flex: 1; height: 6px; border-radius: 3px; background: rgba(102,126,234,0.3); outline: none; cursor: pointer;">
-                    <span id="time-display" style="color: var(--text-secondary); font-size: 0.75rem; min-width: 60px; text-align: right;">0:00 / 0:00</span>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <!-- Bottom Banner Ad -->
     <div class="ad-banner-bottom">
         <ins class="adsbygoogle"
@@ -1839,151 +1769,6 @@
                 }
             });
         });
-
-        // Before/After Video Comparison Slider
-        (function() {
-            const beforeVideo = document.getElementById('before-video');
-            const afterVideo = document.getElementById('after-video');
-            const afterContainer = document.getElementById('after-container');
-            const sliderHandle = document.getElementById('slider-handle');
-            const comparisonContainer = document.getElementById('comparison-container');
-            const playPauseBtn = document.getElementById('play-pause-btn');
-            const btnText = document.getElementById('btn-text');
-            const btnPlayIcon = document.getElementById('btn-play-icon');
-            const videoScrubber = document.getElementById('video-scrubber');
-            const timeDisplay = document.getElementById('time-display');
-
-            let isDragging = false;
-            let isPlaying = false;
-
-            // Attempt to autoplay silently; fall back to user gesture
-            function tryAutoplay() {
-                beforeVideo.muted = true; afterVideo.muted = true;
-                beforeVideo.play().catch(() => {});
-                afterVideo.play().catch(() => {});
-            }
-            document.addEventListener('DOMContentLoaded', tryAutoplay);
-            setTimeout(tryAutoplay, 300);
-            window.addEventListener('pointerdown', tryAutoplay, { once: true });
-
-            // Sync videos
-            function syncVideos() {
-                afterVideo.currentTime = beforeVideo.currentTime;
-            }
-
-            // Update slider position - after video slides from RIGHT to LEFT
-            function updateSlider(clientX) {
-                const rect = comparisonContainer.getBoundingClientRect();
-                const x = clientX - rect.left;
-                const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
-
-                // After video is on the RIGHT, so we show (100 - percentage) of it
-                afterContainer.style.width = (100 - percentage) + '%';
-                sliderHandle.style.left = percentage + '%';
-            }
-
-            // Format time display
-            function formatTime(seconds) {
-                const mins = Math.floor(seconds / 60);
-                const secs = Math.floor(seconds % 60);
-                return `${mins}:${secs.toString().padStart(2, '0')}`;
-            }
-
-            // Update scrubber and time display
-            function updateScrubber() {
-                if (!isDragging && beforeVideo.duration) {
-                    const percentage = (beforeVideo.currentTime / beforeVideo.duration) * 100;
-                    videoScrubber.value = percentage;
-                    timeDisplay.textContent = `${formatTime(beforeVideo.currentTime)} / ${formatTime(beforeVideo.duration)}`;
-                }
-            }
-
-            // Play/Pause function
-            function togglePlayPause() {
-                if (isPlaying) {
-                    beforeVideo.pause();
-                    afterVideo.pause();
-                    btnText.textContent = 'Play';
-                    btnPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"></path>';
-                } else {
-                    beforeVideo.play();
-                    afterVideo.play();
-                    btnText.textContent = 'Pause';
-                    btnPlayIcon.innerHTML = '<path d="M6 4h4v16H6zM14 4h4v16h-4z"></path>';
-                }
-                isPlaying = !isPlaying;
-            }
-
-            // Mouse/Touch drag events for slider
-            sliderHandle.addEventListener('mousedown', (e) => {
-                isDragging = true;
-                e.preventDefault();
-            });
-
-            sliderHandle.addEventListener('touchstart', (e) => {
-                isDragging = true;
-                e.preventDefault();
-            });
-
-            document.addEventListener('mousemove', (e) => {
-                if (isDragging) {
-                    updateSlider(e.clientX);
-                }
-            });
-
-            document.addEventListener('touchmove', (e) => {
-                if (isDragging) {
-                    updateSlider(e.touches[0].clientX);
-                }
-            });
-
-            document.addEventListener('mouseup', () => {
-                isDragging = false;
-            });
-
-            document.addEventListener('touchend', () => {
-                isDragging = false;
-            });
-
-            // Click on video to play/pause
-            comparisonContainer.addEventListener('click', (e) => {
-                if (e.target !== sliderHandle && !sliderHandle.contains(e.target)) {
-                    togglePlayPause();
-                }
-            });
-
-            // Play/Pause button
-            playPauseBtn.addEventListener('click', togglePlayPause);
-
-            // Video scrubber
-            videoScrubber.addEventListener('input', (e) => {
-                if (beforeVideo.duration) {
-                    const time = (e.target.value / 100) * beforeVideo.duration;
-                    beforeVideo.currentTime = time;
-                    afterVideo.currentTime = time;
-                }
-            });
-
-            // Sync videos on timeupdate
-            beforeVideo.addEventListener('timeupdate', () => {
-                syncVideos();
-                updateScrubber();
-            });
-
-            // Load video metadata
-            beforeVideo.addEventListener('loadedmetadata', () => {
-                afterVideo.currentTime = beforeVideo.currentTime;
-                updateScrubber();
-            });
-
-            // Auto-sync after videos in case they drift
-            setInterval(syncVideos, 100);
-
-            // Initial load - set after video width to fill container from right
-            window.addEventListener('load', () => {
-                afterVideo.style.width = comparisonContainer.offsetWidth + 'px';
-            });
-        })();
 
         // --- Deferred Google Ads init helpers ---
         function initVisibleGoogleAd(ins) {
@@ -3554,7 +3339,28 @@
 })();
 </script>
 <!-- Theme Toggle Script -->
-<script src="js/theme.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const themeToggle = document.getElementById('themeToggle');
+    if (!themeToggle) return;
+
+    // Load saved theme on page load
+    const saved = localStorage.getItem('theme');
+    if (saved) {
+        document.documentElement.setAttribute('data-theme', saved);
+        themeToggle.textContent = saved === 'dark' ? 'Light' : 'Dark';
+    }
+
+    // Toggle theme on click
+    themeToggle.addEventListener('click', function() {
+        const html = document.documentElement;
+        const isDark = html.getAttribute('data-theme') === 'dark';
+        html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+        this.textContent = isDark ? 'Dark' : 'Light';
+        localStorage.setItem('theme', isDark ? 'light' : 'dark');
+    });
+});
+</script>
 <script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script></body>
 </html>
 
