@@ -371,9 +371,20 @@ class SAM2TensorRTPredictor:
             raise RuntimeError(f"Could not find mask output. Available: {list(decoder_outputs_host.keys())}")
 
         # Post-process mask (sigmoid + threshold)
-        mask_logits_2d = mask_logits[0, 0]  # Get first mask from batch
-        mask_probs = 1 / (1 + np.exp(-mask_logits_2d))  # Sigmoid
-        mask_binary = (mask_probs > 0.5).astype(np.uint8)
+        # MULTI-CLICK FIX: Combine masks from ALL prompts using OR logic
+        # Each click creates a separate prompt in the batch, so we OR them together
+        num_prompts = mask_logits.shape[0]
+        if num_prompts > 1:
+            # Multiple clicks - combine all masks
+            all_masks_probs = 1 / (1 + np.exp(-mask_logits[:, 0]))  # Sigmoid on all batch items
+            mask_combined = np.any(all_masks_probs > 0.5, axis=0)  # OR combine
+            mask_binary = mask_combined.astype(np.uint8)
+            logger.info(f"[TRT] Combined {num_prompts} click masks into one")
+        else:
+            # Single click - use original logic
+            mask_logits_2d = mask_logits[0, 0]
+            mask_probs = 1 / (1 + np.exp(-mask_logits_2d))  # Sigmoid
+            mask_binary = (mask_probs > 0.5).astype(np.uint8)
 
         # Extract IoU score (ensure it's a scalar)
         if iou_predictions is not None:

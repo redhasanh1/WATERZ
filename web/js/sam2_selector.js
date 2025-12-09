@@ -212,6 +212,11 @@ class SAM2Selector {
 
         console.log(`[SAM2Selector] Added point #${this.currentSelection.points.length} at (${x}, ${y}) to selection #${this.currentSelection.id}`);
 
+        // Fire callback IMMEDIATELY when point is added (before waiting for mask)
+        if (this.options.onPointsChange) {
+            this.options.onPointsChange(this.getAllPoints());
+        }
+
         // Request mask from server with ALL accumulated points
         const mask = await this.requestMask(this.currentSelection.points);
 
