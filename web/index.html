@@ -3310,10 +3310,10 @@
             }
         }
 
-        // Window resize - redraw points
+        // Window resize - redraw points (handled by SAM2Selector)
         window.addEventListener('resize', function() {
-            if (points.length > 0 && video.videoWidth > 0) {
-                redrawAllPoints();
+            if (sam2Selector && points.length > 0 && video.videoWidth > 0) {
+                sam2Selector.draw();
             }
         });
 
