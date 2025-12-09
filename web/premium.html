@@ -395,7 +395,7 @@
 
         .pricing-features li::before {
             content: "✓";
-            color: var(--success);
+            color: var(--accent);
             font-weight: 800;
             font-size: 1.25rem;
         }
@@ -713,65 +713,211 @@
     <!-- Pricing Section -->
     <section class="pricing-section" id="pricing">
         <div class="container">
-            <div class="section-header" style="text-align: center; max-width: 780px; margin: 0 auto 3rem;">
-                <span style="display: inline-block; padding: 0.4rem 1rem; border-radius: 999px; border: 1px solid rgba(102,126,234,0.35); background: rgba(102,126,234,0.12); color: #a0a0c0; font-size: 0.85rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;">Transparent Pricing</span>
-                <h2 class="section-title" style="margin-top: 1rem;">Pick a plan that scales with your rights-cleared catalog</h2>
-                <p class="section-subtitle">From testing new cleanup workflows to deploying policy-ready automation, WatermarkAI has a plan that keeps you compliant and on budget.</p>
-                <div style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.95rem;">Monthly billing · Save 20% with annual contracts · Change plans anytime</div>
+            <!-- Header with Benefits -->
+            <div class="section-header" style="text-align: center; max-width: 800px; margin: 0 auto 3rem;">
+                <span style="display: inline-block; padding: 0.5rem 1.25rem; border-radius: 50px; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); color: var(--accent); font-size: 0.9rem; font-weight: 600; margin-bottom: 1.5rem;">AI-Powered Object Removal</span>
+                <h2 class="section-title" style="margin-top: 0.5rem; font-size: clamp(2.5rem, 5vw, 3.5rem);">Remove Unwanted Objects From Your Videos in Minutes</h2>
+                <p class="section-subtitle" style="font-size: 1.3rem; margin-top: 1rem; color: var(--text-secondary);">Upload your video, click on what you want gone, and let AI handle the rest</p>
+                <div style="margin-top: 1.5rem; display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;">
+                    <span style="color: var(--accent); font-weight: 600;">✓ Upload any video and start removing instantly</span>
+                    <span style="color: var(--accent); font-weight: 600;">✓ No editing skills needed - just point and click</span>
+                    <span style="color: var(--accent); font-weight: 600;">✓ Crystal-clear 4K exports ready for publishing</span>
+                </div>
             </div>
 
-            <div class="pricing-grid" style="gap: 2.5rem;">
-                <!-- Starter Plan -->
+            <!-- Credit Packs Section -->
+            <div style="margin-bottom: 4rem;">
+                <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; margin-bottom: 0.5rem;">💳 Pay As You Go</h3>
+                <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">No subscription required — credits never expire</p>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; max-width: 1000px; margin: 0 auto;">
+                    <!-- Starter Pack -->
+                    <div style="background: var(--bg-card); border: 2px solid rgba(102, 126, 234, 0.15); border-radius: 20px; padding: 2rem; text-align: center; transition: all 0.3s; cursor: pointer;" onmouseover="this.style.transform='translateY(-5px)'; this.style.borderColor='var(--primary)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(102, 126, 234, 0.15)';">
+                        <h4 style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Starter</h4>
+                        <div style="font-size: 2.5rem; font-weight: 800; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$4.99</div>
+                        <p style="color: var(--accent); font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0;">50 Credits</p>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1.5rem;">$0.10 per credit</p>
+                        <button class="btn-pricing secondary" onclick="signUp('credits_starter')" style="padding: 0.8rem 1.5rem;">Buy Now</button>
+                    </div>
+
+                    <!-- Creator Pack - Popular -->
+                    <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15)); border: 2px solid var(--primary); border-radius: 20px; padding: 2rem; text-align: center; position: relative; transform: translateY(-10px); box-shadow: 0 20px 40px rgba(102, 126, 234, 0.3);">
+                        <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gradient-primary); padding: 0.4rem 1.2rem; border-radius: 50px; font-size: 0.75rem; font-weight: 700; color: white; text-transform: uppercase;">Best Value</div>
+                        <h4 style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Creator</h4>
+                        <div style="font-size: 2.5rem; font-weight: 800; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$19.99</div>
+                        <p style="color: var(--accent); font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0;">250 <span style="color: #10b981;">+25 Bonus</span></p>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.25rem;">$0.073 per credit</p>
+                        <p style="color: #10b981; font-size: 0.8rem; font-weight: 600; margin-bottom: 1.5rem;">Save 27%</p>
+                        <button class="btn-pricing primary" onclick="signUp('credits_creator')" style="padding: 0.8rem 1.5rem;">Buy Now</button>
+                    </div>
+
+                    <!-- Pro Pack -->
+                    <div style="background: var(--bg-card); border: 2px solid rgba(102, 126, 234, 0.15); border-radius: 20px; padding: 2rem; text-align: center; transition: all 0.3s; cursor: pointer;" onmouseover="this.style.transform='translateY(-5px)'; this.style.borderColor='var(--primary)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(102, 126, 234, 0.15)';">
+                        <h4 style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Pro</h4>
+                        <div style="font-size: 2.5rem; font-weight: 800; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$49.99</div>
+                        <p style="color: var(--accent); font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0;">750 <span style="color: #10b981;">+100 Bonus</span></p>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.25rem;">$0.059 per credit</p>
+                        <p style="color: #10b981; font-size: 0.8rem; font-weight: 600; margin-bottom: 1.5rem;">Save 41%</p>
+                        <button class="btn-pricing secondary" onclick="signUp('credits_pro')" style="padding: 0.8rem 1.5rem;">Buy Now</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Divider -->
+            <div style="display: flex; align-items: center; gap: 1rem; margin: 3rem 0;">
+                <div style="flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(102,126,234,0.3), transparent);"></div>
+                <span style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em;">Or Subscribe & Save</span>
+                <div style="flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(102,126,234,0.3), transparent);"></div>
+            </div>
+
+            <!-- Monthly/Annual Toggle -->
+            <div style="display: flex; justify-content: center; margin-bottom: 3rem;">
+                <div id="billingToggle" style="display: inline-flex; background: var(--bg-card); border-radius: 50px; padding: 0.35rem; border: 1px solid rgba(102,126,234,0.2);">
+                    <button id="monthlyBtn" onclick="toggleBilling('monthly')" style="padding: 0.75rem 2rem; border-radius: 50px; border: none; font-weight: 600; cursor: pointer; transition: all 0.3s; background: var(--gradient-primary); color: white;">Monthly</button>
+                    <button id="annualBtn" onclick="toggleBilling('annual')" style="padding: 0.75rem 2rem; border-radius: 50px; border: none; font-weight: 600; cursor: pointer; transition: all 0.3s; background: transparent; color: var(--text-secondary);">
+                        Annual <span style="background: rgba(16,185,129,0.2); color: #10b981; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; margin-left: 0.5rem;">Save 25%</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Subscription Plans Grid -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; max-width: 1200px; margin: 0 auto;">
+
+                <!-- Lite Plan -->
                 <div class="pricing-card" style="position: relative; overflow: hidden;">
                     <div class="pricing-header">
-                        <h3>Starter</h3>
-                        <div class="pricing-price">$0<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Perfect for testing owned or licensed clips before moving into production.</p>
+                        <h3>Lite</h3>
+                        <div class="pricing-price" data-monthly="$14.99" data-annual="$11.24">$14.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">200 credits/month</p>
                     </div>
                     <ul class="pricing-features">
-                        <li>10 images + 2 short videos each month</li>
-                        <li>Shared queue with standard turnaround</li>
-                        <li>720p output with watermark audit logs</li>
-                        <li>Email support within 24 hours</li>
+                        <li>Standard processing queue</li>
+                        <li>1080p video output</li>
+                        <li>Email support</li>
+                        <li>Basic analytics</li>
                     </ul>
-                    <button class="btn-pricing secondary" onclick="signUp('free')">Start Free</button>
+                    <button class="btn-pricing secondary" onclick="signUp('lite')">Get Started</button>
                 </div>
 
-                <!-- Professional Plan -->
+                <!-- Pro Plan - Popular -->
                 <div class="pricing-card popular" style="transform: translateY(-14px);">
                     <div class="popular-badge">⭐ MOST POPULAR</div>
                     <div class="pricing-header">
-                        <h3>Professional</h3>
-                        <div class="pricing-price">$29<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Built for independent creators, freelancers, and in-house teams refreshing rights-cleared assets every week.</p>
+                        <h3>Pro</h3>
+                        <div class="pricing-price" data-monthly="$29.99" data-annual="$22.49">$29.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">500 credits/month</p>
                     </div>
                     <ul class="pricing-features">
-                        <li><strong>500 images</strong> + <strong>50 videos</strong> (≤10 min) per month</li>
-                        <li>Priority cleanup lane with 4K output</li>
-                        <li>Batch uploads (up to 100 files) & API (1,000 calls)</li>
-                        <li>Priority support, compliance templates, and commercial license</li>
+                        <li><strong>Priority processing</strong></li>
+                        <li>4K video output</li>
+                        <li>API access (1,000 calls)</li>
+                        <li>Priority support</li>
+                        <li>Advanced analytics</li>
                     </ul>
-                    <div style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; color: #6ee7b7; font-weight: 600;">Most creators see payback after the first client delivery.</div>
+                    <div style="background: rgba(167,139,250,0.12); border: 1px solid rgba(167,139,250,0.3); border-radius: 12px; padding: 0.75rem; margin-bottom: 1.5rem; color: var(--accent); font-weight: 600; font-size: 0.9rem;">Most creators choose this plan</div>
                     <button class="btn-pricing primary" onclick="signUp('pro')">Start Free Trial</button>
                 </div>
+
+                <!-- Business Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Business</h3>
+                        <div class="pricing-price" data-monthly="$49.99" data-annual="$37.49">$49.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">1,000 credits/month</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>Everything in Pro</li>
+                        <li><strong>Team access (5 seats)</strong></li>
+                        <li>Unlimited API calls</li>
+                        <li>Dedicated account manager</li>
+                        <li>Custom integrations</li>
+                    </ul>
+                    <button class="btn-pricing secondary" onclick="signUp('business')">Get Started</button>
+                </div>
+
+                <!-- Enterprise Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Enterprise</h3>
+                        <div class="pricing-price" data-monthly="$99.99" data-annual="$74.99">$99.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">2,500 credits/month</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>Everything in Business</li>
+                        <li><strong>Unlimited team seats</strong></li>
+                        <li>White-label options</li>
+                        <li>SLA guarantee (99.9%)</li>
+                        <li>Priority phone support</li>
+                        <li>Custom training</li>
+                    </ul>
+                    <button class="btn-pricing secondary" onclick="signUp('enterprise')">Contact Sales</button>
+                </div>
             </div>
 
-            <div style="margin-top: 3rem; text-align: center; color: var(--text-secondary); font-size: 0.95rem;">
-                Need a volume quote or want to migrate from another tool? <a href="mailto:hello@watermarkai.com" style="color: #667eea; text-decoration: none;">Schedule a pricing session</a> and our team will tailor a plan in under 24 hours.
+            <!-- Trust Signals -->
+            <div style="display: flex; justify-content: center; gap: 3rem; flex-wrap: wrap; margin-top: 3rem; padding: 2rem; background: rgba(26, 26, 46, 0.5); border-radius: 16px; border: 1px solid rgba(102,126,234,0.1);">
+                <div style="display: flex; align-items: center; gap: 0.75rem; color: var(--text-secondary);">
+                    <span style="font-size: 1.5rem;">🔒</span>
+                    <span style="font-weight: 600;">Secure Payment</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.75rem; color: var(--text-secondary);">
+                    <span style="font-size: 1.5rem;">↩️</span>
+                    <span style="font-weight: 600;">30-Day Money Back</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.75rem; color: var(--text-secondary);">
+                    <span style="font-size: 1.5rem;">⚡</span>
+                    <span style="font-weight: 600;">Cancel Anytime</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.75rem; color: var(--text-secondary);">
+                    <span style="font-size: 1.5rem;">💬</span>
+                    <span style="font-weight: 600;">24/7 Support</span>
+                </div>
             </div>
 
-            <div style="display: grid; gap: 1.5rem; margin-top: 3rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
-                <div style="background: rgba(26, 26, 46, 0.8); border-radius: 16px; border: 1px solid rgba(102,126,234,0.15); padding: 1.75rem;">
-                    <h3 style="margin-top: 0; color: var(--text-primary); font-size: 1.1rem;">ROI in hours, not weeks</h3>
-                    <p style="color: var(--text-secondary);">Teams report saving up to 8 hours per project by removing manual cleanup passes and re-upload cycles.</p>
-                </div>
-                <div style="background: rgba(26, 26, 46, 0.8); border-radius: 16px; border: 1px solid rgba(102,126,234,0.15); padding: 1.75rem;">
-                    <h3 style="margin-top: 0; color: var(--text-primary); font-size: 1.1rem;">Policy-ready by default</h3>
-                    <p style="color: var(--text-secondary);">Every plan includes attestations, audit trails, and rights-first messaging tuned for ad networks and streaming platforms.</p>
-                </div>
-                <div style="background: rgba(26, 26, 46, 0.8); border-radius: 16px; border: 1px solid rgba(102,126,234,0.15); padding: 1.75rem;">
-                    <h3 style="margin-top: 0; color: var(--text-primary); font-size: 1.1rem;">Scale with confidence</h3>
-                    <p style="color: var(--text-secondary);">Upgrade or downgrade with a single click, and invite teammates with granular permissions whenever you expand beyond a solo workflow.</p>
+            <!-- FAQ Section -->
+            <div style="max-width: 800px; margin: 4rem auto 0;">
+                <h3 style="text-align: center; font-size: 1.75rem; margin-bottom: 2rem;">Frequently Asked Questions</h3>
+
+                <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
+                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
+                            What is a credit and how are they used?
+                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
+                        </button>
+                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">Credits are our universal currency for object removal. A typical removal uses 5-30 credits depending on object size and video length. Small objects use ~5 credits, medium objects ~15 credits, and large objects or people ~30 credits per removal.</p>
+                        </div>
+                    </div>
+
+                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
+                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
+                            Do unused credits roll over?
+                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
+                        </button>
+                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">One-time credit packs never expire. Monthly subscription credits reset at the start of each billing cycle — use them or lose them! This keeps our servers running efficiently.</p>
+                        </div>
+                    </div>
+
+                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
+                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
+                            Can I cancel my subscription anytime?
+                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
+                        </button>
+                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">Yes! Cancel anytime with one click. No questions asked. You'll keep access until your current billing period ends. We also offer a 30-day money-back guarantee for all new subscriptions.</p>
+                        </div>
+                    </div>
+
+                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
+                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
+                            What video formats and resolutions are supported?
+                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
+                        </button>
+                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">We support all major formats: MP4, MOV, AVI, WebM, and more. Pro plans and above get 4K output, while Lite plans output at 1080p. Maximum video length depends on your plan.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -876,6 +1022,53 @@
                 alert('We were unable to start checkout. Please try again or contact support.');
             }
         }
+
+        // Billing toggle functionality
+        let currentBilling = 'monthly';
+
+        function toggleBilling(type) {
+            currentBilling = type;
+            const monthlyBtn = document.getElementById('monthlyBtn');
+            const annualBtn = document.getElementById('annualBtn');
+            const priceElements = document.querySelectorAll('.pricing-price[data-monthly]');
+
+            if (type === 'monthly') {
+                monthlyBtn.style.background = 'var(--gradient-primary)';
+                monthlyBtn.style.color = 'white';
+                annualBtn.style.background = 'transparent';
+                annualBtn.style.color = 'var(--text-secondary)';
+
+                priceElements.forEach(el => {
+                    const price = el.getAttribute('data-monthly');
+                    el.innerHTML = price + '<span>/month</span>';
+                });
+            } else {
+                annualBtn.style.background = 'var(--gradient-primary)';
+                annualBtn.style.color = 'white';
+                monthlyBtn.style.background = 'transparent';
+                monthlyBtn.style.color = 'var(--text-secondary)';
+
+                priceElements.forEach(el => {
+                    const price = el.getAttribute('data-annual');
+                    el.innerHTML = price + '<span>/month</span>';
+                });
+            }
+        }
+
+        // FAQ accordion functionality
+        function toggleFaq(button) {
+            const content = button.nextElementSibling;
+            const icon = button.querySelector('span');
+
+            if (content.style.maxHeight && content.style.maxHeight !== '0px') {
+                content.style.maxHeight = '0px';
+                icon.textContent = '+';
+                icon.style.transform = 'rotate(0deg)';
+            } else {
+                content.style.maxHeight = content.scrollHeight + 'px';
+                icon.textContent = '−';
+                icon.style.transform = 'rotate(180deg)';
+            }
         }
 
         function submitEmail(e) {
