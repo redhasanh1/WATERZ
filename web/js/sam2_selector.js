@@ -222,9 +222,15 @@ class SAM2Selector {
             // Update selections array (replace if exists, add if new)
             const existingIndex = this.selections.findIndex(s => s.id === this.currentSelection.id);
             if (existingIndex >= 0) {
-                this.selections[existingIndex] = {...this.currentSelection};
+                // Directly update mask and points to avoid shallow copy issues
+                this.selections[existingIndex].mask = mask;
+                this.selections[existingIndex].points = [...this.currentSelection.points];
             } else {
-                this.selections.push({...this.currentSelection});
+                this.selections.push({
+                    id: this.currentSelection.id,
+                    points: [...this.currentSelection.points],
+                    mask: mask
+                });
             }
 
             console.log(`[SAM2Selector] Updated selection #${this.currentSelection.id} with ${this.currentSelection.points.length} points`);
@@ -322,20 +328,16 @@ class SAM2Selector {
     }
 
     /**
-     * Draw current state (video frame + mask overlay + points)
+     * Draw current state (mask overlay + points only - canvas overlays video)
      */
     draw() {
         if (!this.videoWidth) return;
 
-        // Clear canvas
+        // Clear canvas (make transparent - video shows through)
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw video frame (scaled)
-        this.ctx.drawImage(
-            this.video,
-            0, 0, this.videoWidth, this.videoHeight,
-            0, 0, this.canvas.width, this.canvas.height
-        );
+        // DON'T draw video - canvas overlays the <video> element
+        // The video is visible underneath the transparent canvas
 
         // Draw all mask overlays
         this.drawAllMasks();
