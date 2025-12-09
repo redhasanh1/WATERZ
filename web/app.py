@@ -379,6 +379,11 @@ def privacy_page():
     return send_file('privacy.html')
 
 
+@app.route('/contact.html')
+def contact_page():
+    return send_file('contact.html')
+
+
 @app.route('/css/<path:path>')
 def serve_css(path):
     """Serve CSS files with path traversal protection"""
