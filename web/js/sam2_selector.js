@@ -190,6 +190,14 @@ class SAM2Selector {
      * Add point to current selection (accumulates multiple clicks)
      */
     async addPoint(x, y, label) {
+        // Limit to 10 clicks per session
+        const totalPoints = this.getAllPoints().length;
+        if (totalPoints >= 10) {
+            console.log('[SAM2Selector] Maximum 10 clicks reached');
+            alert('Maximum 10 selection points allowed. Click Reset to start over.');
+            return;
+        }
+
         // Create new selection if none exists, or add to existing
         if (!this.currentSelection) {
             this.currentSelection = {
