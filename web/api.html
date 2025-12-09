@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Documentation - MarkRemoverAI | Video Object Removal API</title>
+    <meta name="description" content="Integrate AI-powered video object removal into your apps. RESTful API with simple authentication, batch processing, and webhook support.">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <style>
+        /* Light mode (default) */
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5568d3;
+            --secondary: #764ba2;
+            --accent: #a78bfa;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --bg-dark: #f8fafc;
+            --bg-card: #ffffff;
+            --bg-glass: rgba(255, 255, 255, 0.9);
+            --text-primary: #1a1a2e;
+            --text-secondary: #64748b;
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            --border-color: rgba(102, 126, 234, 0.2);
+            --nav-bg: rgba(255, 255, 255, 0.95);
+            --code-bg: #1e1e2e;
+        }
+
+        /* Dark mode */
+        [data-theme="dark"] {
+            --bg-dark: #0a0a14;
+            --bg-card: #1a1a2e;
+            --bg-glass: rgba(26, 26, 46, 0.8);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0c0;
+            --border-color: rgba(102, 126, 234, 0.15);
+            --nav-bg: rgba(10, 10, 20, 0.95);
+            --code-bg: #0d0d14;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* Navigation */
+        .nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: var(--nav-bg);
+            backdrop-filter: blur(20px);
+            z-index: 1000;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: var(--text-primary);
+        }
+
+        .btn-nav {
+            padding: 0.6rem 1.5rem;
+            background: var(--gradient-primary);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+        }
+
+        .btn-nav:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        /* Hero */
+        .hero {
+            padding: 160px 0 100px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(at 40% 20%, rgba(102, 126, 234, 0.3) 0px, transparent 50%),
+                        radial-gradient(at 80% 0%, rgba(118, 75, 162, 0.2) 0px, transparent 50%);
+            opacity: 0.6;
+            z-index: 0;
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-badge {
+            display: inline-block;
+            padding: 0.5rem 1.25rem;
+            background: rgba(102, 126, 234, 0.15);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 50px;
+            color: var(--accent);
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+        }
+
+        .hero-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+            line-height: 1.2;
+        }
+
+        .gradient-text {
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto 2.5rem;
+        }
+
+        .hero-cta {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn-primary {
+            padding: 1rem 2.5rem;
+            background: var(--gradient-primary);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            padding: 1rem 2.5rem;
+            background: transparent;
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(102, 126, 234, 0.1);
+            border-color: var(--primary);
+        }
+
+        /* Code Section */
+        .code-section {
+            padding: 80px 0;
+        }
+
+        .code-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .code-tab {
+            padding: 0.5rem 1.25rem;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .code-tab.active {
+            background: var(--gradient-primary);
+            border-color: transparent;
+            color: white;
+        }
+
+        .code-block {
+            background: var(--code-bg);
+            border-radius: 16px;
+            padding: 1.5rem;
+            overflow-x: auto;
+            border: 1px solid rgba(102, 126, 234, 0.2);
+        }
+
+        .code-block pre {
+            margin: 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            color: #e2e8f0;
+        }
+
+        .code-comment { color: #64748b; }
+        .code-keyword { color: #10b981; }
+        .code-string { color: #fbbf24; }
+        .code-property { color: #a78bfa; }
+
+        /* Features Grid */
+        .features-section {
+            padding: 100px 0;
+            background: var(--bg-glass);
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .section-title {
+            font-size: clamp(2rem, 4vw, 2.5rem);
+            font-weight: 800;
+            margin-bottom: 1rem;
+        }
+
+        .section-subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 2rem;
+            border: 1px solid var(--border-color);
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(102, 126, 234, 0.15);
+        }
+
+        .feature-icon {
+            width: 50px;
+            height: 50px;
+            background: var(--gradient-primary);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.25rem;
+        }
+
+        .feature-icon svg {
+            width: 24px;
+            height: 24px;
+            stroke: white;
+            fill: none;
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        /* Pricing Section */
+        .pricing-section {
+            padding: 100px 0;
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .pricing-card {
+            background: var(--bg-card);
+            border: 2px solid var(--border-color);
+            border-radius: 20px;
+            padding: 2.5rem;
+            text-align: center;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--primary);
+        }
+
+        .pricing-card.popular {
+            border-color: var(--primary);
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+        }
+
+        .popular-badge {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--gradient-primary);
+            padding: 0.4rem 1.2rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: white;
+        }
+
+        .pricing-tier {
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.5rem;
+        }
+
+        .pricing-price {
+            font-size: 3rem;
+            font-weight: 800;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .pricing-price span {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            -webkit-text-fill-color: var(--text-secondary);
+        }
+
+        .pricing-calls {
+            color: var(--accent);
+            font-weight: 600;
+            margin: 0.5rem 0 1.5rem;
+        }
+
+        .pricing-features {
+            list-style: none;
+            text-align: left;
+            margin-bottom: 2rem;
+        }
+
+        .pricing-features li {
+            padding: 0.6rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .pricing-features li::before {
+            content: "✓";
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .btn-pricing {
+            width: 100%;
+            padding: 1rem;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: none;
+        }
+
+        .btn-pricing.primary {
+            background: var(--gradient-primary);
+            color: white;
+        }
+
+        .btn-pricing.secondary {
+            background: transparent;
+            border: 2px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .btn-pricing:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+
+        /* Use Cases */
+        .use-cases-section {
+            padding: 100px 0;
+            background: var(--bg-glass);
+        }
+
+        .use-cases-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .use-case-card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 2rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .use-case-card h4 {
+            margin-bottom: 0.5rem;
+        }
+
+        .use-case-card p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* CTA Section */
+        .cta-section {
+            padding: 100px 0;
+            text-align: center;
+        }
+
+        .cta-box {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 4rem;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 3rem 0;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        .footer a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            margin: 0 1rem;
+        }
+
+        .footer a:hover {
+            color: var(--primary);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-links {
+                gap: 1rem;
+            }
+
+            .nav-links a:not(.btn-nav) {
+                display: none;
+            }
+
+            .hero {
+                padding: 120px 0 60px;
+            }
+
+            .hero-cta {
+                flex-direction: column;
+            }
+
+            .code-tabs {
+                flex-wrap: wrap;
+            }
+
+            .pricing-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <a class="logo" href="index.html">MarkRemoverAI</a>
+            <div class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="premium.html#pricing">Pricing</a>
+                <a href="api.html">API</a>
+                <a href="login.html" class="btn-nav">Get API Key</a>
+                <button id="themeToggle" onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; color: var(--text-primary); font-size: 1rem; transition: all 0.3s;" title="Toggle theme">
+                    <span id="themeIcon"></span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-background"></div>
+        <div class="container">
+            <div class="hero-content">
+                <span class="hero-badge">REST API v1</span>
+                <h1 class="hero-title">
+                    Build with <span class="gradient-text">MarkRemoverAI API</span>
+                </h1>
+                <p class="hero-subtitle">
+                    Integrate AI-powered video object removal into your applications. Process thousands of videos programmatically with simple API calls.
+                </p>
+                <div class="hero-cta">
+                    <a href="login.html" class="btn-primary">Get API Key Free</a>
+                    <a href="#quickstart" class="btn-secondary">View Documentation</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start Code Section -->
+    <section class="code-section" id="quickstart">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Quick Start</h2>
+                <p class="section-subtitle">Start removing objects from videos in minutes</p>
+            </div>
+
+            <div class="code-tabs">
+                <button class="code-tab active" onclick="showCode('curl')">cURL</button>
+                <button class="code-tab" onclick="showCode('python')">Python</button>
+                <button class="code-tab" onclick="showCode('javascript')">JavaScript</button>
+            </div>
+
+            <div class="code-block" id="code-curl">
+<pre><span class="code-comment"># Upload video and create removal job</span>
+<span class="code-keyword">curl</span> -X POST https://api.markremoverai.com/v1/jobs \
+  -H <span class="code-string">"Authorization: Bearer YOUR_API_KEY"</span> \
+  -H <span class="code-string">"Content-Type: multipart/form-data"</span> \
+  -F <span class="code-string">"video=@input.mp4"</span> \
+  -F <span class="code-string">"mask=@mask.png"</span> \
+  -F <span class="code-string">"webhook_url=https://your-app.com/webhook"</span>
+
+<span class="code-comment"># Response</span>
+{
+  <span class="code-property">"job_id"</span>: <span class="code-string">"job_abc123def456"</span>,
+  <span class="code-property">"status"</span>: <span class="code-string">"processing"</span>,
+  <span class="code-property">"estimated_time"</span>: <span class="code-string">"45 seconds"</span>,
+  <span class="code-property">"credits_used"</span>: 12
+}</pre>
+            </div>
+
+            <div class="code-block" id="code-python" style="display: none;">
+<pre><span class="code-keyword">import</span> requests
+
+<span class="code-comment"># Initialize API client</span>
+API_KEY = <span class="code-string">"your_api_key_here"</span>
+BASE_URL = <span class="code-string">"https://api.markremoverai.com/v1"</span>
+
+<span class="code-comment"># Upload video and create removal job</span>
+<span class="code-keyword">with</span> open(<span class="code-string">"input.mp4"</span>, <span class="code-string">"rb"</span>) <span class="code-keyword">as</span> video, open(<span class="code-string">"mask.png"</span>, <span class="code-string">"rb"</span>) <span class="code-keyword">as</span> mask:
+    response = requests.post(
+        f<span class="code-string">"{BASE_URL}/jobs"</span>,
+        headers={<span class="code-string">"Authorization"</span>: f<span class="code-string">"Bearer {API_KEY}"</span>},
+        files={
+            <span class="code-string">"video"</span>: video,
+            <span class="code-string">"mask"</span>: mask
+        },
+        data={<span class="code-string">"webhook_url"</span>: <span class="code-string">"https://your-app.com/webhook"</span>}
+    )
+
+job = response.json()
+<span class="code-keyword">print</span>(f<span class="code-string">"Job {job['job_id']} created - Status: {job['status']}"</span>)</pre>
+            </div>
+
+            <div class="code-block" id="code-javascript" style="display: none;">
+<pre><span class="code-comment">// Using fetch API</span>
+<span class="code-keyword">const</span> API_KEY = <span class="code-string">'your_api_key_here'</span>;
+
+<span class="code-keyword">async function</span> removeObject(videoFile, maskFile) {
+  <span class="code-keyword">const</span> formData = <span class="code-keyword">new</span> FormData();
+  formData.append(<span class="code-string">'video'</span>, videoFile);
+  formData.append(<span class="code-string">'mask'</span>, maskFile);
+  formData.append(<span class="code-string">'webhook_url'</span>, <span class="code-string">'https://your-app.com/webhook'</span>);
+
+  <span class="code-keyword">const</span> response = <span class="code-keyword">await</span> fetch(<span class="code-string">'https://api.markremoverai.com/v1/jobs'</span>, {
+    method: <span class="code-string">'POST'</span>,
+    headers: {
+      <span class="code-string">'Authorization'</span>: <span class="code-string">`Bearer ${API_KEY}`</span>
+    },
+    body: formData
+  });
+
+  <span class="code-keyword">const</span> job = <span class="code-keyword">await</span> response.json();
+  console.log(<span class="code-string">`Job ${job.job_id} created`</span>);
+  <span class="code-keyword">return</span> job;
+}</pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section" id="features">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Everything You Need to Build</h2>
+                <p class="section-subtitle">Powerful features for developers and enterprises</p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    </div>
+                    <h3>Lightning Fast</h3>
+                    <p>Average processing time of 30-60 seconds for most videos. Priority queue for paid plans.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><polygon points="12,2 2,7 12,12 22,7"/><polyline points="2,17 12,22 22,17"/><polyline points="2,12 12,17 22,12"/></svg>
+                    </div>
+                    <h3>Batch Processing</h3>
+                    <p>Process up to 1,000 videos simultaneously. Perfect for large-scale operations.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    </div>
+                    <h3>Webhook Callbacks</h3>
+                    <p>Get notified instantly when jobs complete. No polling required.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    </div>
+                    <h3>Enterprise Security</h3>
+                    <p>SOC 2 compliant. End-to-end encryption. Files auto-deleted after processing.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8h20"/><polygon points="10,12 10,18 16,15"/></svg>
+                    </div>
+                    <h3>4K Support</h3>
+                    <p>Process videos up to 4K resolution. Maintain original quality in output.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+                    </div>
+                    <h3>99.9% Uptime SLA</h3>
+                    <p>Guaranteed availability for Business and Enterprise plans.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section class="pricing-section" id="pricing">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">API Pricing</h2>
+                <p class="section-subtitle">Simple, transparent pricing that scales with you</p>
+            </div>
+
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <div class="pricing-tier">Free</div>
+                    <div class="pricing-price">$0<span>/mo</span></div>
+                    <div class="pricing-calls">100 API calls/month</div>
+                    <ul class="pricing-features">
+                        <li>1080p max resolution</li>
+                        <li>Standard processing queue</li>
+                        <li>Community support</li>
+                        <li>Basic analytics</li>
+                    </ul>
+                    <button class="btn-pricing secondary" onclick="window.location.href='login.html'">Get Started Free</button>
+                </div>
+
+                <div class="pricing-card popular">
+                    <div class="popular-badge">MOST POPULAR</div>
+                    <div class="pricing-tier">Developer</div>
+                    <div class="pricing-price">$49<span>/mo</span></div>
+                    <div class="pricing-calls">5,000 API calls/month</div>
+                    <ul class="pricing-features">
+                        <li>4K resolution support</li>
+                        <li>Priority processing</li>
+                        <li>Email support</li>
+                        <li>Webhook callbacks</li>
+                        <li>Batch processing</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="window.location.href='login.html'">Start Free Trial</button>
+                </div>
+
+                <div class="pricing-card">
+                    <div class="pricing-tier">Business</div>
+                    <div class="pricing-price">$199<span>/mo</span></div>
+                    <div class="pricing-calls">25,000 API calls/month</div>
+                    <ul class="pricing-features">
+                        <li>Everything in Developer</li>
+                        <li>99.9% uptime SLA</li>
+                        <li>Priority support</li>
+                        <li>Custom integrations</li>
+                        <li>Team access</li>
+                    </ul>
+                    <button class="btn-pricing secondary" onclick="window.location.href='login.html'">Contact Sales</button>
+                </div>
+
+                <div class="pricing-card">
+                    <div class="pricing-tier">Enterprise</div>
+                    <div class="pricing-price">Custom</div>
+                    <div class="pricing-calls">Unlimited API calls</div>
+                    <ul class="pricing-features">
+                        <li>Everything in Business</li>
+                        <li>Dedicated infrastructure</li>
+                        <li>Custom SLA</li>
+                        <li>Dedicated account manager</li>
+                        <li>On-premise deployment</li>
+                    </ul>
+                    <button class="btn-pricing secondary" onclick="window.location.href='mailto:enterprise@markremoverai.com'">Contact Us</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Use Cases Section -->
+    <section class="use-cases-section">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Built for Every Industry</h2>
+                <p class="section-subtitle">See how teams are using our API</p>
+            </div>
+
+            <div class="use-cases-grid">
+                <div class="use-case-card">
+                    <h4>Content Platforms</h4>
+                    <p>Automatically clean user-uploaded videos at scale</p>
+                </div>
+                <div class="use-case-card">
+                    <h4>Marketing Agencies</h4>
+                    <p>Refresh client assets and remove outdated branding</p>
+                </div>
+                <div class="use-case-card">
+                    <h4>E-commerce</h4>
+                    <p>Clean product videos and remove unwanted elements</p>
+                </div>
+                <div class="use-case-card">
+                    <h4>Media Companies</h4>
+                    <p>Process footage for broadcast and streaming</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <div class="cta-box">
+                <h2 class="section-title">Ready to Get Started?</h2>
+                <p class="section-subtitle" style="margin-bottom: 2rem;">Create your free API key and start building today. No credit card required.</p>
+                <a href="login.html" class="btn-primary">Get Your Free API Key</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 MarkRemoverAI. All rights reserved.</p>
+            <p style="margin-top: 0.5rem;">
+                <a href="terms.html">Terms</a>
+                <a href="privacy.html">Privacy</a>
+                <a href="mailto:api@markremoverai.com">API Support</a>
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // Code tab switching
+        function showCode(lang) {
+            document.querySelectorAll('.code-block').forEach(block => {
+                block.style.display = 'none';
+            });
+            document.querySelectorAll('.code-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.getElementById('code-' + lang).style.display = 'block';
+            event.target.classList.add('active');
+        }
+
+        // Theme toggle
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeIcon(newTheme);
+        }
+
+        function updateThemeIcon(theme) {
+            const icon = document.getElementById('themeIcon');
+            if (icon) {
+                icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+            }
+        }
+
+        function loadTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            updateThemeIcon(savedTheme);
+        }
+
+        loadTheme();
+    </script>
+</body>
+</html>

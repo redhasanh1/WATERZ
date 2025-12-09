@@ -615,11 +615,11 @@
     <!-- Navigation -->
     <nav class="nav">
         <div class="nav-container">
-            <a class="logo" href="index.html" style="text-decoration: none;">WatermarkAI</a>
+            <a class="logo" href="index.html" style="text-decoration: none;">MarkRemoverAI</a>
             <div class="nav-links">
-                <a href="#features">Features</a>
+                <a href="index.html">Home</a>
                 <a href="#pricing">Pricing</a>
-                <a href="#api">API</a>
+                <a href="api.html">API</a>
                 <button class="btn-nav" onclick="scrollToPricing()">Start Free Cleanup</button>
                 <button id="themeToggle" onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; color: var(--text-primary); font-size: 1rem; transition: all 0.3s;" title="Toggle theme">
                     <span id="themeIcon">🌙</span>
@@ -645,30 +645,6 @@
                     <button class="btn-primary" onclick="scrollToPricing()">
                         Get Started
                     </button>
-                </div>
-            </div>
-        </div>
-    </section>
-
-
-    <section style="padding: 80px 0; background: var(--bg-glass); border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);">
-        <div class="container" style="max-width: 1000px;">
-            <div class="section-header">
-                <h2 class="section-title">Compliance at the Core</h2>
-                <p class="section-subtitle">WatermarkAI is purpose-built for ethical use cases and policy-friendly workflows.</p>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;">
-                <div style="background: var(--bg-card); border-radius: 16px; padding: 1.75rem; border: 1px solid var(--border-color); color: var(--text-secondary);">
-                    <h3 style="color: var(--text-primary); margin-bottom: 0.75rem;">Rights Verification</h3>
-                    <p>Require clients or teammates to confirm ownership or licensing before upload with customizable attestations.</p>
-                </div>
-                <div style="background: var(--bg-card); border-radius: 16px; padding: 1.75rem; border: 1px solid var(--border-color); color: var(--text-secondary);">
-                    <h3 style="color: var(--text-primary); margin-bottom: 0.75rem;">Audit-Friendly Logs</h3>
-                    <p>Track who cleaned what, when, and why. Exportable logs help satisfy legal, brand, and platform requirements.</p>
-                </div>
-                <div style="background: var(--bg-card); border-radius: 16px; padding: 1.75rem; border: 1px solid var(--border-color); color: var(--text-secondary);">
-                    <h3 style="color: var(--text-primary); margin-bottom: 0.75rem;">Ad Network Friendly</h3>
-                    <p>Copy, UI, and policies aligned with Google Ads standards. We actively monitor usage and can disable non-compliant projects.</p>
                 </div>
             </div>
         </div>
@@ -796,6 +772,37 @@
                         <li>Custom integrations</li>
                     </ul>
                     <button class="btn-pricing secondary" onclick="signUp('business_monthly')">Get Started</button>
+                </div>
+            </div>
+
+            <!-- API Preview Section -->
+            <div style="margin: 4rem 0; padding: 3rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.08), rgba(118, 75, 162, 0.08)); border: 1px solid var(--border-color); border-radius: 24px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center;">
+                    <div>
+                        <span style="display: inline-block; padding: 0.4rem 1rem; border-radius: 50px; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); color: var(--accent); font-size: 0.8rem; font-weight: 600; margin-bottom: 1rem;">FOR DEVELOPERS</span>
+                        <h3 style="font-size: 1.75rem; color: var(--text-primary); margin-bottom: 1rem;">Automate Your Workflow with Our API</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.7;">Process thousands of videos programmatically. Perfect for agencies, content platforms, and enterprise teams who need to scale their video editing operations.</p>
+                        <ul style="list-style: none; padding: 0; margin-bottom: 2rem;">
+                            <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> RESTful API with simple authentication</li>
+                            <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> Batch processing up to 1,000 videos</li>
+                            <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> Webhook callbacks for async processing</li>
+                            <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> 99.9% uptime SLA guarantee</li>
+                        </ul>
+                        <a href="api.html" style="display: inline-block; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 30px rgba(102, 126, 234, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">Explore API Documentation</a>
+                    </div>
+                    <div style="background: rgba(10, 10, 20, 0.9); border-radius: 16px; padding: 1.5rem; font-family: 'Courier New', monospace; font-size: 0.85rem; color: #a78bfa; overflow-x: auto; border: 1px solid rgba(102, 126, 234, 0.3);">
+                        <div style="color: #64748b; margin-bottom: 0.5rem;"># Remove object from video</div>
+                        <div style="color: #10b981;">curl</div> -X POST https://api.markremoverai.com/v1/remove \<br>
+                        &nbsp;&nbsp;-H <span style="color: #fbbf24;">"Authorization: Bearer YOUR_API_KEY"</span> \<br>
+                        &nbsp;&nbsp;-F <span style="color: #fbbf24;">"video=@input.mp4"</span> \<br>
+                        &nbsp;&nbsp;-F <span style="color: #fbbf24;">"mask=@mask.png"</span><br><br>
+                        <div style="color: #64748b;"># Response</div>
+                        <div style="color: #f8fafc;">{</div>
+                        <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"job_id"</span>: <span style="color: #fbbf24;">"job_abc123"</span>,</div>
+                        <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"status"</span>: <span style="color: #fbbf24;">"processing"</span>,</div>
+                        <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"webhook_url"</span>: <span style="color: #fbbf24;">"..."</span></div>
+                        <div style="color: #f8fafc;">}</div>
+                    </div>
                 </div>
             </div>
 
