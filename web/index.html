@@ -2928,8 +2928,8 @@
         let frames = [];
         let currentFrame = 0;
         let isDragging = false;
-        const FPS = 30;
-        const FRAME_INTERVAL = 1 / FPS; // Every frame at 30fps!
+        const MAX_FRAMES = 40; // Maximum thumbnails - mobile friendly!
+        let FRAME_INTERVAL = 0.5; // Will be calculated based on duration
 
         function formatTime(seconds) {
             const mins = Math.floor(seconds / 60);
@@ -2962,7 +2962,9 @@
             const duration = video.duration;
             if (!duration || duration === Infinity) return;
 
-            const frameCount = Math.ceil(duration / FRAME_INTERVAL);
+            // Calculate adaptive frame interval - max 40 thumbnails for mobile
+            FRAME_INTERVAL = Math.max(0.5, duration / MAX_FRAMES);
+            const frameCount = Math.min(MAX_FRAMES, Math.ceil(duration / FRAME_INTERVAL));
             const canvas = document.createElement('canvas');
             canvas.width = 64;
             canvas.height = 48;
