@@ -24,18 +24,21 @@ class SAM2Selector {
         this.currentSelection = null; // Active selection being built with multiple clicks
         this.isLoading = false;
 
-        // BRIGHT AF color palette - maximum saturation, no dull shit
+        // NUCLEAR NEON palette - maximum saturation, eye-melting colors
         this.colorPalette = [
-            [0, 255, 255],    // CYAN - electric
-            [255, 0, 128],    // HOT PINK - neon
-            [0, 255, 0],      // LIME GREEN - pure
-            [255, 255, 0],    // YELLOW - blazing
-            [255, 0, 255],    // MAGENTA - vivid
-            [0, 128, 255],    // ELECTRIC BLUE
-            [255, 128, 0],    // ORANGE - fire
-            [128, 255, 0],    // CHARTREUSE - acid green
-            [255, 0, 0],      // RED - pure
-            [0, 255, 128],    // SPRING GREEN - neon
+            [  0, 255, 255],   // 0  CYBER-CYAN        – electric blade
+            [255,   0, 255],   // 1  PSYCHEDELIC PINK  – neon sign on steroids
+            [  0, 255,   0],   // 2  NUCLEAR LIME      – toxic waste highlight
+            [255, 255,   0],   // 3  BLINDING YELLOW   – solar flare
+            [255,   0, 255],   // 4  MAGENTA BEAM      – violet laser
+            [  0, 128, 255],   // 5  ARC-BLUE          – lightning bolt
+            [255, 128,   0],   // 6  PLASMA ORANGE     – molten copper
+            [128, 255,   0],   // 7  ACID CHARTREUSE   – acid-trip highlighter
+            [255,   0,   0],   // 8  PURE HELL-RED     – stop-sign on fire
+            [  0, 255, 128],   // 9  SPRING SHOCK-GREEN– radioactive mint
+            [255,   0, 128],   //10  ULTRA HOT-PINK    – barbie in a microwave
+            [255, 255, 255],   //11  STAR WHITE        – pure highlight
+            [128,   0, 255],   //12  QUANTUM VIOLET    – galaxy edge
         ];
         this.colorIndex = 0; // Tracks which color to use next
 
