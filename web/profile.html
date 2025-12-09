@@ -563,6 +563,47 @@
         // API Base URL
         const API_BASE_URL = window.API_BASE_URL || '';
 
+        // Setup verify button click handler
+        function setupVerifyButton() {
+            const btn = document.getElementById('verifyBtn');
+            const status = document.getElementById('verifyStatus');
+            if (!btn) return;
+
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.textContent = 'Sending...';
+
+                try {
+                    const response = await fetch(API_BASE_URL + '/api/auth/resend-verification', {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        status.textContent = 'Email sent! Check your inbox.';
+                        status.style.color = '#10b981';
+                        btn.style.display = 'none';
+                    } else if (response.status === 429) {
+                        status.textContent = 'Please wait before requesting again.';
+                        status.style.color = '#f59e0b';
+                        btn.disabled = false;
+                        btn.textContent = 'Verify Now';
+                    } else {
+                        status.textContent = data.error || 'Failed to send';
+                        status.style.color = '#ef4444';
+                        btn.disabled = false;
+                        btn.textContent = 'Verify Now';
+                    }
+                } catch (e) {
+                    status.textContent = 'Connection error';
+                    status.style.color = '#ef4444';
+                    btn.disabled = false;
+                    btn.textContent = 'Verify Now';
+                }
+            });
+        }
+
         // Load user data
         async function loadUserProfile() {
             const loadingState = document.getElementById('loadingState');
@@ -607,7 +648,12 @@
                 if (user.email_verified) {
                     verificationStatus.innerHTML = '<span class="badge badge-success">Verified</span>';
                 } else {
-                    verificationStatus.innerHTML = '<span class="badge badge-warning">Not Verified</span>';
+                    verificationStatus.innerHTML = `
+                        <span class="badge badge-warning">Not Verified</span>
+                        <button id="verifyBtn" style="margin-left: 0.5rem; padding: 0.25rem 0.75rem; font-size: 0.8rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer;">Verify Now</button>
+                        <span id="verifyStatus" style="margin-left: 0.5rem; font-size: 0.85rem;"></span>
+                    `;
+                    setupVerifyButton();
                 }
 
                 // Member since (if available)
