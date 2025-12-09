@@ -17,13 +17,18 @@ from flask_cors import CORS
 import cv2
 import numpy as np
 from werkzeug.utils import secure_filename
-import tempfile
 import mimetypes
 from pathlib import Path
 from urllib.parse import urljoin, urlencode
 import stripe
 import secrets
 import requests
+import atexit
+
+# Security modules
+from security.path_validator import validate_static_path, SecurityError
+from security.av_scanner import scan_file_async
+from security.mime_validator import validate_mime_type, MIMEValidationError
 
 # Import watermark removal modules
 try:
@@ -37,10 +42,18 @@ app = Flask(__name__, static_folder='.')
 CORS(app)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.environ.get('SECRET_KEY', 'watermarkai-dev-secret'))
 
-# Configuration
-UPLOAD_FOLDER = tempfile.mkdtemp()
+# Configuration - Fixed temp directory for better security and cleanup
+WEB_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(WEB_DIR, 'temp', 'uploads')
+RESULTS_FOLDER = os.path.join(WEB_DIR, 'results')
+QUARANTINE_FOLDER = os.path.join(WEB_DIR, 'quarantine')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'mp4', 'mov', 'avi'}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+
+# Ensure directories exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(RESULTS_FOLDER, exist_ok=True)
+os.makedirs(QUARANTINE_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
@@ -368,27 +381,46 @@ def privacy_page():
 
 @app.route('/css/<path:path>')
 def serve_css(path):
-    """Serve CSS files"""
-    return send_file(f'css/{path}')
+    """Serve CSS files with path traversal protection"""
+    try:
+        safe_path = validate_static_path(path, 'css', ['.css'])
+        return send_file(safe_path)
+    except SecurityError as e:
+        return jsonify({'error': 'Access denied'}), 403
 
 
 @app.route('/js/<path:path>')
 def serve_js(path):
-    """Serve JavaScript files"""
-    return send_file(f'js/{path}')
+    """Serve JavaScript files with path traversal protection"""
+    try:
+        safe_path = validate_static_path(path, 'js', ['.js'])
+        return send_file(safe_path)
+    except SecurityError as e:
+        return jsonify({'error': 'Access denied'}), 403
 
 
 @app.route('/<path:filename>')
 def serve_static_root(filename):
-    """Serve static files from root (images, etc)"""
-    if filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.webp')):
-        return send_file(filename)
+    """Serve static files from root with path traversal protection"""
+    allowed_exts = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.webp']
+    if any(filename.endswith(ext) for ext in allowed_exts):
+        try:
+            safe_path = validate_static_path(filename, '', allowed_exts)
+            return send_file(safe_path)
+        except SecurityError:
+            return jsonify({'error': 'Access denied'}), 403
     return send_file('index.html')
+
+
+def _on_threat_detected(filepath: str, result: dict):
+    """Callback when malware is detected - file already quarantined by scanner."""
+    print(f"SECURITY ALERT: Malware detected and quarantined: {filepath}")
+    print(f"Threat: {result.get('threat_name', 'Unknown')}")
 
 
 @app.route('/api/remove-watermark', methods=['POST'])
 def remove_watermark():
-    """API endpoint to process uploaded file"""
+    """API endpoint to process uploaded file with security validation"""
     # Check if file is present
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
@@ -401,11 +433,24 @@ def remove_watermark():
     if not allowed_file(file.filename):
         return jsonify({'error': 'Invalid file type'}), 400
 
+    filepath = None
     try:
         # Save uploaded file
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
+
+        # Security: Validate MIME type matches extension (fast - ~1.5ms)
+        ext = os.path.splitext(filename)[1]
+        try:
+            validate_mime_type(filepath, ext)
+        except MIMEValidationError as e:
+            os.remove(filepath)
+            return jsonify({'error': 'Invalid file content'}), 400
+
+        # Security: Start async AV scan (non-blocking - 0ms overhead)
+        # Scan runs in background, quarantines file if threat found
+        scan_file_async(filepath, on_threat=_on_threat_detected)
 
         print(f"Processing file: {filename}")
 
@@ -434,10 +479,10 @@ def remove_watermark():
 
     finally:
         # Cleanup uploaded file (keep processed file for download)
-        if os.path.exists(filepath):
+        if filepath and os.path.exists(filepath):
             try:
                 os.remove(filepath)
-            except:
+            except Exception:
                 pass
 
 
@@ -561,6 +606,51 @@ def health():
         'detector_loaded': detector is not None,
         'inpainter_loaded': inpainter is not None
     })
+
+
+# ============================================================================
+# Temp File Cleanup Scheduler
+# ============================================================================
+
+def cleanup_old_files():
+    """Delete files older than 1 hour from temp and results directories."""
+    import time
+    now = time.time()
+    cutoff = now - 3600  # 1 hour
+
+    for directory in [UPLOAD_FOLDER, RESULTS_FOLDER]:
+        if not os.path.exists(directory):
+            continue
+        for filename in os.listdir(directory):
+            filepath = os.path.join(directory, filename)
+            try:
+                if os.path.isfile(filepath) and os.path.getmtime(filepath) < cutoff:
+                    os.remove(filepath)
+                    print(f"Cleaned up old file: {filename}")
+            except Exception as e:
+                print(f"Error cleaning up {filename}: {e}")
+
+
+def start_cleanup_scheduler():
+    """Start background thread for periodic cleanup."""
+    import threading
+    import time
+
+    def cleanup_loop():
+        while True:
+            time.sleep(900)  # Run every 15 minutes
+            try:
+                cleanup_old_files()
+            except Exception as e:
+                print(f"Cleanup scheduler error: {e}")
+
+    thread = threading.Thread(target=cleanup_loop, daemon=True, name="cleanup_scheduler")
+    thread.start()
+    print("Temp file cleanup scheduler started (runs every 15 minutes)")
+
+
+# Start cleanup scheduler when app loads
+start_cleanup_scheduler()
 
 
 if __name__ == '__main__':

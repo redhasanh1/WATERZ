@@ -49,6 +49,10 @@ def privacy():
 def terms():
     return send_file('web/terms.html')
 
+@app.route('/contact')
+def contact():
+    return send_file('web/contact.html')
+
 @app.route('/web/<path:path>')
 def serve_static(path):
     return send_from_directory('web', path)

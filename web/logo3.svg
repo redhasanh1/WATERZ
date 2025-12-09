@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#0ea5e9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#grad)"/>
+
+  <!-- Abstract "remove/erase" symbol - broken square -->
+  <g stroke="white" stroke-width="3.5" stroke-linecap="round" fill="none">
+    <!-- Top left corner -->
+    <path d="M20 18h-2v8"/>
+    <!-- Top right corner -->
+    <path d="M46 18h-8"/>
+    <!-- Bottom left corner -->
+    <path d="M18 38v8h8"/>
+    <!-- Bottom right corner - broken/removed -->
+    <path d="M38 46h8v-8"/>
+
+    <!-- Diagonal strike through - the "remove" action -->
+    <line x1="24" y1="24" x2="40" y2="40" stroke-width="4"/>
+  </g>
+</svg>

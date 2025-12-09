@@ -42,7 +42,8 @@
       "Bash(git -C \"D:\\watermarkz\" add web/index.html web/premium.html web/api.html)",
       "Bash(git -C \"D:\\watermarkz\" commit -m \"$(cat <<''EOF''\nAdd API page, standardize navigation, and remove compliance section\n\n- Add Home and API links to navigation on all pages\n- Remove \"Compliance at the Core\" section from premium.html\n- Add API preview section with code snippet after pricing plans\n- Create new api.html page with:\n  - Hero section for developers\n  - Quick start code examples (cURL, Python, JavaScript)\n  - Features grid (batch processing, webhooks, 4K support, etc.)\n  - API pricing tiers (Free, Developer, Business, Enterprise)\n  - Use cases section\n- Light/dark mode support on API page\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(PGPASSWORD=\"xXqaHpjxSUSIXgfPKacAFWkpTURaBzvN\" psql:*)",
-      "Bash(python -c \"\nimport psycopg2\nconn = psycopg2.connect(\n    host=''centerbeam.proxy.rlwy.net'',\n    port=49937,\n    user=''postgres'',\n    password=''xXqaHpjxSUSIXgfPKacAFWkpTURaBzvN'',\n    database=''railway''\n)\ncur = conn.cursor()\ncur.execute(''ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE'')\nconn.commit()\nprint(''is_admin column added successfully!'')\ncur.close()\nconn.close()\n\")"
+      "Bash(python -c \"\nimport psycopg2\nconn = psycopg2.connect(\n    host=''centerbeam.proxy.rlwy.net'',\n    port=49937,\n    user=''postgres'',\n    password=''xXqaHpjxSUSIXgfPKacAFWkpTURaBzvN'',\n    database=''railway''\n)\ncur = conn.cursor()\ncur.execute(''ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE'')\nconn.commit()\nprint(''is_admin column added successfully!'')\ncur.close()\nconn.close()\n\")",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []
