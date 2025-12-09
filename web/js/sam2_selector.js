@@ -24,18 +24,18 @@ class SAM2Selector {
         this.currentSelection = null; // Active selection being built with multiple clicks
         this.isLoading = false;
 
-        // Professional color palette - rotates for each new selection
+        // BRIGHT AF color palette - maximum saturation, no dull shit
         this.colorPalette = [
-            [0, 212, 255],    // Cyan/Electric Blue
-            [255, 107, 107],  // Coral Red
-            [78, 205, 196],   // Teal
-            [255, 193, 7],    // Amber/Gold
-            [156, 39, 176],   // Purple
-            [0, 230, 118],    // Emerald Green
-            [255, 152, 0],    // Orange
-            [33, 150, 243],   // Blue
-            [233, 30, 99],    // Pink
-            [139, 195, 74],   // Light Green
+            [0, 255, 255],    // CYAN - electric
+            [255, 0, 128],    // HOT PINK - neon
+            [0, 255, 0],      // LIME GREEN - pure
+            [255, 255, 0],    // YELLOW - blazing
+            [255, 0, 255],    // MAGENTA - vivid
+            [0, 128, 255],    // ELECTRIC BLUE
+            [255, 128, 0],    // ORANGE - fire
+            [128, 255, 0],    // CHARTREUSE - acid green
+            [255, 0, 0],      // RED - pure
+            [0, 255, 128],    // SPRING GREEN - neon
         ];
         this.colorIndex = 0; // Tracks which color to use next
 

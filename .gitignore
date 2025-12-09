@@ -205,3 +205,4 @@ pure_trt_masks/
 /yolo_training
 *.jpg
 /yolo_training/images
+/web/pricing-versions
