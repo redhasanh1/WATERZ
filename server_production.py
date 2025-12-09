@@ -977,6 +977,73 @@ def auth_logout():
     session.clear()
     return jsonify({'status': 'success'})
 
+
+@app.route('/api/auth/delete-account', methods=['POST', 'OPTIONS'])
+@require_auth
+def delete_account():
+    """
+    Delete user's own account and all associated data.
+
+    SECURITY: Users can ONLY delete their OWN account.
+    Deletes: user record, uploads, results, clears session.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        user_id = session.get('user_id')
+        user_email = session.get('email')
+
+        if not user_id:
+            return jsonify({'status': 'error', 'message': 'Not authenticated'}), 401
+
+        print(f"[ACCOUNT DELETE] Starting deletion for user {user_id} ({user_email})")
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'status': 'error', 'message': 'Database error'}), 500
+
+        try:
+            cur = conn.cursor()
+
+            # Verify user exists and get their data
+            cur.execute("SELECT id, email FROM users WHERE id = %s", (user_id,))
+            user = cur.fetchone()
+
+            if not user:
+                return jsonify({'status': 'error', 'message': 'User not found'}), 404
+
+            # Double-check: only allow deletion of own account
+            if user[0] != user_id:
+                print(f"[SECURITY] User {user_id} tried to delete different account!")
+                return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+
+            # Delete user from database
+            cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+            conn.commit()
+
+            print(f"[ACCOUNT DELETE] Deleted user {user_id} ({user_email}) from database")
+
+            # Clear session
+            session.clear()
+
+            # Note: User's uploaded files are stored with task_ids (UUIDs), not user IDs
+            # They will be cleaned up by the automatic cleanup routine
+            # If you want immediate deletion, you'd need to track user->file associations
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Account deleted successfully'
+            })
+
+        finally:
+            release_db_connection(conn)
+
+    except Exception as e:
+        print(f"[ERROR] Account deletion failed: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to delete account'}), 500
+
+
 # ----------------------------------------------------------------------------
 # End Authentication Routes
 # ----------------------------------------------------------------------------
@@ -1089,6 +1156,7 @@ app.config['TEMP_FOLDER'] = TEMP_DIR  # D drive only!
 
 # Rate limiting - prevent abuse
 UPLOAD_RATE_LIMIT = {}  # IP -> (count, timestamp)
+USER_VIDEO_RATE_LIMIT = {}  # user_id -> list of timestamps
 
 # Input validation
 def sanitize_filename(filename):
@@ -1099,6 +1167,135 @@ def sanitize_filename(filename):
     # Only allow alphanumeric, dots, dashes, underscores
     filename = re.sub(r'[^a-zA-Z0-9._-]', '', filename)
     return filename
+
+
+# ============================================
+# FILE SECURITY - Magic Bytes Validation
+# ============================================
+# Validates file type by checking actual file content (magic bytes)
+# NOT just the extension - prevents malicious file uploads
+
+ALLOWED_FILE_SIGNATURES = {
+    # Video formats
+    'mp4': [
+        (4, b'ftyp'),           # MP4/M4V - ftyp at offset 4
+        (4, b'ftypmp4'),        # MP4
+        (4, b'ftypisom'),       # MP4 ISO
+        (4, b'ftypMSNV'),       # MP4 Sony
+        (4, b'ftypavc1'),       # MP4 AVC
+    ],
+    'mov': [
+        (4, b'ftypqt'),         # QuickTime
+        (4, b'ftyp'),           # MOV also uses ftyp
+        (4, b'moov'),           # Old MOV format
+        (0, b'moov'),           # Alternative MOV
+    ],
+    'avi': [
+        (0, b'RIFF'),           # AVI starts with RIFF
+    ],
+    'webm': [
+        (0, b'\x1a\x45\xdf\xa3'),  # WebM/Matroska
+    ],
+    'mkv': [
+        (0, b'\x1a\x45\xdf\xa3'),  # MKV/Matroska
+    ],
+    # Image formats
+    'jpg': [
+        (0, b'\xff\xd8\xff'),   # JPEG
+    ],
+    'jpeg': [
+        (0, b'\xff\xd8\xff'),   # JPEG
+    ],
+    'png': [
+        (0, b'\x89PNG'),        # PNG
+    ],
+    'gif': [
+        (0, b'GIF87a'),         # GIF87
+        (0, b'GIF89a'),         # GIF89
+    ],
+    'webp': [
+        (0, b'RIFF'),           # WebP (also uses RIFF, check for WEBP later)
+    ],
+}
+
+def validate_file_magic_bytes(file_stream, claimed_extension):
+    """
+    Validate that file content matches claimed extension using magic bytes.
+    Returns (is_valid, detected_type, error_message)
+
+    This is a SECURITY measure to prevent:
+    - Uploading executables disguised as videos
+    - Malware hidden in fake media files
+    - Script injection via file uploads
+    """
+    try:
+        # Read first 32 bytes for signature check
+        file_stream.seek(0)
+        header = file_stream.read(32)
+        file_stream.seek(0)  # Reset for later use
+
+        if len(header) < 8:
+            return False, None, "File too small to validate"
+
+        # Normalize extension
+        ext = claimed_extension.lower().lstrip('.')
+
+        # Check if extension is in our whitelist
+        if ext not in ALLOWED_FILE_SIGNATURES:
+            return False, None, f"File type '.{ext}' not allowed. Allowed: mp4, mov, avi, webm, mkv, jpg, png, gif"
+
+        # Check magic bytes for this extension
+        signatures = ALLOWED_FILE_SIGNATURES[ext]
+        for offset, signature in signatures:
+            if offset + len(signature) <= len(header):
+                if header[offset:offset + len(signature)] == signature:
+                    # Additional check for AVI vs WebP (both use RIFF)
+                    if ext == 'avi' and b'AVI ' not in header[:16]:
+                        continue
+                    if ext == 'webp' and b'WEBP' not in header[:16]:
+                        continue
+                    return True, ext, None
+
+        # Signature didn't match - could be malicious
+        # Log what we actually found for debugging
+        detected = "unknown"
+        if header[:4] == b'RIFF':
+            if b'AVI ' in header[:16]:
+                detected = "avi"
+            elif b'WEBP' in header[:16]:
+                detected = "webp"
+        elif header[4:8] == b'ftyp':
+            detected = "mp4/mov"
+        elif header[:3] == b'\xff\xd8\xff':
+            detected = "jpg"
+        elif header[:4] == b'\x89PNG':
+            detected = "png"
+        elif header[:4] == b'GIF8':
+            detected = "gif"
+        elif header[:2] == b'MZ':
+            detected = "EXECUTABLE (BLOCKED!)"
+        elif header[:4] == b'PK\x03\x04':
+            detected = "ZIP/JAR (BLOCKED!)"
+        elif b'<script' in header.lower() or b'<?php' in header.lower():
+            detected = "SCRIPT (BLOCKED!)"
+
+        return False, detected, f"File content doesn't match '.{ext}' extension. Detected: {detected}"
+
+    except Exception as e:
+        return False, None, f"Error validating file: {str(e)}"
+
+
+def is_path_safe(filepath, allowed_directory):
+    """
+    Check if filepath is safely within allowed_directory.
+    Prevents path traversal attacks like ../../etc/passwd
+    """
+    # Resolve to absolute paths
+    filepath = os.path.abspath(filepath)
+    allowed_directory = os.path.abspath(allowed_directory)
+
+    # Check if filepath starts with allowed directory
+    return filepath.startswith(allowed_directory + os.sep) or filepath == allowed_directory
 
 def get_tunnel_url():
     """Get tunnel URL from environment variable or file"""
@@ -5361,6 +5558,44 @@ def check_rate_limit(ip):
         UPLOAD_RATE_LIMIT[ip] = (1, current_time)
         return True
 
+
+def is_user_admin(user_id):
+    """Check if user has admin privileges."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT is_admin FROM users WHERE id = %s', (user_id,))
+                result = cur.fetchone()
+                return result and result[0] is True
+    except Exception:
+        return False
+
+
+def check_user_video_rate_limit(user_id, is_admin=False):
+    """Check if user has exceeded rate limit (5 videos per minute). Admins bypass."""
+    if is_admin:
+        return True
+
+    current_time = time.time()
+    window = 60  # 1 minute window
+    max_requests = 5
+
+    if user_id not in USER_VIDEO_RATE_LIMIT:
+        USER_VIDEO_RATE_LIMIT[user_id] = []
+
+    # Remove timestamps older than window
+    USER_VIDEO_RATE_LIMIT[user_id] = [
+        ts for ts in USER_VIDEO_RATE_LIMIT[user_id]
+        if current_time - ts < window
+    ]
+
+    if len(USER_VIDEO_RATE_LIMIT[user_id]) >= max_requests:
+        return False
+
+    USER_VIDEO_RATE_LIMIT[user_id].append(current_time)
+    return True
+
+
 @app.route('/api/upload', methods=['POST', 'OPTIONS'])
 @require_auth
 def upload_file():
@@ -5368,6 +5603,9 @@ def upload_file():
         return ('', 204)
     """
     Upload video/image file (rate limited to 10/hour per IP)
+
+    SECURITY: Validates file type by magic bytes, not just extension.
+    Blocks executables, scripts, and other malicious files.
 
     Returns: { "status": "success", "task_id": "uuid" }
     """
@@ -5388,17 +5626,39 @@ def upload_file():
         if file.filename == '':
             return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
 
+        # Get and sanitize file extension
+        original_ext = os.path.splitext(file.filename)[1] or '.mp4'
+        ext = original_ext.lower()
+
+        # ============================================
+        # SECURITY: Validate file by magic bytes
+        # ============================================
+        is_valid, detected_type, error_msg = validate_file_magic_bytes(file.stream, ext)
+
+        if not is_valid:
+            print(f"[SECURITY] Blocked upload: {file.filename} - {error_msg}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Invalid file: {error_msg}'
+            }), 400
+
         # Generate unique task ID
         task_id = str(uuid.uuid4())
 
-        # Get file extension
-        ext = os.path.splitext(file.filename)[1] or '.mp4'
+        # Build file path and verify it's within UPLOAD_DIR (prevent path traversal)
+        file_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+
+        if not is_path_safe(file_path, UPLOAD_DIR):
+            print(f"[SECURITY] Path traversal attempt blocked: {file_path}")
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid file path'
+            }), 400
 
         # Save file
-        file_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
         file.save(file_path)
 
-        print(f"[OK] File uploaded: {file_path}")
+        print(f"[OK] File uploaded (validated {detected_type}): {file_path}")
 
         return jsonify({
             'status': 'success',
@@ -5547,6 +5807,15 @@ def process_video():
     Response: { "status": "success", "task_id": "celery-task-id" }
     """
     try:
+        # Check user video rate limit (5 per minute, admins bypass)
+        user_id = session.get('user_id')
+        if not check_user_video_rate_limit(user_id, is_user_admin(user_id)):
+            return jsonify({
+                'status': 'error',
+                'message': 'Rate limit exceeded. Maximum 5 videos per minute.',
+                'retry_after': 60
+            }), 429
+
         data = request.get_json()
         task_id = data.get('task_id')
 

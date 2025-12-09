@@ -202,3 +202,6 @@ segment-anything-2/
 pure_trt_masks/
 *.png
 *.mp4
+/yolo_training
+*.jpg
+/yolo_training/images
