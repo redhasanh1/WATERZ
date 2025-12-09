@@ -12,8 +12,9 @@ WORKDIR /app
 COPY requirements_web.txt .
 RUN pip install --no-cache-dir -r requirements_web.txt
 
-# Copy only web-related files (cache bust: 2025-12-07-v2)
+# Copy only web-related files (cache bust: 2025-12-09)
 COPY server_production.py .
+COPY email_utils.py .
 COPY web ./web
 
 # Create necessary directories
