@@ -581,7 +581,7 @@ def auth_google():
                     "redirect_uris": [redirect_uri]
                 }
             },
-            scopes=['openid', 'email', 'profile']
+            scopes=['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile']
         )
 
         flow.redirect_uri = redirect_uri
@@ -629,7 +629,7 @@ def auth_google_callback():
                     "redirect_uris": [redirect_uri]
                 }
             },
-            scopes=['openid', 'email', 'profile'],
+            scopes=['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile'],
             state=state
         )
 

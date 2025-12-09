@@ -1,0 +1,6 @@
+Threat Report
+=============
+Original file: D:\watermarkz\web\temp\uploads\eicar_test.txt
+Detection time: 2025-12-09T15:33:09.901774
+Threat name: ----------------------------- Threat information ------------------------------
+Quarantine location: D:\watermarkz\web\quarantine\20251209_153309_eicar_test.txt.quarantine
