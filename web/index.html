@@ -2938,8 +2938,12 @@
             });
 
             const activeThumb = document.querySelector('.frame-thumb.active');
-            if (activeThumb) {
-                activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            if (activeThumb && thumbnailStrip) {
+                // Scroll only within the thumbnail strip, not the whole page
+                const stripRect = thumbnailStrip.getBoundingClientRect();
+                const thumbRect = activeThumb.getBoundingClientRect();
+                const scrollLeft = activeThumb.offsetLeft - (stripRect.width / 2) + (thumbRect.width / 2);
+                thumbnailStrip.scrollTo({ left: scrollLeft, behavior: 'smooth' });
             }
 
             // Update scrubber position
