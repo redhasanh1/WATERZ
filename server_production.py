@@ -13,6 +13,7 @@ import os
 import importlib
 import shutil
 from pathlib import Path
+from email_utils import send_reset_email
 
 # Load environment variables from .env file (for Celery Redis configuration)
 from dotenv import load_dotenv
@@ -809,6 +810,14 @@ def auth_login():
             if not bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
                 return jsonify({'error': 'Invalid email or password'}), 401
 
+            # Check if email is verified
+            if not email_verified:
+                return jsonify({
+                    'error': 'Please verify your email before logging in. Check your inbox for the verification link.',
+                    'needs_verification': True,
+                    'email': email
+                }), 403
+
             # Create session
             session['user_id'] = user_id
             session['email'] = email
@@ -1054,6 +1063,135 @@ def delete_account():
     except Exception as e:
         print(f"[ERROR] Account deletion failed: {e}")
         return jsonify({'status': 'error', 'message': 'Failed to delete account'}), 500
+
+
+@app.route('/api/auth/forgot-password', methods=['POST', 'OPTIONS'])
+def forgot_password():
+    """Request password reset email."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication disabled'}), 500
+
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Check if user exists
+            cur.execute('SELECT id, name FROM users WHERE email = %s', (email,))
+            user = cur.fetchone()
+
+            # Always return success to prevent email enumeration
+            # But only send email if user exists
+            if user:
+                import datetime
+
+                # Generate reset token
+                token = secrets.token_urlsafe(32)
+                expires_at = datetime.datetime.now() + datetime.timedelta(hours=1)
+
+                # Store token in database
+                cur.execute('''
+                    INSERT INTO password_reset_tokens (user_id, token, expires_at)
+                    VALUES (%s, %s, %s)
+                ''', (user[0], token, expires_at))
+
+                # Generate reset URL and send email
+                base_url = os.getenv('TUNNEL_URL', request.host_url.rstrip('/'))
+                reset_url = f"{base_url}/reset-password.html?token={token}"
+
+                try:
+                    send_reset_email(email, reset_url)
+                    print(f"[AUTH] Password reset email sent to {email}")
+                except Exception as mail_err:
+                    print(f"[WARNING] Email failed for {email}: {mail_err}")
+                    # Still return success to prevent email enumeration
+
+        return jsonify({
+            'status': 'success',
+            'message': 'If an account exists with that email, a password reset link has been sent.'
+        })
+
+    except Exception as e:
+        print(f"[ERROR] Forgot password failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to process request'}), 500
+
+
+@app.route('/api/auth/reset-password', methods=['POST', 'OPTIONS'])
+def reset_password():
+    """Reset password using token."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED:
+        return jsonify({'error': 'Authentication disabled'}), 500
+
+    try:
+        data = request.get_json()
+        token = data.get('token', '')
+        new_password = data.get('newPassword', '')
+
+        if not token or not new_password:
+            return jsonify({'error': 'Token and new password are required'}), 400
+
+        if len(new_password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            # Find valid token
+            cur.execute('''
+                SELECT user_id, expires_at
+                FROM password_reset_tokens
+                WHERE token = %s AND used = FALSE
+            ''', (token,))
+
+            reset_token = cur.fetchone()
+
+            if not reset_token:
+                return jsonify({'error': 'Invalid or expired reset token'}), 400
+
+            # Check if token expired
+            import datetime
+            if reset_token[1] < datetime.datetime.now():
+                return jsonify({'error': 'Reset token has expired'}), 400
+
+            # Hash new password
+            password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+            # Update password
+            cur.execute('''
+                UPDATE users
+                SET password_hash = %s
+                WHERE id = %s
+            ''', (password_hash, reset_token[0]))
+
+            # Mark token as used
+            cur.execute('''
+                UPDATE password_reset_tokens
+                SET used = TRUE
+                WHERE token = %s
+            ''', (token,))
+
+            print(f"[AUTH] Password reset successful for user_id {reset_token[0]}")
+
+        return jsonify({'status': 'success', 'message': 'Password reset successfully'})
+
+    except Exception as e:
+        print(f"[ERROR] Password reset failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to reset password'}), 500
 
 
 # ----------------------------------------------------------------------------
@@ -4844,6 +4982,12 @@ def index():
 def login_page():
     """Serve login page"""
     return send_file('web/login.html')
+
+
+@app.route('/reset-password.html')
+def reset_password_page():
+    """Serve password reset page"""
+    return send_file('web/reset-password.html')
 
 
 
