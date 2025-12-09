@@ -111,12 +111,11 @@
         }
 
         .logo {
-            display: flex;
-            align-items: center;
-            gap: 0.85rem;
             font-size: 1.5rem;
             font-weight: 700;
-            color: var(--text-primary);
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
             transition: transform 0.2s ease;
         }
 
@@ -440,23 +439,7 @@
     <!-- Navigation -->
     <nav class="nav">
         <div class="nav-container">
-            <a class="logo" href="index.html" style="text-decoration: none;">
-                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                        <linearGradient id="logoGradientPremium" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
-                        </linearGradient>
-                    </defs>
-                    <rect width="40" height="40" rx="10" fill="url(#logoGradientPremium)"/>
-                    <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
-                    <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
-                    <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
-                    <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
-                    <circle cx="25" cy="15" r="2" fill="#10b981"/>
-                </svg>
-                <span>MarkRemoverAI</span>
-            </a>
+            <a class="logo" href="index.html" style="text-decoration: none;">MarkRemoverAI</a>
             <div class="nav-links" id="navLinks">
                 <a href="index.html">Home</a>
                 <a href="api.html">API</a>
