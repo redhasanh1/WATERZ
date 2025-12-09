@@ -378,6 +378,14 @@ def serve_js(path):
     return send_file(f'js/{path}')
 
 
+@app.route('/<path:filename>')
+def serve_static_root(filename):
+    """Serve static files from root (images, etc)"""
+    if filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.webp')):
+        return send_file(filename)
+    return send_file('index.html')
+
+
 @app.route('/api/remove-watermark', methods=['POST'])
 def remove_watermark():
     """API endpoint to process uploaded file"""
