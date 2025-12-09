@@ -422,6 +422,7 @@ else:
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', '')
 GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
 
 # ----------------------------------------------------------------------------
@@ -566,6 +567,9 @@ def auth_google():
         return jsonify({'error': 'Google OAuth not configured'}), 503
 
     try:
+        # Use configured redirect URI or fallback to request host
+        redirect_uri = GOOGLE_REDIRECT_URI or f"{request.host_url}auth/google/callback"
+
         # Create flow instance
         flow = Flow.from_client_config(
             {
@@ -574,14 +578,13 @@ def auth_google():
                     "client_secret": GOOGLE_CLIENT_SECRET,
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [f"{request.host_url}auth/google/callback"]
+                    "redirect_uris": [redirect_uri]
                 }
             },
             scopes=['openid', 'email', 'profile']
         )
 
-        # Use the actual callback URL from request
-        flow.redirect_uri = f"{request.host_url}auth/google/callback"
+        flow.redirect_uri = redirect_uri
 
         # Generate authorization URL with state token (CSRF protection)
         authorization_url, state = flow.authorization_url(
@@ -612,6 +615,9 @@ def auth_google_callback():
         if not state or state != request.args.get('state'):
             return jsonify({'error': 'Invalid state parameter'}), 400
 
+        # Use configured redirect URI or fallback to request host
+        redirect_uri = GOOGLE_REDIRECT_URI or f"{request.host_url}auth/google/callback"
+
         # Create flow instance with same config
         flow = Flow.from_client_config(
             {
@@ -620,14 +626,14 @@ def auth_google_callback():
                     "client_secret": GOOGLE_CLIENT_SECRET,
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [f"{request.host_url}auth/google/callback"]
+                    "redirect_uris": [redirect_uri]
                 }
             },
             scopes=['openid', 'email', 'profile'],
             state=state
         )
 
-        flow.redirect_uri = f"{request.host_url}auth/google/callback"
+        flow.redirect_uri = redirect_uri
 
         # Exchange authorization code for tokens
         flow.fetch_token(authorization_response=request.url)
