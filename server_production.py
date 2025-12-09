@@ -636,7 +636,9 @@ def auth_google_callback():
         flow.redirect_uri = redirect_uri
 
         # Exchange authorization code for tokens
-        flow.fetch_token(authorization_response=request.url)
+        # Fix: request.url may have http:// behind reverse proxy, force https://
+        auth_response = request.url.replace('http://', 'https://')
+        flow.fetch_token(authorization_response=auth_response)
 
         # Get user info from ID token
         credentials = flow.credentials
