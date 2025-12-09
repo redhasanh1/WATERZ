@@ -13,7 +13,7 @@ import os
 import importlib
 import shutil
 from pathlib import Path
-from email_utils import send_reset_email
+from email_utils import send_reset_email, send_verification_email
 
 # Load environment variables from .env file (for Celery Redis configuration)
 from dotenv import load_dotenv
@@ -486,76 +486,7 @@ SMTP_USERNAME = "9c3ca4001@smtp-brevo.com"
 SMTP_PASSWORD = "xsmtpsib-798b8db725baf9ad346d32e4ccae5bdcfc64f7c03d059b5aef8e6f82fa5da30b-IB5SjcNk2AV6NZ1f"
 SMTP_FROM = "markremoverai@gmail.com"
 
-def send_verification_email(to_email, token):
-    """Send email verification link to user."""
-    try:
-        # Build verification URL
-        base_url = os.getenv('SITE_URL', 'https://markremoverai.com')
-        verify_url = f"{base_url}/api/auth/verify?token={token}"
-
-        msg = EmailMessage()
-        msg["Subject"] = "Verify your email for MarkRemoverAI"
-        msg["From"] = SMTP_FROM
-        msg["To"] = to_email
-        msg.set_content(f"""
-Welcome to MarkRemoverAI!
-
-Please click the link below to verify your email address:
-
-{verify_url}
-
-This link will expire in 24 hours.
-
-If you didn't create an account, you can safely ignore this email.
-
-- The MarkRemoverAI Team
-""")
-
-        # Also set HTML version
-        msg.add_alternative(f"""
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #667eea;">Welcome to MarkRemoverAI!</h2>
-        <p>Please click the button below to verify your email address:</p>
-        <p style="text-align: center; margin: 30px 0;">
-            <a href="{verify_url}"
-               style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                      color: white;
-                      padding: 14px 28px;
-                      text-decoration: none;
-                      border-radius: 8px;
-                      font-weight: bold;
-                      display: inline-block;">
-                Verify Email
-            </a>
-        </p>
-        <p style="color: #666; font-size: 14px;">
-            Or copy and paste this link into your browser:<br>
-            <a href="{verify_url}" style="color: #667eea;">{verify_url}</a>
-        </p>
-        <p style="color: #999; font-size: 12px; margin-top: 30px;">
-            This link will expire in 24 hours.<br>
-            If you didn't create an account, you can safely ignore this email.
-        </p>
-    </div>
-</body>
-</html>
-""", subtype='html')
-
-        # Send via Brevo SMTP
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls(context=ssl.create_default_context())
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.send_message(msg)
-
-        print(f"[EMAIL] Verification email sent to {to_email}")
-        return True
-
-    except Exception as e:
-        print(f"[ERROR] Failed to send verification email to {to_email}: {e}")
-        return False
+# send_verification_email is now imported from email_utils.py (uses Brevo API)
 
 # ----------------------------------------------------------------------------
 # Authentication Routes (Google OAuth + Email/Password)
@@ -756,7 +687,9 @@ def auth_register():
             session.permanent = True
 
             # Send verification email (async to not block response)
-            threading.Thread(target=send_verification_email, args=(email, verification_token)).start()
+            base_url = os.getenv('SITE_URL', 'https://markremoverai.com')
+            verify_url = f"{base_url}/api/auth/verify?token={verification_token}"
+            threading.Thread(target=send_verification_email, args=(email, verify_url)).start()
 
             print(f"[AUTH] New user registered: {email} (5 free credits, verification email sent)")
 
@@ -943,7 +876,9 @@ def auth_resend_verification():
             )
 
             # Send email
-            threading.Thread(target=send_verification_email, args=(email, verification_token)).start()
+            base_url = os.getenv('SITE_URL', 'https://markremoverai.com')
+            verify_url = f"{base_url}/api/auth/verify?token={verification_token}"
+            threading.Thread(target=send_verification_email, args=(email, verify_url)).start()
 
             print(f"[AUTH] Resent verification email to {email}")
 
