@@ -616,30 +616,19 @@
         <div class="hero-background"></div>
         <div class="container">
             <div class="hero-content">
-                <div class="badge">
-                    Rights-respecting cleanup for creators & teams
-                </div>
-
                 <h1 class="hero-title">
-                    Restore Licensed Content in
-                    <span class="gradient-text">Seconds</span>
+                    Professional <span class="gradient-text">Video Object Removal</span>
                 </h1>
 
                 <p class="hero-subtitle">
-                    Rights-first AI cleanup for media you own or have written permission to edit.
-                    <br><strong>Refresh archives, update branding, and stay compliant without writing code.</strong>
+                    Remove anything from any video in minutes
                 </p>
 
                 <div class="hero-cta">
                     <button class="btn-primary" onclick="scrollToPricing()">
-                        Start Free Cleanup Trial →
+                        Get Started
                     </button>
-                    <button class="btn-secondary" onclick="document.getElementById('demoUpload').click()">
-                        Preview Demo
-                    </button>
-                    <input type="file" id="demoUpload" accept="image/*,video/*" style="display: none;">
                 </div>
-
             </div>
         </div>
     </section>
@@ -715,7 +704,7 @@
     <section class="pricing-section" id="pricing">
         <div class="container">
             <!-- Header with Benefits -->
-            <div class="section-header" style="text-align: center; max-width: 800px; margin: 0 auto 3rem;">
+            <div class="section-header" style="text-align: center; max-width: 800px; margin: 0 auto 4rem;">
                 <span style="display: inline-block; padding: 0.5rem 1.25rem; border-radius: 50px; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); color: var(--accent); font-size: 0.9rem; font-weight: 600; margin-bottom: 1.5rem;">AI-Powered Object Removal</span>
                 <h2 class="section-title" style="margin-top: 0.5rem; font-size: clamp(2.5rem, 5vw, 3.5rem);">Remove Unwanted Objects From Your Videos in Minutes</h2>
                 <p class="section-subtitle" style="font-size: 1.3rem; margin-top: 1rem; color: var(--text-secondary);">Upload your video, click on what you want gone, and let AI handle the rest</p>
@@ -727,7 +716,7 @@
             </div>
 
             <!-- Credit Packs Section -->
-            <div style="margin-bottom: 4rem;">
+            <div style="margin-bottom: 5rem;">
                 <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; margin-bottom: 0.5rem;">Pay As You Go</h3>
                 <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">No subscription required — credits never expire</p>
 
@@ -855,16 +844,6 @@
                 </div>
             </div>
 
-            <!-- Trust Signals -->
-            <div style="display: flex; justify-content: center; gap: 3rem; flex-wrap: wrap; margin-top: 3rem; padding: 2rem;">
-                <span style="color: var(--text-secondary); font-weight: 600;">Secure Payment</span>
-                <span style="color: var(--text-secondary);">|</span>
-                <span style="color: var(--text-secondary); font-weight: 600;">30-Day Money Back</span>
-                <span style="color: var(--text-secondary);">|</span>
-                <span style="color: var(--text-secondary); font-weight: 600;">Cancel Anytime</span>
-                <span style="color: var(--text-secondary);">|</span>
-                <span style="color: var(--text-secondary); font-weight: 600;">24/7 Support</span>
-            </div>
 
             <!-- FAQ Section -->
             <div style="max-width: 800px; margin: 4rem auto 0;">
@@ -934,55 +913,6 @@
         </div>
     </section>
 
-    <!-- API Section -->
-    <section class="api-section" id="api">
-        <div class="container">
-            <div class="api-content">
-                <div>
-                    <h2 class="section-title">Developer-Friendly API</h2>
-                    <p class="section-subtitle" style="text-align: left; margin: 1.5rem 0;">
-                        Integrate authorized watermark cleanup into your applications with our simple RESTful API.
-                    </p>
-                    <ul style="list-style: none; margin: 2rem 0;">
-                        <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
-                            <span style="color: var(--success);">✓</span>
-                            <span>99.9% uptime SLA</span>
-                        </li>
-                        <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
-                            <span style="color: var(--success);">✓</span>
-                            <span>Comprehensive documentation</span>
-                        </li>
-                        <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
-                            <span style="color: var(--success);">✓</span>
-                            <span>SDKs for Python, Node.js, PHP with usage auditing</span>
-                        </li>
-                        <li style="padding: 0.75rem 0; display: flex; gap: 0.75rem;">
-                            <span style="color: var(--success);">✓</span>
-                            <span>Webhook support for completion and compliance events</span>
-                        </li>
-                    </ul>
-                    <button class="btn-primary" onclick="window.location.href='#pricing'">Get API Access</button>
-                </div>
-
-                <div class="code-block">
-<pre style="margin: 0; color: #a78bfa;">
-<span style="color: #6b7280;">// Example API Request</span>
-<span style="color: #10b981;">const</span> response = <span style="color: #10b981;">await</span> <span style="color: #667eea;">fetch</span>(<span style="color: #f59e0b;">'https://api.watermarkai.com/v1/cleanup'</span>, {
-  <span style="color: #a78bfa;">method</span>: <span style="color: #f59e0b;">'POST'</span>,
-  <span style="color: #a78bfa;">headers</span>: {
-    <span style="color: #f59e0b;">'Authorization'</span>: <span style="color: #f59e0b;">'Bearer YOUR_API_KEY'</span>,
-    <span style="color: #f59e0b;">'Content-Type'</span>: <span style="color: #f59e0b;">'multipart/form-data'</span>
-  },
-  <span style="color: #a78bfa;">body</span>: formData
-});
-
-<span style="color: #10b981;">const</span> result = <span style="color: #10b981;">await</span> response.<span style="color: #667eea;">json</span>();
-<span style="color: #6b7280;">// Download cleaned file</span>
-</pre>
-                </div>
-            </div>
-        </div>
-    </section>
 
     <!-- Footer -->
     <footer class="footer">
