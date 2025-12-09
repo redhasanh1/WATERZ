@@ -404,7 +404,7 @@ else:
 if not GPU_AVAILABLE:
     try:
         from flask_session import Session
-        app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
+        app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', os.getenv('SECRET_KEY', secrets.token_hex(32)))
         app.config['SESSION_TYPE'] = 'redis'
         app.config['SESSION_PERMANENT'] = True
         app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
