@@ -410,6 +410,8 @@ if not GPU_AVAILABLE:
         app.config['SESSION_USE_SIGNER'] = True  # Encrypt session cookie
         app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
         app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+        app.config['SESSION_COOKIE_SECURE'] = True      # Required for HTTPS
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'   # Allow OAuth redirects
         Session(app)
         print("[OK] Flask-Session initialized with Redis")
     except ImportError:
