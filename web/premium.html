@@ -1,48 +1,63 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MarkRemoverAI - Professional Video Object Removal</title>
-    <meta name="description" content="Rights-first AI cleanup for owned or licensed images and videos. Refresh branded assets responsibly. Start free - no credit card required.">
+    <title>Pricing - AI Video Object Remover | MarkRemoverAI</title>
+    <meta name="description" content="Affordable pricing for AI video object removal. One-time credit packs starting at $2.99 or monthly plans. No commitments, credits never expire.">
+    <link rel="canonical" href="https://markremoverai.com/premium.html">
 
     <!-- SEO & Social -->
-    <meta property="og:title" content="MarkRemoverAI - Professional Video Object Removal">
-    <meta property="og:description" content="Rights-first AI cleanup for owned or licensed media. Trusted by agencies and in-house teams.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://markremoverai.com/premium.html">
+    <meta property="og:title" content="Pricing - AI Video Object Remover | MarkRemoverAI">
+    <meta property="og:description" content="Affordable pricing for AI video object removal. One-time credit packs or monthly plans. Start free today.">
+    <meta property="og:image" content="https://markremoverai.com/emblem.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://markremoverai.com/premium.html">
+    <meta property="twitter:title" content="Pricing - AI Video Object Remover | MarkRemoverAI">
+    <meta property="twitter:description" content="Affordable pricing for AI video object removal. One-time credit packs or monthly plans.">
+    <meta property="twitter:image" content="https://markremoverai.com/emblem.png">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 
     <style>
-        /* Light mode (default) */
         :root {
+            /* Primary Colors */
             --primary: #667eea;
             --primary-dark: #5568d3;
             --secondary: #764ba2;
             --accent: #a78bfa;
             --success: #10b981;
             --warning: #f59e0b;
-            --bg-dark: #f8fafc;
-            --bg-card: #ffffff;
-            --bg-glass: rgba(255, 255, 255, 0.9);
-            --text-primary: #1a1a2e;
-            --text-secondary: #64748b;
+
+            /* Light Mode (Default) */
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-card: #f8fafc;
+            --bg-glass: rgba(248, 250, 252, 0.8);
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --border-color: rgba(102, 126, 234, 0.12);
+
+            /* Gradients */
             --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            --border-color: rgba(102, 126, 234, 0.2);
-            --nav-bg: rgba(255, 255, 255, 0.95);
         }
 
-        /* Dark mode */
-        [data-theme="dark"] {
-            --bg-dark: #0a0a14;
+        /* Dark Mode Override */
+        html[data-theme="dark"] {
+            --bg-primary: #0b1020;
+            --bg-secondary: #121826;
             --bg-card: #1a1a2e;
             --bg-glass: rgba(26, 26, 46, 0.8);
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0c0;
-            --border-color: rgba(102, 126, 234, 0.15);
-            --nav-bg: rgba(10, 10, 20, 0.95);
+            --text-primary: #e5e7eb;
+            --text-secondary: #9aa4b2;
+            --border-color: rgba(102, 126, 234, 0.12);
         }
 
         * {
@@ -53,10 +68,11 @@
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg-dark);
+            background: var(--bg-primary);
             color: var(--text-primary);
             line-height: 1.6;
             overflow-x: hidden;
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
 
         .container {
@@ -71,252 +87,135 @@
             top: 0;
             left: 0;
             right: 0;
-            background: var(--nav-bg);
+            background: rgba(255, 255, 255, 0.98);
             backdrop-filter: blur(20px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
             z-index: 1000;
             border-bottom: 1px solid var(--border-color);
+            padding: 1.25rem 0;
+            transition: background-color 0.3s ease;
+        }
+
+        html[data-theme="dark"] .nav {
+            background: rgba(11, 16, 32, 0.98);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
         }
 
         .nav-container {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 1rem 20px;
+            padding: 0 2rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
         .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
             font-size: 1.5rem;
             font-weight: 700;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text-primary);
+            transition: transform 0.2s ease;
+        }
+
+        .logo:hover {
+            transform: translateY(-1px);
         }
 
         .nav-links {
             display: flex;
-            gap: 2rem;
+            gap: 2.25rem;
             align-items: center;
         }
 
         .nav-links a {
             color: var(--text-secondary);
             text-decoration: none;
-            font-weight: 500;
-            transition: color 0.3s;
+            font-weight: 600;
+            font-size: 0.95rem;
+            position: relative;
+            letter-spacing: -0.01em;
+            transition: color 0.3s ease;
         }
 
         .nav-links a:hover {
-            color: var(--text-primary);
+            color: var(--primary);
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 0;
+            width: 0;
+            height: 2.5px;
+            background: var(--gradient-primary);
+            border-radius: 2px;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
         }
 
         .btn-nav {
-            padding: 0.6rem 1.5rem;
+            padding: 0.75rem 1.85rem;
             background: var(--gradient-primary);
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             color: white;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25);
+            transition: all 0.3s ease;
         }
 
         .btn-nav:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
         }
 
-        /* Hero */
-        .hero {
-            position: relative;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 120px 0 60px;
-            overflow: hidden;
-        }
-
-        .hero-background {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: radial-gradient(at 40% 20%, rgba(102, 126, 234, 0.4) 0px, transparent 50%),
-                        radial-gradient(at 80% 0%, rgba(118, 75, 162, 0.3) 0px, transparent 50%),
-                        radial-gradient(at 0% 50%, rgba(167, 139, 250, 0.25) 0px, transparent 50%);
-            opacity: 0.6;
-            z-index: 0;
-        }
-
-        .hero-content {
-            position: relative;
-            z-index: 1;
-            text-align: center;
-            max-width: 900px;
-            margin: 0 auto;
-        }
-
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1.25rem;
-            background: rgba(16, 185, 129, 0.15);
-            border: 1px solid var(--success);
-            border-radius: 50px;
-            color: var(--success);
-            font-size: 0.85rem;
-            font-weight: 600;
-            margin-bottom: 2rem;
-            animation: fadeInUp 0.6s ease-out;
-        }
-
-        .hero-title {
-            font-family: 'Space Grotesk', sans-serif;
-            font-size: clamp(3rem, 6vw, 5.5rem);
-            font-weight: 800;
-            line-height: 1.1;
-            margin-bottom: 1.5rem;
-            animation: fadeInUp 0.8s ease-out;
-        }
-
-        .gradient-text {
-            background: var(--gradient-primary);
-            background-size: 200% 200%;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            animation: gradient-shift 5s ease infinite;
-        }
-
-        @keyframes gradient-shift {
-            0%, 100% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-        }
-
-        .hero-subtitle {
-            font-size: clamp(1.2rem, 2.5vw, 1.5rem);
-            color: var(--text-secondary);
-            margin-bottom: 2.5rem;
-            animation: fadeInUp 0.8s ease-out 0.2s backwards;
-        }
-
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .hero-cta {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-bottom: 3rem;
-            animation: fadeInUp 0.8s ease-out 0.4s backwards;
-        }
-
-        .btn-primary, .btn-secondary {
-            padding: 1.25rem 3rem;
-            font-size: 1.15rem;
-            font-weight: 700;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.3s;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .btn-primary {
-            background: var(--gradient-primary);
-            color: white;
-            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.4);
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 20px 50px rgba(102, 126, 234, 0.5);
-        }
-
-        .btn-secondary {
-            background: transparent;
-            color: var(--text-primary);
-            border: 2px solid rgba(102, 126, 234, 0.4);
-        }
-
-        .btn-secondary:hover {
-            background: rgba(102, 126, 234, 0.1);
-            border-color: var(--primary);
-        }
-
-        .trust-signals {
-            display: flex;
-            justify-content: center;
-            gap: 2rem;
-            flex-wrap: wrap;
-            animation: fadeInUp 0.8s ease-out 0.6s backwards;
-        }
-
-        .trust-item {
-            display: flex;
+        .mobile-menu-toggle {
+            display: none;
             flex-direction: column;
-            align-items: center;
-            gap: 0.25rem;
+            gap: 5px;
+            cursor: pointer;
+            padding: 10px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            transition: background 0.3s ease;
         }
 
-        .trust-number {
-            font-size: 2rem;
-            font-weight: 800;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        .mobile-menu-toggle:hover {
+            background: rgba(102, 126, 234, 0.12);
         }
 
-        .trust-label {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
+        .mobile-menu-toggle span {
+            width: 26px;
+            height: 2.5px;
+            background: var(--text-primary);
+            border-radius: 3px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        /* Stats Section */
-        .stats-section {
-            padding: 80px 0;
-            background: linear-gradient(180deg, transparent, rgba(102, 126, 234, 0.03));
+        .mobile-menu-toggle.active span:nth-child(1) {
+            transform: translateY(7.5px) rotate(45deg);
         }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 3rem;
-            text-align: center;
+        .mobile-menu-toggle.active span:nth-child(2) {
+            opacity: 0;
         }
 
-        .stat-item h3 {
-            font-size: 3.5rem;
-            font-weight: 800;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 0.5rem;
-        }
-
-        .stat-item p {
-            color: var(--text-secondary);
-            font-size: 1.1rem;
+        .mobile-menu-toggle.active span:nth-child(3) {
+            transform: translateY(-7.5px) rotate(-45deg);
         }
 
         /* Pricing Section */
         .pricing-section {
-            padding: 100px 0;
+            padding: 120px 0 100px;
         }
 
         .section-header {
@@ -346,7 +245,7 @@
             background: var(--bg-card);
             border: 2px solid rgba(102, 126, 234, 0.15);
             border-radius: 24px;
-            padding: 3.5rem 3rem;
+            padding: 3rem 2.5rem;
             position: relative;
             transition: all 0.4s;
         }
@@ -381,12 +280,11 @@
         }
 
         .pricing-price {
-            font-size: 2.5rem;
+            font-size: 3.5rem;
             font-weight: 800;
             background: var(--gradient-primary);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            background-clip: text;
             margin: 1rem 0;
         }
 
@@ -409,8 +307,8 @@
         }
 
         .pricing-features li::before {
-            content: "✓";
-            color: var(--accent);
+            content: "\2713";
+            color: var(--success);
             font-weight: 800;
             font-size: 1.25rem;
         }
@@ -442,102 +340,10 @@
             box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
         }
 
-        /* Email Capture */
-        .email-section {
-            padding: 100px 0;
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
-        }
-
-        .email-card {
-            max-width: 700px;
-            margin: 0 auto;
-            text-align: center;
-            background: var(--bg-card);
-            padding: 4rem 3rem;
-            border-radius: 24px;
-            border: 1px solid rgba(102, 126, 234, 0.2);
-        }
-
-        .email-form {
-            display: flex;
-            gap: 1rem;
-            margin-top: 2rem;
-            flex-wrap: wrap;
-        }
-
-        .email-input {
-            flex: 1;
-            min-width: 250px;
-            padding: 1.25rem 1.5rem;
-            background: rgba(102, 126, 234, 0.05);
-            border: 2px solid rgba(102, 126, 234, 0.2);
-            border-radius: 12px;
-            color: var(--text-primary);
-            font-size: 1rem;
-            outline: none;
-            transition: all 0.3s;
-        }
-
-        .email-input:focus {
-            border-color: var(--primary);
-            background: rgba(102, 126, 234, 0.1);
-        }
-
-        .email-input::placeholder {
-            color: var(--text-secondary);
-        }
-
-        /* Features */
-        .features-section {
-            padding: 100px 0;
-        }
-
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 3rem;
-            margin-top: 4rem;
-        }
-
-        .feature-card {
-            background: var(--bg-card);
-            padding: 3rem 2rem;
-            border-radius: 20px;
-            border: 1px solid rgba(102, 126, 234, 0.1);
-            transition: all 0.3s;
-        }
-
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(102, 126, 234, 0.2);
-        }
-
-        .feature-icon {
-            width: 70px;
-            height: 70px;
-            background: var(--gradient-primary);
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 1.5rem;
-            font-size: 2rem;
-        }
-
-        .feature-card h3 {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .feature-card p {
-            color: var(--text-secondary);
-            line-height: 1.7;
-        }
-
         /* API Section */
         .api-section {
             padding: 100px 0;
-            background: var(--bg-glass);
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
         }
 
         .api-content {
@@ -568,45 +374,64 @@
 
         /* Responsive */
         @media (max-width: 768px) {
+            .nav-container {
+                padding: 0 1.5rem;
+            }
+
+            .mobile-menu-toggle {
+                display: flex;
+            }
+
             .nav-links {
-                gap: 1rem;
+                position: fixed;
+                top: 75px;
+                left: 0;
+                right: 0;
+                flex-direction: column;
+                gap: 0;
+                background: rgba(10, 10, 20, 0.98);
+                backdrop-filter: blur(20px);
+                padding: 1.5rem 0;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.12);
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+                transform: translateY(-100%);
+                opacity: 0;
+                pointer-events: none;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .nav-links.active {
+                transform: translateY(0);
+                opacity: 1;
+                pointer-events: auto;
             }
 
             .nav-links a {
-                display: none;
-            }
-
-            .hero {
-                padding: 100px 0 40px;
-            }
-
-            .hero-title {
-                font-size: 2.5rem;
-            }
-
-            .hero-cta {
-                flex-direction: column;
-            }
-
-            .btn-primary, .btn-secondary {
+                display: block;
                 width: 100%;
-                justify-content: center;
+                text-align: center;
+                padding: 1rem 0;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.08);
             }
 
-            .pricing-grid, .features-grid {
+            .nav-links a:last-of-type {
+                border-bottom: none;
+            }
+
+            .btn-nav {
+                margin: 1rem 1.5rem 0.5rem;
+            }
+
+            .pricing-section {
+                padding: 100px 0 60px;
+            }
+
+            .pricing-grid {
                 grid-template-columns: 1fr;
             }
 
             .api-content {
                 grid-template-columns: 1fr;
-            }
-
-            .email-form {
-                flex-direction: column;
-            }
-
-            .email-input {
-                min-width: 100%;
             }
         }
     </style>
@@ -615,296 +440,267 @@
     <!-- Navigation -->
     <nav class="nav">
         <div class="nav-container">
-            <a class="logo" href="index.html" style="text-decoration: none;">MarkRemoverAI</a>
-            <div class="nav-links">
+            <a class="logo" href="index.html" style="text-decoration: none;">
+                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="logoGradientPremium" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                        </linearGradient>
+                    </defs>
+                    <rect width="40" height="40" rx="10" fill="url(#logoGradientPremium)"/>
+                    <path d="M12 14C12 12.8954 12.8954 12 14 12H26C27.1046 12 28 12.8954 28 14V26C28 27.1046 27.1046 28 26 28H14C12.8954 28 12 27.1046 12 26V14Z" fill="white" fill-opacity="0.2"/>
+                    <circle cx="17" cy="17" r="2.5" fill="white" fill-opacity="0.9"/>
+                    <path d="M14 24L18 20L22 24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                    <path d="M22 24L26 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill-opacity="0.9"/>
+                    <circle cx="25" cy="15" r="2" fill="#10b981"/>
+                </svg>
+                <span>MarkRemoverAI</span>
+            </a>
+            <div class="nav-links" id="navLinks">
                 <a href="index.html">Home</a>
                 <a href="api.html">API</a>
                 <a href="contact.html">Contact</a>
                 <button class="btn-nav" onclick="scrollToPricing()">Get Started</button>
                 <button id="themeToggle" onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; color: var(--text-primary); font-size: 1rem; transition: all 0.3s;" title="Toggle theme">
-                    <span id="themeIcon">🌙</span>
+                    <span id="themeIcon">☀️</span>
                 </button>
+            </div>
+            <div class="mobile-menu-toggle" id="mobileMenuToggle">
+                <span></span>
+                <span></span>
+                <span></span>
             </div>
         </div>
     </nav>
 
-    <!-- Hero Section -->
-    <section class="hero">
-        <div class="hero-background"></div>
+    <!-- Pricing Section -->
+    <section class="pricing-section" id="pricing">
         <div class="container">
-            <div class="hero-content">
-                <h1 class="hero-title">
-                    Professional <span class="gradient-text">Video Object Removal</span>
-                </h1>
+            <div class="section-header" style="text-align: center; max-width: 820px; margin: 0 auto 3rem;">
+                <h2 class="section-title" style="font-size: 2.75rem; line-height: 1.2;">Remove Objects from Videos</h2>
+                <p class="section-subtitle" style="font-size: 1.15rem; color: var(--text-secondary); margin-top: 1rem;">4K Quality • Fast Processing • Simple Pricing</p>
+            </div>
 
-                <p class="hero-subtitle">
-                    Remove anything from any video in minutes
-                </p>
+            <!-- One-Time Credit Packs Section -->
+            <div style="margin-bottom: 5rem;">
+                <div style="text-align: center; margin-bottom: 2.5rem;">
+                    <h3 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">
+                        <span style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">One-Time Credit Packs</span>
+                    </h3>
+                    <p style="color: var(--text-secondary); font-size: 1.1rem;">No monthly commitment • Credits never expire • Perfect for occasional use</p>
+                </div>
 
-                <div class="hero-cta">
-                    <button class="btn-primary" onclick="scrollToPricing()">
-                        Get Started
-                    </button>
+                <div class="pricing-grid" style="gap: 2rem;">
+                    <!-- 10 Credits - Starter -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
+                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
+                        <div class="pricing-header">
+                            <h3>Starter Pack</h3>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$2.99</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Perfect for trying out the service</p>
+                        </div>
+                        <ul class="pricing-features" style="margin: 1.5rem 0;">
+                            <li><strong>Clean 10 videos</strong> — Test the magic</li>
+                            <li style="color: var(--text-secondary); font-size: 0.9rem;">Reclaim ~2 hours of manual editing</li>
+                            <li>Your credits, forever — No expiration games</li>
+                            <li>Full access to all AI-powered features</li>
+                            <li>Cancel anytime (hint: there's nothing to cancel)</li>
+                        </ul>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_10')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Starter Pack</button>
+                    </div>
+
+                    <!-- 25 Credits - Basic -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
+                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
+                        <div class="pricing-header">
+                            <h3>Basic Pack</h3>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$6.99</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Great value for small projects</p>
+                        </div>
+                        <ul class="pricing-features" style="margin: 1.5rem 0;">
+                            <li><strong>Clean 25 videos</strong> — Enough for your first project</li>
+                            <li style="color: var(--text-secondary); font-size: 0.9rem;">Save ~5 hours vs manual removal</li>
+                            <li>Lock in your credits — They're yours until you use them</li>
+                            <li>Process entire batches while you sleep</li>
+                            <li style="color: #9779d4; font-weight: 600;">Better deal — 7% cheaper per video</li>
+                        </ul>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_25')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Basic Pack</button>
+                    </div>
+
+                    <!-- 100 Credits - BEST VALUE (Hero) -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.08), rgba(151, 121, 212, 0.08)); border: 2px solid #7352b4; transform: scale(1.05) translateY(-10px); box-shadow: 0 25px 60px rgba(115, 82, 180, 0.25); transition: all 0.3s ease;">
+                        <div class="popular-badge" style="background: linear-gradient(135deg, #7352b4, #9779d4);">BEST VALUE</div>
+                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.2); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
+                        <div class="pricing-header">
+                            <h3>Pro Pack</h3>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$24.99</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Most popular for one-time buyers</p>
+                        </div>
+                        <ul class="pricing-features" style="margin: 1.5rem 0;">
+                            <li><strong>Clean 100 videos</strong> — Build your portfolio</li>
+                            <li style="color: var(--text-secondary); font-size: 0.9rem;">Reclaim 20+ hours for actual creative work</li>
+                            <li>Lifetime access — Use them this year or next decade</li>
+                            <li>Batch process catalogs overnight</li>
+                            <li style="color: #9779d4; font-weight: 600;">Smart buy — 17% cheaper than buying small</li>
+                        </ul>
+                        <div style="background: rgba(115, 82, 180, 0.15); border: 1px solid rgba(115, 82, 180, 0.3); border-radius: 12px; padding: 1rem; margin-bottom: 1.25rem; color: var(--text-primary); font-weight: 600; font-size: 0.92rem; text-align: center; line-height: 1.5;">
+                            <strong>Creator favorite:</strong> Enough credits to clean your entire back catalog without thinking twice
+                        </div>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease; font-size: 1.05rem;" onclick="buyCredits('credits_100')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.4)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Pro Pack</button>
+                    </div>
+
+                    <!-- 500 Credits - Enterprise -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
+                        <div style="position: absolute; top: 0.75rem; right: 1rem; background: linear-gradient(135deg, #f59e0b, #ef4444); padding: 0.4rem 0.9rem; border-radius: 999px; font-size: 0.7rem; font-weight: 700; color: white; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">BIGGEST SAVINGS</div>
+                        <div style="position: absolute; top: 3.25rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
+                        <div class="pricing-header">
+                            <h3>Enterprise Pack</h3>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$99.99</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Maximum value for heavy users</p>
+                        </div>
+                        <ul class="pricing-features" style="margin: 1.5rem 0;">
+                            <li><strong>Clean 500 videos</strong> — Scale your operation</li>
+                            <li style="color: var(--text-secondary); font-size: 0.9rem;">Unlock 100+ hours for high-value client work</li>
+                            <li>Forever yours — Zero pressure, zero deadlines</li>
+                            <li>Process unlimited batches in parallel</li>
+                            <li style="color: #9779d4; font-weight: 600;">Maximum savings — 33% off vs small packs</li>
+                        </ul>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_500')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Enterprise Pack</button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Simple Separator -->
+            <div style="display: flex; align-items: center; gap: 1.5rem; margin: 3rem 0;">
+                <div style="flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(102,126,234,0.3), transparent);"></div>
+                <span style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em;">Or Subscribe Monthly</span>
+                <div style="flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(102,126,234,0.3), transparent);"></div>
+            </div>
+
+            <!-- Monthly Subscription Plans -->
+            <div style="text-align: center; margin-bottom: 2.5rem;">
+                <h3 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">Monthly Subscription Plans</h3>
+                <p style="color: var(--text-secondary); font-size: 1.1rem;">Recurring credits every month • Best for regular users</p>
+            </div>
+
+            <div class="pricing-grid" style="gap: 2.5rem;">
+                <!-- Free Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Free</h3>
+                        <div class="pricing-price">$0<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">Try it out with complimentary credits on signup.</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>50 videos</strong> per month</li>
+                        <li>Priority cleanup lane</li>
+                        <li>Batch uploads & API access</li>
+                        <li>Priority support</li>
+                    </ul>
+                    <button class="btn-pricing secondary" onclick="signUp('free')">Start Free</button>
+                </div>
+
+                <!-- Starter Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Starter</h3>
+                        <div class="pricing-price">$4.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">Great for creators refreshing smaller catalogs each month.</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>300 videos</strong> per month</li>
+                        <li>Team features and audit logging</li>
+                        <li>Dedicated support</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('starter')">Get Starter</button>
+                </div>
+
+                <!-- Professional Plan -->
+                <div class="pricing-card popular" style="transform: translateY(-14px);">
+                    <div class="popular-badge">MOST POPULAR</div>
+                    <div class="pricing-header">
+                        <h3>Pro</h3>
+                        <div class="pricing-price">$9.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">Built for independent creators and teams refreshing rights-cleared assets weekly.</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>50 videos</strong> per month</li>
+                        <li>Priority cleanup lane</li>
+                        <li>Batch uploads & API access</li>
+                        <li>Priority support</li>
+                    </ul>
+                    <div style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; color: #6ee7b7; font-weight: 600;">Most creators see payback after the first client delivery.</div>
+                    <button class="btn-pricing primary" onclick="signUp('pro')">Start Pro</button>
+                </div>
+
+                <!-- Enterprise Plan -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Enterprise</h3>
+                        <div class="pricing-price">$49.99<span>/month</span></div>
+                        <p style="color: var(--text-secondary);">For agencies and teams processing larger libraries every month.</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><strong>50 videos</strong> per month</li>
+                        <li>Priority cleanup lane</li>
+                        <li>Batch uploads & API access</li>
+                        <li>Priority support</li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('enterprise')">Go Enterprise</button>
+                </div>
+            </div>
+
+            <div style="margin-top: 3rem; text-align: center; color: var(--text-secondary); font-size: 0.95rem;">
+                Need a volume quote or want to migrate from another tool? <a href="mailto:support@markremoverai.com" style="color: #667eea; text-decoration: none;">Schedule a pricing session</a> and our team will tailor a plan in under 24 hours.
+            </div>
+
+            <div style="display: grid; gap: 1.5rem; margin-top: 3rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
+                <div style="background: var(--bg-card); border-radius: 16px; border: 1px solid rgba(102,126,234,0.15); padding: 1.75rem;">
+                    <h3 style="margin-top: 0; color: var(--text-primary); font-size: 1.1rem;">ROI in hours, not weeks</h3>
+                    <p style="color: var(--text-secondary);">Teams report saving up to 8 hours per project by removing manual cleanup passes and re-upload cycles.</p>
+                </div>
+                <div style="background: var(--bg-card); border-radius: 16px; border: 1px solid rgba(102,126,234,0.15); padding: 1.75rem;">
+                    <h3 style="margin-top: 0; color: var(--text-primary); font-size: 1.1rem;">Policy-ready by default</h3>
+                    <p style="color: var(--text-secondary);">Every plan includes attestations, audit trails, and rights-first messaging tuned for ad networks and streaming platforms.</p>
+                </div>
+                <div style="background: var(--bg-card); border-radius: 16px; border: 1px solid rgba(102,126,234,0.15); padding: 1.75rem;">
+                    <h3 style="margin-top: 0; color: var(--text-primary); font-size: 1.1rem;">Scale with confidence</h3>
+                    <p style="color: var(--text-secondary);">Upgrade or downgrade with a single click, and invite teammates with granular permissions whenever you expand beyond a solo workflow.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Pricing Section -->
-    <section class="pricing-section" id="pricing">
+    <!-- API Section -->
+    <section class="api-section">
         <div class="container">
-            <!-- Header with Benefits -->
-            <div class="section-header" style="text-align: center; max-width: 800px; margin: 0 auto 4rem;">
-                <span style="display: inline-block; padding: 0.5rem 1.25rem; border-radius: 50px; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); color: var(--accent); font-size: 0.9rem; font-weight: 600; margin-bottom: 1.5rem;">AI-Powered Object Removal</span>
-                <h2 class="section-title" style="margin-top: 0.5rem; font-size: clamp(2.5rem, 5vw, 3.5rem);">Remove Unwanted Objects From Your Videos in Minutes</h2>
-                <p class="section-subtitle" style="font-size: 1.3rem; margin-top: 1rem; color: var(--text-secondary);">Upload your video, click on what you want gone, and let AI handle the rest</p>
-                <div style="margin-top: 1.5rem; display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;">
-                    <span style="color: var(--accent); font-weight: 600;">✓ Upload any video and start removing instantly</span>
-                    <span style="color: var(--accent); font-weight: 600;">✓ No editing skills needed - just point and click</span>
-                    <span style="color: var(--accent); font-weight: 600;">✓ Crystal-clear 4K exports ready for publishing</span>
-                </div>
-            </div>
-
-            <!-- Credit Packs Section -->
-            <div style="margin-bottom: 5rem;">
-                <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; margin-bottom: 0.5rem;">Pay As You Go</h3>
-                <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">No subscription required — credits never expire</p>
-
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; max-width: 1000px; margin: 0 auto;">
-                    <!-- Starter Pack -->
-                    <div style="background: var(--bg-card); border: 2px solid rgba(102, 126, 234, 0.15); border-radius: 20px; padding: 2rem; text-align: center; transition: all 0.3s; cursor: pointer;" onmouseover="this.style.transform='translateY(-5px)'; this.style.borderColor='var(--primary)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(102, 126, 234, 0.15)';">
-                        <h4 style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Starter</h4>
-                        <div style="font-size: 2.5rem; font-weight: 800; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$4.99</div>
-                        <p style="color: var(--accent); font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0;">50 Credits</p>
-                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1.5rem;">$0.10 per credit</p>
-                        <button class="btn-pricing secondary" onclick="signUp('credits_starter')" style="padding: 0.8rem 1.5rem;">Buy Now</button>
-                    </div>
-
-                    <!-- Creator Pack - Popular -->
-                    <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15)); border: 2px solid var(--primary); border-radius: 20px; padding: 2rem; text-align: center; position: relative; transform: translateY(-10px); box-shadow: 0 20px 40px rgba(102, 126, 234, 0.3);">
-                        <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gradient-primary); padding: 0.4rem 1.2rem; border-radius: 50px; font-size: 0.75rem; font-weight: 700; color: white; text-transform: uppercase;">Best Value</div>
-                        <h4 style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Creator</h4>
-                        <div style="font-size: 2.5rem; font-weight: 800; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$19.99</div>
-                        <p style="color: var(--accent); font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0;">250 <span style="color: #10b981;">+25 Bonus</span></p>
-                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.25rem;">$0.073 per credit</p>
-                        <p style="color: #10b981; font-size: 0.8rem; font-weight: 600; margin-bottom: 1.5rem;">Save 27%</p>
-                        <button class="btn-pricing primary" onclick="signUp('credits_creator')" style="padding: 0.8rem 1.5rem;">Buy Now</button>
-                    </div>
-
-                    <!-- Pro Pack -->
-                    <div style="background: var(--bg-card); border: 2px solid rgba(102, 126, 234, 0.15); border-radius: 20px; padding: 2rem; text-align: center; transition: all 0.3s; cursor: pointer;" onmouseover="this.style.transform='translateY(-5px)'; this.style.borderColor='var(--primary)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(102, 126, 234, 0.15)';">
-                        <h4 style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Pro</h4>
-                        <div style="font-size: 2.5rem; font-weight: 800; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$49.99</div>
-                        <p style="color: var(--accent); font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0;">750 <span style="color: #10b981;">+100 Bonus</span></p>
-                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.25rem;">$0.059 per credit</p>
-                        <p style="color: #10b981; font-size: 0.8rem; font-weight: 600; margin-bottom: 1.5rem;">Save 41%</p>
-                        <button class="btn-pricing secondary" onclick="signUp('credits_pro')" style="padding: 0.8rem 1.5rem;">Buy Now</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Divider -->
-            <div style="display: flex; align-items: center; gap: 1rem; margin: 3rem 0;">
-                <div style="flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(102,126,234,0.3), transparent);"></div>
-                <span style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em;">Or Subscribe & Save</span>
-                <div style="flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(102,126,234,0.3), transparent);"></div>
-            </div>
-
-            <!-- Monthly/Annual Toggle -->
-            <div style="display: flex; justify-content: center; margin-bottom: 3rem;">
-                <div id="billingToggle" style="display: inline-flex; background: var(--bg-card); border-radius: 50px; padding: 0.35rem; border: 1px solid rgba(102,126,234,0.2);">
-                    <button id="monthlyBtn" onclick="toggleBilling('monthly')" style="padding: 0.75rem 2rem; border-radius: 50px; border: none; font-weight: 600; cursor: pointer; transition: all 0.3s; background: var(--gradient-primary); color: white;">Monthly</button>
-                    <button id="annualBtn" onclick="toggleBilling('annual')" style="padding: 0.75rem 2rem; border-radius: 50px; border: none; font-weight: 600; cursor: pointer; transition: all 0.3s; background: transparent; color: var(--text-secondary);">
-                        Annual <span style="background: rgba(16,185,129,0.2); color: #10b981; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; margin-left: 0.5rem;">Save 25%</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Monthly Plans Grid -->
-            <div id="monthlyPlans" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; max-width: 900px; margin: 0 auto;">
-
-                <!-- Lite Plan -->
-                <div class="pricing-card" style="position: relative; overflow: hidden;">
-                    <div class="pricing-header">
-                        <h3>Lite</h3>
-                        <div class="pricing-price">$14.99<span>/month</span></div>
-                        <p style="color: var(--text-secondary); font-size: 0.9rem;">200 credits/month</p>
-                    </div>
-                    <ul class="pricing-features">
-                        <li>Standard processing queue</li>
-                        <li>1080p video output</li>
-                        <li>Email support</li>
-                        <li>Basic analytics</li>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center;">
+                <div>
+                    <span style="display: inline-block; padding: 0.4rem 1rem; border-radius: 50px; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); color: var(--accent); font-size: 0.8rem; font-weight: 600; margin-bottom: 1rem;">FOR DEVELOPERS</span>
+                    <h3 style="font-size: 1.75rem; color: var(--text-primary); margin-bottom: 1rem;">Automate Your Workflow with Our API</h3>
+                    <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.7;">Process thousands of videos programmatically. Perfect for agencies, content platforms, and enterprise teams who need to scale their video editing operations.</p>
+                    <ul style="list-style: none; padding: 0; margin-bottom: 2rem;">
+                        <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> RESTful API with simple authentication</li>
+                        <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> Batch processing up to 1,000 videos</li>
+                        <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> Webhook callbacks for async processing</li>
+                        <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> 99.9% uptime SLA guarantee</li>
                     </ul>
-                    <button class="btn-pricing secondary" onclick="signUp('lite_monthly')">Get Started</button>
+                    <a href="api.html" style="display: inline-block; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 30px rgba(102, 126, 234, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">Explore API Documentation</a>
                 </div>
-
-                <!-- Pro Plan - Popular -->
-                <div class="pricing-card popular" style="transform: translateY(-14px);">
-                    <div class="popular-badge">MOST POPULAR</div>
-                    <div class="pricing-header">
-                        <h3>Pro</h3>
-                        <div class="pricing-price">$29.99<span>/month</span></div>
-                        <p style="color: var(--text-secondary); font-size: 0.9rem;">500 credits/month</p>
-                    </div>
-                    <ul class="pricing-features">
-                        <li><strong>Priority processing</strong></li>
-                        <li>4K video output</li>
-                        <li>API access (1,000 calls)</li>
-                        <li>Priority support</li>
-                        <li>Advanced analytics</li>
-                    </ul>
-                    <button class="btn-pricing primary" onclick="signUp('pro_monthly')">Start Free Trial</button>
-                </div>
-
-                <!-- Business Plan -->
-                <div class="pricing-card" style="position: relative; overflow: hidden;">
-                    <div class="pricing-header">
-                        <h3>Business</h3>
-                        <div class="pricing-price">$49.99<span>/month</span></div>
-                        <p style="color: var(--text-secondary); font-size: 0.9rem;">1,000 credits/month</p>
-                    </div>
-                    <ul class="pricing-features">
-                        <li>Everything in Pro</li>
-                        <li><strong>Team access (5 seats)</strong></li>
-                        <li>Unlimited API calls</li>
-                        <li>Dedicated account manager</li>
-                        <li>Custom integrations</li>
-                    </ul>
-                    <button class="btn-pricing secondary" onclick="signUp('business_monthly')">Get Started</button>
-                </div>
-            </div>
-
-            <!-- API Preview Section -->
-            <div style="margin: 4rem 0; padding: 3rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.08), rgba(118, 75, 162, 0.08)); border: 1px solid var(--border-color); border-radius: 24px;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center;">
-                    <div>
-                        <span style="display: inline-block; padding: 0.4rem 1rem; border-radius: 50px; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); color: var(--accent); font-size: 0.8rem; font-weight: 600; margin-bottom: 1rem;">FOR DEVELOPERS</span>
-                        <h3 style="font-size: 1.75rem; color: var(--text-primary); margin-bottom: 1rem;">Automate Your Workflow with Our API</h3>
-                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.7;">Process thousands of videos programmatically. Perfect for agencies, content platforms, and enterprise teams who need to scale their video editing operations.</p>
-                        <ul style="list-style: none; padding: 0; margin-bottom: 2rem;">
-                            <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> RESTful API with simple authentication</li>
-                            <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> Batch processing up to 1,000 videos</li>
-                            <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> Webhook callbacks for async processing</li>
-                            <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> 99.9% uptime SLA guarantee</li>
-                        </ul>
-                        <a href="api.html" style="display: inline-block; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 30px rgba(102, 126, 234, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">Explore API Documentation</a>
-                    </div>
-                    <div style="background: rgba(10, 10, 20, 0.9); border-radius: 16px; padding: 1.5rem; font-family: 'Courier New', monospace; font-size: 0.85rem; color: #a78bfa; overflow-x: auto; border: 1px solid rgba(102, 126, 234, 0.3);">
-                        <div style="color: #64748b; margin-bottom: 0.5rem;"># Remove object from video</div>
-                        <div style="color: #10b981;">curl</div> -X POST https://api.markremoverai.com/v1/remove \<br>
-                        &nbsp;&nbsp;-H <span style="color: #fbbf24;">"Authorization: Bearer YOUR_API_KEY"</span> \<br>
-                        &nbsp;&nbsp;-F <span style="color: #fbbf24;">"video=@input.mp4"</span> \<br>
-                        &nbsp;&nbsp;-F <span style="color: #fbbf24;">"mask=@mask.png"</span><br><br>
-                        <div style="color: #64748b;"># Response</div>
-                        <div style="color: #f8fafc;">{</div>
-                        <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"job_id"</span>: <span style="color: #fbbf24;">"job_abc123"</span>,</div>
-                        <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"status"</span>: <span style="color: #fbbf24;">"processing"</span>,</div>
-                        <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"webhook_url"</span>: <span style="color: #fbbf24;">"..."</span></div>
-                        <div style="color: #f8fafc;">}</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Annual Plans Grid - Only Pro and Enterprise -->
-            <div id="annualPlans" style="display: none; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem; max-width: 800px; margin: 0 auto;">
-
-                <!-- Pro Annual -->
-                <div class="pricing-card popular" style="transform: translateY(-10px);">
-                    <div class="popular-badge">BEST VALUE</div>
-                    <div class="pricing-header">
-                        <h3>Pro Annual</h3>
-                        <div class="pricing-price">$239.99<span>/year</span></div>
-                        <p style="color: var(--text-secondary); font-size: 0.9rem;">6,000 credits/year</p>
-                        <p style="color: #10b981; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem;">Save $119.89 vs monthly</p>
-                    </div>
-                    <ul class="pricing-features">
-                        <li><strong>Priority processing</strong></li>
-                        <li>4K video output</li>
-                        <li>API access (1,000 calls/mo)</li>
-                        <li>Priority support</li>
-                        <li>Advanced analytics</li>
-                        <li><strong>500 credits/month</strong></li>
-                    </ul>
-                    <button class="btn-pricing primary" onclick="signUp('pro_annual')">Get Pro Annual</button>
-                </div>
-
-                <!-- Enterprise Annual -->
-                <div class="pricing-card" style="position: relative; overflow: hidden;">
-                    <div class="pricing-header">
-                        <h3>Enterprise Annual</h3>
-                        <div class="pricing-price">$499<span>/year</span></div>
-                        <p style="color: var(--text-secondary); font-size: 0.9rem;">15,000 credits/year</p>
-                        <p style="color: #10b981; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem;">Save $700+ vs monthly</p>
-                    </div>
-                    <ul class="pricing-features">
-                        <li>Everything in Pro</li>
-                        <li><strong>Unlimited team seats</strong></li>
-                        <li>Unlimited API calls</li>
-                        <li>White-label options</li>
-                        <li>SLA guarantee (99.9%)</li>
-                        <li>Priority phone support</li>
-                        <li><strong>1,250 credits/month</strong></li>
-                    </ul>
-                    <button class="btn-pricing secondary" onclick="signUp('enterprise_annual')">Get Enterprise</button>
-                </div>
-            </div>
-
-
-            <!-- FAQ Section -->
-            <div style="max-width: 800px; margin: 4rem auto 0;">
-                <h3 style="text-align: center; font-size: 1.75rem; margin-bottom: 2rem;">Frequently Asked Questions</h3>
-
-                <div style="display: flex; flex-direction: column; gap: 1rem;">
-                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
-                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
-                            What is a credit and how are they used?
-                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
-                        </button>
-                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
-                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">Credits are our universal currency for object removal. Credit usage is based on video duration, video quality/resolution, and the complexity of the object being removed. Shorter videos and lower resolutions use fewer credits, while longer 4K videos with complex removals use more. A typical removal uses 5-30 credits depending on these factors.</p>
-                        </div>
-                    </div>
-
-                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
-                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
-                            Do unused credits roll over?
-                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
-                        </button>
-                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
-                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">One-time credit packs never expire. Monthly subscription credits reset at the start of each billing cycle — use them or lose them! This keeps our servers running efficiently.</p>
-                        </div>
-                    </div>
-
-                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
-                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
-                            Can I cancel my subscription anytime?
-                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
-                        </button>
-                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
-                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">Yes! Cancel anytime with one click. No questions asked. You'll keep access until your current billing period ends.</p>
-                        </div>
-                    </div>
-
-                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
-                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
-                            What video formats and resolutions are supported?
-                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
-                        </button>
-                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
-                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">We support all major formats: MP4, MOV, AVI, WebM, and more. Pro plans and above get 4K output, while Lite plans output at 1080p. Maximum video length depends on your plan.</p>
-                        </div>
-                    </div>
-
-                    <div style="background: var(--bg-card); border-radius: 12px; border: 1px solid rgba(102,126,234,0.15); overflow: hidden;">
-                        <button onclick="toggleFaq(this)" style="width: 100%; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center; background: none; border: none; color: var(--text-primary); font-weight: 600; font-size: 1rem; cursor: pointer; text-align: left;">
-                            Can this be a tax write off if I'm a marketing agency or business owner?
-                            <span style="color: var(--accent); font-size: 1.25rem; transition: transform 0.3s;">+</span>
-                        </button>
-                        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
-                            <p style="padding: 0 1.25rem 1.25rem; color: var(--text-secondary); margin: 0;">Yes, most marketing agencies can usually treat our AI object-removal service as a standard business expense, since agencies already outsource editing, cleanup, and production tasks as part of creating ads, client content, and marketing materials. The same typically applies to creators, e-commerce brands, real estate teams, video production companies, and small businesses producing their own marketing content. While we can't legally guarantee deductibility in every situation, our service is generally treated like any other editing, software, or media-production tool. As long as the work is used to promote a business or deliver client projects, it will usually qualify—though each business should confirm with their accountant.</p>
-                        </div>
-                    </div>
+                <div class="code-block">
+                    <div style="color: #64748b; margin-bottom: 0.5rem;"># Remove object from video</div>
+                    <div style="color: #10b981;">curl</div> -X POST https://api.markremoverai.com/v1/remove \<br>
+                    &nbsp;&nbsp;-H <span style="color: #fbbf24;">"Authorization: Bearer YOUR_API_KEY"</span> \<br>
+                    &nbsp;&nbsp;-F <span style="color: #fbbf24;">"video=@input.mp4"</span> \<br>
+                    &nbsp;&nbsp;-F <span style="color: #fbbf24;">"mask=@mask.png"</span><br><br>
+                    <div style="color: #64748b;"># Response</div>
+                    <div style="color: #f8fafc;">{</div>
+                    <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"job_id"</span>: <span style="color: #fbbf24;">"job_abc123"</span>,</div>
+                    <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"status"</span>: <span style="color: #fbbf24;">"processing"</span>,</div>
+                    <div style="color: #f8fafc;">&nbsp;&nbsp;<span style="color: #a78bfa;">"webhook_url"</span>: <span style="color: #fbbf24;">"..."</span></div>
+                    <div style="color: #f8fafc;">}</div>
                 </div>
             </div>
         </div>
@@ -924,6 +720,25 @@
 
     <script src="js/billing.js"></script>
     <script>
+        // Mobile Menu Toggle
+        const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+        const navLinks = document.getElementById('navLinks');
+
+        if (mobileMenuToggle && navLinks) {
+            mobileMenuToggle.addEventListener('click', () => {
+                navLinks.classList.toggle('active');
+                mobileMenuToggle.classList.toggle('active');
+            });
+
+            // Close mobile menu when clicking a link
+            document.querySelectorAll('.nav-links a, .btn-nav').forEach(link => {
+                link.addEventListener('click', () => {
+                    navLinks.classList.remove('active');
+                    mobileMenuToggle.classList.remove('active');
+                });
+            });
+        }
+
         function scrollToPricing() {
             document.getElementById('pricing').scrollIntoView({ behavior: 'smooth' });
         }
@@ -934,79 +749,39 @@
                 return;
             }
             try {
-                await Billing.startCheckout(plan);
+                // Get user from localStorage
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                if (!user.id) {
+                    alert('Please sign in first to purchase a plan');
+                    window.location.href = 'login.html';
+                    return;
+                }
+                // Pass user_id to checkout
+                await Billing.startCheckout(plan, { user_id: user.id });
             } catch (error) {
                 console.error('Stripe checkout error:', error);
                 alert('We were unable to start checkout. Please try again or contact support.');
             }
         }
 
-        // Billing toggle functionality
-        let currentBilling = 'monthly';
-
-        function toggleBilling(type) {
-            currentBilling = type;
-            const monthlyBtn = document.getElementById('monthlyBtn');
-            const annualBtn = document.getElementById('annualBtn');
-            const monthlyPlans = document.getElementById('monthlyPlans');
-            const annualPlans = document.getElementById('annualPlans');
-
-            if (type === 'monthly') {
-                monthlyBtn.style.background = 'var(--gradient-primary)';
-                monthlyBtn.style.color = 'white';
-                annualBtn.style.background = 'transparent';
-                annualBtn.style.color = 'var(--text-secondary)';
-
-                // Show monthly, hide annual
-                monthlyPlans.style.display = 'grid';
-                annualPlans.style.display = 'none';
-            } else {
-                annualBtn.style.background = 'var(--gradient-primary)';
-                annualBtn.style.color = 'white';
-                monthlyBtn.style.background = 'transparent';
-                monthlyBtn.style.color = 'var(--text-secondary)';
-
-                // Show annual, hide monthly
-                monthlyPlans.style.display = 'none';
-                annualPlans.style.display = 'grid';
-            }
-        }
-
-        // FAQ accordion functionality
-        function toggleFaq(button) {
-            const content = button.nextElementSibling;
-            const icon = button.querySelector('span');
-
-            if (content.style.maxHeight && content.style.maxHeight !== '0px') {
-                content.style.maxHeight = '0px';
-                icon.textContent = '+';
-                icon.style.transform = 'rotate(0deg)';
-            } else {
-                content.style.maxHeight = content.scrollHeight + 'px';
-                icon.textContent = '−';
-                icon.style.transform = 'rotate(180deg)';
-            }
-        }
-
-        function submitEmail(e) {
-            e.preventDefault();
-            const email = e.target.querySelector('input').value;
-            alert(`Thanks for subscribing, ${email}!\n\nIn production, this would:\n1. Save to the policy update list\n2. Send a welcome email with best practices\n3. Trigger educational sequences\n4. Track engagement`);
-            e.target.reset();
-        }
-
-        // Demo upload handler
-        const demoUpload = document.getElementById('demoUpload');
-        if (demoUpload) {
-            demoUpload.addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (file) {
-                    alert(`Demo file selected: ${file.name}\n\nIn production, this would:\n1. Confirm rights before upload\n2. Process with AI cleanup\n3. Show before/after preview\n4. Prompt to sign up`);
+        async function buyCredits(packageName) {
+            try {
+                // Get user from localStorage
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                if (!user.id) {
+                    alert('Please sign in first to purchase credits');
+                    window.location.href = 'login.html';
+                    return;
                 }
-            });
+                // Pass user_id and package to one-time checkout
+                await Billing.startOneTimeCheckout(packageName, { user_id: user.id });
+            } catch (error) {
+                console.error('Credit purchase error:', error);
+                alert('We were unable to start checkout. Please try again or contact support.');
+            }
         }
 
-        // Theme toggle functionality - syncs with index.html
+        // Theme toggle functionality
         function toggleTheme() {
             const html = document.documentElement;
             const currentTheme = html.getAttribute('data-theme');

@@ -199,7 +199,7 @@ class SAM2Selector {
     }
 
     /**
-     * Add point to current selection (accumulates multiple clicks)
+     * Add point as a new selection (each click = new object with new color)
      */
     async addPoint(x, y, label) {
         // Limit to 10 clicks per session
@@ -210,46 +210,35 @@ class SAM2Selector {
             return;
         }
 
-        // Create new selection if none exists, or add to existing
-        if (!this.currentSelection) {
-            // Assign next color from palette (cycles through)
-            const color = this.colorPalette[this.colorIndex % this.colorPalette.length];
-            this.colorIndex++;
+        // Each click creates a NEW selection with its own color
+        const color = this.colorPalette[this.colorIndex % this.colorPalette.length];
+        this.colorIndex++;
 
-            this.currentSelection = {
-                id: this.currentSelectionId++,
-                points: [],
-                mask: null,
-                color: color
-            };
-        }
+        this.currentSelection = {
+            id: this.currentSelectionId++,
+            points: [{x, y, label}],  // Single point for this selection
+            mask: null,
+            color: color
+        };
 
-        // Add new point to current selection
-        this.currentSelection.points.push({x, y, label});
-
-        console.log(`[SAM2Selector] Added point #${this.currentSelection.points.length} at (${x}, ${y}) to selection #${this.currentSelection.id}`);
+        console.log(`[SAM2Selector] New selection #${this.currentSelection.id} at (${x}, ${y}) with color ${this.colorIndex - 1}`);
 
         // Fire callback IMMEDIATELY when point is added (before waiting for mask)
         if (this.options.onPointsChange) {
             this.options.onPointsChange(this.getAllPoints());
         }
 
-        // Request mask from server with ALL accumulated points
+        // Request mask from server for this single point
         const mask = await this.requestMask(this.currentSelection.points);
 
         if (mask) {
             // Update current selection's mask
             this.currentSelection.mask = mask;
 
-            // Update selections array (replace if exists, add if new)
-            const existingIndex = this.selections.findIndex(s => s.id === this.currentSelection.id);
-            if (existingIndex >= 0) {
-                this.selections[existingIndex] = {...this.currentSelection};
-            } else {
-                this.selections.push({...this.currentSelection});
-            }
+            // Always add as new selection (each click is separate)
+            this.selections.push({...this.currentSelection});
 
-            console.log(`[SAM2Selector] Updated selection #${this.currentSelection.id} with ${this.currentSelection.points.length} points`);
+            console.log(`[SAM2Selector] Added selection #${this.currentSelection.id} with color index ${this.colorIndex - 1}`);
 
             // Callback for selection changes
             if (this.options.onPointsChange) {
