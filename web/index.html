@@ -151,6 +151,11 @@
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%);
         }
 
+        /* Dark mode fix for upload box */
+        html[data-theme="dark"] .demo-card {
+            background-image: linear-gradient(var(--bg-card), var(--bg-card)), var(--gradient-rainbow);
+        }
+
         /* Timeline Scrubber Styling */
         .timeline-scrubber {
             background: #ffffff;
@@ -853,7 +858,7 @@
         .nav-left {
             display: flex;
             align-items: center;
-            gap: 6rem;
+            gap: 3rem;
             flex: 1;
             min-width: 0;
         }
@@ -911,7 +916,7 @@
 
         /* Navigation links - wide spacing */
         .nav-left .nav-menu {
-            gap: 3.5rem;
+            gap: 2rem;
         }
 
         /* User menu - comfortable spacing */
@@ -1321,7 +1326,6 @@
                 </a>
 
                 <ul class="nav-menu" id="navMenu">
-                    <li><a href="/">Home</a></li>
                     <li><a href="#how-to">How It Works</a></li>
                     <li><a href="#comparison">Examples</a></li>
                     <li><a href="premium.html#pricing">Pricing</a></li>
@@ -1336,7 +1340,6 @@
                     <ul class="nav-menu" id="userNav" style="display: none;">
                         <li><span id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem;"></span></li>
                         <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
-                        <li><a href="premium.html#pricing" id="buyCreditsBtn" class="nav-cta-small" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">Buy Credits</a></li>
                         <li><a href="#" id="signOutBtn" class="nav-cta-small" style="background: rgba(239, 68, 68, 0.9);">Sign Out</a></li>
                     </ul>
                 </div>
@@ -1651,7 +1654,7 @@
                                     playsinline
                                     aria-label="AI inpainting demonstration video"
                                 >
-                                    <source src="/cool.mp4" type="video/mp4">
+                                    <source src="https://markz.humblewoslayer.workers.dev/permanent/demo/cool.mp4" type="video/mp4">
                                     Your browser does not support the video tag.
                                 </video>
 
