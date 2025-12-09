@@ -783,6 +783,14 @@
             animation: float 3s ease-in-out infinite;
         }
 
+        .feature-number svg {
+            width: 28px;
+            height: 28px;
+            stroke: white;
+            stroke-width: 2;
+            fill: none;
+        }
+
         .feature-card:nth-child(1) .feature-number {
             background: var(--bg-gradient);
             animation-delay: 0s;
@@ -801,6 +809,68 @@
         .feature-card:nth-child(4) .feature-number {
             background: var(--bg-gradient-4);
             animation-delay: 0.9s;
+        }
+
+        /* Toolkit Section */
+        .toolkit-section {
+            padding: 4rem 0;
+            background: var(--bg-card);
+        }
+
+        .toolkit-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.25rem;
+            margin-top: 2rem;
+        }
+
+        .toolkit-feature {
+            display: flex;
+            align-items: flex-start;
+            gap: 1.25rem;
+            background: var(--bg-light);
+            border-radius: 12px;
+            padding: 1.25rem 1.5rem;
+            border: 1px solid rgba(102, 126, 234, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .toolkit-feature:hover {
+            border-color: var(--primary);
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.15);
+        }
+
+        .toolkit-icon {
+            width: 44px;
+            height: 44px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--gradient-primary);
+            border-radius: 10px;
+        }
+
+        .toolkit-icon svg {
+            width: 24px;
+            height: 24px;
+            stroke: white;
+            stroke-width: 2;
+            fill: none;
+        }
+
+        .toolkit-content h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .toolkit-content p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin: 0;
         }
 
         .btn-primary {
@@ -1331,6 +1401,7 @@
                         <li><span id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem;"></span></li>
                         <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
                         <li><a href="#" id="signOutBtn" class="nav-cta-small" style="background: rgba(239, 68, 68, 0.9);">Sign Out</a></li>
+                        <li><a href="#" id="deleteAccountBtn" class="nav-cta-small" style="background: rgba(127, 29, 29, 0.9); font-size: 0.75rem; margin-top: 0.25rem;">Delete Account</a></li>
                     </ul>
                 </div>
 
@@ -1662,20 +1733,26 @@
                     </div>
                 </section>
 
-                <h2 style="text-align: center; font-size: 2.25rem; font-weight: 700; margin: 3rem 0 2rem; color: var(--text-primary);">How It Works - 3 Simple Steps</h2>
+                <h2 style="text-align: center; font-size: 2.25rem; font-weight: 700; margin: 3rem 0 2rem; color: var(--text-primary);">How It Works - 4 Simple Steps</h2>
                 <div class="feature-grid" id="how-to">
                     <div class="feature-card">
-                        <div class="feature-number">1</div>
+                        <div class="feature-number">
+                            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
                         <h3>Upload Video</h3>
                         <p style="color: var(--text-secondary);">Drag and drop your video or paste a URL. Quick and easy.</p>
                     </div>
                     <div class="feature-card">
-                        <div class="feature-number">2</div>
+                        <div class="feature-number">
+                            <svg viewBox="0 0 24 24"><path d="M9 3v12l4-4 2.5 6 2-1-2.5-6H21L9 3z"/></svg>
+                        </div>
                         <h3>Click Object</h3>
                         <p style="color: var(--text-secondary);">Click on any object you want to remove. Smart detection highlights it instantly.</p>
                     </div>
                     <div class="feature-card">
-                        <div class="feature-number">3</div>
+                        <div class="feature-number">
+                            <svg viewBox="0 0 24 24"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M5 19l1 3 1-3 3-1-3-1-1-3-1 3-3 1 3 1z"/><path d="M19 5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5L17 6l1.5-.5.5-1.5z"/></svg>
+                        </div>
                         <h3>Watch it Disappear</h3>
                         <p style="color: var(--text-secondary);">Our AI removes the object seamlessly in seconds.</p>
                         <button id="removeWatermarkBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; display: none;">
@@ -1686,11 +1763,69 @@
                         </button>
                     </div>
                     <div class="feature-card">
-                        <div class="feature-number">4</div>
+                        <div class="feature-number">
+                            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        </div>
                         <h3>Download Clean Video</h3>
                         <p style="color: var(--text-secondary);">Get your professionally edited video in high quality.</p>
                     </div>
                 </div>
+
+                <!-- Responsible Cleanup Toolkit -->
+                <section class="toolkit-section" style="margin-top: 3rem; border-radius: 20px;">
+                    <div class="container">
+                        <h2 style="text-align: center; font-size: 2rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">Responsible Cleanup Toolkit</h2>
+                        <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">Everything you need to refresh authorized assets at scale</p>
+
+                        <div class="toolkit-grid">
+                            <div class="toolkit-feature">
+                                <div class="toolkit-icon">
+                                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+                                </div>
+                                <div class="toolkit-content">
+                                    <h4>AI-Powered Detection</h4>
+                                    <p>Advanced detection automatically finds logos, bugs, and timestamps on approved files with audit trails</p>
+                                </div>
+                            </div>
+                            <div class="toolkit-feature">
+                                <div class="toolkit-icon">
+                                    <svg viewBox="0 0 24 24"><path d="M18.37 2.63L14 7l-1.59-1.59a2 2 0 00-2.82 0L8 7l9 9 1.59-1.59a2 2 0 000-2.82L17 10l4.37-4.37a2.12 2.12 0 10-3-3z"/><path d="M9 8c-2 3-4 3.5-7 4l8 10c2-1 6-5 6-7"/></svg>
+                                </div>
+                                <div class="toolkit-content">
+                                    <h4>Smart Inpainting</h4>
+                                    <p>State-of-the-art inpainting restores branded backgrounds seamlessly while maintaining original quality</p>
+                                </div>
+                            </div>
+                            <div class="toolkit-feature">
+                                <div class="toolkit-icon">
+                                    <svg viewBox="0 0 24 24"><polygon points="12,2 2,7 12,12 22,7"/><polyline points="2,17 12,22 22,17"/><polyline points="2,12 12,17 22,12"/></svg>
+                                </div>
+                                <div class="toolkit-content">
+                                    <h4>Batch Processing</h4>
+                                    <p>Process up to 1000 files simultaneously, whether you work solo or invite collaborators with permission controls</p>
+                                </div>
+                            </div>
+                            <div class="toolkit-feature">
+                                <div class="toolkit-icon">
+                                    <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="8" x2="22" y2="8"/><polygon points="10,12 10,18 16,15"/></svg>
+                                </div>
+                                <div class="toolkit-content">
+                                    <h4>Video Support</h4>
+                                    <p>Clean overlays on rights-cleared video up to 4K resolution. Supports MP4, MOV, AVI formats</p>
+                                </div>
+                            </div>
+                            <div class="toolkit-feature">
+                                <div class="toolkit-icon">
+                                    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><rect x="9" y="10" width="6" height="5" rx="1"/><path d="M10 10V8a2 2 0 114 0v2"/></svg>
+                                </div>
+                                <div class="toolkit-content">
+                                    <h4>Privacy First</h4>
+                                    <p>Files are encrypted in transit, processed in memory, and deleted automatically after completion</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
                 <!-- Ad After Features -->
                 <div class="ad-container" style="margin: 2rem auto; max-width: 728px;">
@@ -3330,6 +3465,48 @@
           e.preventDefault();
           localStorage.removeItem('user');
           window.location.href = 'login.html';
+        });
+      }
+
+      // Delete account button
+      const deleteAccountBtn = document.getElementById('deleteAccountBtn');
+      if (deleteAccountBtn) {
+        deleteAccountBtn.addEventListener('click', async function(e) {
+          e.preventDefault();
+
+          // Double confirmation for account deletion
+          const confirm1 = confirm('Are you sure you want to delete your account? This action CANNOT be undone.');
+          if (!confirm1) return;
+
+          const confirm2 = confirm('FINAL WARNING: All your data will be permanently deleted. Type "DELETE" to confirm.');
+          if (!confirm2) return;
+
+          const typed = prompt('Type DELETE to confirm account deletion:');
+          if (typed !== 'DELETE') {
+            alert('Account deletion cancelled.');
+            return;
+          }
+
+          try {
+            const response = await fetch(window.API_BASE_URL + '/api/auth/delete-account', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' }
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+              alert('Your account has been deleted. You will now be redirected to the home page.');
+              localStorage.removeItem('user');
+              window.location.href = 'index.html';
+            } else {
+              alert('Failed to delete account: ' + (data.message || 'Unknown error'));
+            }
+          } catch (err) {
+            console.error('Delete account error:', err);
+            alert('Error deleting account. Please try again.');
+          }
         });
       }
     }
