@@ -19,13 +19,25 @@ class SAM2Selector {
         };
 
         // Multi-object selection state
-        this.selections = []; // Array of {id, points, mask}
+        this.selections = []; // Array of {id, points, mask, color}
         this.currentSelectionId = 0;
         this.currentSelection = null; // Active selection being built with multiple clicks
         this.isLoading = false;
 
-        // All objects use green color
-        this.maskColor = [0, 255, 0]; // Green for all selections
+        // Professional color palette - rotates for each new selection
+        this.colorPalette = [
+            [0, 212, 255],    // Cyan/Electric Blue
+            [255, 107, 107],  // Coral Red
+            [78, 205, 196],   // Teal
+            [255, 193, 7],    // Amber/Gold
+            [156, 39, 176],   // Purple
+            [0, 230, 118],    // Emerald Green
+            [255, 152, 0],    // Orange
+            [33, 150, 243],   // Blue
+            [233, 30, 99],    // Pink
+            [139, 195, 74],   // Light Green
+        ];
+        this.colorIndex = 0; // Tracks which color to use next
 
         // Video metadata
         this.videoWidth = 0;
@@ -200,10 +212,15 @@ class SAM2Selector {
 
         // Create new selection if none exists, or add to existing
         if (!this.currentSelection) {
+            // Assign next color from palette (cycles through)
+            const color = this.colorPalette[this.colorIndex % this.colorPalette.length];
+            this.colorIndex++;
+
             this.currentSelection = {
                 id: this.currentSelectionId++,
                 points: [],
-                mask: null
+                mask: null,
+                color: color
             };
         }
 
@@ -369,10 +386,13 @@ class SAM2Selector {
         // Create ImageData to build mask
         const maskData = tempCtx.createImageData(this.canvas.width, this.canvas.height);
 
-        // Loop through all selections and composite their masks
+        // Loop through all selections and composite their masks with unique colors
         this.selections.forEach(selection => {
             const mask = selection.mask;
             if (!mask) return;
+
+            // Get this selection's color (fallback to cyan if not set)
+            const color = selection.color || [0, 212, 255];
 
             // Resize mask data to match canvas
             for (let y = 0; y < this.canvas.height; y++) {
@@ -382,12 +402,12 @@ class SAM2Selector {
                     const maskY = Math.floor(y / this.canvas.height * mask.height);
                     const maskIdx = (maskY * mask.width + maskX) * 4;
 
-                    // If mask pixel is white (255), apply green overlay
+                    // If mask pixel is white (255), apply this selection's color
                     if (mask.data[maskIdx] > 127) {
                         const idx = (y * this.canvas.width + x) * 4;
-                        maskData.data[idx] = this.maskColor[0];     // R (Green)
-                        maskData.data[idx + 1] = this.maskColor[1]; // G (Green)
-                        maskData.data[idx + 2] = this.maskColor[2]; // B (Green)
+                        maskData.data[idx] = color[0];     // R
+                        maskData.data[idx + 1] = color[1]; // G
+                        maskData.data[idx + 2] = color[2]; // B
                         maskData.data[idx + 3] = 255; // Full alpha on temp canvas
                     }
                 }
@@ -405,16 +425,28 @@ class SAM2Selector {
     }
 
     /**
-     * Draw all selection points
+     * Convert RGB array to hex color string
+     */
+    rgbToHex(rgb) {
+        return '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('');
+    }
+
+    /**
+     * Draw all selection points with matching colors
      */
     drawAllPoints() {
         this.selections.forEach(selection => {
+            // Get selection's color (for positive points), red for negative
+            const selectionColor = selection.color || [0, 212, 255];
+            const positiveHex = this.rgbToHex(selectionColor);
+
             selection.points.forEach(point => {
                 // Points are stored in canvas coordinates (native video resolution)
                 // Draw directly since canvas is at native resolution
                 const x = point.x;
                 const y = point.y;
-                const color = point.label ? '#00FF00' : '#FF0000'; // Green=positive, Red=negative
+                // Positive points use selection color, negative always red
+                const color = point.label ? positiveHex : '#FF0000';
 
                 // Draw circle
                 this.ctx.beginPath();
@@ -458,6 +490,7 @@ class SAM2Selector {
         this.selections = [];
         this.currentSelection = null; // Clear current selection too
         this.currentSelectionId = 0;
+        this.colorIndex = 0; // Reset color rotation
         this.draw();
 
         console.log('[SAM2Selector] Reset all selections');
