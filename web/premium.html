@@ -15,6 +15,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 
     <style>
+        /* Light mode (default) */
         :root {
             --primary: #667eea;
             --primary-dark: #5568d3;
@@ -22,13 +23,26 @@
             --accent: #a78bfa;
             --success: #10b981;
             --warning: #f59e0b;
+            --bg-dark: #f8fafc;
+            --bg-card: #ffffff;
+            --bg-glass: rgba(255, 255, 255, 0.9);
+            --text-primary: #1a1a2e;
+            --text-secondary: #64748b;
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            --border-color: rgba(102, 126, 234, 0.2);
+            --nav-bg: rgba(255, 255, 255, 0.95);
+        }
+
+        /* Dark mode */
+        [data-theme="dark"] {
             --bg-dark: #0a0a14;
             --bg-card: #1a1a2e;
             --bg-glass: rgba(26, 26, 46, 0.8);
             --text-primary: #ffffff;
             --text-secondary: #a0a0c0;
-            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            --border-color: rgba(102, 126, 234, 0.15);
+            --nav-bg: rgba(10, 10, 20, 0.95);
         }
 
         * {
@@ -57,10 +71,10 @@
             top: 0;
             left: 0;
             right: 0;
-            background: rgba(10, 10, 20, 0.95);
+            background: var(--nav-bg);
             backdrop-filter: blur(20px);
             z-index: 1000;
-            border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+            border-bottom: 1px solid var(--border-color);
         }
 
         .nav-container {
@@ -523,7 +537,7 @@
         /* API Section */
         .api-section {
             padding: 100px 0;
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+            background: var(--bg-glass);
         }
 
         .api-content {
@@ -607,6 +621,9 @@
                 <a href="#pricing">Pricing</a>
                 <a href="#api">API</a>
                 <button class="btn-nav" onclick="scrollToPricing()">Start Free Cleanup</button>
+                <button id="themeToggle" onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; color: var(--text-primary); font-size: 1rem; transition: all 0.3s;" title="Toggle theme">
+                    <span id="themeIcon">🌙</span>
+                </button>
             </div>
         </div>
     </nav>
@@ -677,22 +694,22 @@
         </div>
     </section>
 
-    <section style="padding: 80px 0; background: rgba(15, 15, 30, 0.9); border-top: 1px solid rgba(102, 126, 234, 0.1); border-bottom: 1px solid rgba(102, 126, 234, 0.1);">
+    <section style="padding: 80px 0; background: var(--bg-glass); border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);">
         <div class="container" style="max-width: 1000px;">
             <div class="section-header">
                 <h2 class="section-title">Compliance at the Core</h2>
                 <p class="section-subtitle">WatermarkAI is purpose-built for ethical use cases and policy-friendly workflows.</p>
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;">
-                <div style="background: rgba(26, 26, 46, 0.8); border-radius: 16px; padding: 1.75rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
+                <div style="background: var(--bg-card); border-radius: 16px; padding: 1.75rem; border: 1px solid var(--border-color); color: var(--text-secondary);">
                     <h3 style="color: var(--text-primary); margin-bottom: 0.75rem;">Rights Verification</h3>
                     <p>Require clients or teammates to confirm ownership or licensing before upload with customizable attestations.</p>
                 </div>
-                <div style="background: rgba(26, 26, 46, 0.8); border-radius: 16px; padding: 1.75rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
+                <div style="background: var(--bg-card); border-radius: 16px; padding: 1.75rem; border: 1px solid var(--border-color); color: var(--text-secondary);">
                     <h3 style="color: var(--text-primary); margin-bottom: 0.75rem;">Audit-Friendly Logs</h3>
                     <p>Track who cleaned what, when, and why. Exportable logs help satisfy legal, brand, and platform requirements.</p>
                 </div>
-                <div style="background: rgba(26, 26, 46, 0.8); border-radius: 16px; padding: 1.75rem; border: 1px solid rgba(102, 126, 234, 0.12); color: var(--text-secondary);">
+                <div style="background: var(--bg-card); border-radius: 16px; padding: 1.75rem; border: 1px solid var(--border-color); color: var(--text-secondary);">
                     <h3 style="color: var(--text-primary); margin-bottom: 0.75rem;">Ad Network Friendly</h3>
                     <p>Copy, UI, and policies aligned with Google Ads standards. We actively monitor usage and can disable non-compliant projects.</p>
                 </div>
@@ -770,14 +787,14 @@
                 </div>
             </div>
 
-            <!-- Subscription Plans Grid -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; max-width: 1200px; margin: 0 auto;">
+            <!-- Monthly Plans Grid -->
+            <div id="monthlyPlans" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; max-width: 900px; margin: 0 auto;">
 
                 <!-- Lite Plan -->
                 <div class="pricing-card" style="position: relative; overflow: hidden;">
                     <div class="pricing-header">
                         <h3>Lite</h3>
-                        <div class="pricing-price" data-monthly="$14.99" data-annual="$11.24">$14.99<span>/month</span></div>
+                        <div class="pricing-price">$14.99<span>/month</span></div>
                         <p style="color: var(--text-secondary); font-size: 0.9rem;">200 credits/month</p>
                     </div>
                     <ul class="pricing-features">
@@ -786,7 +803,7 @@
                         <li>Email support</li>
                         <li>Basic analytics</li>
                     </ul>
-                    <button class="btn-pricing secondary" onclick="signUp('lite')">Get Started</button>
+                    <button class="btn-pricing secondary" onclick="signUp('lite_monthly')">Get Started</button>
                 </div>
 
                 <!-- Pro Plan - Popular -->
@@ -794,7 +811,7 @@
                     <div class="popular-badge">MOST POPULAR</div>
                     <div class="pricing-header">
                         <h3>Pro</h3>
-                        <div class="pricing-price" data-monthly="$29.99" data-annual="$22.49">$29.99<span>/month</span></div>
+                        <div class="pricing-price">$29.99<span>/month</span></div>
                         <p style="color: var(--text-secondary); font-size: 0.9rem;">500 credits/month</p>
                     </div>
                     <ul class="pricing-features">
@@ -804,15 +821,14 @@
                         <li>Priority support</li>
                         <li>Advanced analytics</li>
                     </ul>
-                    <div style="background: rgba(167,139,250,0.12); border: 1px solid rgba(167,139,250,0.3); border-radius: 12px; padding: 0.75rem; margin-bottom: 1.5rem; color: var(--accent); font-weight: 600; font-size: 0.9rem;">Most creators choose this plan</div>
-                    <button class="btn-pricing primary" onclick="signUp('pro')">Start Free Trial</button>
+                    <button class="btn-pricing primary" onclick="signUp('pro_monthly')">Start Free Trial</button>
                 </div>
 
                 <!-- Business Plan -->
                 <div class="pricing-card" style="position: relative; overflow: hidden;">
                     <div class="pricing-header">
                         <h3>Business</h3>
-                        <div class="pricing-price" data-monthly="$49.99" data-annual="$37.49">$49.99<span>/month</span></div>
+                        <div class="pricing-price">$49.99<span>/month</span></div>
                         <p style="color: var(--text-secondary); font-size: 0.9rem;">1,000 credits/month</p>
                     </div>
                     <ul class="pricing-features">
@@ -822,25 +838,51 @@
                         <li>Dedicated account manager</li>
                         <li>Custom integrations</li>
                     </ul>
-                    <button class="btn-pricing secondary" onclick="signUp('business')">Get Started</button>
+                    <button class="btn-pricing secondary" onclick="signUp('business_monthly')">Get Started</button>
                 </div>
+            </div>
 
-                <!-- Enterprise Plan -->
-                <div class="pricing-card" style="position: relative; overflow: hidden;">
+            <!-- Annual Plans Grid - Only Pro and Enterprise -->
+            <div id="annualPlans" style="display: none; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem; max-width: 800px; margin: 0 auto;">
+
+                <!-- Pro Annual -->
+                <div class="pricing-card popular" style="transform: translateY(-10px);">
+                    <div class="popular-badge">BEST VALUE</div>
                     <div class="pricing-header">
-                        <h3>Enterprise</h3>
-                        <div class="pricing-price" data-monthly="$99.99" data-annual="$74.99">$99.99<span>/month</span></div>
-                        <p style="color: var(--text-secondary); font-size: 0.9rem;">2,500 credits/month</p>
+                        <h3>Pro Annual</h3>
+                        <div class="pricing-price">$239.99<span>/year</span></div>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">6,000 credits/year</p>
+                        <p style="color: #10b981; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem;">Save $119.89 vs monthly</p>
                     </div>
                     <ul class="pricing-features">
-                        <li>Everything in Business</li>
+                        <li><strong>Priority processing</strong></li>
+                        <li>4K video output</li>
+                        <li>API access (1,000 calls/mo)</li>
+                        <li>Priority support</li>
+                        <li>Advanced analytics</li>
+                        <li><strong>500 credits/month</strong></li>
+                    </ul>
+                    <button class="btn-pricing primary" onclick="signUp('pro_annual')">Get Pro Annual</button>
+                </div>
+
+                <!-- Enterprise Annual -->
+                <div class="pricing-card" style="position: relative; overflow: hidden;">
+                    <div class="pricing-header">
+                        <h3>Enterprise Annual</h3>
+                        <div class="pricing-price">$499<span>/year</span></div>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">15,000 credits/year</p>
+                        <p style="color: #10b981; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem;">Save $700+ vs monthly</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>Everything in Pro</li>
                         <li><strong>Unlimited team seats</strong></li>
+                        <li>Unlimited API calls</li>
                         <li>White-label options</li>
                         <li>SLA guarantee (99.9%)</li>
                         <li>Priority phone support</li>
-                        <li>Custom training</li>
+                        <li><strong>1,250 credits/month</strong></li>
                     </ul>
-                    <button class="btn-pricing secondary" onclick="signUp('enterprise')">Contact Sales</button>
+                    <button class="btn-pricing secondary" onclick="signUp('enterprise_annual')">Get Enterprise</button>
                 </div>
             </div>
 
@@ -962,7 +1004,8 @@
             currentBilling = type;
             const monthlyBtn = document.getElementById('monthlyBtn');
             const annualBtn = document.getElementById('annualBtn');
-            const priceElements = document.querySelectorAll('.pricing-price[data-monthly]');
+            const monthlyPlans = document.getElementById('monthlyPlans');
+            const annualPlans = document.getElementById('annualPlans');
 
             if (type === 'monthly') {
                 monthlyBtn.style.background = 'var(--gradient-primary)';
@@ -970,20 +1013,18 @@
                 annualBtn.style.background = 'transparent';
                 annualBtn.style.color = 'var(--text-secondary)';
 
-                priceElements.forEach(el => {
-                    const price = el.getAttribute('data-monthly');
-                    el.innerHTML = price + '<span>/month</span>';
-                });
+                // Show monthly, hide annual
+                monthlyPlans.style.display = 'grid';
+                annualPlans.style.display = 'none';
             } else {
                 annualBtn.style.background = 'var(--gradient-primary)';
                 annualBtn.style.color = 'white';
                 monthlyBtn.style.background = 'transparent';
                 monthlyBtn.style.color = 'var(--text-secondary)';
 
-                priceElements.forEach(el => {
-                    const price = el.getAttribute('data-annual');
-                    el.innerHTML = price + '<span>/month</span>';
-                });
+                // Show annual, hide monthly
+                monthlyPlans.style.display = 'none';
+                annualPlans.style.display = 'grid';
             }
         }
 
@@ -1011,12 +1052,43 @@
         }
 
         // Demo upload handler
-        document.getElementById('demoUpload').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                alert(`Demo file selected: ${file.name}\n\nIn production, this would:\n1. Confirm rights before upload\n2. Process with AI cleanup\n3. Show before/after preview\n4. Prompt to sign up`);
+        const demoUpload = document.getElementById('demoUpload');
+        if (demoUpload) {
+            demoUpload.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    alert(`Demo file selected: ${file.name}\n\nIn production, this would:\n1. Confirm rights before upload\n2. Process with AI cleanup\n3. Show before/after preview\n4. Prompt to sign up`);
+                }
+            });
+        }
+
+        // Theme toggle functionality - syncs with index.html
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeIcon(newTheme);
+        }
+
+        function updateThemeIcon(theme) {
+            const icon = document.getElementById('themeIcon');
+            if (icon) {
+                icon.textContent = theme === 'dark' ? '☀️' : '🌙';
             }
-        });
+        }
+
+        // Load saved theme on page load
+        function loadTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            updateThemeIcon(savedTheme);
+        }
+
+        // Initialize theme
+        loadTheme();
     </script>
 </body>
 </html>
