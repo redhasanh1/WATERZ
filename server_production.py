@@ -1019,11 +1019,7 @@ def delete_account():
 
         print(f"[ACCOUNT DELETE] Starting deletion for user {user_id} ({user_email})")
 
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({'status': 'error', 'message': 'Database error'}), 500
-
-        try:
+        with get_db() as conn:
             cur = conn.cursor()
 
             # Verify user exists and get their data
@@ -1040,24 +1036,20 @@ def delete_account():
 
             # Delete user from database
             cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-            conn.commit()
 
             print(f"[ACCOUNT DELETE] Deleted user {user_id} ({user_email}) from database")
 
-            # Clear session
-            session.clear()
+        # Clear session
+        session.clear()
 
-            # Note: User's uploaded files are stored with task_ids (UUIDs), not user IDs
-            # They will be cleaned up by the automatic cleanup routine
-            # If you want immediate deletion, you'd need to track user->file associations
+        # Note: User's uploaded files are stored with task_ids (UUIDs), not user IDs
+        # They will be cleaned up by the automatic cleanup routine
+        # If you want immediate deletion, you'd need to track user->file associations
 
-            return jsonify({
-                'status': 'success',
-                'message': 'Account deleted successfully'
-            })
-
-        finally:
-            release_db_connection(conn)
+        return jsonify({
+            'status': 'success',
+            'message': 'Account deleted successfully'
+        })
 
     except Exception as e:
         print(f"[ERROR] Account deletion failed: {e}")
