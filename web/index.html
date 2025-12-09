@@ -771,21 +771,21 @@
             width: 60px;
             height: 60px;
             margin: 0 auto 1.5rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 1.5rem;
             font-weight: 700;
-            color: white;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            color: var(--text-primary);
         }
 
         .feature-number svg {
             width: 28px;
             height: 28px;
-            stroke: white;
+            stroke: var(--text-secondary);
             stroke-width: 2;
             fill: none;
         }
@@ -1595,7 +1595,7 @@
                     </script>
                 </div>
 
-                <!-- AI Inpainting Showcase Section -->
+                <!-- Video Demo Section -->
                 <section id="showcase" style="padding: 4rem 0; margin: 3rem 0; background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%); border-top: 1px solid rgba(102, 126, 234, 0.1); border-bottom: 1px solid rgba(102, 126, 234, 0.1); border-radius: 24px;">
                     <div class="container">
                         <div style="text-align: center; max-width: 900px; margin: 0 auto 3rem;">
@@ -1603,7 +1603,7 @@
                                 See Our AI in Action
                             </h2>
                             <p style="color: var(--text-secondary); font-size: 1.2rem; line-height: 1.7;">
-                                Watch how our advanced AI inpainting technology removes objects seamlessly from videos. Professional results in seconds.
+                                Watch how our AI removes objects seamlessly from videos. Professional results in seconds.
                             </p>
                         </div>
 
@@ -1616,7 +1616,7 @@
                                     controls
                                     preload="metadata"
                                     playsinline
-                                    aria-label="AI inpainting demonstration video"
+                                    aria-label="AI demonstration video"
                                 >
                                     <source src="https://markz.humblewoslayer.workers.dev/permanent/demo/cool.mp4" type="video/mp4">
                                     Your browser does not support the video tag.
@@ -1657,7 +1657,7 @@
                             <svg viewBox="0 0 24 24"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M5 19l1 3 1-3 3-1-3-1-1-3-1 3-3 1 3 1z"/><path d="M19 5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5L17 6l1.5-.5.5-1.5z"/></svg>
                         </div>
                         <h3>AI-Powered Removal</h3>
-                        <p style="color: var(--text-secondary);">Advanced neural networks intelligently fill in the removed area, preserving original quality and motion.</p>
+                        <p style="color: var(--text-secondary);">Our AI intelligently fills in the removed area, preserving original quality and motion.</p>
                         <button id="removeWatermarkBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; display: none;">
                             Remove Object - Free (5 min wait)
                         </button>
@@ -2209,13 +2209,13 @@
                             localStorage.removeItem(ACTIVE_TASK_KEY);
                             return;
                         } else if (statusData.status === 'processing') {
-                            statusText.textContent = 'SAM2 removing selected objects...';
+                            statusText.textContent = 'Removing selected objects...';
                             statusText.style.color = '#a0a0c0';
                             progressBar.style.width = '50%';
                             progressPercent.textContent = '50%';
                         } else {
                             // pending or other status
-                            statusText.textContent = 'Waiting for SAM2 worker...';
+                            statusText.textContent = 'Processing...';
                             statusText.style.color = '#a0a0c0';
                         }
 
@@ -2341,7 +2341,7 @@
             const points = window.sam2Selector.getAllPoints();
             const frameIndex = window.currentFrame || 0;
 
-            statusText.textContent = 'Starting SAM2 object removal...';
+            statusText.textContent = 'Starting object removal...';
 
             const response = await apiFetchPath('/api/sam2/process-video', {
                 method: 'POST',
