@@ -164,7 +164,7 @@ def draw_overlay(display_frame, frame_idx, total_frames, video_idx, total_videos
 
     # Controls at bottom
     h = overlay.shape[0]
-    hint = "N=next | B=back | S=skip | D=done | R=reset | X=restart | Q=quit"
+    hint = "SPACE=next | B=back | S=skip | D=done | R=reset | X=restart | Q=quit"
     cv2.putText(overlay, hint, (10, h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 2)
     cv2.putText(overlay, hint, (10, h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1)
 
@@ -303,7 +303,7 @@ def main():
                     cv2.destroyAllWindows()
                     return
 
-                elif key == ord('n'):
+                elif key == ord(' '):  # Spacebar
                     # Save and next frame
                     if boxes:
                         save_frame_and_label(frame, boxes, progress)
