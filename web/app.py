@@ -60,10 +60,28 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
 # Stripe configuration
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', '')
-STRIPE_PRICE_LOOKUP = {
-    'pro': os.environ.get('STRIPE_PRICE_ID_PRO', ''),
-    'enterprise': os.environ.get('STRIPE_PRICE_ID_ENTERPRISE', '')
+
+# Monthly subscription price IDs
+STRIPE_SUBSCRIPTION_PRICES = {
+    'starter': os.environ.get('STRIPE_PRICE_STARTER', ''),
+    'pro': os.environ.get('STRIPE_PRICE_PRO', ''),
+    'agency': os.environ.get('STRIPE_PRICE_AGENCY', '')
 }
+
+# One-time credit pack price IDs
+STRIPE_CREDIT_PRICES = {
+    'credits_10': os.environ.get('STRIPE_PRICE_CREDITS_10', ''),
+    'credits_25': os.environ.get('STRIPE_PRICE_CREDITS_25', ''),
+    'credits_100': os.environ.get('STRIPE_PRICE_CREDITS_100', '')
+}
+
+# Credit amounts per package
+CREDIT_AMOUNTS = {
+    'credits_10': 10,
+    'credits_25': 25,
+    'credits_100': 100
+}
+
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
@@ -505,7 +523,7 @@ def create_checkout_session():
 
     data = request.get_json(silent=True) or {}
     plan = data.get('plan', 'pro').lower()
-    price_id = STRIPE_PRICE_LOOKUP.get(plan)
+    price_id = STRIPE_SUBSCRIPTION_PRICES.get(plan)
 
     if not price_id:
         return jsonify({'error': f'Unsupported plan "{plan}".'}), 400
@@ -513,6 +531,7 @@ def create_checkout_session():
     success_url = data.get('success_url') or _default_url('success.html?session_id={CHECKOUT_SESSION_ID}')
     cancel_url = data.get('cancel_url') or _default_url('cancel.html')
     customer_email = data.get('email') or None
+    user_id = data.get('user_id')
 
     try:
         session = stripe.checkout.Session.create(
@@ -526,7 +545,49 @@ def create_checkout_session():
             cancel_url=cancel_url,
             customer_email=customer_email,
             allow_promotion_codes=True,
-            metadata={'plan': plan}
+            metadata={'plan': plan, 'user_id': user_id}
+        )
+        return jsonify({'url': session.url})
+    except stripe.error.StripeError as exc:
+        print(f"Stripe error: {exc}")
+        return jsonify({'error': str(exc)}), 502
+    except Exception as exc:
+        print(f"Unexpected error creating checkout session: {exc}")
+        return jsonify({'error': 'Unable to create checkout session.'}), 500
+
+
+@app.route('/api/billing/create-onetime-checkout', methods=['POST'])
+def create_onetime_checkout():
+    """Create a Stripe Checkout session for a one-time credit pack purchase."""
+    if not stripe.api_key:
+        return jsonify({'error': 'Stripe is not configured on the server.'}), 503
+
+    data = request.get_json(silent=True) or {}
+    package = data.get('package', '').lower()
+    price_id = STRIPE_CREDIT_PRICES.get(package)
+
+    if not price_id:
+        return jsonify({'error': f'Unsupported package "{package}".'}), 400
+
+    success_url = data.get('success_url') or _default_url('success.html?session_id={CHECKOUT_SESSION_ID}')
+    cancel_url = data.get('cancel_url') or _default_url('cancel.html')
+    customer_email = data.get('email') or None
+    user_id = data.get('user_id')
+    credits = CREDIT_AMOUNTS.get(package, 0)
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode='payment',
+            payment_method_types=['card'],
+            line_items=[{
+                'price': price_id,
+                'quantity': 1
+            }],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            customer_email=customer_email,
+            allow_promotion_codes=True,
+            metadata={'package': package, 'credits': credits, 'user_id': user_id}
         )
         return jsonify({'url': session.url})
     except stripe.error.StripeError as exc:

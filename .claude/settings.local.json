@@ -44,7 +44,21 @@
       "Bash(PGPASSWORD=\"xXqaHpjxSUSIXgfPKacAFWkpTURaBzvN\" psql:*)",
       "Bash(python -c \"\nimport psycopg2\nconn = psycopg2.connect(\n    host=''centerbeam.proxy.rlwy.net'',\n    port=49937,\n    user=''postgres'',\n    password=''xXqaHpjxSUSIXgfPKacAFWkpTURaBzvN'',\n    database=''railway''\n)\ncur = conn.cursor()\ncur.execute(''ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE'')\nconn.commit()\nprint(''is_admin column added successfully!'')\ncur.close()\nconn.close()\n\")",
       "Bash(ls:*)",
-      "Bash(python -c:*)"
+      "Bash(python -c:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(dir:*)",
+      "Bash(python:*)",
+      "Bash(py -3.12:*)",
+      "Bash(cmd.exe /c \"D:\\watermarkz\\TRAIN_SORA_V2.bat\")",
+      "Bash(cmd.exe /c \"cd /d D:\\watermarkz && TRAIN_SORA_V2.bat\")",
+      "Bash(cmd.exe /c \"set PYTHONPATH=D:\\watermarkz\\python_packages && py -3.12 D:\\watermarkz\\train_sora_v2.py\")",
+      "Bash(powershell.exe -Command \"cd D:\\watermarkz; $env:PYTHONPATH=''D:\\watermarkz\\python_packages''; py -3.12 train_sora_v2.py\")",
+      "Bash(\"C:\\Windows\\py.exe\" -3.12 \"D:\\watermarkz\\train_sora_v2.py\")",
+      "Bash(where:*)",
+      "Bash(\"C:/Users/has/AppData/Local/Programs/Python/Python312/python.exe\" \"D:/watermarkz/train_sora_v2.py\")",
+      "Bash(git -C \"D:/watermarkz\" status web/js/billing.js)",
+      "Bash(git -C \"D:/watermarkz\" diff web/js/billing.js)"
     ],
     "deny": [],
     "ask": []
