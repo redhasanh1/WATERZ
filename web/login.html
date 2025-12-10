@@ -640,12 +640,78 @@
                         window.location.href = 'index.html';
                     }, 1000);
                 } else {
-                    showMessage(data.error || 'Login failed. Please try again.', 'error');
+                    const errorMsg = data.error || 'Login failed. Please try again.';
+                    // Check if error is about email verification
+                    if (errorMsg.toLowerCase().includes('verify your email') || errorMsg.toLowerCase().includes('verification')) {
+                        showVerificationRequiredError(email, errorMsg);
+                    } else {
+                        showMessage(errorMsg, 'error');
+                    }
                 }
             } catch (error) {
                 console.error('Login error:', error);
                 showMessage('Connection error. Please try again.', 'error');
             }
+        }
+
+        // Show verification required error with resend button
+        function showVerificationRequiredError(email, errorMsg) {
+            const messageEl = document.getElementById('authMessage');
+            if (!messageEl) return;
+
+            messageEl.classList.remove('success');
+            messageEl.classList.add('error');
+            messageEl.style.display = 'block';
+            messageEl.removeAttribute('hidden');
+
+            messageEl.innerHTML = `
+                <div style="text-align: left;">
+                    <p style="margin: 0 0 0.75rem 0;">${errorMsg}</p>
+                    <button type="button" id="resendFromLoginBtn" style="background: transparent; border: 1px solid currentColor; color: inherit; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
+                        Resend Verification Email
+                    </button>
+                    <span id="resendFromLoginStatus" style="margin-left: 0.5rem; font-size: 0.85rem;"></span>
+                </div>
+            `;
+
+            // Add click handler for resend button
+            document.getElementById('resendFromLoginBtn').addEventListener('click', async function() {
+                const btn = this;
+                const statusEl = document.getElementById('resendFromLoginStatus');
+                btn.disabled = true;
+                btn.textContent = 'Sending...';
+
+                try {
+                    const endpoint = '/api/auth/resend-verification';
+                    const apiUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: email }),
+                        credentials: 'include'
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        statusEl.innerHTML = '<span style="color: #10b981;">✓ Email sent!</span>';
+                        btn.textContent = 'Email Sent';
+                        setTimeout(() => {
+                            btn.disabled = false;
+                            btn.textContent = 'Resend Verification Email';
+                        }, 60000);
+                    } else {
+                        statusEl.innerHTML = '<span style="color: #fca5a5;">' + (data.error || 'Failed to send') + '</span>';
+                        btn.disabled = false;
+                        btn.textContent = 'Resend Verification Email';
+                    }
+                } catch (error) {
+                    statusEl.innerHTML = '<span style="color: #fca5a5;">Connection error</span>';
+                    btn.disabled = false;
+                    btn.textContent = 'Resend Verification Email';
+                }
+            });
         }
 
         // Show message helper
