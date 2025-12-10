@@ -27,8 +27,11 @@
     }
 
     async function startOneTimeCheckout(packageName, options) {
-        const payload = Object.assign({ package: packageName }, options || {});
-        const url = `${API_BASE}/api/billing/create-onetime-checkout`;
+        const payload = Object.assign({
+            package: packageName,
+            mode: 'payment'  // Use payment mode for one-time purchases
+        }, options || {});
+        const url = `${API_BASE}/api/billing/create-checkout-session`;  // Same endpoint as subscriptions
         const { url: checkoutUrl, error } = await postJSON(url, payload);
         if (error) throw new Error(error);
         window.location.href = checkoutUrl;

@@ -58,7 +58,11 @@
       "Bash(where:*)",
       "Bash(\"C:/Users/has/AppData/Local/Programs/Python/Python312/python.exe\" \"D:/watermarkz/train_sora_v2.py\")",
       "Bash(git -C \"D:/watermarkz\" status web/js/billing.js)",
-      "Bash(git -C \"D:/watermarkz\" diff web/js/billing.js)"
+      "Bash(git -C \"D:/watermarkz\" diff web/js/billing.js)",
+      "Bash(git -C \"D:/watermarkz\" diff --stat web/app.py)",
+      "Bash(git -C \"D:/watermarkz\" log --oneline -5)",
+      "Bash(git -C \"D:/watermarkz\" show --stat 166174f0)",
+      "Bash(git -C \"D:/watermarkz\" status -sb)"
     ],
     "deny": [],
     "ask": []
