@@ -23,8 +23,8 @@ if exist redis_url.txt (
 )
 
 REM B2 credentials for mask upload
-set B2_KEY_ID=00539db5c1104b50000000002
-set B2_APP_KEY=K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4
+set B2_KEY_ID=00539db5c1104b50000000003
+set B2_APP_KEY=K005384b8lPoBT11wScxkZ2Gx0fszus
 set B2_BUCKET=watermarkz
 set B2_CDN_URL=https://markz.humblewoslayer.workers.dev
 

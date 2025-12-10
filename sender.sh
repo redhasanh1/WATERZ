@@ -37,8 +37,8 @@ else
 fi
 
 # B2 credentials for mask upload
-export B2_KEY_ID="00539db5c1104b50000000002"
-export B2_APP_KEY="K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4"
+export B2_KEY_ID="00539db5c1104b50000000003"
+export B2_APP_KEY="K005384b8lPoBT11wScxkZ2Gx0fszus"
 export B2_BUCKET="watermarkz"
 export B2_CDN_URL="https://markz.humblewoslayer.workers.dev"
 echo "[B2] Upload enabled to $B2_BUCKET"

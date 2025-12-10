@@ -2172,8 +2172,8 @@ def trigger_finalization(redis_client, video_id, total_segments):
         from b2sdk.v2 import B2Api, InMemoryAccountInfo
         import time as _upload_time
 
-        B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
-        B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+        B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000003')
+        B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005384b8lPoBT11wScxkZ2Gx0fszus')
         B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
         B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 

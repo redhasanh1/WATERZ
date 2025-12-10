@@ -1303,8 +1303,8 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             from b2sdk.v2 import B2Api, InMemoryAccountInfo
             import time as _upload_time
 
-            B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
-            B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+            B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000003')
+            B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005384b8lPoBT11wScxkZ2Gx0fszus')
             B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
             B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 
@@ -1794,8 +1794,8 @@ def finalize_yolo_task(self, segment_results, video_data):
     try:
         from b2sdk.v2 import B2Api, InMemoryAccountInfo
 
-        B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
-        B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+        B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000003')
+        B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005384b8lPoBT11wScxkZ2Gx0fszus')
         B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
         B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 
@@ -2518,8 +2518,8 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             from b2sdk.v2 import B2Api, InMemoryAccountInfo
             import time as _upload_time
 
-            B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000002')
-            B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4')
+            B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000003')
+            B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005384b8lPoBT11wScxkZ2Gx0fszus')
             B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
             B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 

@@ -1,0 +1,182 @@
+================================================================================
+DOCKER BUILD NOTES - December 10, 2025
+================================================================================
+
+GOAL: Build Docker image with ZERO first-run build time
+      - Pre-built TRT engines baked into image
+      - Updated B2 credentials
+      - Instant startup on Salad/any 4090
+
+================================================================================
+WHAT'S INCLUDED IN THE NEW BUILD
+================================================================================
+
+1. PRE-BUILT TENSORRT ENGINES (No more 15 min wait!)
+   ------------------------------------------------
+   These are downloaded during docker build from B2:
+
+   - NeuFlow TRT Engine (27MB):
+     https://f005.backblazeb2.com/file/watermarkz/engines/neuflow_things_fp16.engine
+     -> /app/faster-propainter-main/models/neuflow_things_fp16.engine
+
+   - RFCNet DCNv4 TRT Engine (12MB):
+     https://f005.backblazeb2.com/file/watermarkz/engines/rfcnet_dcnv4_fp16.engine
+     -> /app/engines/rfcnet/rfcnet_dcnv4_fp16.engine
+
+   These were built on a Linux 4090 (Salad) on Dec 10, 2025.
+   They are GPU-architecture specific (SM89 = RTX 40xx series).
+
+2. DCNv4 TENSORRT PLUGIN
+   ----------------------
+   Compiled from source during docker build:
+   -> /app/libdcnv4_plugin.so
+
+   Source: dcnv4_tensorrt_plugin/
+   CUDA Architectures: 75, 80, 89 (Turing, Ampere, Ada)
+
+3. B2 CREDENTIALS (UPDATED Dec 10, 2025)
+   --------------------------------------
+   Old (INVALID - DO NOT USE):
+     B2_KEY_ID: 00539db5c1104b50000000002
+     B2_APP_KEY: K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4
+
+   New (ACTIVE):
+     B2_KEY_ID: 00539db5c1104b50000000003
+     B2_APP_KEY: K005384b8lPoBT11wScxkZ2Gx0fszus
+
+   Updated in these files:
+     - server_production.py (line ~2175)
+     - server_production2.py (lines ~1306, ~1797, ~2521)
+     - sender.sh (lines 40-41)
+     - 4090_sender.bat (lines 26-27)
+     - Cloudflare Worker (markz.humblewoslayer.workers.dev)
+
+4. PROPAINTER WEIGHTS
+   -------------------
+   Baked into image via COPY faster-propainter-main/:
+     - /app/faster-propainter-main/weights/ProPainter.pth
+     - /app/faster-propainter-main/weights/recurrent_flow_completion.pth
+     - /app/faster-propainter-main/weights/raft-things.pth
+
+5. YOLO WEIGHTS
+   -------------
+   Copied to: /app/runs/detect/new_sora_watermark/weights/best.pt
+
+   NOTE: There was a path issue where code looked for relative path
+   instead of absolute. Fixed by running from /app directory.
+
+================================================================================
+HOW TO BUILD AND PUSH
+================================================================================
+
+# In WSL (Linux):
+cd /mnt/d/watermarkz
+
+# Build the image
+docker build -f Dockerfile.4090worker.trt -t humblewoslayer/watermarkz-celery:v2 .
+
+# Login to Docker Hub
+docker login -u humblewoslayer
+
+# Push to Docker Hub
+docker push humblewoslayer/watermarkz-celery:v2
+
+================================================================================
+SALAD CONFIGURATION
+================================================================================
+
+Image: humblewoslayer/watermarkz-celery:v2
+
+Required Environment Variables:
+  REDIS_URL=redis://default:PASSWORD@HOST:PORT/0
+
+Optional (already have defaults in code):
+  B2_KEY_ID=00539db5c1104b50000000003
+  B2_APP_KEY=K005384b8lPoBT11wScxkZ2Gx0fszus
+  B2_BUCKET=watermarkz
+  B2_CDN_URL=https://markz.humblewoslayer.workers.dev
+
+Docker Registry Credentials:
+  Username: humblewoslayer
+  Password: (Docker Hub access token)
+
+Container Caching: ENABLED (30 days)
+
+================================================================================
+STARTUP BEHAVIOR
+================================================================================
+
+OLD BEHAVIOR (before this fix):
+  1. Container starts
+  2. docker-entrypoint.sh runs
+  3. Builds NeuFlow TRT engine (~10 min)
+  4. Builds RFCNet TRT engine (~5 min)
+  5. Starts Celery worker
+  TOTAL: ~15 minutes before ready
+
+NEW BEHAVIOR (after this fix):
+  1. Container starts
+  2. docker-entrypoint.sh runs
+  3. Detects engines already exist (pre-built in image)
+  4. Starts Celery worker immediately
+  TOTAL: ~30 seconds to ready
+
+================================================================================
+DOCKERFILE CHANGES MADE
+================================================================================
+
+Added after ONNX models section (around line 75):
+
+  # ---- Pre-built TRT Engines (built on Linux 4090, skip 15min build!) ----
+  RUN curl -o /app/faster-propainter-main/models/neuflow_things_fp16.engine \
+      https://f005.backblazeb2.com/file/watermarkz/engines/neuflow_things_fp16.engine && \
+      curl -o /app/engines/rfcnet/rfcnet_dcnv4_fp16.engine \
+      https://f005.backblazeb2.com/file/watermarkz/engines/rfcnet_dcnv4_fp16.engine
+
+================================================================================
+KNOWN ISSUES / TODO
+================================================================================
+
+1. YOLO PATH ISSUE
+   - YOLO detector looks for relative path 'runs/detect/.../best.pt'
+   - Works when running from /app directory
+   - May need to fix to use absolute path /app/runs/detect/...
+   - Not critical if only using SAM2 interactive mode
+
+2. SAM2 MODELS
+   - SAM2 models may download from HuggingFace on first use
+   - Consider baking SAM2 checkpoints into image for faster cold start
+   - Current behavior: downloads ~500MB on first SAM2 task
+
+================================================================================
+FILES UPLOADED TO B2 FOR THIS BUILD
+================================================================================
+
+Uploaded from Salad container on Dec 10, 2025:
+
+  b2 upload-file watermarkz \
+    /app/faster-propainter-main/models/neuflow_things_fp16.engine \
+    engines/neuflow_things_fp16.engine
+
+  b2 upload-file watermarkz \
+    /app/engines/rfcnet/rfcnet_dcnv4_fp16.engine \
+    engines/rfcnet_dcnv4_fp16.engine
+
+These are publicly accessible (no auth needed for download).
+
+================================================================================
+VERIFICATION
+================================================================================
+
+After container starts, logs should show:
+
+  [OK] NeuFlow TRT engine exists: /app/faster-propainter-main/models/neuflow_things_fp16.engine
+  [OK] RFCNet DCNv4 TRT engine exists: /app/engines/rfcnet/rfcnet_dcnv4_fp16.engine
+  ...
+  [START] Launching Celery Worker
+
+NOT:
+
+  [BUILD] NeuFlow TRT engine not found, building...
+
+================================================================================
