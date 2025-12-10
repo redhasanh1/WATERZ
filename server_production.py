@@ -182,6 +182,42 @@ except ImportError:
     STRIPE_ENABLED = False
     print("[WARNING] Stripe not installed - billing endpoints disabled")
 
+# B2 + Cloudflare CDN for zero-egress file storage
+B2_KEY_ID = os.getenv('B2_KEY_ID', '')
+B2_APP_KEY = os.getenv('B2_APP_KEY', '')
+B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+B2_UPLOAD_ENABLED = os.getenv('B2_UPLOAD_ENABLED', '1') == '1'
+
+try:
+    from b2sdk.v2 import B2Api, InMemoryAccountInfo
+    B2_ENABLED = bool(B2_KEY_ID and B2_APP_KEY)
+    if B2_ENABLED:
+        print(f"[OK] B2 storage enabled - CDN: {B2_CDN_URL}")
+    else:
+        print("[WARNING] B2 credentials not set - using local storage")
+except ImportError:
+    B2_ENABLED = False
+    print("[WARNING] b2sdk not installed - using local storage")
+
+def upload_to_b2(local_path: str, remote_path: str) -> str:
+    """Upload a file to B2 and return CDN URL. Returns None on failure."""
+    if not B2_ENABLED or not B2_UPLOAD_ENABLED:
+        return None
+    try:
+        from b2sdk.v2 import B2Api, InMemoryAccountInfo
+        info = InMemoryAccountInfo()
+        b2_api = B2Api(info)
+        b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+        bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+        bucket.upload_local_file(local_file=local_path, file_name=remote_path)
+        cdn_url = f"{B2_CDN_URL}/{remote_path}"
+        print(f"[B2] Uploaded {local_path} -> {cdn_url}")
+        return cdn_url
+    except Exception as e:
+        print(f"[B2] Upload failed: {e}")
+        return None
+
 # Authentication and session management
 from flask import session, redirect, url_for
 try:
@@ -5747,14 +5783,24 @@ def upload_file():
                 'message': 'Invalid file path'
             }), 400
 
-        # Save file
+        # Save file locally first (needed for B2 upload)
         file.save(file_path)
-
         print(f"[OK] File uploaded (validated {detected_type}): {file_path}")
+
+        # Upload to B2 for CDN serving (zero egress)
+        cdn_url = None
+        if B2_ENABLED:
+            remote_path = f"uploads/{task_id}{ext}"
+            cdn_url = upload_to_b2(file_path, remote_path)
+            if cdn_url:
+                # Store CDN URL in Redis for later retrieval
+                redis_client.set(f"upload:{task_id}:cdn_url", cdn_url)
+                print(f"[B2] Upload CDN URL stored: {cdn_url}")
 
         return jsonify({
             'status': 'success',
-            'task_id': task_id
+            'task_id': task_id,
+            'cdn_url': cdn_url  # Frontend/workers can use this directly
         })
 
     except Exception as e:
@@ -6015,9 +6061,20 @@ def process_video():
 
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
-    """Serve uploaded video files"""
+    """Serve uploaded video files - redirect to CDN if available (zero egress)"""
     # Sanitize filename to prevent path traversal
     filename = sanitize_filename(filename)
+
+    # Extract task_id from filename (format: {task_id}.{ext})
+    task_id = os.path.splitext(filename)[0]
+
+    # Check Redis for CDN URL (uploaded to B2)
+    cdn_url = redis_client.get(f"upload:{task_id}:cdn_url")
+    if cdn_url:
+        print(f"[CDN] Redirecting upload {filename} to CDN: {cdn_url}")
+        return redirect(cdn_url)
+
+    # Fallback to local file serving
     file_path = os.path.join(UPLOAD_DIR, filename)
 
     # Verify file exists and is within upload directory
@@ -6158,17 +6215,36 @@ def admin_upload_video():
 
 @app.route('/results/<filename>')
 def serve_result(filename):
-    """Serve processed result files and delete after sending"""
+    """Serve processed result files - redirect to CDN if available (zero egress)"""
     print(f"[SERVE-RESULT] Request for file: {filename} from {request.remote_addr}")
 
     # Sanitize filename to prevent path traversal
     filename = sanitize_filename(filename)
+
+    # Extract task_id from filename (format: {task_id}_processed.ext or {task_id}.ext)
+    base_name = os.path.splitext(filename)[0]
+    # Handle both {task_id}_processed and {task_id} formats
+    task_id = base_name.replace('_processed', '').replace('_cleaned', '')
+
+    # Check Redis for CDN URL (result uploaded to B2 by worker)
+    cdn_url = redis_client.get(f"video:{task_id}:final_path")
+    if cdn_url and cdn_url.startswith('http'):
+        print(f"[CDN] Redirecting result {filename} to CDN: {cdn_url}")
+        # Clean up local files if they exist
+        file_path = os.path.join(RESULT_DIR, filename)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"[CLEANUP] Deleted local result after CDN redirect: {filename}")
+            except Exception as e:
+                print(f"[WARNING] Could not delete local file: {e}")
+        return redirect(cdn_url)
+
+    # Fallback to local file serving
     file_path = os.path.join(RESULT_DIR, filename)
 
     print(f"[SERVE-RESULT] Looking for file at: {file_path}")
-    print(f"[SERVE-RESULT] RESULT_DIR: {RESULT_DIR}")
     print(f"[SERVE-RESULT] File exists: {os.path.exists(file_path)}")
-    print(f"[SERVE-RESULT] RESULT_DIR contents: {os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else 'DIR NOT FOUND'}")
 
     # Verify file exists and is within result directory
     if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(RESULT_DIR)):
@@ -6176,7 +6252,7 @@ def serve_result(filename):
         return jsonify({'error': 'File not found'}), 404
 
     # Send file with as_attachment to trigger download
-    print(f"[SERVE-RESULT] ✅ Serving file: {filename}")
+    print(f"[SERVE-RESULT] ✅ Serving file locally: {filename}")
     response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
 
     # Schedule file deletion after response is sent
@@ -6784,6 +6860,25 @@ def stripe_webhook():
                             if result:
                                 new_balance = result[0]
                                 print(f"[BILLING] ✅ Credits added successfully. User {user_id} new balance: {new_balance}")
+
+                                # Record purchase in history
+                                try:
+                                    cur.execute('''
+                                        INSERT INTO purchases (user_id, stripe_session_id, stripe_payment_intent, package, credits_awarded, amount_cents, currency, status)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                    ''', (
+                                        user_id,
+                                        data_object.get('id'),
+                                        data_object.get('payment_intent'),
+                                        key,
+                                        credits_to_add,
+                                        data_object.get('amount_total'),
+                                        data_object.get('currency', 'usd'),
+                                        'completed'
+                                    ))
+                                    print(f"[BILLING] ✅ Purchase recorded in history")
+                                except Exception as pe:
+                                    print(f"[BILLING] ⚠️ Failed to record purchase history: {pe}")
                             else:
                                 print(f"[BILLING] ❌ User {user_id} not found in database")
                     except Exception as e:
@@ -6826,9 +6921,18 @@ def create_portal_session():
     try:
         data = request.get_json() or {}
         customer_id = data.get('customer_id')
+        session_id = data.get('session_id')
+
+        # Fallback: retrieve customer_id from checkout session
+        if not customer_id and session_id:
+            try:
+                checkout_session = stripe.checkout.Session.retrieve(session_id)
+                customer_id = checkout_session.customer
+            except stripe.error.StripeError as exc:
+                return jsonify({'error': str(exc)}), 400
 
         if not customer_id:
-            return jsonify({'error': 'customer_id is required'}), 400
+            return jsonify({'error': 'customer_id or session_id is required'}), 400
 
         # Get base URL for return redirect
         base_url = request.host_url.rstrip('/')
@@ -6843,6 +6947,47 @@ def create_portal_session():
 
     except Exception as e:
         print(f"[BILLING-PORTAL-ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/billing/purchase-history', methods=['GET', 'OPTIONS'])
+def get_purchase_history():
+    """Get user's purchase history"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute('''
+                SELECT id, package, credits_awarded, amount_cents, currency, status, created_at
+                FROM purchases
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT 50
+            ''', (user_id,))
+            rows = cur.fetchall()
+
+            purchases = []
+            for row in rows:
+                purchases.append({
+                    'id': row[0],
+                    'package': row[1],
+                    'credits_awarded': row[2],
+                    'amount_cents': row[3],
+                    'currency': row[4],
+                    'status': row[5],
+                    'created_at': row[6].isoformat() if row[6] else None
+                })
+
+            return jsonify({'purchases': purchases})
+
+    except Exception as e:
+        print(f"[PURCHASE-HISTORY-ERROR] {e}")
         return jsonify({'error': str(e)}), 500
 
 
