@@ -1913,11 +1913,13 @@
 
                     // Show process button
                     const processBtn = document.getElementById('processBtn');
-                    processBtn.style.display = 'block';
-                    document.getElementById('removeObjectBtn').style.display = 'block';
+                    if (processBtn) processBtn.style.display = 'block';
+                    const removeObjBtn = document.getElementById('removeObjectBtn');
+                    if (removeObjBtn) removeObjBtn.style.display = 'block';
 
                     // Show scroll hint
-                    document.getElementById('scrollHint').style.display = 'block';
+                    const scrollHint = document.getElementById('scrollHint');
+                    if (scrollHint) scrollHint.style.display = 'block';
 
                     // Auto-scroll to button after a brief delay
                     setTimeout(() => {
@@ -1998,18 +2000,20 @@
 
                     // Show process button
                     const processBtn = document.getElementById('processBtn');
-                    processBtn.style.display = 'block';
+                    if (processBtn) processBtn.style.display = 'block';
 
                     // Show scroll hint
-                    document.getElementById('scrollHint').style.display = 'block';
+                    const scrollHint = document.getElementById('scrollHint');
+                    if (scrollHint) scrollHint.style.display = 'block';
 
                     // Show cleanup button in feature section
-                    document.getElementById('removeObjectBtn').style.display = 'block';
+                    const removeObjBtn = document.getElementById('removeObjectBtn');
+                    if (removeObjBtn) removeObjBtn.style.display = 'block';
 
                     // Show download hint
                     // Auto-scroll to button after a brief delay
                     setTimeout(() => {
-                        processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        if (processBtn) processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }, 500);
 
                     alert('Video loaded successfully! Ready to start authorized cleanup.');
