@@ -1,5 +1,5 @@
 """
-Security module for watermark removal web application.
+Security module for MarkRemoverAI web application.
 Provides path validation, directory sandboxing, MIME type checking, and antivirus scanning.
 """
 

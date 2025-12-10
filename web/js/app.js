@@ -1,6 +1,6 @@
-// AI Watermark Remover - Main Application JavaScript
+// MarkRemoverAI - Main Application JavaScript
 
-class WatermarkRemover {
+class ObjectRemover {
     constructor() {
         this.currentFile = null;
         this.processedFile = null;
@@ -153,7 +153,7 @@ class WatermarkRemover {
             // Simulate progress for better UX
             this.updateProgress(10);
 
-            const response = await fetch('/api/remove-watermark', {
+            const response = await fetch('/api/remove-object', {
                 method: 'POST',
                 body: formData
             });
@@ -284,7 +284,7 @@ class WatermarkRemover {
 
         const extension = this.isVideo ? 'mp4' : 'png';
         const timestamp = new Date().getTime();
-        a.download = `watermark-removed-${timestamp}.${extension}`;
+        a.download = `object-removed-${timestamp}.${extension}`;
 
         document.body.appendChild(a);
         a.click();
@@ -312,5 +312,5 @@ class WatermarkRemover {
 
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    new WatermarkRemover();
+    new ObjectRemover();
 });

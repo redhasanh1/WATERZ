@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Flask Backend for AI Watermark Remover
-Handles file uploads and watermark removal processing
+Flask Backend for MarkRemoverAI
+Handles file uploads and object removal processing
 """
 
 import sys
@@ -30,17 +30,17 @@ from security.path_validator import validate_static_path, SecurityError
 from security.av_scanner import scan_file_async
 from security.mime_validator import validate_mime_type, MIMEValidationError
 
-# Import watermark removal modules
+# Import object removal modules
 try:
     from yolo_detector import YOLOWatermarkDetector
     from wavepaint_tensorrt_inpainter import WavePaintTensorRTInpainter
 except ImportError as e:
-    print(f"Warning: Could not import watermark removal modules: {e}")
-    print("Make sure you're running from the watermarkz directory")
+    print(f"Warning: Could not import object removal modules: {e}")
+    print("Make sure you're running from the project directory")
 
 app = Flask(__name__, static_folder='.')
 CORS(app)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.environ.get('SECRET_KEY', 'watermarkai-dev-secret'))
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.environ.get('SECRET_KEY', 'markremoverai-dev-secret'))
 
 # Configuration - Fixed temp directory for better security and cleanup
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -423,8 +423,8 @@ def _on_threat_detected(filepath: str, result: dict):
     print(f"Threat: {result.get('threat_name', 'Unknown')}")
 
 
-@app.route('/api/remove-watermark', methods=['POST'])
-def remove_watermark():
+@app.route('/api/remove-object', methods=['POST'])
+def remove_object():
     """API endpoint to process uploaded file with security validation"""
     # Check if file is present
     if 'file' not in request.files:
@@ -660,7 +660,7 @@ start_cleanup_scheduler()
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("AI Watermark Remover - Flask Backend")
+    print("MarkRemoverAI - Flask Backend")
     print("=" * 60)
     print(f"Upload folder: {UPLOAD_FOLDER}")
     print(f"Max file size: {MAX_FILE_SIZE / 1024 / 1024}MB")

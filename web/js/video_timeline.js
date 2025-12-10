@@ -1,6 +1,6 @@
 /**
  * VideoTimeline - Professional timeline with frame thumbnails
- * For watermarkz video editing application
+ * For MarkRemoverAI video editing application
  */
 class VideoTimeline {
     constructor(videoElement, options = {}) {

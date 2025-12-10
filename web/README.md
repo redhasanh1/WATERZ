@@ -1,11 +1,11 @@
-# AI Watermark Remover - Local Web Interface
+# MarkRemoverAI - Local Web Interface
 
-A modern, AI-powered web application for removing watermarks from images and videos using YOLO detection and LaMa inpainting.
+A modern, AI-powered web application for removing unwanted objects from images and videos using YOLO detection and LaMa inpainting.
 
 ## Features
 
-- 🎯 **AI-Powered Detection**: Automatic watermark detection using YOLOv8
-- 🎨 **Smart Removal**: Advanced LaMa inpainting for seamless watermark removal
+- 🎯 **AI-Powered Detection**: Automatic object detection using YOLOv8
+- 🎨 **Smart Removal**: Advanced LaMa inpainting for seamless object removal
 - 📹 **Video Support**: Process both images (JPG, PNG) and videos (MP4, MOV)
 - 🔍 **Before/After Comparison**: Interactive slider to compare results
 - 💅 **Modern UI**: Clean, dark-themed interface with purple gradients
@@ -16,14 +16,14 @@ A modern, AI-powered web application for removing watermarks from images and vid
 ### Prerequisites
 
 1. Python 3.8+
-2. YOLO model weights (should be in parent watermarkz directory)
-3. LaMa inpainting model (should be configured in parent watermarkz directory)
+2. YOLO model weights (should be in parent directory)
+3. LaMa inpainting model (should be configured in parent directory)
 
 ### Setup
 
 1. Navigate to the web directory:
 ```bash
-cd /workspaces/RoomFinderAI/watermarkz/web
+cd web
 ```
 
 2. Install Python dependencies:
@@ -82,14 +82,14 @@ The frontend pricing buttons call these endpoints through `web/js/billing.js`.
 
 1. **Upload File**: Drag and drop or click to select an image or video file
 2. **Preview**: Review your uploaded file
-3. **Process**: Click "Process File" to start watermark removal
+3. **Process**: Click "Process File" to start object removal
 4. **Compare**: Use the interactive slider to compare before/after results
-5. **Download**: Download your watermark-free file
+5. **Download**: Download your clean file
 
 ## API Endpoints
 
-### POST `/api/remove-watermark`
-Upload a file for watermark removal.
+### POST `/api/remove-object`
+Upload a file for object removal.
 
 **Request:**
 - Method: POST
@@ -97,7 +97,7 @@ Upload a file for watermark removal.
 - Body: file (image or video)
 
 **Response:**
-- Returns the processed file with watermarks removed
+- Returns the processed file with objects removed
 
 ### GET `/api/health`
 Check server health and model status.
@@ -135,12 +135,12 @@ Check server health and model status.
 ### Backend
 - Flask web framework
 - OpenCV for image/video processing
-- YOLO for watermark detection
+- YOLO for object detection
 - LaMa for inpainting
 
 ### Processing Pipeline
 1. File upload and validation
-2. YOLO detection of watermark regions
+2. YOLO detection of object regions
 3. Template matching fallback (if available)
 4. Temporal consistency for videos
 5. LaMa inpainting for seamless removal
@@ -148,29 +148,8 @@ Check server health and model status.
 
 ## Troubleshooting
 
-### Models not loading
-Make sure the parent directory contains:
-- `yolo_detector.py`
-- `lama_inpaint_local.py`
-- YOLO model weights (`yolov8n.pt` or similar)
-- LaMa model files
+### Common Issues
 
-### Port already in use
-Change the port in `app.py`:
-```python
-app.run(host='0.0.0.0', port=5001, debug=True)
-```
-
-### Large video processing
-For videos longer than a few minutes, processing may take time. The progress is logged in the console.
-
-## Notes
-
-- This tool is for educational and fair use purposes only
-- Processing time varies based on file size and content
-- Video processing is frame-by-frame and may take several minutes
-- First request may be slower as models are lazy-loaded
-
-## License
-
-For educational purposes only. Please respect copyright and use responsibly.
+1. **Model not loaded**: Ensure YOLO and LaMa models are properly configured in the parent directory
+2. **Upload fails**: Check file size (max 100MB) and format (JPG, PNG, MP4, MOV, AVI)
+3. **Processing slow**: Video processing is intensive - consider shorter videos or using GPU acceleration

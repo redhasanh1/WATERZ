@@ -4,12 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Watermark Remover - Demo</title>
+    <title>MarkRemoverAI - Demo</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* AI Watermark Remover - Standalone Demo */
+        /* MarkRemoverAI - Standalone Demo */
         :root {
             --primary: #667eea;
             --primary-dark: #5568d3;
@@ -275,11 +275,11 @@
         <div class="container">
             <div class="hero-content">
                 <h1 class="hero-title">
-                    Remove Watermarks with
+                    Remove Objects with
                     <span class="gradient-text">AI Precision</span>
                 </h1>
                 <p class="hero-subtitle">
-                    Instantly remove watermarks from videos and images using advanced AI technology.
+                    Instantly remove unwanted objects from videos and images using advanced AI technology.
                     <br>No quality loss. No hassle. Just clean results.
                 </p>
 
@@ -307,12 +307,12 @@
 
                     <div class="info-box">
                         <h3>🎯 Demo Features</h3>
-                        <p>This is a UI demonstration of the AI Watermark Remover interface. The full backend processing requires running the Python Flask/Gradio server with YOLO and LaMa models.</p>
+                        <p>This is a UI demonstration of the MarkRemoverAI interface. The full backend processing requires running the Python Flask/Gradio server with YOLO and LaMa models.</p>
                         <p style="margin-top: 1rem;"><strong>To use the full application:</strong></p>
                         <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
-                            <li>Run the Python backend from the watermarkz directory</li>
+                            <li>Run the Python backend from the project directory</li>
                             <li>Access at http://localhost:5000 or http://localhost:7860</li>
-                            <li>Upload images/videos for AI-powered watermark removal</li>
+                            <li>Upload images/videos for AI-powered object removal</li>
                         </ul>
                     </div>
                 </div>
@@ -326,12 +326,12 @@
                     <div class="feature-card">
                         <div class="feature-number">2</div>
                         <h3>AI Detection</h3>
-                        <p style="color: var(--text-secondary);">YOLOv8 automatically detects watermarks</p>
+                        <p style="color: var(--text-secondary);">YOLOv8 automatically detects objects</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-number">3</div>
                         <h3>Smart Removal</h3>
-                        <p style="color: var(--text-secondary);">LaMa inpainting removes watermarks seamlessly</p>
+                        <p style="color: var(--text-secondary);">LaMa inpainting removes objects seamlessly</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-number">4</div>
@@ -426,7 +426,7 @@
                     document.getElementById('previewImage').style.display = 'none';
                     previewContainer.classList.add('active');
 
-                    alert('Video loaded successfully! Ready to remove watermark.');
+                    alert('Video loaded successfully! Ready to remove objects.');
                 } else {
                     alert('Error: ' + (data.message || 'Failed to load video'));
                 }
