@@ -9,6 +9,7 @@
                 'Content-Type': 'application/json',
                 'ngrok-skip-browser-warning': 'true'
             },
+            credentials: 'include',
             body: JSON.stringify(payload || {})
         });
         if (!response.ok) {
