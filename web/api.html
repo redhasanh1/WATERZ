@@ -540,14 +540,83 @@
             color: var(--primary);
         }
 
+        /* Mobile Menu Toggle */
+        .mobile-menu-toggle {
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            cursor: pointer;
+            padding: 10px;
+            z-index: 1001;
+        }
+
+        .mobile-menu-toggle span {
+            width: 24px;
+            height: 2.5px;
+            background: var(--text-primary);
+            border-radius: 2px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .mobile-menu-toggle.active span:nth-child(1) {
+            transform: translateY(7.5px) rotate(45deg);
+        }
+
+        .mobile-menu-toggle.active span:nth-child(2) {
+            opacity: 0;
+        }
+
+        .mobile-menu-toggle.active span:nth-child(3) {
+            transform: translateY(-7.5px) rotate(-45deg);
+        }
+
+        /* Mobile Nav Menu */
+        .mobile-nav {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: var(--nav-bg);
+            backdrop-filter: blur(20px);
+            padding: 80px 20px 30px;
+            flex-direction: column;
+            gap: 1rem;
+            z-index: 999;
+            transform: translateY(-100%);
+            transition: transform 0.3s ease;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .mobile-nav.active {
+            transform: translateY(0);
+        }
+
+        .mobile-nav a {
+            color: var(--text-primary);
+            text-decoration: none;
+            font-weight: 500;
+            padding: 12px 16px;
+            border-radius: 8px;
+            transition: background 0.3s;
+        }
+
+        .mobile-nav a:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .nav-links {
-                gap: 1rem;
+                display: none;
             }
 
-            .nav-links a:not(.btn-nav) {
-                display: none;
+            .mobile-menu-toggle {
+                display: flex;
+            }
+
+            .mobile-nav {
+                display: flex;
             }
 
             .hero {
@@ -564,6 +633,18 @@
 
             .pricing-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .use-cases-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .cta-box {
+                padding: 2rem;
             }
         }
     </style>
@@ -585,8 +666,24 @@
                     <span id="themeIcon"></span>
                 </button>
             </div>
+            <div class="mobile-menu-toggle" id="mobileMenuToggle">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
         </div>
     </nav>
+
+    <!-- Mobile Navigation Menu -->
+    <div class="mobile-nav" id="mobileNav">
+        <a href="index.html">Home</a>
+        <a href="premium.html#pricing">Pricing</a>
+        <a href="api.html">API</a>
+        <a href="login.html">Get API Key</a>
+        <button onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 12px 16px; cursor: pointer; color: var(--text-primary); font-size: 1rem; text-align: left;">
+            <span id="themeIconMobile"></span> Toggle Theme
+        </button>
+    </div>
 
     <!-- Hero Section -->
     <section class="hero">
@@ -898,6 +995,32 @@ job = response.json()
             const savedTheme = localStorage.getItem('theme') || 'dark';
             document.documentElement.setAttribute('data-theme', savedTheme);
             updateThemeIcon(savedTheme);
+        }
+
+        // Mobile menu toggle
+        const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+        const mobileNav = document.getElementById('mobileNav');
+
+        mobileMenuToggle.addEventListener('click', () => {
+            mobileMenuToggle.classList.toggle('active');
+            mobileNav.classList.toggle('active');
+        });
+
+        // Close mobile menu when clicking a link
+        document.querySelectorAll('.mobile-nav a').forEach(link => {
+            link.addEventListener('click', () => {
+                mobileMenuToggle.classList.remove('active');
+                mobileNav.classList.remove('active');
+            });
+        });
+
+        // Update mobile theme icon too
+        function updateThemeIcon(theme) {
+            const icon = document.getElementById('themeIcon');
+            const iconMobile = document.getElementById('themeIconMobile');
+            const text = theme === 'dark' ? '☀️' : '🌙';
+            if (icon) icon.textContent = text;
+            if (iconMobile) iconMobile.textContent = text;
         }
 
         loadTheme();
