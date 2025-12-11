@@ -6184,6 +6184,65 @@ def admin_list_videos():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/admin/migrate-static-to-b2', methods=['POST'])
+def admin_migrate_static_to_b2():
+    """One-time migration: Upload all static videos from Railway volume to B2 CDN"""
+    admin_secret = os.getenv('ADMIN_SECRET', 'dev-secret-123')
+
+    if request.headers.get('X-Admin-Secret') != admin_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if not B2_ENABLED:
+        return jsonify({'error': 'B2 not enabled'}), 400
+
+    results = {'migrated': [], 'failed': [], 'skipped': []}
+
+    # Migrate static videos
+    if os.path.exists(STATIC_VIDEOS_DIR):
+        for filename in os.listdir(STATIC_VIDEOS_DIR):
+            if filename.endswith('.mp4'):
+                local_path = os.path.join(STATIC_VIDEOS_DIR, filename)
+                remote_path = f"static/static/{filename}"
+                try:
+                    cdn_url = upload_to_b2(local_path, remote_path)
+                    results['migrated'].append({'file': filename, 'cdn_url': cdn_url})
+                    print(f"[MIGRATE] ✅ {filename} -> {cdn_url}")
+                except Exception as e:
+                    results['failed'].append({'file': filename, 'error': str(e)})
+                    print(f"[MIGRATE] ❌ {filename}: {e}")
+
+    # Migrate training videos
+    if os.path.exists(TRAINING_VIDEOS_DIR):
+        for filename in os.listdir(TRAINING_VIDEOS_DIR):
+            if filename.endswith('.mp4'):
+                local_path = os.path.join(TRAINING_VIDEOS_DIR, filename)
+                remote_path = f"static/training/{filename}"
+                try:
+                    cdn_url = upload_to_b2(local_path, remote_path)
+                    results['migrated'].append({'file': filename, 'cdn_url': cdn_url})
+                    print(f"[MIGRATE] ✅ {filename} -> {cdn_url}")
+                except Exception as e:
+                    results['failed'].append({'file': filename, 'error': str(e)})
+                    print(f"[MIGRATE] ❌ {filename}: {e}")
+
+    # Migrate demo videos
+    demo_dir = os.path.join(DATA_DIR, 'demo_videos') if IS_RAILWAY else 'demo_videos'
+    if os.path.exists(demo_dir):
+        for filename in os.listdir(demo_dir):
+            if filename.endswith('.mp4'):
+                local_path = os.path.join(demo_dir, filename)
+                remote_path = f"demo_videos/{filename}"
+                try:
+                    cdn_url = upload_to_b2(local_path, remote_path)
+                    results['migrated'].append({'file': filename, 'cdn_url': cdn_url})
+                    print(f"[MIGRATE] ✅ {filename} -> {cdn_url}")
+                except Exception as e:
+                    results['failed'].append({'file': filename, 'error': str(e)})
+                    print(f"[MIGRATE] ❌ {filename}: {e}")
+
+    return jsonify(results)
+
+
 @app.route('/admin/upload-video', methods=['POST'])
 def admin_upload_video():
     """Admin endpoint to upload videos to Railway volume"""
