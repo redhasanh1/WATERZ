@@ -117,10 +117,18 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             transition: transform 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
 
         .logo:hover {
             transform: translateY(-1px);
+        }
+
+        .logo img {
+            width: 36px;
+            height: 36px;
         }
 
         .nav-links {
@@ -439,14 +447,17 @@
     <!-- Navigation -->
     <nav class="nav">
         <div class="nav-container">
-            <a class="logo" href="index.html" style="text-decoration: none;">MarkRemoverAI</a>
+            <a class="logo" href="index.html" style="text-decoration: none;">
+                <img src="logo.svg" alt="MarkRemoverAI">
+                MarkRemoverAI
+            </a>
             <div class="nav-links" id="navLinks">
                 <a href="index.html">Home</a>
                 <a href="api.html">API</a>
                 <a href="contact.html">Contact</a>
                 <button class="btn-nav" onclick="scrollToPricing()">Get Started</button>
                 <button id="themeToggle" onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; color: var(--text-primary); font-size: 1rem; transition: all 0.3s;" title="Toggle theme">
-                    <span id="themeIcon">☀️</span>
+                    <span id="themeIcon">Light</span>
                 </button>
             </div>
             <div class="mobile-menu-toggle" id="mobileMenuToggle">
@@ -475,7 +486,7 @@
                 </div>
 
                 <div class="pricing-grid" style="gap: 2rem;">
-                    <!-- 10 Credits - Starter -->
+                    <!-- 5 Credits - Starter -->
                     <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
                         <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
                         <div class="pricing-header">
@@ -484,16 +495,17 @@
                             <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Perfect for trying out the service</p>
                         </div>
                         <ul class="pricing-features" style="margin: 1.5rem 0;">
-                            <li><strong>Clean 10 videos</strong> — Test the magic</li>
-                            <li style="color: var(--text-secondary); font-size: 0.9rem;">Reclaim ~2 hours of manual editing</li>
-                            <li>Your credits, forever — No expiration games</li>
-                            <li>Full access to all AI-powered features</li>
-                            <li>Cancel anytime (hint: there's nothing to cancel)</li>
+                            <li><strong>5 credits</strong> (1 credit = 10 sec at 720p)</li>
+                            <li>State-of-the-art AI object removal</li>
+                            <li>Up to 4K resolution support</li>
+                            <li>No watermarks on exports</li>
+                            <li>Great for occasional use</li>
+                            <li>Instant processing — no queue</li>
                         </ul>
-                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_10')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Starter Pack</button>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_5')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get Starter Pack</button>
                     </div>
 
-                    <!-- 25 Credits - Basic -->
+                    <!-- 15 Credits - Basic -->
                     <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
                         <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
                         <div class="pricing-header">
@@ -502,35 +514,34 @@
                             <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Great value for small projects</p>
                         </div>
                         <ul class="pricing-features" style="margin: 1.5rem 0;">
-                            <li><strong>Clean 25 videos</strong> — Enough for your first project</li>
-                            <li style="color: var(--text-secondary); font-size: 0.9rem;">Save ~5 hours vs manual removal</li>
-                            <li>Lock in your credits — They're yours until you use them</li>
-                            <li>Process entire batches while you sleep</li>
-                            <li style="color: #9779d4; font-weight: 600;">Better deal — 7% cheaper per video</li>
+                            <li><strong>15 credits</strong></li>
+                            <li>Everything in Starter</li>
+                            <li>Save ~5 hours vs manual removal</li>
+                            <li>Great for occasional use</li>
+                            <li style="color: #9779d4; font-weight: 600;">Save 22% per credit</li>
                         </ul>
-                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_25')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Basic Pack</button>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease;" onclick="buyCredits('credits_15')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get Basic Pack</button>
                     </div>
 
-                    <!-- 100 Credits - BEST VALUE (Hero) -->
+                    <!-- 60 Credits - BEST VALUE (Hero) -->
                     <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.08), rgba(151, 121, 212, 0.08)); border: 2px solid #7352b4; transform: scale(1.05) translateY(-10px); box-shadow: 0 25px 60px rgba(115, 82, 180, 0.25); transition: all 0.3s ease;">
-                        <div class="popular-badge" style="background: linear-gradient(135deg, #f59e0b, #ef4444); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">BIGGEST SAVINGS</div>
+                        <div class="popular-badge" style="background: linear-gradient(135deg, #f59e0b, #ef4444); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">BEST VALUE</div>
                         <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.2); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>
                         <div class="pricing-header">
                             <h3>Pro Pack</h3>
                             <div class="pricing-price" style="background: linear-gradient(135deg, #7352b4, #9779d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$24.99</div>
-                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Most popular for one-time buyers</p>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Most popular choice</p>
                         </div>
                         <ul class="pricing-features" style="margin: 1.5rem 0;">
-                            <li><strong>Clean 100 videos</strong> — Build your portfolio</li>
-                            <li style="color: var(--text-secondary); font-size: 0.9rem;">Reclaim 20+ hours for actual creative work</li>
-                            <li>Lifetime access — Use them this year or next decade</li>
-                            <li>Batch process catalogs overnight</li>
-                            <li style="color: #9779d4; font-weight: 600;">Smart buy — 17% cheaper than buying small</li>
+                            <li><strong>60 credits</strong></li>
+                            <li>Everything in Basic</li>
+                            <li>Reclaim 20+ hours for actual creative work</li>
+                            <li style="color: #9779d4; font-weight: 600;">Save 30% per credit</li>
                         </ul>
                         <div style="background: rgba(115, 82, 180, 0.15); border: 1px solid rgba(115, 82, 180, 0.3); border-radius: 12px; padding: 1rem; margin-bottom: 1.25rem; color: var(--text-primary); font-weight: 600; font-size: 0.92rem; text-align: center; line-height: 1.5;">
-                            <strong>Creator favorite:</strong> Enough credits to clean your entire back catalog without thinking twice
+                            Most creators choose this pack
                         </div>
-                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease; font-size: 1.05rem;" onclick="buyCredits('credits_100')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.4)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get My Pro Pack</button>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #7352b4, #9779d4); transition: all 0.3s ease; font-size: 1.05rem;" onclick="buyCredits('credits_60')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(115, 82, 180, 0.4)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Get Pro Pack</button>
                     </div>
 
                 </div>
@@ -556,13 +567,13 @@
                     <div class="pricing-header">
                         <h3>Free</h3>
                         <div class="pricing-price">$0<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Try it out with complimentary credits on signup.</p>
+                        <p style="color: var(--text-secondary);">Try it out risk-free.</p>
                     </div>
                     <ul class="pricing-features">
-                        <li><strong>50 videos</strong> per month</li>
-                        <li>Priority cleanup lane</li>
-                        <li>Batch uploads & API access</li>
-                        <li>Priority support</li>
+                        <li><strong>3 credits</strong> on signup</li>
+                        <li>Full AI object removal</li>
+                        <li>720p exports</li>
+                        <li>No credit card required</li>
                     </ul>
                     <button class="btn-pricing secondary" onclick="signUp('free')">Start Free</button>
                 </div>
@@ -572,12 +583,14 @@
                     <div class="pricing-header">
                         <h3>Starter</h3>
                         <div class="pricing-price">$4.99<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Great for creators refreshing smaller catalogs each month.</p>
+                        <p style="color: var(--text-secondary);">For regular creators.</p>
                     </div>
                     <ul class="pricing-features">
-                        <li><strong>300 videos</strong> per month</li>
-                        <li>Team features and audit logging</li>
-                        <li>Dedicated support</li>
+                        <li><strong>10 credits</strong> per month</li>
+                        <li>Everything in Free</li>
+                        <li>Up to 4K exports</li>
+                        <li>Priority processing</li>
+                        <li>Great for occasional use</li>
                     </ul>
                     <button class="btn-pricing primary" onclick="signUp('starter')">Get Starter</button>
                 </div>
@@ -588,26 +601,21 @@
                     <div class="pricing-header">
                         <h3>Pro</h3>
                         <div class="pricing-price">$14.99<span>/month</span></div>
-                        <p style="color: var(--text-secondary);">Built for independent creators and teams refreshing rights-cleared assets weekly.</p>
+                        <p style="color: var(--text-secondary);">For professionals and teams.</p>
                     </div>
                     <ul class="pricing-features">
-                        <li><strong>50 videos</strong> per month</li>
-                        <li>Priority cleanup lane</li>
-                        <li>Batch uploads & API access</li>
+                        <li><strong>35 credits</strong> per month</li>
+                        <li>Everything in Starter</li>
+                        <li>API access included</li>
+                        <li>Commercial use license</li>
                         <li>Priority support</li>
                     </ul>
-                    <div style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; color: #6ee7b7; font-weight: 600;">Most creators see payback after the first client delivery.</div>
+                    <div style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; color: #6ee7b7; font-weight: 600;">Best value for regular use</div>
                     <button class="btn-pricing primary" onclick="signUp('pro')">Start Pro</button>
                 </div>
 
             </div>
 
-            <!-- Credit usage note -->
-            <div style="margin-top: 3rem; padding: 1.5rem; background: rgba(102,126,234,0.05); border: 1px solid rgba(102,126,234,0.1); border-radius: 12px;">
-                <p style="color: var(--text-secondary); font-size: 0.85rem; margin: 0; line-height: 1.6;">
-                    <strong style="color: var(--text-primary);">Credit usage:</strong> 1 credit = 1 video at 720p 30fps. Higher resolutions and frame rates scale proportionally (e.g., 1080p 30fps = 2 credits, 4K 30fps = 4 credits, 4K 60fps = 8 credits).
-                </p>
-            </div>
         </div>
     </section>
 
@@ -733,7 +741,7 @@
         function updateThemeIcon(theme) {
             const icon = document.getElementById('themeIcon');
             if (icon) {
-                icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+                icon.textContent = theme === 'dark' ? 'Light' : 'Dark';
             }
         }
 

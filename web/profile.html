@@ -90,6 +90,14 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo img {
+            width: 36px;
+            height: 36px;
         }
 
         .nav-links {
@@ -406,7 +414,10 @@
     <!-- Navigation -->
     <nav class="nav">
         <div class="nav-container">
-            <a class="logo" href="index.html">MarkRemoverAI</a>
+            <a class="logo" href="index.html">
+                <img src="logo.svg" alt="MarkRemoverAI">
+                MarkRemoverAI
+            </a>
             <div class="nav-links">
                 <a href="index.html">Home</a>
                 <a href="premium.html#pricing">Pricing</a>
