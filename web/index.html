@@ -1120,6 +1120,7 @@
             .nav-auth #signInLink {
                 font-size: 0.85rem;
                 padding: 0.5rem 1rem !important;
+                margin-right: 0.5rem;
             }
 
             /* Hide API chip on mobile */
@@ -1130,10 +1131,28 @@
             .theme-toggle {
                 font-size: 0.85rem;
                 padding: 0.5rem 0.75rem;
+                order: 1;
             }
 
             .nav-cta {
                 margin: 0.5rem 1rem;
+            }
+
+            /* Make logo text smaller on mobile */
+            .nav-logo {
+                font-size: 1rem !important;
+                overflow: visible;
+                white-space: nowrap;
+            }
+
+            /* Move theme toggle to far right */
+            .nav-controls {
+                display: flex;
+                align-items: center;
+            }
+
+            .mobile-menu-toggle {
+                order: 0;
             }
         }
         /* Ad zones */
