@@ -6575,8 +6575,17 @@ def premium_page():
 @app.route('/<path:filename>')
 def serve_static_files(filename):
     """Serve HTML and other static files from web folder"""
+    # If already has .html extension, serve directly
     if filename.endswith('.html'):
         return send_file(os.path.join(app.static_folder, filename))
+
+    # Try adding .html extension for clean URLs (e.g., /contact -> contact.html)
+    html_file = filename + '.html'
+    html_path = os.path.join(app.static_folder, html_file)
+    if os.path.exists(html_path):
+        return send_file(html_path)
+
+    # Otherwise serve as static file
     return send_from_directory(app.static_folder, filename)
 
 
