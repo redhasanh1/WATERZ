@@ -874,25 +874,39 @@ def auth_resend_verification():
     if not AUTH_ENABLED:
         return jsonify({'error': 'Authentication not enabled'}), 503
 
+    # Support both logged-in users and users who can't log in due to unverified email
     user_id = session.get('user_id')
+    email_from_request = None
+
     if not user_id:
-        return jsonify({'error': 'Not logged in'}), 401
+        # Try to get email from request body (for users who can't log in)
+        data = request.get_json() or {}
+        email_from_request = data.get('email', '').strip().lower()
+        if not email_from_request:
+            return jsonify({'error': 'Email is required'}), 400
 
     try:
         with get_db() as conn:
             cur = conn.cursor()
 
-            # Get user info
-            cur.execute(
-                'SELECT email, email_verified, verification_token_expires FROM users WHERE id = %s',
-                (user_id,)
-            )
+            # Get user info - either by user_id or by email
+            if user_id:
+                cur.execute(
+                    'SELECT id, email, email_verified, verification_token_expires FROM users WHERE id = %s',
+                    (user_id,)
+                )
+            else:
+                cur.execute(
+                    'SELECT id, email, email_verified, verification_token_expires FROM users WHERE email = %s',
+                    (email_from_request,)
+                )
             user = cur.fetchone()
 
             if not user:
-                return jsonify({'error': 'User not found'}), 404
+                # Don't reveal if email exists or not for security
+                return jsonify({'status': 'success', 'message': 'If an account exists, a verification email will be sent'}), 200
 
-            email, email_verified, last_token_expires = user
+            user_id, email, email_verified, last_token_expires = user
 
             if email_verified:
                 return jsonify({'error': 'Email already verified'}), 400
@@ -6083,52 +6097,52 @@ def serve_upload(filename):
     except Exception as e:
         print(f"[CDN] Redis lookup failed for {task_id}: {e}")
 
-    # Fallback to local file serving
+    # Check if local file exists
     file_path = os.path.join(UPLOAD_DIR, filename)
 
-    # Verify file exists and is within upload directory
-    if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR)):
+    # If local file exists, upload to B2 first to avoid Railway egress
+    if os.path.exists(file_path) and os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR)):
+        if B2_ENABLED:
+            try:
+                remote_path = f"uploads/{filename}"
+                cdn_url = upload_to_b2(file_path, remote_path)
+                print(f"[SERVE-UPLOAD] ✅ Uploaded to B2 on-the-fly: {cdn_url}")
+                # Store in Redis for future requests
+                redis_client.setex(f"upload:{task_id}:cdn_url", 86400, cdn_url)
+                return redirect(cdn_url)
+            except Exception as b2_err:
+                print(f"[SERVE-UPLOAD] ⚠️ B2 upload failed: {b2_err}")
+
+    # File not found anywhere
+    if not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
 
+    # Last resort: serve locally (shouldn't reach here if B2 is working)
+    print(f"[SERVE-UPLOAD] ⚠️ Serving file locally (B2 failed): {filename}")
     return send_file(file_path)
 
 
 @app.route('/cool.mp4')
 def serve_cool_video():
-    """Serve showcase video (cool.mp4)"""
-    video_path = os.path.join(STATIC_VIDEOS_DIR, 'cool.mp4')
-
-    if not os.path.exists(video_path):
-        return jsonify({'error': 'Showcase video not found'}), 404
-
-    return send_file(video_path, mimetype='video/mp4')
+    """Redirect to B2 CDN for showcase video (zero Railway egress)"""
+    return redirect(f"{B2_CDN_URL}/static/static/cool.mp4")
 
 
 @app.route('/s2.mp4')
 def serve_s2_video():
-    """Serve s2 before video"""
-    video_path = os.path.join(STATIC_VIDEOS_DIR, 's2.mp4')
-
-    if not os.path.exists(video_path):
-        return jsonify({'error': 's2 video not found'}), 404
-
-    return send_file(video_path, mimetype='video/mp4')
+    """Redirect to B2 CDN for s2 before video (zero Railway egress)"""
+    return redirect(f"{B2_CDN_URL}/static/static/s2.mp4")
 
 
 @app.route('/s2removed.mp4')
 def serve_s2removed_video():
-    """Serve s2removed after video"""
-    video_path = os.path.join(STATIC_VIDEOS_DIR, 's2removed.mp4')
-
-    if not os.path.exists(video_path):
-        return jsonify({'error': 's2removed video not found'}), 404
-
-    return send_file(video_path, mimetype='video/mp4')
+    """Redirect to B2 CDN for s2removed after video (zero Railway egress)"""
+    return redirect(f"{B2_CDN_URL}/static/static/s2removed.mp4")
 
 
 @app.route('/training/<filename>')
 def serve_training_video(filename):
-    """Serve training videos from volume"""
+    """Redirect to B2 CDN for training videos (zero Railway egress)"""
     # Sanitize filename to prevent path traversal
     filename = sanitize_filename(filename)
 
@@ -6136,13 +6150,8 @@ def serve_training_video(filename):
     if not filename.endswith('.mp4'):
         return jsonify({'error': 'Invalid file type'}), 400
 
-    video_path = os.path.join(TRAINING_VIDEOS_DIR, filename)
-
-    # Verify file exists and is within training directory
-    if not os.path.exists(video_path) or not os.path.abspath(video_path).startswith(os.path.abspath(TRAINING_VIDEOS_DIR)):
-        return jsonify({'error': 'Training video not found'}), 404
-
-    return send_file(video_path, mimetype='video/mp4')
+    print(f"[TRAINING-VIDEO] Redirecting {filename} to B2 CDN")
+    return redirect(f"{B2_CDN_URL}/static/training/{filename}")
 
 
 @app.route('/admin/list-videos', methods=['GET'])
@@ -6209,16 +6218,30 @@ def admin_upload_video():
     # Create directory if it doesn't exist
     os.makedirs(dest_dir, exist_ok=True)
 
-    # Save file
+    # Save file locally first
     file_path = os.path.join(dest_dir, filename)
     video.save(file_path)
+
+    # Upload to B2 CDN to avoid Railway egress costs
+    cdn_url = None
+    if B2_ENABLED:
+        try:
+            remote_path = f"static/{video_type}/{filename}"
+            cdn_url = upload_to_b2(file_path, remote_path)
+            print(f"[ADMIN-UPLOAD] ✅ Uploaded to B2: {cdn_url}")
+            # Clean up local file after B2 upload
+            os.remove(file_path)
+            print(f"[ADMIN-UPLOAD] Cleaned up local file: {file_path}")
+        except Exception as b2_err:
+            print(f"[ADMIN-UPLOAD] ⚠️ B2 upload failed: {b2_err}, keeping local file")
 
     return jsonify({
         'success': True,
         'filename': filename,
         'type': video_type,
         'path': file_path,
-        'url': f'/training/{filename}' if video_type == 'training' else f'/{filename}'
+        'url': cdn_url or (f'/training/{filename}' if video_type == 'training' else f'/{filename}'),
+        'cdn_url': cdn_url
     })
 
 
@@ -6253,65 +6276,56 @@ def serve_result(filename):
     except Exception as e:
         print(f"[CDN] Redis lookup failed for result {task_id}: {e}")
 
-    # Fallback to local file serving
+    # Check if local file exists
     file_path = os.path.join(RESULT_DIR, filename)
-
     print(f"[SERVE-RESULT] Looking for file at: {file_path}")
     print(f"[SERVE-RESULT] File exists: {os.path.exists(file_path)}")
 
-    # Verify file exists and is within result directory
-    if not os.path.exists(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(RESULT_DIR)):
-        print(f"[SERVE-RESULT] ❌ File not found: {file_path}")
-        return jsonify({'error': 'File not found'}), 404
+    # If local file exists, upload to B2 first to avoid Railway egress
+    if os.path.exists(file_path) and os.path.abspath(file_path).startswith(os.path.abspath(RESULT_DIR)):
+        if B2_ENABLED:
+            try:
+                remote_path = f"results/{filename}"
+                cdn_url = upload_to_b2(file_path, remote_path)
+                print(f"[SERVE-RESULT] ✅ Uploaded to B2 on-the-fly: {cdn_url}")
+                # Store in Redis for future requests
+                redis_client.setex(f"video:{task_id}:final_path", 86400, cdn_url)
+                # Clean up local file
+                os.remove(file_path)
+                print(f"[SERVE-RESULT] Cleaned up local file after B2 upload")
+                return redirect(cdn_url)
+            except Exception as b2_err:
+                print(f"[SERVE-RESULT] ⚠️ B2 upload failed: {b2_err}")
 
-    # Send file with as_attachment to trigger download
-    print(f"[SERVE-RESULT] ✅ Serving file locally: {filename}")
+    # File not found anywhere
+    if not os.path.exists(file_path):
+        print(f"[SERVE-RESULT] ❌ File not found: {file_path}")
+        return jsonify({'error': 'File not found. Please try processing again.'}), 404
+
+    # Last resort: serve locally (shouldn't reach here if B2 is working)
+    print(f"[SERVE-RESULT] ⚠️ Serving file locally (B2 failed): {filename}")
     response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
 
     # Schedule file deletion after response is sent
     @response.call_on_close
     def delete_files():
         try:
-            # Delete the result file
             if os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"[CLEANUP]  Deleted result: {filename}")
-
-            # Delete corresponding upload file
-            # Extract original task_id from processed filename
-            original_name = filename.replace('_processed.avi', '.mp4')
-            upload_path = os.path.join(UPLOAD_DIR, original_name)
-            if os.path.exists(upload_path):
-                os.remove(upload_path)
-                print(f"[CLEANUP]  Deleted upload: {original_name}")
+                print(f"[CLEANUP] Deleted result: {filename}")
         except Exception as e:
-            print(f"[WARNING]  Error deleting files: {e}")
+            print(f"[WARNING] Error deleting files: {e}")
 
     return response
 
 
 @app.route('/demo_videos/<filename>')
 def serve_demo_video(filename):
-    """Serve demo/example videos from /data/demo_videos/ directory"""
-    print(f"[DEMO-VIDEO] Request for: {filename}")
-
+    """Redirect to B2 CDN for demo videos (zero Railway egress)"""
     # Sanitize filename
     filename = sanitize_filename(filename)
-    demo_dir = os.path.join(DATA_DIR, 'demo_videos')
-    file_path = os.path.join(demo_dir, filename)
-
-    print(f"[DEMO-VIDEO] Serving from: {file_path}")
-
-    if not os.path.exists(file_path):
-        print(f"[DEMO-VIDEO] File not found: {file_path}")
-        abort(404)
-
-    # Verify file is within demo directory (security)
-    if not os.path.abspath(file_path).startswith(os.path.abspath(demo_dir)):
-        print(f"[DEMO-VIDEO] Path traversal attempt blocked")
-        abort(403)
-
-    return send_file(file_path, mimetype='video/mp4')
+    print(f"[DEMO-VIDEO] Redirecting {filename} to B2 CDN")
+    return redirect(f"{B2_CDN_URL}/demo_videos/{filename}")
 
 
 @app.route('/api/upload-result', methods=['POST', 'OPTIONS'])
@@ -6349,7 +6363,23 @@ def upload_result():
         print(f"[UPLOAD-RESULT] File exists check: {os.path.exists(dest)}")
         print(f"[UPLOAD-RESULT] RESULT_DIR contents: {os.listdir(RESULT_DIR) if os.path.exists(RESULT_DIR) else 'DIR NOT FOUND'}")
 
-        return jsonify({'status': 'success', 'result_url': f'/results/{safe_name}'})
+        # Upload to B2 CDN to avoid Railway egress costs
+        cdn_url = None
+        if B2_ENABLED:
+            try:
+                remote_path = f"results/{safe_name}"
+                cdn_url = upload_to_b2(dest, remote_path)
+                print(f"[UPLOAD-RESULT] ✅ Uploaded to B2: {cdn_url}")
+                # Store CDN URL in Redis for serving
+                task_id = safe_name.split('_')[0] if '_' in safe_name else safe_name.rsplit('.', 1)[0]
+                redis_client.setex(f"video:{task_id}:final_path", 86400, cdn_url)
+                # Clean up local file after B2 upload
+                os.remove(dest)
+                print(f"[UPLOAD-RESULT] Cleaned up local file: {dest}")
+            except Exception as b2_err:
+                print(f"[UPLOAD-RESULT] ⚠️ B2 upload failed: {b2_err}, keeping local file")
+
+        return jsonify({'status': 'success', 'result_url': cdn_url or f'/results/{safe_name}'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -6410,9 +6440,22 @@ def upload_segment():
 
         print(f"[OK] Received segment upload: video_id={video_id}, seg_idx={seg_idx}, file={safe_name}")
 
+        # Upload to B2 CDN to avoid Railway egress costs
+        cdn_url = None
+        if B2_ENABLED:
+            try:
+                remote_path = f"segments/{video_id}/{safe_name}"
+                cdn_url = upload_to_b2(dest, remote_path)
+                print(f"[UPLOAD-SEGMENT] ✅ Uploaded to B2: {cdn_url}")
+                # Clean up local file after B2 upload
+                os.remove(dest)
+                print(f"[UPLOAD-SEGMENT] Cleaned up local file: {dest}")
+            except Exception as b2_err:
+                print(f"[UPLOAD-SEGMENT] ⚠️ B2 upload failed: {b2_err}, keeping local file")
+
         return jsonify({
             'status': 'success',
-            'segment_url': f'/results/{safe_name}',
+            'segment_url': cdn_url or f'/results/{safe_name}',
             'video_id': video_id,
             'seg_idx': seg_idx
         })
