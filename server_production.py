@@ -5790,12 +5790,17 @@ def upload_file():
         # Upload to B2 for CDN serving (zero egress)
         cdn_url = None
         if B2_ENABLED:
-            remote_path = f"uploads/{task_id}{ext}"
-            cdn_url = upload_to_b2(file_path, remote_path)
-            if cdn_url:
-                # Store CDN URL in Redis for later retrieval
-                redis_client.set(f"upload:{task_id}:cdn_url", cdn_url)
-                print(f"[B2] Upload CDN URL stored: {cdn_url}")
+            try:
+                remote_path = f"uploads/{task_id}{ext}"
+                cdn_url = upload_to_b2(file_path, remote_path)
+                if cdn_url:
+                    # Store CDN URL in Redis for later retrieval
+                    redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                    redis_client.set(f"upload:{task_id}:cdn_url", cdn_url)
+                    print(f"[B2] Upload CDN URL stored: {cdn_url}")
+            except Exception as e:
+                print(f"[B2] Upload or Redis store failed: {e}")
+                # Continue without CDN - local file was already saved
 
         return jsonify({
             'status': 'success',
@@ -6069,10 +6074,14 @@ def serve_upload(filename):
     task_id = os.path.splitext(filename)[0]
 
     # Check Redis for CDN URL (uploaded to B2)
-    cdn_url = redis_client.get(f"upload:{task_id}:cdn_url")
-    if cdn_url:
-        print(f"[CDN] Redirecting upload {filename} to CDN: {cdn_url}")
-        return redirect(cdn_url)
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        cdn_url = redis_client.get(f"upload:{task_id}:cdn_url")
+        if cdn_url:
+            print(f"[CDN] Redirecting upload {filename} to CDN: {cdn_url}")
+            return redirect(cdn_url)
+    except Exception as e:
+        print(f"[CDN] Redis lookup failed for {task_id}: {e}")
 
     # Fallback to local file serving
     file_path = os.path.join(UPLOAD_DIR, filename)
@@ -6227,18 +6236,22 @@ def serve_result(filename):
     task_id = base_name.replace('_processed', '').replace('_cleaned', '')
 
     # Check Redis for CDN URL (result uploaded to B2 by worker)
-    cdn_url = redis_client.get(f"video:{task_id}:final_path")
-    if cdn_url and cdn_url.startswith('http'):
-        print(f"[CDN] Redirecting result {filename} to CDN: {cdn_url}")
-        # Clean up local files if they exist
-        file_path = os.path.join(RESULT_DIR, filename)
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                print(f"[CLEANUP] Deleted local result after CDN redirect: {filename}")
-            except Exception as e:
-                print(f"[WARNING] Could not delete local file: {e}")
-        return redirect(cdn_url)
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        cdn_url = redis_client.get(f"video:{task_id}:final_path")
+        if cdn_url and cdn_url.startswith('http'):
+            print(f"[CDN] Redirecting result {filename} to CDN: {cdn_url}")
+            # Clean up local files if they exist
+            file_path = os.path.join(RESULT_DIR, filename)
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    print(f"[CLEANUP] Deleted local result after CDN redirect: {filename}")
+                except Exception as e:
+                    print(f"[WARNING] Could not delete local file: {e}")
+            return redirect(cdn_url)
+    except Exception as e:
+        print(f"[CDN] Redis lookup failed for result {task_id}: {e}")
 
     # Fallback to local file serving
     file_path = os.path.join(RESULT_DIR, filename)

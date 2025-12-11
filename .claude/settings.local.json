@@ -62,7 +62,8 @@
       "Bash(git -C \"D:/watermarkz\" diff --stat web/app.py)",
       "Bash(git -C \"D:/watermarkz\" log --oneline -5)",
       "Bash(git -C \"D:/watermarkz\" show --stat 166174f0)",
-      "Bash(git -C \"D:/watermarkz\" status -sb)"
+      "Bash(git -C \"D:/watermarkz\" status -sb)",
+      "Bash(md5sum:*)"
     ],
     "deny": [],
     "ask": []
