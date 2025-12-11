@@ -6965,7 +6965,7 @@ def create_portal_session():
 
 @app.route('/api/billing/purchase-history', methods=['GET', 'OPTIONS'])
 def get_purchase_history():
-    """Get user's purchase history"""
+    """Get user's purchase history from Stripe"""
     if request.method == 'OPTIONS':
         return ('', 204)
 
@@ -6974,30 +6974,49 @@ def get_purchase_history():
         return jsonify({'error': 'Not authenticated'}), 401
 
     try:
+        # Get user's email from database
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute('''
-                SELECT id, package, credits_awarded, amount_cents, currency, status, created_at
-                FROM purchases
-                WHERE user_id = %s
-                ORDER BY created_at DESC
-                LIMIT 50
-            ''', (user_id,))
-            rows = cur.fetchall()
+            cur.execute('SELECT email FROM users WHERE id = %s', (user_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'purchases': []})
+            user_email = row[0]
 
-            purchases = []
-            for row in rows:
+        # Find Stripe customer by email
+        if not STRIPE_ENABLED:
+            return jsonify({'purchases': []})
+
+        customers = stripe.Customer.list(email=user_email, limit=1)
+        if not customers.data:
+            return jsonify({'purchases': []})
+
+        customer_id = customers.data[0].id
+
+        # Fetch payment intents for this customer
+        payment_intents = stripe.PaymentIntent.list(
+            customer=customer_id,
+            limit=50
+        )
+
+        purchases = []
+        for pi in payment_intents.data:
+            if pi.status == 'succeeded':
+                # Get package info from metadata
+                package = pi.metadata.get('package', 'Unknown')
+                credits = pi.metadata.get('credits', 0)
+
                 purchases.append({
-                    'id': row[0],
-                    'package': row[1],
-                    'credits_awarded': row[2],
-                    'amount_cents': row[3],
-                    'currency': row[4],
-                    'status': row[5],
-                    'created_at': row[6].isoformat() if row[6] else None
+                    'id': pi.id,
+                    'package': package,
+                    'credits_awarded': int(credits) if credits else 0,
+                    'amount_cents': pi.amount,
+                    'currency': pi.currency,
+                    'status': 'completed',
+                    'created_at': datetime.fromtimestamp(pi.created).isoformat()
                 })
 
-            return jsonify({'purchases': purchases})
+        return jsonify({'purchases': purchases})
 
     except Exception as e:
         print(f"[PURCHASE-HISTORY-ERROR] {e}")
