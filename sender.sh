@@ -37,11 +37,17 @@ else
 fi
 
 # B2 credentials for mask upload
-export B2_KEY_ID="00539db5c1104b50000000002"
-export B2_APP_KEY="K005HJKUP7ahSNJ1wgQHDDJ+uEATiU4"
+export B2_KEY_ID="00539db5c1104b50000000003"
+export B2_APP_KEY="K005384b8lPoBT11wScxkZ2Gx0fszus"
 export B2_BUCKET="watermarkz"
 export B2_CDN_URL="https://markz.humblewoslayer.workers.dev"
 echo "[B2] Upload enabled to $B2_BUCKET"
+# TensorRT optimizations (from working commit d5443f3d)
+export USE_NEUFLOW=1
+export FORCE_TRT_RFCNET=1
+export ENABLE_DCNV4_RFCNET=1
+export FORCE_TRT_TRANSFORMER=0
+echo "[TRT] USE_NEUFLOW=1, FORCE_TRT_RFCNET=1, ENABLE_DCNV4_RFCNET=1"
 
 # Load Redis URL from file or use default
 if [ -f "redis_url.txt" ]; then
