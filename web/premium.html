@@ -5,18 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pricing - AI Video Object Remover | MarkRemoverAI</title>
     <meta name="description" content="Affordable pricing for AI video object removal. One-time credit packs starting at $2.99 or monthly plans. No commitments, credits never expire.">
-    <link rel="canonical" href="https://markremoverai.com/premium">
+    <link rel="canonical" href="https://markremoverai.com/premium.html">
 
     <!-- SEO & Social -->
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://markremoverai.com/premium">
+    <meta property="og:url" content="https://markremoverai.com/premium.html">
     <meta property="og:title" content="Pricing - AI Video Object Remover | MarkRemoverAI">
     <meta property="og:description" content="Affordable pricing for AI video object removal. One-time credit packs or monthly plans. Start free today.">
     <meta property="og:image" content="https://markremoverai.com/emblem.png">
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image">
-    <meta property="twitter:url" content="https://markremoverai.com/premium">
+    <meta property="twitter:url" content="https://markremoverai.com/premium.html">
     <meta property="twitter:title" content="Pricing - AI Video Object Remover | MarkRemoverAI">
     <meta property="twitter:description" content="Affordable pricing for AI video object removal. One-time credit packs or monthly plans.">
     <meta property="twitter:image" content="https://markremoverai.com/emblem.png">
@@ -447,14 +447,14 @@
     <!-- Navigation -->
     <nav class="nav">
         <div class="nav-container">
-            <a class="logo" href="index" style="text-decoration: none;">
+            <a class="logo" href="index.html" style="text-decoration: none;">
                 <img src="logo.svg" alt="MarkRemoverAI">
                 MarkRemoverAI
             </a>
             <div class="nav-links" id="navLinks">
-                <a href="index">Home</a>
-                <a href="api">API</a>
-                <a href="contact">Contact</a>
+                <a href="index.html">Home</a>
+                <a href="api.html">API</a>
+                <a href="contact.html">Contact</a>
                 <button class="btn-nav" onclick="scrollToPricing()">Get Started</button>
                 <button id="themeToggle" onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; color: var(--text-primary); font-size: 1rem; transition: all 0.3s;" title="Toggle theme">
                     <span id="themeIcon">Light</span>
@@ -632,7 +632,7 @@
                         <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> Webhook callbacks for async processing</li>
                         <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> 99.9% uptime SLA guarantee</li>
                     </ul>
-                    <a href="api" style="display: inline-block; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 30px rgba(102, 126, 234, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">Explore API Documentation</a>
+                    <a href="api.html" style="display: inline-block; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 30px rgba(102, 126, 234, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">Explore API Documentation</a>
                 </div>
                 <div class="code-block">
                     <div style="color: #64748b; margin-bottom: 0.5rem;"># Remove object from video</div>
@@ -656,9 +656,9 @@
         <div class="container">
             <p>&copy; 2025 MarkRemoverAI. All rights reserved.</p>
             <p style="margin-top: 0.5rem;">
-                <a href="terms" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Terms</a>
-                <a href="privacy" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Privacy</a>
-                <a href="contact" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Contact</a>
+                <a href="terms.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Terms</a>
+                <a href="privacy.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Privacy</a>
+                <a href="contact.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Contact</a>
             </p>
         </div>
     </footer>
@@ -690,7 +690,7 @@
 
         async function signUp(plan) {
             if (plan === 'free') {
-                window.location.href = 'login';
+                window.location.href = 'login.html';
                 return;
             }
             try {
@@ -698,7 +698,7 @@
                 const user = JSON.parse(localStorage.getItem('user') || '{}');
                 if (!user.id) {
                     alert('Please sign in first to purchase a plan');
-                    window.location.href = 'login';
+                    window.location.href = 'login.html';
                     return;
                 }
                 // Pass user_id to checkout
@@ -715,7 +715,7 @@
                 const user = JSON.parse(localStorage.getItem('user') || '{}');
                 if (!user.id) {
                     alert('Please sign in first to purchase credits');
-                    window.location.href = 'login';
+                    window.location.href = 'login.html';
                     return;
                 }
                 // Pass user_id and package to one-time checkout

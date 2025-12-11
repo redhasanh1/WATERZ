@@ -381,15 +381,15 @@
     <!-- Navigation Header -->
     <nav class="nav-header">
         <div class="nav-container">
-            <a href="index" class="nav-logo">
+            <a href="index.html" class="nav-logo">
                 <img src="logo.svg" alt="MarkRemoverAI">
                 <span>MarkRemoverAI</span>
             </a>
 
             <ul class="nav-menu" id="navMenu">
-                <li><a href="index#remove-objects">Remove Objects</a></li>
-                <li><a href="premium#pricing">Pricing</a></li>
-                <li><a href="index#comparison">Results</a></li>
+                <li><a href="index.html#remove-objects">Remove Objects</a></li>
+                <li><a href="premium.html#pricing">Pricing</a></li>
+                <li><a href="index.html#comparison">Results</a></li>
                 <li class="desktop-only"><button id="themeToggle" style="background: var(--gradient-primary); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 600;" aria-label="Toggle theme">Dark</button></li>
             </ul>
 
@@ -439,7 +439,7 @@
                 <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
 
                 <div style="text-align: right; margin-top: 0.5rem;">
-                    <a href="reset-password" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; font-weight: 600;">Forgot your password?</a>
+                    <a href="reset-password.html" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; font-weight: 600;">Forgot your password?</a>
                 </div>
 
                 <button type="submit" class="btn">Sign in</button>
@@ -465,8 +465,8 @@
             </form>
         </div>
         <div class="footer-links">
-            <p><a href="index">← Back to Home</a></p>
-            <p>Need pricing info first? <a href="premium#pricing">Explore plans</a></p>
+            <p><a href="index.html">← Back to Home</a></p>
+            <p>Need pricing info first? <a href="premium.html#pricing">Explore plans</a></p>
         </div>
     </div>
     </div>
@@ -629,7 +629,7 @@
 
                     // Redirect to main app
                     setTimeout(() => {
-                        window.location.href = 'index';
+                        window.location.href = 'index.html';
                     }, 1000);
                 } else {
                     const errorMsg = data.error || 'Login failed. Please try again.';
@@ -746,7 +746,7 @@
                         </button>
                     </div>
                     <div id="resendStatus" style="margin-top: 1rem; font-size: 0.9rem;"></div>
-                    <button type="button" class="btn" style="margin-top: 1.5rem; width: 100%;" onclick="window.location.href='index'">
+                    <button type="button" class="btn" style="margin-top: 1.5rem; width: 100%;" onclick="window.location.href='index.html'">
                         Continue to Dashboard
                     </button>
                     <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-secondary);">

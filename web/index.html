@@ -1292,9 +1292,9 @@
                 </a>
 
                 <ul class="nav-menu" id="navMenu">
-                    <li><a href="premium#pricing">Pricing</a></li>
-                    <li><a href="api">API</a></li>
-                    <li><a href="contact">Contact</a></li>
+                    <li><a href="premium.html#pricing">Pricing</a></li>
+                    <li><a href="api.html">API</a></li>
+                    <li><a href="contact.html">Contact</a></li>
                 </ul>
             </div>
 
@@ -1302,9 +1302,9 @@
             <div class="nav-right">
                 <!-- Auth Section -->
                 <div class="nav-auth">
-                    <a href="login" class="nav-cta" id="signInLink">Sign In</a>
+                    <a href="login.html" class="nav-cta" id="signInLink">Sign In</a>
                     <ul class="nav-menu" id="userNav" style="display: none;">
-                        <li><a href="profile" id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem; text-decoration: none; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'"></a></li>
+                        <li><a href="profile.html" id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem; text-decoration: none; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'"></a></li>
                         <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
                     </ul>
                 </div>
@@ -1699,10 +1699,10 @@
             MarkRemoverAI - Professional Video Object Removal
         </p>
         <p style="color: var(--text-secondary); font-size: 0.95rem;">
-            <a href="terms" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Terms</a> •
-            <a href="privacy" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Privacy</a> •
-            <a href="premium" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Pricing</a> •
-            <a href="contact" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Contact</a>
+            <a href="terms.html" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Terms</a> •
+            <a href="privacy.html" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Privacy</a> •
+            <a href="premium.html" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Pricing</a> •
+            <a href="contact.html" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Contact</a>
         </p>
         <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 1rem;">
             Contact: <a href="mailto:support@markremoverai.com" style="color: var(--primary); text-decoration: none;">support@markremoverai.com</a>
@@ -1829,7 +1829,7 @@
             const user = JSON.parse(localStorage.getItem('user') || '{}');
             if (!user.id || !user.email) {
                 alert('Please sign in to use MarkRemoverAI. Sign up now and get 5 FREE credits!');
-                window.location.href = 'login';
+                window.location.href = 'login.html';
                 return;
             }
 
@@ -3160,7 +3160,7 @@
                 const data = await resp.clone().json();
                 if (data && data.error === 'signin_required') {
                   alert('Please sign in to process videos. Redirecting to login...');
-                  window.location.href = 'login';
+                  window.location.href = 'login.html';
                   return;
                 }
                 if (data && data.error === 'insufficient_credits') {
@@ -3326,7 +3326,7 @@
         signOutBtn.addEventListener('click', function(e) {
           e.preventDefault();
           localStorage.removeItem('user');
-          window.location.href = 'login';
+          window.location.href = 'login.html';
         });
       }
 
