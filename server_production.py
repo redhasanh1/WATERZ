@@ -6845,28 +6845,26 @@ if __name__ == '__main__':
 # BILLING ENDPOINTS (Stripe)
 # ===================================
 
-# Stripe Price IDs for credit packages (set in environment)
+# Stripe Price IDs for credit packages
 STRIPE_PRICE_IDS = {
-    'credits_10': os.getenv('STRIPE_PRICE_ID_CREDITS_10', ''),
-    'credits_25': os.getenv('STRIPE_PRICE_ID_CREDITS_25', ''),
-    'credits_100': os.getenv('STRIPE_PRICE_ID_CREDITS_100', ''),
-    'credits_250': os.getenv('STRIPE_PRICE_ID_CREDITS_250', ''),
-    'credits_500': os.getenv('STRIPE_PRICE_ID_CREDITS_500', ''),
+    # One-time credit packs (5/15/60 credits)
+    'credits_5': 'price_1ScgBpDbvxhrePJFnMa5NdJh',   # Starter Pack - $2.99
+    'credits_15': 'price_1ScgCKDbvxhrePJFGytHR4i5',  # Basic Pack - $6.99
+    'credits_60': 'price_1ScgCgDbvxhrePJF6JXX6Wh4',  # Pro Pack - $24.99
+    # Monthly subscription tiers
     'starter': os.getenv('STRIPE_PRICE_ID_STARTER', ''),
     'pro': os.getenv('STRIPE_PRICE_ID_PRO', ''),
-    'enterprise': os.getenv('STRIPE_PRICE_ID_ENTERPRISE', '')
 }
 
 # Credit amounts for each package
 CREDIT_AMOUNTS = {
-    'credits_10': 10,
-    'credits_25': 25,
-    'credits_100': 100,
-    'credits_250': 250,
-    'credits_500': 500,
-    'starter': 20,
-    'pro': 50,
-    'enterprise': 300
+    # One-time credit packs
+    'credits_5': 5,
+    'credits_15': 15,
+    'credits_60': 60,
+    # Monthly subscription credits
+    'starter': 10,
+    'pro': 35,
 }
 
 @app.route('/api/billing/create-checkout-session', methods=['POST', 'OPTIONS'])
