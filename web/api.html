@@ -3,38 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Documentation - MarkRemoverAI | Video Object Removal API</title>
+    <title>API Support - MarkRemoverAI | Enterprise Support</title>
     <!-- Google AdSense -->
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5993103018552371"
      crossorigin="anonymous"></script>
-    <meta name="description" content="Integrate AI-powered video object removal into your apps. RESTful API with simple authentication, batch processing, and webhook support.">
+    <meta name="description" content="Enterprise-grade API support for MarkRemoverAI. Get help with integration, authentication, billing, and custom solutions. Response within 24 hours.">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 
     <style>
-        /* Light mode (default) */
         :root {
             --primary: #667eea;
             --primary-dark: #5568d3;
             --secondary: #764ba2;
             --accent: #a78bfa;
             --success: #10b981;
-            --warning: #f59e0b;
             --bg-dark: #f8fafc;
             --bg-card: #ffffff;
             --bg-glass: rgba(255, 255, 255, 0.9);
             --text-primary: #1a1a2e;
             --text-secondary: #64748b;
             --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
             --border-color: rgba(102, 126, 234, 0.2);
             --nav-bg: rgba(255, 255, 255, 0.95);
-            --code-bg: #1e1e2e;
         }
 
-        /* Dark mode */
         [data-theme="dark"] {
             --bg-dark: #0a0a14;
             --bg-card: #1a1a2e;
@@ -43,7 +38,6 @@
             --text-secondary: #a0a0c0;
             --border-color: rgba(102, 126, 234, 0.15);
             --nav-bg: rgba(10, 10, 20, 0.95);
-            --code-bg: #0d0d14;
         }
 
         * {
@@ -57,7 +51,6 @@
             background: var(--bg-dark);
             color: var(--text-primary);
             line-height: 1.6;
-            overflow-x: hidden;
         }
 
         .container {
@@ -140,7 +133,7 @@
 
         /* Hero */
         .hero {
-            padding: 160px 0 100px;
+            padding: 160px 0 80px;
             text-align: center;
             position: relative;
             overflow: hidden;
@@ -177,7 +170,7 @@
 
         .hero-title {
             font-family: 'Space Grotesk', sans-serif;
-            font-size: clamp(2.5rem, 5vw, 4rem);
+            font-size: clamp(2.5rem, 5vw, 3.5rem);
             font-weight: 800;
             margin-bottom: 1.5rem;
             line-height: 1.2;
@@ -192,23 +185,243 @@
         .hero-subtitle {
             font-size: 1.25rem;
             color: var(--text-secondary);
-            max-width: 600px;
-            margin: 0 auto 2.5rem;
+            max-width: 700px;
+            margin: 0 auto 2rem;
         }
 
-        .hero-cta {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
+        /* Response Time Banner */
+        .response-banner {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 1.25rem 2rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 2rem;
         }
 
-        .btn-primary {
-            padding: 1rem 2.5rem;
+        .response-banner svg {
+            color: #10b981;
+            flex-shrink: 0;
+        }
+
+        .response-banner span {
+            color: #10b981;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        /* Contact Section */
+        .contact-section {
+            padding: 60px 0;
+        }
+
+        .contact-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+            margin-bottom: 4rem;
+        }
+
+        .contact-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2.5rem;
+            transition: all 0.3s;
+        }
+
+        .contact-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .contact-icon {
+            width: 56px;
+            height: 56px;
             background: var(--gradient-primary);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .contact-icon svg {
+            width: 28px;
+            height: 28px;
+            color: white;
+        }
+
+        .contact-card h3 {
+            font-size: 1.4rem;
+            margin-bottom: 0.75rem;
+            font-weight: 700;
+        }
+
+        .contact-card p {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+            line-height: 1.7;
+        }
+
+        .contact-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--primary);
+            font-weight: 600;
+            text-decoration: none;
+            transition: gap 0.3s;
+        }
+
+        .contact-link:hover {
+            gap: 0.75rem;
+        }
+
+        /* Topics Section */
+        .topics-section {
+            padding: 60px 0;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .section-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .section-subtitle {
+            text-align: center;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto 3rem;
+        }
+
+        .topics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .topic-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 1.5rem;
+            background: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            transition: all 0.3s;
+        }
+
+        .topic-item:hover {
+            border-color: var(--primary);
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .topic-icon {
+            width: 44px;
+            height: 44px;
+            background: rgba(102, 126, 234, 0.15);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .topic-icon svg {
+            width: 22px;
+            height: 22px;
+            color: var(--primary);
+        }
+
+        .topic-content h4 {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .topic-content p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        /* Enterprise Section */
+        .enterprise-section {
+            padding: 80px 0;
+        }
+
+        .enterprise-card {
+            background: var(--gradient-primary);
+            border-radius: 20px;
+            padding: 3.5rem;
+            text-align: center;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .enterprise-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(at 30% 30%, rgba(255, 255, 255, 0.2) 0px, transparent 50%);
+        }
+
+        .enterprise-card > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .enterprise-card h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .enterprise-card p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto 2rem;
+        }
+
+        .enterprise-features {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+
+        .enterprise-feature {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 500;
+        }
+
+        .enterprise-feature svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .btn-white {
+            padding: 1rem 2.5rem;
+            background: white;
             border: none;
             border-radius: 12px;
-            color: white;
+            color: #667eea;
             font-weight: 700;
             font-size: 1rem;
             cursor: pointer;
@@ -219,310 +432,9 @@
             gap: 0.5rem;
         }
 
-        .btn-primary:hover {
+        .btn-white:hover {
             transform: translateY(-2px);
-            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.4);
-        }
-
-        .btn-secondary {
-            padding: 1rem 2.5rem;
-            background: transparent;
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            color: var(--text-primary);
-            font-weight: 700;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-decoration: none;
-        }
-
-        .btn-secondary:hover {
-            background: rgba(102, 126, 234, 0.1);
-            border-color: var(--primary);
-        }
-
-        /* Code Section */
-        .code-section {
-            padding: 80px 0;
-        }
-
-        .code-tabs {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .code-tab {
-            padding: 0.5rem 1.25rem;
-            background: transparent;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            color: var(--text-secondary);
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .code-tab.active {
-            background: var(--gradient-primary);
-            border-color: transparent;
-            color: white;
-        }
-
-        .code-block {
-            background: var(--code-bg);
-            border-radius: 16px;
-            padding: 1.5rem;
-            overflow-x: auto;
-            border: 1px solid rgba(102, 126, 234, 0.2);
-        }
-
-        .code-block pre {
-            margin: 0;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.9rem;
-            line-height: 1.6;
-            color: #e2e8f0;
-        }
-
-        .code-comment { color: #64748b; }
-        .code-keyword { color: #10b981; }
-        .code-string { color: #fbbf24; }
-        .code-property { color: #a78bfa; }
-
-        /* Features Grid */
-        .features-section {
-            padding: 100px 0;
-            background: var(--bg-glass);
-        }
-
-        .section-header {
-            text-align: center;
-            margin-bottom: 4rem;
-        }
-
-        .section-title {
-            font-size: clamp(2rem, 4vw, 2.5rem);
-            font-weight: 800;
-            margin-bottom: 1rem;
-        }
-
-        .section-subtitle {
-            font-size: 1.1rem;
-            color: var(--text-secondary);
-        }
-
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 2rem;
-        }
-
-        .feature-card {
-            background: var(--bg-card);
-            border-radius: 16px;
-            padding: 2rem;
-            border: 1px solid var(--border-color);
-            transition: all 0.3s;
-        }
-
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(102, 126, 234, 0.15);
-        }
-
-        .feature-icon {
-            width: 50px;
-            height: 50px;
-            background: var(--gradient-primary);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 1.25rem;
-        }
-
-        .feature-icon svg {
-            width: 24px;
-            height: 24px;
-            stroke: white;
-            fill: none;
-        }
-
-        .feature-card h3 {
-            font-size: 1.25rem;
-            margin-bottom: 0.75rem;
-        }
-
-        .feature-card p {
-            color: var(--text-secondary);
-            line-height: 1.7;
-        }
-
-        /* Pricing Section */
-        .pricing-section {
-            padding: 100px 0;
-        }
-
-        .pricing-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 2rem;
-            max-width: 1100px;
-            margin: 0 auto;
-        }
-
-        .pricing-card {
-            background: var(--bg-card);
-            border: 2px solid var(--border-color);
-            border-radius: 20px;
-            padding: 2.5rem;
-            text-align: center;
-            transition: all 0.3s;
-            position: relative;
-        }
-
-        .pricing-card:hover {
-            transform: translateY(-5px);
-            border-color: var(--primary);
-        }
-
-        .pricing-card.popular {
-            border-color: var(--primary);
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
-        }
-
-        .popular-badge {
-            position: absolute;
-            top: -12px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--gradient-primary);
-            padding: 0.4rem 1.2rem;
-            border-radius: 50px;
-            font-size: 0.75rem;
-            font-weight: 700;
-            color: white;
-        }
-
-        .pricing-tier {
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            font-size: 0.85rem;
-            letter-spacing: 0.1em;
-            margin-bottom: 0.5rem;
-        }
-
-        .pricing-price {
-            font-size: 3rem;
-            font-weight: 800;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .pricing-price span {
-            font-size: 1rem;
-            color: var(--text-secondary);
-            -webkit-text-fill-color: var(--text-secondary);
-        }
-
-        .pricing-calls {
-            color: var(--accent);
-            font-weight: 600;
-            margin: 0.5rem 0 1.5rem;
-        }
-
-        .pricing-features {
-            list-style: none;
-            text-align: left;
-            margin-bottom: 2rem;
-        }
-
-        .pricing-features li {
-            padding: 0.6rem 0;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            color: var(--text-secondary);
-        }
-
-        .pricing-features li::before {
-            content: "✓";
-            color: var(--accent);
-            font-weight: 700;
-        }
-
-        .btn-pricing {
-            width: 100%;
-            padding: 1rem;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s;
-            border: none;
-        }
-
-        .btn-pricing.primary {
-            background: var(--gradient-primary);
-            color: white;
-        }
-
-        .btn-pricing.secondary {
-            background: transparent;
-            border: 2px solid var(--border-color);
-            color: var(--text-primary);
-        }
-
-        .btn-pricing:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-        }
-
-        /* Use Cases */
-        .use-cases-section {
-            padding: 100px 0;
-            background: var(--bg-glass);
-        }
-
-        .use-cases-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .use-case-card {
-            background: var(--bg-card);
-            border-radius: 16px;
-            padding: 2rem;
-            border: 1px solid var(--border-color);
-            text-align: center;
-        }
-
-        .use-case-card h4 {
-            margin-bottom: 0.5rem;
-        }
-
-        .use-case-card p {
-            color: var(--text-secondary);
-            font-size: 0.95rem;
-        }
-
-        /* CTA Section */
-        .cta-section {
-            padding: 100px 0;
-            text-align: center;
-        }
-
-        .cta-box {
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
-            border: 1px solid var(--border-color);
-            border-radius: 24px;
-            padding: 4rem;
-            max-width: 800px;
-            margin: 0 auto;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
         }
 
         /* Footer */
@@ -543,111 +455,24 @@
             color: var(--primary);
         }
 
-        /* Mobile Menu Toggle */
-        .mobile-menu-toggle {
-            display: none;
-            flex-direction: column;
-            gap: 5px;
-            cursor: pointer;
-            padding: 10px;
-            z-index: 1001;
-        }
-
-        .mobile-menu-toggle span {
-            width: 24px;
-            height: 2.5px;
-            background: var(--text-primary);
-            border-radius: 2px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .mobile-menu-toggle.active span:nth-child(1) {
-            transform: translateY(7.5px) rotate(45deg);
-        }
-
-        .mobile-menu-toggle.active span:nth-child(2) {
-            opacity: 0;
-        }
-
-        .mobile-menu-toggle.active span:nth-child(3) {
-            transform: translateY(-7.5px) rotate(-45deg);
-        }
-
-        /* Mobile Nav Menu */
-        .mobile-nav {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: var(--nav-bg);
-            backdrop-filter: blur(20px);
-            padding: 80px 20px 30px;
-            flex-direction: column;
-            gap: 1rem;
-            z-index: 999;
-            transform: translateY(-100%);
-            transition: transform 0.3s ease;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .mobile-nav.active {
-            transform: translateY(0);
-        }
-
-        .mobile-nav a {
-            color: var(--text-primary);
-            text-decoration: none;
-            font-weight: 500;
-            padding: 12px 16px;
-            border-radius: 8px;
-            transition: background 0.3s;
-        }
-
-        .mobile-nav a:hover {
-            background: rgba(102, 126, 234, 0.1);
-        }
-
-        /* Responsive */
+        /* Mobile */
         @media (max-width: 768px) {
             .nav-links {
                 display: none;
             }
 
-            .mobile-menu-toggle {
-                display: flex;
-            }
-
-            .mobile-nav {
-                display: flex;
-            }
-
-            .hero {
-                padding: 120px 0 60px;
-            }
-
-            .hero-cta {
-                flex-direction: column;
-            }
-
-            .code-tabs {
-                flex-wrap: wrap;
-            }
-
-            .pricing-grid {
+            .contact-grid {
                 grid-template-columns: 1fr;
             }
 
-            .features-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .use-cases-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .cta-box {
+            .enterprise-card {
                 padding: 2rem;
+            }
+
+            .enterprise-features {
+                flex-direction: column;
+                align-items: center;
+                gap: 1rem;
             }
         }
     </style>
@@ -656,298 +481,303 @@
     <!-- Navigation -->
     <nav class="nav">
         <div class="nav-container">
-            <a class="logo" href="index">
-                <img src="logo.svg" alt="MarkRemoverAI">
+            <a href="index" class="logo">
+                <img src="emblem.png" alt="MarkRemoverAI">
                 MarkRemoverAI
             </a>
             <div class="nav-links">
-                <a href="index">Home</a>
-                <a href="premium#pricing">Pricing</a>
-                <a href="api">API</a>
-                <a href="login" class="btn-nav">Get API Key</a>
+                <a href="premium">Pricing</a>
+                <a href="index">Main App</a>
+                <a href="login" class="btn-nav">Get Started</a>
                 <button id="themeToggle" onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; color: var(--text-primary); font-size: 1rem; transition: all 0.3s;" title="Toggle theme">
-                    <span id="themeIcon"></span>
+                    <span id="themeIcon">Dark</span>
                 </button>
-            </div>
-            <div class="mobile-menu-toggle" id="mobileMenuToggle">
-                <span></span>
-                <span></span>
-                <span></span>
             </div>
         </div>
     </nav>
-
-    <!-- Mobile Navigation Menu -->
-    <div class="mobile-nav" id="mobileNav">
-        <a href="index">Home</a>
-        <a href="premium#pricing">Pricing</a>
-        <a href="api">API</a>
-        <a href="login">Get API Key</a>
-        <button onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 12px 16px; cursor: pointer; color: var(--text-primary); font-size: 1rem; text-align: left;">
-            <span id="themeIconMobile"></span> Toggle Theme
-        </button>
-    </div>
 
     <!-- Hero Section -->
     <section class="hero">
         <div class="hero-background"></div>
         <div class="container">
             <div class="hero-content">
-                <span class="hero-badge">REST API v1</span>
+                <span class="hero-badge">Enterprise Support</span>
                 <h1 class="hero-title">
-                    Build with <span class="gradient-text">MarkRemoverAI API</span>
+                    <span class="gradient-text">API Support</span> for Your Business
                 </h1>
                 <p class="hero-subtitle">
-                    Integrate AI-powered video object removal into your applications. Process thousands of videos programmatically with simple API calls.
+                    Our dedicated support team is here to help you integrate, optimize, and scale your MarkRemoverAI API implementation. We're committed to your success.
                 </p>
-                <div class="hero-cta">
-                    <a href="login" class="btn-primary">Get API Key Free</a>
-                    <a href="#quickstart" class="btn-secondary">View Documentation</a>
+                <div class="response-banner">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <span>Response within 24 hours or less</span>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Quick Start Code Section -->
-    <section class="code-section" id="quickstart">
+    <!-- Contact Section -->
+    <section class="contact-section">
         <div class="container">
-            <div class="section-header">
-                <h2 class="section-title">Quick Start</h2>
-                <p class="section-subtitle">Start removing objects from videos in minutes</p>
-            </div>
-
-            <div class="code-tabs">
-                <button class="code-tab active" onclick="showCode('curl')">cURL</button>
-                <button class="code-tab" onclick="showCode('python')">Python</button>
-                <button class="code-tab" onclick="showCode('javascript')">JavaScript</button>
-            </div>
-
-            <div class="code-block" id="code-curl">
-<pre><span class="code-comment"># Upload video and create removal job</span>
-<span class="code-keyword">curl</span> -X POST https://api.markremoverai.com/v1/jobs \
-  -H <span class="code-string">"Authorization: Bearer YOUR_API_KEY"</span> \
-  -H <span class="code-string">"Content-Type: multipart/form-data"</span> \
-  -F <span class="code-string">"video=@input.mp4"</span> \
-  -F <span class="code-string">"mask=@mask.png"</span> \
-  -F <span class="code-string">"webhook_url=https://your-app.com/webhook"</span>
-
-<span class="code-comment"># Response</span>
-{
-  <span class="code-property">"job_id"</span>: <span class="code-string">"job_abc123def456"</span>,
-  <span class="code-property">"status"</span>: <span class="code-string">"processing"</span>,
-  <span class="code-property">"estimated_time"</span>: <span class="code-string">"45 seconds"</span>,
-  <span class="code-property">"credits_used"</span>: 12
-}</pre>
-            </div>
-
-            <div class="code-block" id="code-python" style="display: none;">
-<pre><span class="code-keyword">import</span> requests
-
-<span class="code-comment"># Initialize API client</span>
-API_KEY = <span class="code-string">"your_api_key_here"</span>
-BASE_URL = <span class="code-string">"https://api.markremoverai.com/v1"</span>
-
-<span class="code-comment"># Upload video and create removal job</span>
-<span class="code-keyword">with</span> open(<span class="code-string">"input.mp4"</span>, <span class="code-string">"rb"</span>) <span class="code-keyword">as</span> video, open(<span class="code-string">"mask.png"</span>, <span class="code-string">"rb"</span>) <span class="code-keyword">as</span> mask:
-    response = requests.post(
-        f<span class="code-string">"{BASE_URL}/jobs"</span>,
-        headers={<span class="code-string">"Authorization"</span>: f<span class="code-string">"Bearer {API_KEY}"</span>},
-        files={
-            <span class="code-string">"video"</span>: video,
-            <span class="code-string">"mask"</span>: mask
-        },
-        data={<span class="code-string">"webhook_url"</span>: <span class="code-string">"https://your-app.com/webhook"</span>}
-    )
-
-job = response.json()
-<span class="code-keyword">print</span>(f<span class="code-string">"Job {job['job_id']} created - Status: {job['status']}"</span>)</pre>
-            </div>
-
-            <div class="code-block" id="code-javascript" style="display: none;">
-<pre><span class="code-comment">// Using fetch API</span>
-<span class="code-keyword">const</span> API_KEY = <span class="code-string">'your_api_key_here'</span>;
-
-<span class="code-keyword">async function</span> removeObject(videoFile, maskFile) {
-  <span class="code-keyword">const</span> formData = <span class="code-keyword">new</span> FormData();
-  formData.append(<span class="code-string">'video'</span>, videoFile);
-  formData.append(<span class="code-string">'mask'</span>, maskFile);
-  formData.append(<span class="code-string">'webhook_url'</span>, <span class="code-string">'https://your-app.com/webhook'</span>);
-
-  <span class="code-keyword">const</span> response = <span class="code-keyword">await</span> fetch(<span class="code-string">'https://api.markremoverai.com/v1/jobs'</span>, {
-    method: <span class="code-string">'POST'</span>,
-    headers: {
-      <span class="code-string">'Authorization'</span>: <span class="code-string">`Bearer ${API_KEY}`</span>
-    },
-    body: formData
-  });
-
-  <span class="code-keyword">const</span> job = <span class="code-keyword">await</span> response.json();
-  console.log(<span class="code-string">`Job ${job.job_id} created`</span>);
-  <span class="code-keyword">return</span> job;
-}</pre>
-            </div>
-        </div>
-    </section>
-
-    <!-- Features Section -->
-    <section class="features-section" id="features">
-        <div class="container">
-            <div class="section-header">
-                <h2 class="section-title">Everything You Need to Build</h2>
-                <p class="section-subtitle">Powerful features for developers and enterprises</p>
-            </div>
-
-            <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <div class="contact-grid">
+                <!-- Email Support -->
+                <div class="contact-card">
+                    <div class="contact-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
                     </div>
-                    <h3>Lightning Fast</h3>
-                    <p>Average processing time of 30-60 seconds for most videos. Priority queue for paid plans.</p>
+                    <h3>Email Support</h3>
+                    <p>Reach out to our technical support team for any questions about API integration, authentication, or troubleshooting. We respond to all inquiries within 24 hours.</p>
+                    <a href="mailto:support@markremoverai.com" class="contact-link">
+                        support@markremoverai.com
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                    </a>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" stroke-width="2"><polygon points="12,2 2,7 12,12 22,7"/><polyline points="2,17 12,22 22,17"/><polyline points="2,12 12,17 22,12"/></svg>
+
+                <!-- Documentation -->
+                <div class="contact-card">
+                    <div class="contact-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
                     </div>
-                    <h3>Batch Processing</h3>
-                    <p>Process up to 1,000 videos simultaneously. Perfect for large-scale operations.</p>
+                    <h3>Getting Started</h3>
+                    <p>Ready to integrate? Sign up for a free account to get your API key and start processing videos programmatically in minutes.</p>
+                    <a href="login" class="contact-link">
+                        Get Your API Key
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                    </a>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+
+                <!-- Sales Inquiries -->
+                <div class="contact-card">
+                    <div class="contact-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="12" cy="7" r="4"></circle>
+                        </svg>
                     </div>
-                    <h3>Webhook Callbacks</h3>
-                    <p>Get notified instantly when jobs complete. No polling required.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    </div>
-                    <h3>Enterprise Security</h3>
-                    <p>SOC 2 compliant. End-to-end encryption. Files auto-deleted after processing.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8h20"/><polygon points="10,12 10,18 16,15"/></svg>
-                    </div>
-                    <h3>4K Support</h3>
-                    <p>Process videos up to 4K resolution. Maintain original quality in output.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
-                    </div>
-                    <h3>99.9% Uptime SLA</h3>
-                    <p>Guaranteed availability for Business and Enterprise plans.</p>
+                    <h3>Sales & Enterprise</h3>
+                    <p>Looking for custom solutions, volume pricing, or dedicated infrastructure? Our enterprise team will work with you to create a tailored solution for your needs.</p>
+                    <a href="mailto:support@markremoverai.com?subject=Enterprise%20Inquiry" class="contact-link">
+                        Contact Enterprise Sales
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                    </a>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Pricing Section -->
-    <section class="pricing-section" id="pricing">
+    <!-- Topics Section -->
+    <section class="topics-section">
         <div class="container">
-            <div class="section-header">
-                <h2 class="section-title">API Pricing</h2>
-                <p class="section-subtitle">Simple, transparent pricing that scales with you</p>
-            </div>
+            <h2 class="section-title">How Can We Help?</h2>
+            <p class="section-subtitle">Our support team specializes in helping businesses integrate and scale their video processing workflows.</p>
 
-            <div class="pricing-grid">
-                <div class="pricing-card">
-                    <div class="pricing-tier">Free</div>
-                    <div class="pricing-price">$0<span>/mo</span></div>
-                    <div class="pricing-calls">100 API calls/month</div>
-                    <ul class="pricing-features">
-                        <li>1080p max resolution</li>
-                        <li>Standard processing queue</li>
-                        <li>Community support</li>
-                        <li>Basic analytics</li>
-                    </ul>
-                    <button class="btn-pricing secondary" onclick="window.location.href='login'">Get Started Free</button>
+            <div class="topics-grid">
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="16 18 22 12 16 6"></polyline>
+                            <polyline points="8 6 2 12 8 18"></polyline>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>API Integration</h4>
+                        <p>Help with setup, SDKs, and implementation</p>
+                    </div>
                 </div>
 
-                <div class="pricing-card popular">
-                    <div class="popular-badge">MOST POPULAR</div>
-                    <div class="pricing-tier">Developer</div>
-                    <div class="pricing-price">$49<span>/mo</span></div>
-                    <div class="pricing-calls">5,000 API calls/month</div>
-                    <ul class="pricing-features">
-                        <li>4K resolution support</li>
-                        <li>Priority processing</li>
-                        <li>Email support</li>
-                        <li>Webhook callbacks</li>
-                        <li>Batch processing</li>
-                    </ul>
-                    <button class="btn-pricing primary" onclick="window.location.href='login'">Get Started</button>
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>Authentication & API Keys</h4>
+                        <p>Secure access and key management</p>
+                    </div>
                 </div>
 
-                <div class="pricing-card">
-                    <div class="pricing-tier">Business</div>
-                    <div class="pricing-price">$199<span>/mo</span></div>
-                    <div class="pricing-calls">25,000 API calls/month</div>
-                    <ul class="pricing-features">
-                        <li>Everything in Developer</li>
-                        <li>99.9% uptime SLA</li>
-                        <li>Priority support</li>
-                        <li>Custom integrations</li>
-                        <li>Team access</li>
-                    </ul>
-                    <button class="btn-pricing secondary" onclick="window.location.href='login'">Contact Sales</button>
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>Rate Limits & Quotas</h4>
+                        <p>Usage optimization and limit increases</p>
+                    </div>
                 </div>
 
-                <div class="pricing-card">
-                    <div class="pricing-tier">Enterprise</div>
-                    <div class="pricing-price">Custom</div>
-                    <div class="pricing-calls">Unlimited API calls</div>
-                    <ul class="pricing-features">
-                        <li>Everything in Business</li>
-                        <li>Dedicated infrastructure</li>
-                        <li>Custom SLA</li>
-                        <li>Dedicated account manager</li>
-                        <li>On-premise deployment</li>
-                    </ul>
-                    <button class="btn-pricing secondary" onclick="window.location.href='mailto:support@markremoverai.com'">Contact Us</button>
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+                            <line x1="1" y1="10" x2="23" y2="10"></line>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>Billing & Invoicing</h4>
+                        <p>Payment questions and invoice requests</p>
+                    </div>
+                </div>
+
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>Custom Solutions</h4>
+                        <p>Tailored integrations and workflows</p>
+                    </div>
+                </div>
+
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>Technical Troubleshooting</h4>
+                        <p>Debug issues and error resolution</p>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Use Cases Section -->
-    <section class="use-cases-section">
+    <!-- Industries Section -->
+    <section class="industries-section" style="padding: 80px 0;">
         <div class="container">
-            <div class="section-header">
-                <h2 class="section-title">Built for Every Industry</h2>
-                <p class="section-subtitle">See how teams are using our API</p>
-            </div>
+            <h2 class="section-title">Built for Every Industry</h2>
+            <p class="section-subtitle">See how teams are using our API</p>
 
-            <div class="use-cases-grid">
-                <div class="use-case-card">
-                    <h4>Content Platforms</h4>
-                    <p>Automatically clean user-uploaded videos at scale</p>
+            <div class="topics-grid" style="margin-top: 2rem;">
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>Content Platforms</h4>
+                        <p>Automatically clean user-uploaded videos at scale</p>
+                    </div>
                 </div>
-                <div class="use-case-card">
-                    <h4>Marketing Agencies</h4>
-                    <p>Refresh client assets and remove outdated branding</p>
+
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 20V10"></path>
+                            <path d="M18 20V4"></path>
+                            <path d="M6 20v-4"></path>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>Marketing Agencies</h4>
+                        <p>Refresh client assets and remove outdated branding</p>
+                    </div>
                 </div>
-                <div class="use-case-card">
-                    <h4>E-commerce</h4>
-                    <p>Clean product videos and remove unwanted elements</p>
+
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="9" cy="21" r="1"></circle>
+                            <circle cx="20" cy="21" r="1"></circle>
+                            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>E-commerce</h4>
+                        <p>Clean product videos and remove unwanted elements</p>
+                    </div>
                 </div>
-                <div class="use-case-card">
-                    <h4>Media Companies</h4>
-                    <p>Process footage for broadcast and streaming</p>
+
+                <div class="topic-item">
+                    <div class="topic-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                        </svg>
+                    </div>
+                    <div class="topic-content">
+                        <h4>Media Companies</h4>
+                        <p>Process footage for broadcast and streaming</p>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- CTA Section -->
-    <section class="cta-section">
+    <!-- Enterprise Section -->
+    <section class="enterprise-section">
         <div class="container">
-            <div class="cta-box">
-                <h2 class="section-title">Ready to Get Started?</h2>
-                <p class="section-subtitle" style="margin-bottom: 2rem;">Create your free API key and start building today. No credit card required.</p>
-                <a href="login" class="btn-primary">Get Your Free API Key</a>
+            <div class="enterprise-card">
+                <h2>Enterprise Solutions</h2>
+                <p>Need a custom solution for your organization? We offer dedicated infrastructure, custom SLAs, volume pricing, and white-glove onboarding for enterprise clients.</p>
+
+                <div class="enterprise-features">
+                    <div class="enterprise-feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Dedicated Infrastructure
+                    </div>
+                    <div class="enterprise-feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Custom SLA
+                    </div>
+                    <div class="enterprise-feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Volume Pricing
+                    </div>
+                    <div class="enterprise-feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Priority Support
+                    </div>
+                </div>
+
+                <a href="mailto:support@markremoverai.com?subject=Enterprise%20Inquiry" class="btn-white">
+                    Contact Our Enterprise Team
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </a>
             </div>
         </div>
     </section>
@@ -959,25 +789,12 @@ job = response.json()
             <p style="margin-top: 0.5rem;">
                 <a href="terms">Terms</a>
                 <a href="privacy">Privacy</a>
-                <a href="api-support">API Support</a>
+                <a href="contact">Contact</a>
             </p>
         </div>
     </footer>
 
     <script>
-        // Code tab switching
-        function showCode(lang) {
-            document.querySelectorAll('.code-block').forEach(block => {
-                block.style.display = 'none';
-            });
-            document.querySelectorAll('.code-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.getElementById('code-' + lang).style.display = 'block';
-            event.target.classList.add('active');
-        }
-
-        // Theme toggle
         function toggleTheme() {
             const html = document.documentElement;
             const currentTheme = html.getAttribute('data-theme');
@@ -995,35 +812,9 @@ job = response.json()
         }
 
         function loadTheme() {
-            const savedTheme = localStorage.getItem('theme') || 'dark';
+            const savedTheme = localStorage.getItem('theme') || 'light';
             document.documentElement.setAttribute('data-theme', savedTheme);
             updateThemeIcon(savedTheme);
-        }
-
-        // Mobile menu toggle
-        const mobileMenuToggle = document.getElementById('mobileMenuToggle');
-        const mobileNav = document.getElementById('mobileNav');
-
-        mobileMenuToggle.addEventListener('click', () => {
-            mobileMenuToggle.classList.toggle('active');
-            mobileNav.classList.toggle('active');
-        });
-
-        // Close mobile menu when clicking a link
-        document.querySelectorAll('.mobile-nav a').forEach(link => {
-            link.addEventListener('click', () => {
-                mobileMenuToggle.classList.remove('active');
-                mobileNav.classList.remove('active');
-            });
-        });
-
-        // Update mobile theme icon too
-        function updateThemeIcon(theme) {
-            const icon = document.getElementById('themeIcon');
-            const iconMobile = document.getElementById('themeIconMobile');
-            const text = theme === 'dark' ? 'Light' : 'Dark';
-            if (icon) icon.textContent = text;
-            if (iconMobile) iconMobile.textContent = text;
         }
 
         loadTheme();
