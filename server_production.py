@@ -237,6 +237,15 @@ except ImportError as e:
 # [INIT] FFmpeg/FFprobe path detection (check common locations, no download)
 def get_ffmpeg_executables():
     """Get FFmpeg and FFprobe paths - check common locations first, then PATH."""
+    import platform
+
+    # On Linux/Docker, use system ffmpeg first (avoid Windows .exe files from mounted volumes)
+    if platform.system() != 'Windows':
+        ffmpeg_path = shutil.which('ffmpeg')
+        ffprobe_path = shutil.which('ffprobe')
+        if ffmpeg_path and ffprobe_path:
+            print(f"[OK] Using system FFmpeg (Linux): {ffmpeg_path}")
+            return ffmpeg_path, ffprobe_path
 
     # Common FFmpeg install locations on Windows
     common_locations = [
@@ -280,6 +289,27 @@ except Exception as e:
         print(f"[INFO] FFmpeg not available (API-only mode): {e}")
 
 print("[DEBUG] FFmpeg init complete, creating Flask app...", flush=True)
+
+# [VRAM] Aggressive VRAM cleanup helper - call after every GPU task
+def cleanup_vram(context=""):
+    """Force VRAM cleanup to prevent OOM errors between tasks."""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            try:
+                torch.cuda.ipc_collect()
+            except:
+                pass
+            # Log VRAM status
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            print(f"[VRAM] Cleanup {context}: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+    except Exception as e:
+        print(f"[VRAM] Cleanup error: {e}")
 
 # [INIT] EXTREME SPEED: Global in-memory frame/mask cache
 # Shared across all threads in Celery worker (threads pool)
@@ -2656,7 +2686,7 @@ def broadcast_video_download(self, video_id, video_url, upload_filename):
 
 
 @celery.task(bind=True, name='prepare_video')
-def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id=None, masks_dir=None):
+def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id=None, masks_dir=None, masks_url=None):
     """
     Phase 1: Prepare video for distributed processing
     - Download video if needed
@@ -2798,12 +2828,25 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
 
         # Create shared directories for distributed access
         # If masks_dir provided (from _continue_after_masks), use it directly!
+        print(f"[DEBUG] masks_dir received: {masks_dir}")
+        print(f"[DEBUG] masks_url received: {masks_url}")
+        print(f"[DEBUG] os.path.isdir(masks_dir): {os.path.isdir(masks_dir) if masks_dir else 'N/A'}")
+        if masks_dir:
+            print(f"[DEBUG] os.path.exists(masks_dir): {os.path.exists(masks_dir)}")
+            if os.path.exists(masks_dir):
+                try:
+                    contents = os.listdir(masks_dir)
+                    print(f"[DEBUG] Directory contents ({len(contents)} items): {contents[:5] if len(contents) > 5 else contents}...")
+                except Exception as e:
+                    print(f"[DEBUG] Failed to list directory: {e}")
+
         if masks_dir and os.path.isdir(masks_dir):
             shared_mask_dir = masks_dir
             print(f"[OK] Using pre-downloaded masks from: {masks_dir}")
             mask_count = len([f for f in os.listdir(masks_dir) if f.endswith('.png')])
             print(f"   Found {mask_count} masks - skipping YOLO detection!")
         else:
+            print(f"[WARNING] masks_dir check FAILED - will create new directory and run YOLO")
             shared_mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{video_id}")
             os.makedirs(shared_mask_dir, exist_ok=True)
         shared_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_originals")
@@ -3127,6 +3170,7 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
                 'video_path': video_path,  # For background encoder audio merge
                 'shared_mask_dir': shared_mask_dir,
                 'shared_frames_dir': shared_frames_dir,
+                'masks_url': masks_url,  # B2 CDN URL for remote download fallback
                 'video_url': f"{api_base_url.rstrip('/')}/uploads/{os.path.basename(video_path)}",
                 'temp_base_url': temp_base_url,
                 'api_base': api_base_url,
@@ -3285,6 +3329,16 @@ def process_segment_task(self, segment_data):
         origin_base = segment_data.get('temp_base_url') or os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL')
         shared_mask_dir = segment_data.get('shared_mask_dir')
         shared_frames_dir = segment_data.get('shared_frames_dir')
+
+        # Debug logging for mask path investigation
+        print(f"   [DEBUG] Segment {seg_idx} - shared_mask_dir from segment_data: {shared_mask_dir}")
+        print(f"   [DEBUG] Segment {seg_idx} - shared_mask_dir exists: {os.path.exists(shared_mask_dir) if shared_mask_dir else 'N/A'}")
+        if shared_mask_dir and os.path.exists(shared_mask_dir):
+            try:
+                mask_files = os.listdir(shared_mask_dir)
+                print(f"   [DEBUG] Segment {seg_idx} - masks in directory: {len(mask_files)} files")
+            except Exception as e:
+                print(f"   [DEBUG] Segment {seg_idx} - failed to list masks: {e}")
 
         # Multi-PC optimization: Skip frame sharing, download video directly in parallel
         # Smart detection: Check if shared dirs are locally accessible (same PC = fast file copy)
@@ -3591,6 +3645,47 @@ def process_segment_task(self, segment_data):
                     print(f"   [WARNING]  Only {masks_succeeded}/{len(masks_needed)} masks downloaded - will regenerate")
             except Exception as download_err:
                 print(f"   [WARNING]  Mask download failed: {download_err} - will regenerate")
+
+        # Fallback: Download entire mask ZIP from B2 CDN (for distributed workers)
+        if not masks_downloaded:
+            masks_url = segment_data.get('masks_url')
+            print(f"   [DEBUG] masks_url from segment_data: {masks_url}")
+            if masks_url:
+                print(f"   [B2] Downloading masks from B2 CDN: {masks_url}")
+                self.update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Downloading masks from B2'})
+                try:
+                    import zipfile
+                    zip_path = os.path.join(TEMP_DIR, f"{video_id}_masks_seg{seg_idx}.zip")
+                    r = requests.get(masks_url, timeout=120)
+                    r.raise_for_status()
+                    with open(zip_path, 'wb') as f:
+                        f.write(r.content)
+                    print(f"   [B2] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
+
+                    # Extract to shared_mask_dir (create if needed)
+                    os.makedirs(shared_mask_dir, exist_ok=True)
+                    with zipfile.ZipFile(zip_path, 'r') as zf:
+                        zf.extractall(shared_mask_dir)
+                    os.remove(zip_path)
+
+                    # Now copy masks for this segment
+                    masks_succeeded = 0
+                    for abs_frame_idx in masks_needed:
+                        mask_filename = f"{abs_frame_idx:05d}.png"
+                        shared_mask_path = os.path.join(shared_mask_dir, mask_filename)
+                        if os.path.exists(shared_mask_path):
+                            local_idx = abs_frame_idx - padded_start
+                            local_mask_path = os.path.join(seg_mask_dir, f"{local_idx:04d}.png")
+                            shutil.copy2(shared_mask_path, local_mask_path)
+                            masks_succeeded += 1
+
+                    if masks_succeeded == len(masks_needed):
+                        print(f"   [OK] Downloaded and extracted {masks_succeeded} masks from B2 CDN")
+                        masks_downloaded = True
+                    else:
+                        print(f"   [WARNING] Only {masks_succeeded}/{len(masks_needed)} masks found in B2 zip")
+                except Exception as b2_err:
+                    print(f"   [ERROR] B2 download failed: {b2_err}")
 
         # Define memory pipeline flag (check if we have all frames/masks in memory)
         using_memory_pipeline = (len(segment_frames_memory) == frames_copied and
@@ -3949,6 +4044,9 @@ def process_segment_task(self, segment_data):
         # Note: Don't call self.update_state(state='SUCCESS') - it overrides the return value!
         # Celery automatically sets state to SUCCESS when the task returns normally
         # Chord will automatically trigger finalize when all segments complete
+
+        # 🔥 VRAM cleanup after segment processing
+        cleanup_vram(f"after segment {seg_idx+1}/{total_segments}")
 
         return result
 

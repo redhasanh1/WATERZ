@@ -28,6 +28,26 @@ from crop_utils import calculate_crop_region
 
 # Number of parallel segment workers
 SEGMENT_WORKERS = int(os.getenv('SEGMENT_WORKERS', '2'))
+
+# [VRAM] Aggressive VRAM cleanup helper - call after every GPU task
+def cleanup_vram(context=""):
+    """Force VRAM cleanup to prevent OOM errors between tasks."""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            try:
+                torch.cuda.ipc_collect()
+            except:
+                pass
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            print(f"[VRAM] Cleanup {context}: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+    except Exception as e:
+        print(f"[VRAM] Cleanup error: {e}")
 # Parallel segment execution (inside a single video task)
 SAM2_PARALLEL_SEGMENTS = os.getenv('SAM2_PARALLEL_SEGMENTS', '1').lower() in ('1', 'true', 'yes', 'on')
 
@@ -1375,16 +1395,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         raise
     finally:
         # Force VRAM cleanup after EVERY task to prevent memory leaks
-        import gc
-        gc.collect()
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                print(f"[VRAM] Cleanup complete")
-        except Exception:
-            pass
+        cleanup_vram("finally block")
 
 
 #============================================================================
@@ -2431,17 +2442,22 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             api_base_url = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or ''
             temp_base_url = os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL') or ''
 
-            # Call server_production.py's prepare_video task - pass masks_dir to avoid re-download!
+            # Call server_production.py's prepare_video task - pass masks_dir AND masks_url!
+            # masks_url allows remote workers to download masks from B2 CDN if local path doesn't exist
             from celery import signature
             task = signature('prepare_video', args=[video_path], kwargs={
                 'api_base': api_base_url,
                 'temp_base': temp_base_url,
-                'masks_dir': masks_dir,  # Pass pre-downloaded masks - segment tasks will use this
+                'masks_dir': masks_dir,  # Local path (may not exist on remote worker)
+                'masks_url': masks_url,  # B2 CDN URL for remote download fallback
             })
-            result = task.apply_async()
+            result = task.apply_async(queue='propainter')  # Force to Docker (has updated code)
 
             print(f"[YOLO] Forwarded to prepare_video task: {result.id}")
             print(f"   Pre-downloaded masks at: {masks_dir}")
+
+            # 🔥 VRAM cleanup after YOLO mask download/forwarding
+            cleanup_vram("after YOLO forward")
 
             return {
                 'status': 'processing',
@@ -2596,6 +2612,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 if os.path.isdir(temp_path):
                     _shutil.rmtree(temp_path)
 
+        # 🔥 VRAM cleanup before returning
+        cleanup_vram("after SAM2 pipeline")
+
         return {
             'status': 'success', 'video_id': video_id,
             'video_path': video_path, 'output_path': cdn_url or output_path,
@@ -2620,16 +2639,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         raise
     finally:
         # Force VRAM cleanup after EVERY task to prevent memory leaks
-        import gc
-        gc.collect()
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                print(f"[VRAM] Cleanup complete")
-        except Exception:
-            pass
+        cleanup_vram("finally block")
 
 
 # =============================================================================
