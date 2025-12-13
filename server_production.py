@@ -7058,6 +7058,15 @@ def create_checkout_session():
         if not user_id:
             return jsonify({'error': 'user_id is required'}), 400
 
+        # Fetch user email from database
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT email FROM users WHERE id = %s', (user_id,))
+                result = cur.fetchone()
+                if not result:
+                    return jsonify({'error': 'User not found'}), 404
+                user_email = result[0]
+
         # Get base URL for success/cancel redirects
         base_url = request.host_url.rstrip('/')
 
@@ -7071,6 +7080,7 @@ def create_checkout_session():
             'mode': mode,
             'success_url': f'{base_url}/success.html?session_id={{CHECKOUT_SESSION_ID}}',
             'cancel_url': f'{base_url}/premium.html',
+            'customer_email': user_email,  # Pre-fill with user's actual email
             'client_reference_id': user_id,
             'metadata': {
                 'user_id': user_id,
