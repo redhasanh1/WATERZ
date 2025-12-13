@@ -1318,7 +1318,7 @@
         <div class="nav-container">
             <!-- LEFT: Logo + Main Navigation -->
             <div class="nav-left">
-                <a href="/" class="nav-logo" style="font-size: 1.5rem; font-weight: 700; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-decoration: none;">
+                <a href="/" class="nav-logo" style="font-size: 1.2rem; font-weight: 700; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-decoration: none;">
                     <img src="logo.svg" alt="MarkRemoverAI">
                     MarkRemoverAI
                 </a>
@@ -1335,10 +1335,10 @@
             <div class="nav-right">
                 <!-- Auth Section -->
                 <div class="nav-auth">
+                    <span id="headerCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span>
                     <a href="login" class="nav-cta" id="signInLink">Sign In</a>
                     <ul class="nav-menu" id="userNav" style="display: none;">
                         <li><a href="profile" id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem; text-decoration: none; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'"></a></li>
-                        <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
                     </ul>
                 </div>
 
@@ -2487,7 +2487,7 @@
                     if (user.id && user.credits !== undefined) {
                         user.credits = Math.max(0, user.credits - 1);
                         localStorage.setItem('user', JSON.stringify(user));
-                        const creditsEl = document.getElementById('userCredits');
+                        const creditsEl = document.getElementById('headerCredits');
                         if (creditsEl) {
                             creditsEl.textContent = user.credits + ' credit' + (user.credits !== 1 ? 's' : '');
                             if (user.credits === 0) {
@@ -3316,15 +3316,15 @@
         userEmailEl.textContent = userData.name || userData.email;
       }
 
-      // Show credits
-      const userCreditsEl = document.getElementById('userCredits');
+      // Show credits in header
+      const headerCreditsEl = document.getElementById('headerCredits');
       const credits = userData.credits || 0;
-      if (userCreditsEl) {
-        userCreditsEl.textContent = credits + ' credit' + (credits !== 1 ? 's' : '');
+      if (headerCreditsEl) {
+        headerCreditsEl.textContent = credits + ' credit' + (credits !== 1 ? 's' : '');
         if (credits === 0) {
-          userCreditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
+          headerCreditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
         } else if (credits < 3) {
-          userCreditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+          headerCreditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
         }
       }
 
