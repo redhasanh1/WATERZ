@@ -44,8 +44,8 @@ class YOLOWatermarkDetector:
                 print(f"[OK] Loaded custom model: {model_path}")
             else:
                 # Try TensorRT engine first
-                batch_engine = 'runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx4090.engine'
-                pt_model = 'runs/detect/new_sora_watermark/weights/best.pt'
+                batch_engine = 'runs/detect/sora_watermark_v2/weights/best.engine'
+                pt_model = 'runs/detect/sora_watermark_v2/weights/best.pt'
 
                 if os.path.exists(batch_engine) and (torch is not None) and torch.cuda.is_available():
                     # Load batch-enabled TensorRT engine

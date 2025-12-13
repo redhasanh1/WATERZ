@@ -159,7 +159,9 @@ echo "  Concurrency: $CONCURRENCY"
 echo "============================================================"
 echo ""
 
-# Start Celery worker (server_production2 has TRT env vars baked in)
+# Single worker handles BOTH modes:
+# - YOLO mode: celery queue -> forwards to server_production
+# - SAM2 mode: propainter queue -> handled directly
 exec celery -A server_production2.celery worker \
     -Q celery,propainter \
     --loglevel=info \

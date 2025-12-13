@@ -1303,12 +1303,14 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             from b2sdk.v2 import B2Api, InMemoryAccountInfo
             import time as _upload_time
 
-            B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000003')
-            B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005384b8lPoBT11wScxkZ2Gx0fszus')
+            B2_KEY_ID = os.getenv('B2_KEY_ID')
+            B2_APP_KEY = os.getenv('B2_APP_KEY')
             B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
             B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 
-            if os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
+            if not B2_KEY_ID or not B2_APP_KEY:
+                print(f"[B2] Warning: B2 credentials not set - skipping upload")
+            elif os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
                 timestamp = int(_upload_time.time())
                 remote_path = f"results/{timestamp}_{os.path.basename(output_path)}"
 
@@ -1371,6 +1373,18 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             print(f"[CLEANUP] Warning: {cleanup_err}")
         # Do not call update_state with FAILURE meta (Celery will store proper exception info)
         raise
+    finally:
+        # Force VRAM cleanup after EVERY task to prevent memory leaks
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                print(f"[VRAM] Cleanup complete")
+        except Exception:
+            pass
 
 
 #============================================================================
@@ -1794,12 +1808,14 @@ def finalize_yolo_task(self, segment_results, video_data):
     try:
         from b2sdk.v2 import B2Api, InMemoryAccountInfo
 
-        B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000003')
-        B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005384b8lPoBT11wScxkZ2Gx0fszus')
+        B2_KEY_ID = os.getenv('B2_KEY_ID')
+        B2_APP_KEY = os.getenv('B2_APP_KEY')
         B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
         B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 
-        if os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
+        if not B2_KEY_ID or not B2_APP_KEY:
+            print(f"[B2] Warning: B2 credentials not set - skipping upload")
+        elif os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
             timestamp = int(_time.time())
             remote_path = f"results/{timestamp}_{os.path.basename(output_path)}"
 
@@ -2388,16 +2404,17 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             api_base_url = os.getenv('API_BASE_URL') or os.getenv('TUNNEL_URL') or ''
             temp_base_url = os.getenv('TEMP_BASE_URL') or os.getenv('TUNNEL_URL') or ''
 
-            # Call server_production.py's prepare_video task - same as START_CELERY_TRT
+            # Call server_production.py's prepare_video task - pass masks_dir to avoid re-download!
             from celery import signature
             task = signature('prepare_video', args=[video_path], kwargs={
                 'api_base': api_base_url,
-                'temp_base': temp_base_url
+                'temp_base': temp_base_url,
+                'masks_dir': masks_dir,  # Pass pre-downloaded masks - segment tasks will use this
             })
             result = task.apply_async()
 
             print(f"[YOLO] Forwarded to prepare_video task: {result.id}")
-            print(f"   This uses the EXACT same code path as START_CELERY_TRT!")
+            print(f"   Pre-downloaded masks at: {masks_dir}")
 
             return {
                 'status': 'processing',
@@ -2518,12 +2535,14 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             from b2sdk.v2 import B2Api, InMemoryAccountInfo
             import time as _upload_time
 
-            B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000003')
-            B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005384b8lPoBT11wScxkZ2Gx0fszus')
+            B2_KEY_ID = os.getenv('B2_KEY_ID')
+            B2_APP_KEY = os.getenv('B2_APP_KEY')
             B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
             B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 
-            if os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
+            if not B2_KEY_ID or not B2_APP_KEY:
+                print(f"[B2] Warning: B2 credentials not set - skipping upload")
+            elif os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
                 timestamp = int(_upload_time.time())
                 remote_path = f"results/{timestamp}_{os.path.basename(output_path)}"
 
@@ -2572,6 +2591,18 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         except Exception as cleanup_err:
             print(f"[CLEANUP] Warning: {cleanup_err}")
         raise
+    finally:
+        # Force VRAM cleanup after EVERY task to prevent memory leaks
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                print(f"[VRAM] Cleanup complete")
+        except Exception:
+            pass
 
 
 # =============================================================================

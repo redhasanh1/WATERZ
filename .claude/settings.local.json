@@ -63,7 +63,18 @@
       "Bash(git -C \"D:/watermarkz\" log --oneline -5)",
       "Bash(git -C \"D:/watermarkz\" show --stat 166174f0)",
       "Bash(git -C \"D:/watermarkz\" status -sb)",
-      "Bash(md5sum:*)"
+      "Bash(md5sum:*)",
+      "Bash(certutil -hashfile:*)",
+      "Bash(C:/Users/has/AppData/Local/Programs/Python/Python312/python.exe:*)",
+      "Bash(wsl -e docker cp:*)",
+      "Bash(wsl bash -c \"docker cp /mnt/d/watermarkz/server_production.py test_v3:/app/ && echo ''Done!''\")",
+      "Bash(wsl bash:*)",
+      "Bash(docker cp:*)",
+      "Bash(ls -la \"D:\\watermarkz\\runs\\detect\\old_sora_watermark_v1_backup\\weights\"\" 2>/dev/null || dir \"D:watermarkzrunsdetectold_sora_watermark_v1_backupweights \")",
+      "Bash(docker ps:*)",
+      "Bash(wsl -e bash -c \"cd /mnt/d/watermarkz && sed -i ''s/\\r$//'' docker-entrypoint.sh && file docker-entrypoint.sh\")",
+      "Bash(wc:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

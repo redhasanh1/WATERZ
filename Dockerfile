@@ -38,7 +38,15 @@ RUN pip install --no-cache-dir \
     requests \
     scipy \
     scikit-image \
-    ffmpeg-python
+    ffmpeg-python \
+    flask \
+    flask-cors \
+    python-dotenv \
+    b2sdk \
+    pydantic \
+    bcrypt \
+    tqdm \
+    einops
 
 # ==============================================================================
 # Runtime Stage (Smaller final image)
@@ -47,7 +55,7 @@ FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install runtime dependencies
+# Install runtime dependencies + TensorRT tools (for trtexec)
 RUN apt-get update && apt-get install -y \
     python3.11 \
     python3-pip \
@@ -57,6 +65,16 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender-dev \
     ffmpeg \
+    wget \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install TensorRT (includes trtexec)
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i cuda-keyring_1.1-1_all.deb \
+    && rm cuda-keyring_1.1-1_all.deb \
+    && apt-get update \
+    && apt-get install -y tensorrt \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.11 as default
@@ -72,6 +90,7 @@ WORKDIR /app
 
 # Copy application code
 COPY server_production.py .
+COPY server_production2.py .
 COPY yolo_detector.py .
 
 # Copy python_packages directory (custom packages)
@@ -80,9 +99,9 @@ COPY python_packages ./python_packages
 # Copy ProPainter pipeline
 COPY faster-propainter-main ./faster-propainter-main
 
-# Copy TensorRT engines and model weights
-COPY runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine \
-     ./runs/detect/new_sora_watermark/weights/best_fp16_batch_rtx5070.engine
+# Copy YOLO model weights (TensorRT engine builds at runtime)
+COPY runs/detect/sora_watermark_v2/weights/best.pt \
+     ./runs/detect/sora_watermark_v2/weights/best.pt
 COPY weights ./weights
 
 # Create necessary directories
@@ -92,7 +111,7 @@ RUN mkdir -p temp uploads results cache pip_cache
 ENV PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=utf-8 \
     PYTHONPATH=/app/python_packages:$PYTHONPATH \
-    YOLO_REQUIRE_TENSORRT=1 \
+    YOLO_REQUIRE_TENSORRT=0 \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     TORCH_HOME=/app/cache \
     XDG_CACHE_HOME=/app/cache \
