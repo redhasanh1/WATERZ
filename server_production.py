@@ -1294,6 +1294,10 @@ app.config['TEMP_FOLDER'] = TEMP_DIR  # D drive only!
 UPLOAD_RATE_LIMIT = {}  # IP -> (count, timestamp)
 USER_VIDEO_RATE_LIMIT = {}  # user_id -> list of timestamps
 
+# Video processing limits
+MAX_VIDEO_DURATION_SECONDS = 60  # 1 minute max
+MAX_VIDEO_FPS = 60  # 60fps max
+
 # Input validation
 def sanitize_filename(filename):
     """Remove dangerous characters from filenames"""
@@ -1932,7 +1936,7 @@ def background_encoder_worker():
 
             print("[BACKGROUND ENCODER] Listening for segment completion signals...")
             print("[BACKGROUND ENCODER] Socket keepalive enabled - NO timeout!")
-            print("[BACKGROUND ENCODER] PARALLEL MODE: Up to 4 concurrent NVENC streams!")
+            print("[BACKGROUND ENCODER] UNIFIED MODE: All encoding happens at finalization (no segment boundaries!)")
 
             # Create thread pool for parallel encoding (4 matches SEGMENT_WORKERS)
             with ThreadPoolExecutor(max_workers=4, thread_name_prefix="EncoderThread") as executor:
@@ -2002,17 +2006,17 @@ def background_encoder_worker():
 
 def encode_segment_background(redis_client, data):
     """
-    Encode a segment using GPU NVENC (same encoding as before, just in background).
-    Called by background encoder thread continuously as segments complete.
-    """
-    import subprocess
-    import time
+    Mark segment as ready for finalization.
 
+    FIX: No longer encodes per-segment videos! All encoding happens in
+    trigger_finalization() which encodes the ENTIRE video in one pass.
+    This eliminates segment boundary flickering.
+    """
     video_id = data['video_id']
     seg_idx = data['seg_idx']
     total_segments = data['total_segments']
 
-    # Get segment metadata from Redis
+    # Get segment metadata from Redis to verify it exists
     segment_key = f"video:{video_id}:segment:{seg_idx}"
     segment_info_raw = redis_client.hgetall(segment_key)
 
@@ -2027,107 +2031,61 @@ def encode_segment_background(redis_client, data):
     }
 
     cleaned_dir = segment_info.get('cleaned_dir')
-    fps = float(segment_info.get('fps', 30))
-    frame_count = int(segment_info.get('frame_count', 0))
-    base_name = segment_info.get('base_name', 'video')
-    # 🔥 SHARED BUFFER: Get frame range for this segment
     start_frame = int(segment_info.get('start_frame', 0))
-    end_frame = int(segment_info.get('end_frame', frame_count - 1))
+    end_frame = int(segment_info.get('end_frame', 0))
 
     if not cleaned_dir or not os.path.exists(cleaned_dir):
         raise RuntimeError(f"Cleaned frames directory not found: {cleaned_dir}")
 
-    # Create output path
-    seg_video_path = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_seg{seg_idx}.mp4")
-
-    print(f"[ENCODER] Encoding segment {seg_idx}: frames {start_frame}-{end_frame} ({frame_count} frames) @ {fps} fps...")
-    encode_start = time.time()
-
-    # 🔥 SHARED BUFFER: Create file list for this segment's frames only
-    # (frames are named by global index in shared buffer)
-    file_list_path = os.path.join(TEMP_DIR, f"encode_seg{seg_idx}_{video_id}.txt")
-    with open(file_list_path, 'w') as f:
-        for global_idx in range(start_frame, end_frame + 1):
-            frame_path = os.path.join(cleaned_dir, f"{global_idx:04d}.png")
-            if os.path.exists(frame_path):
-                # Write absolute path for ffmpeg concat
-                abs_path = os.path.abspath(frame_path).replace('\\', '/')
-                # Use duration 1/fps for each frame
-                f.write(f"file '{abs_path}'\n")
-                f.write(f"duration {1/fps}\n")
-        # Last frame needs to be repeated for proper duration
-        last_frame_path = os.path.join(cleaned_dir, f"{end_frame:04d}.png")
-        if os.path.exists(last_frame_path):
-            abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
-            f.write(f"file '{abs_path}'\n")
-
-    # Encode with NVENC using file list (concat demuxer)
-    encode_cmd = [
-        FFMPEG_EXE, '-y',
-        '-f', 'concat',
-        '-safe', '0',
-        '-i', file_list_path,
-        '-c:v', 'h264_nvenc',
-        '-preset', 'p4',  # Balanced speed/quality
-        '-b:v', '8M',
-        '-pix_fmt', 'yuv420p',
-        '-profile:v', 'main',
-        seg_video_path
-    ]
-
-    try:
-        result = subprocess.run(encode_cmd, capture_output=True, check=True, text=True, timeout=300)
-        encode_duration = time.time() - encode_start
-
-        encoded_size_mb = os.path.getsize(seg_video_path) / (1024 * 1024)
-        fps_actual = frame_count / encode_duration if encode_duration > 0 else 0
-
-        print(f"[ENCODER] [OK] Encoded: {encoded_size_mb:.2f} MB in {encode_duration:.2f}s ({fps_actual:.1f} fps)")
-
-        # Store encoded path in Redis
-        redis_client.hset(segment_key, 'encoded_path', seg_video_path)
-        redis_client.hset(segment_key, 'status', 'encoded')
-
-        # Cleanup file list and frames after successful encoding
-        if os.path.exists(file_list_path):
-            os.remove(file_list_path)
-
-        # Note: Don't cleanup shared_cleaned_dir yet - other segments may need it!
-        # Final cleanup happens after all segments are encoded
-
-    except subprocess.CalledProcessError as e:
-        print(f"[ENCODER ERROR] Encoding failed for segment {seg_idx}!")
-        print(f"   stderr: {e.stderr}")
-        raise
-    except subprocess.TimeoutExpired:
-        print(f"[ENCODER ERROR] Encoding timed out after 300s for segment {seg_idx}")
-        raise
+    # 🔥 SKIP per-segment encoding - finalization encodes entire video at once!
+    # Just mark segment as ready
+    print(f"[ENCODER] Segment {seg_idx} ready: frames {start_frame}-{end_frame} (encoding deferred to finalization)")
+    redis_client.hset(segment_key, 'status', 'ready_for_finalization')
 
 
 def trigger_finalization(redis_client, video_id, total_segments):
     """
-    Concatenate all encoded segments and merge audio.
-    Called automatically when all segments are encoded.
+    Encode entire video at once from shared buffer, then merge audio.
+    Called automatically when all segments complete.
+
+    FIX: Encodes all frames in one pass instead of concatenating per-segment videos.
+    This eliminates segment boundary flickering caused by encoder state reset.
     """
     import subprocess
+    import time as encode_time
 
     print(f"\n[FINALIZE] Starting finalization for video {video_id}")
 
-    # Collect all segment video paths from Redis (in order)
-    segment_paths = []
+    # Get shared_cleaned_dir and frame range from segments
+    segment_key = f"video:{video_id}:segment:0"
+    shared_cleaned_dir_raw = redis_client.hget(segment_key, 'cleaned_dir')
+    if not shared_cleaned_dir_raw:
+        raise RuntimeError(f"No cleaned_dir found for video {video_id}")
+    shared_cleaned_dir = shared_cleaned_dir_raw.decode() if isinstance(shared_cleaned_dir_raw, bytes) else shared_cleaned_dir_raw
+
+    fps_raw = redis_client.hget(segment_key, 'fps')
+    fps = float(fps_raw.decode() if isinstance(fps_raw, bytes) else fps_raw) if fps_raw else 30.0
+
+    # Find the full frame range across all segments
+    min_frame = float('inf')
+    max_frame = 0
     for seg_idx in range(total_segments):
-        segment_key = f"video:{video_id}:segment:{seg_idx}"
-        encoded_path_raw = redis_client.hget(segment_key, 'encoded_path')
+        seg_key = f"video:{video_id}:segment:{seg_idx}"
+        start_raw = redis_client.hget(seg_key, 'start_frame')
+        end_raw = redis_client.hget(seg_key, 'end_frame')
+        if start_raw:
+            start_frame = int(start_raw.decode() if isinstance(start_raw, bytes) else start_raw)
+            min_frame = min(min_frame, start_frame)
+        if end_raw:
+            end_frame = int(end_raw.decode() if isinstance(end_raw, bytes) else end_raw)
+            max_frame = max(max_frame, end_frame)
 
-        # Decode bytes to string
-        encoded_path = encoded_path_raw.decode() if isinstance(encoded_path_raw, bytes) else encoded_path_raw
+    if min_frame == float('inf'):
+        min_frame = 0
 
-        if not encoded_path or not os.path.exists(encoded_path):
-            raise RuntimeError(f"Missing encoded segment {seg_idx}: {encoded_path}")
-
-        segment_paths.append(encoded_path)
-
-    print(f"[FINALIZE] Found {len(segment_paths)} encoded segments")
+    total_frames = max_frame - min_frame + 1
+    print(f"[FINALIZE] Shared buffer: {shared_cleaned_dir}")
+    print(f"[FINALIZE] Frame range: {min_frame}-{max_frame} ({total_frames} frames) @ {fps} fps")
 
     # Get video metadata (decode bytes)
     base_name_raw = redis_client.get(f"video:{video_id}:base_name")
@@ -2136,27 +2094,49 @@ def trigger_finalization(redis_client, video_id, total_segments):
     video_path_raw = redis_client.get(f"video:{video_id}:video_path")
     video_path = video_path_raw.decode() if isinstance(video_path_raw, bytes) else video_path_raw
 
-    # Create concat list
-    concat_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_concat.txt")
-    with open(concat_list_path, 'w') as f:
-        for seg_path in segment_paths:
-            abs_path = os.path.abspath(seg_path).replace('\\', '/')
+    # 🔥 ENCODE ENTIRE VIDEO AT ONCE - no segment concatenation!
+    # This eliminates segment boundary flickering by keeping encoder state continuous
+    file_list_path = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_all_frames.txt")
+    frames_found = 0
+    with open(file_list_path, 'w') as f:
+        for global_idx in range(min_frame, max_frame + 1):
+            frame_path = os.path.join(shared_cleaned_dir, f"{global_idx:04d}.png")
+            if os.path.exists(frame_path):
+                abs_path = os.path.abspath(frame_path).replace('\\', '/')
+                f.write(f"file '{abs_path}'\n")
+                f.write(f"duration {1/fps}\n")
+                frames_found += 1
+        # Last frame for proper duration
+        last_frame_path = os.path.join(shared_cleaned_dir, f"{max_frame:04d}.png")
+        if os.path.exists(last_frame_path):
+            abs_path = os.path.abspath(last_frame_path).replace('\\', '/')
             f.write(f"file '{abs_path}'\n")
 
-    # Concatenate with copy codec (instant - no re-encoding)
+    print(f"[FINALIZE] Found {frames_found}/{total_frames} frames in shared buffer")
+
     temp_processed = os.path.join(RESULT_DIR, f"{base_name}_{video_id}_processed.mp4")
 
-    concat_cmd = [
-        FFMPEG_EXE, '-y', '-f', 'concat', '-safe', '0',
-        '-i', concat_list_path,
-        '-c', 'copy',  # No re-encoding - instant!
+    # Encode with NVENC in ONE PASS - continuous encoder state = no flicker!
+    encode_start = encode_time.time()
+    encode_cmd = [
+        FFMPEG_EXE, '-y',
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', file_list_path,
+        '-c:v', 'h264_nvenc',
+        '-preset', 'p4',
+        '-b:v', '8M',
+        '-pix_fmt', 'yuv420p',
+        '-profile:v', 'main',
         temp_processed
     ]
 
-    print(f"[FINALIZE] Concatenating segments with copy codec...")
-    subprocess.run(concat_cmd, capture_output=True, check=True, text=True, timeout=60)
-    concat_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
-    print(f"[FINALIZE] ✓ Concatenated: {concat_size_mb:.2f} MB")
+    print(f"[FINALIZE] Encoding entire video with NVENC (single pass, no segment boundaries)...")
+    subprocess.run(encode_cmd, capture_output=True, check=True, text=True, timeout=600)
+    encode_duration = encode_time.time() - encode_start
+    encode_fps = frames_found / encode_duration if encode_duration > 0 else 0
+    encoded_size_mb = os.path.getsize(temp_processed) / (1024 * 1024)
+    print(f"[FINALIZE] ✓ Encoded: {encoded_size_mb:.2f} MB in {encode_duration:.2f}s ({encode_fps:.1f} fps)")
 
     # Merge audio from original
     final_output = os.path.join(RESULT_DIR, f"{base_name}_propainter.mp4")
@@ -2197,21 +2177,13 @@ def trigger_finalization(redis_client, video_id, total_segments):
         print(f"[FINALIZE] Using processed video only")
 
     # Cleanup
-    if os.path.exists(concat_list_path):
-        os.remove(concat_list_path)
-    for seg_path in segment_paths:
-        if os.path.exists(seg_path):
-            os.remove(seg_path)
+    if os.path.exists(file_list_path):
+        os.remove(file_list_path)
 
     # 🔥 SHARED BUFFER: Cleanup shared frame directory after finalization
-    # Get shared_cleaned_dir from first segment's metadata
-    segment_key = f"video:{video_id}:segment:0"
-    shared_cleaned_dir_raw = redis_client.hget(segment_key, 'cleaned_dir')
-    if shared_cleaned_dir_raw:
-        shared_cleaned_dir = shared_cleaned_dir_raw.decode() if isinstance(shared_cleaned_dir_raw, bytes) else shared_cleaned_dir_raw
-        if shared_cleaned_dir and os.path.exists(shared_cleaned_dir):
-            print(f"[FINALIZE] Cleaning up shared frame buffer: {shared_cleaned_dir}")
-            shutil.rmtree(shared_cleaned_dir, ignore_errors=True)
+    if shared_cleaned_dir and os.path.exists(shared_cleaned_dir):
+        print(f"[FINALIZE] Cleaning up shared frame buffer: {shared_cleaned_dir}")
+        shutil.rmtree(shared_cleaned_dir, ignore_errors=True)
 
     final_size_mb = os.path.getsize(final_output) / (1024 * 1024)
     print(f"[FINALIZE] ✓ Final video ready: {final_output} ({final_size_mb:.2f} MB)")
@@ -5710,6 +5682,55 @@ def check_rate_limit(ip):
         return True
 
 
+def validate_video_limits(video_path):
+    """
+    Check video duration and FPS against processing limits.
+    Returns (is_valid, error_message)
+    """
+    try:
+        import subprocess
+        import json as json_module
+
+        probe_cmd = [
+            FFPROBE_EXE, '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=r_frame_rate,duration',
+            '-of', 'json',
+            video_path
+        ]
+
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+        probe_data = json_module.loads(probe_result.stdout)
+
+        if not probe_data.get('streams'):
+            return True, None  # Not a video or can't read, let it pass
+
+        stream = probe_data['streams'][0]
+
+        # Extract FPS
+        fps_str = stream.get('r_frame_rate', '30/1')
+        fps_num, fps_den = map(int, fps_str.split('/'))
+        fps = fps_num / fps_den if fps_den != 0 else 30
+
+        # Extract duration
+        duration = float(stream.get('duration', 0))
+
+        # Check FPS limit
+        if fps > MAX_VIDEO_FPS:
+            return False, f"Video exceeds maximum FPS of {MAX_VIDEO_FPS} (yours: {int(fps)}fps)"
+
+        # Check duration limit
+        if duration > MAX_VIDEO_DURATION_SECONDS:
+            return False, f"Video exceeds maximum duration of {MAX_VIDEO_DURATION_SECONDS} seconds (yours: {int(duration)}s)"
+
+        return True, None
+
+    except Exception as e:
+        # If we can't validate, let it through (fail open for edge cases)
+        print(f"⚠️ Video validation error: {e}")
+        return True, None
+
+
 def is_user_admin(user_id):
     """Check if user has admin privileges."""
     try:
@@ -6006,6 +6027,14 @@ def process_video():
 
         if not video_path:
             return jsonify({'status': 'error', 'message': 'Media not found'}), 404
+
+        # Validate video limits (duration and FPS) for video files only
+        ext = os.path.splitext(video_path)[1].lower()
+        image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+        if ext not in image_exts:
+            is_valid, error_msg = validate_video_limits(video_path)
+            if not is_valid:
+                return jsonify({'status': 'error', 'message': error_msg}), 400
 
         # Queue processing task via Celery and return the real task id
         print(f"📤 Queuing processing task for: {video_path}")
