@@ -2356,8 +2356,18 @@
                         let percent = Math.max(0, Math.min(100, info.progress || 0));
                         let status = info.status || 'Processing...';
 
+                        // Show queue position and ETA when waiting in queue
+                        if (statusData.queue && statusData.state === 'PENDING') {
+                            const q = statusData.queue;
+                            const waitMins = Math.ceil(q.estimated_wait_seconds / 60);
+                            if (q.total > 1) {
+                                status = `Queue position: #${q.position} of ${q.total} · ~${waitMins} min wait`;
+                            } else {
+                                status = `Starting soon · ~${waitMins} min estimated`;
+                            }
+                        }
                         // Show better message when encoding is complete/almost done
-                        if (percent >= 95 && status.includes('Video encoding')) {
+                        else if (percent >= 95 && status.includes('Video encoding')) {
                             status = 'Finalizing video...';
                         } else if (status.includes('Segment') && status.includes('complete')) {
                             status = 'Processing complete · Finalizing...';

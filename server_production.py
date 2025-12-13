@@ -2240,6 +2240,20 @@ def trigger_finalization(redis_client, video_id, total_segments):
     redis_client.set(f"video:{video_id}:final_path", cdn_url or final_output)
     redis_client.set(f"video:{video_id}:status", "complete")
 
+    # Track processing time for queue ETA calculation
+    try:
+        import time as time_module
+        start_time_raw = redis_client.get(f"video:{video_id}:start_time")
+        if start_time_raw:
+            start_time = float(start_time_raw if isinstance(start_time_raw, str) else start_time_raw.decode())
+            processing_duration = time_module.time() - start_time
+            # Store in recent processing times list (keep last 20)
+            redis_client.lpush('processing_times:recent', str(processing_duration))
+            redis_client.ltrim('processing_times:recent', 0, 19)
+            print(f"[FINALIZE] Processing time recorded: {processing_duration:.1f}s for video {video_id}")
+    except Exception as e:
+        print(f"[FINALIZE] Could not record processing time: {e}")
+
     # 🔥 FIX: Update distributed tracking to mark all segments complete
     # Status endpoint checks segments:{video_id} to see progress
     # Without this, frontend shows "Segment 0/X complete" forever
@@ -2659,8 +2673,17 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
     """
     try:
         import json
+        import time as time_module
 
         self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Preparing video'})
+
+        # Track processing start time for queue ETA calculation
+        if video_id:
+            try:
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                redis_client.set(f"video:{video_id}:start_time", str(time_module.time()))
+            except:
+                pass
 
         detector = get_detector()
         if not _check_propainter_assets():
@@ -5131,6 +5154,58 @@ def get_status(task_id):
         if task.state == 'PENDING':
             response['progress'] = 'Task is waiting in queue...'
             response['info'] = {'progress': 0, 'status': 'Waiting in queue...'}
+
+            # Get queue position and ETA
+            try:
+                from celery.task.control import inspect
+                i = inspect(app=celery)
+                scheduled = i.scheduled() or {}
+                reserved = i.reserved() or {}
+                active = i.active() or {}
+
+                # Count total pending tasks and find position
+                all_pending = []
+                for worker_tasks in scheduled.values():
+                    all_pending.extend(worker_tasks)
+                for worker_tasks in reserved.values():
+                    all_pending.extend(worker_tasks)
+
+                # Find this task's position (1-indexed)
+                queue_position = 1
+                for idx, t in enumerate(all_pending):
+                    if t.get('id') == task_id:
+                        queue_position = idx + 1
+                        break
+                else:
+                    # Task not found in pending - it's next in line
+                    queue_position = 1
+
+                total_in_queue = len(all_pending)
+                active_count = sum(len(tasks) for tasks in active.values())
+
+                # Get average processing time for ETA
+                avg_time = 120  # Default 2 minutes
+                try:
+                    redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                    times = redis_client.lrange('processing_times:recent', 0, 19)
+                    if times:
+                        times_float = [float(t) for t in times]
+                        avg_time = sum(times_float) / len(times_float)
+                except:
+                    pass
+
+                # Calculate ETA: (position / active_workers) * avg_time
+                workers = max(1, active_count) if active_count > 0 else 1
+                estimated_wait = int((queue_position / workers) * avg_time)
+
+                response['queue'] = {
+                    'position': queue_position,
+                    'total': max(total_in_queue, 1),
+                    'active_workers': active_count,
+                    'estimated_wait_seconds': estimated_wait
+                }
+            except Exception as e:
+                print(f"[WARN] Could not get queue position: {e}")
         elif task.state == 'STARTED':
             info = task.info or {}
             response['progress'] = info.get('status', 'Starting...')
@@ -6646,30 +6721,57 @@ def serve_static_files(filename):
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """
-    Get server statistics
+    Get server statistics including queue info and average processing time
 
     Returns:
         {
             'queue_length': int,
             'active_tasks': int,
-            'completed_today': int
+            'avg_processing_time': float (seconds),
+            'timestamp': str
         }
     """
-    # Get Celery stats
-    from celery.task.control import inspect
+    try:
+        # Get Celery stats
+        from celery.task.control import inspect
 
-    i = inspect(app=celery)
-    active = i.active()
-    scheduled = i.scheduled()
+        i = inspect(app=celery)
+        active = i.active()
+        scheduled = i.scheduled()
+        reserved = i.reserved()  # Tasks that are reserved but not yet started
 
-    active_count = sum(len(tasks) for tasks in (active or {}).values())
-    scheduled_count = sum(len(tasks) for tasks in (scheduled or {}).values())
+        active_count = sum(len(tasks) for tasks in (active or {}).values())
+        scheduled_count = sum(len(tasks) for tasks in (scheduled or {}).values())
+        reserved_count = sum(len(tasks) for tasks in (reserved or {}).values())
 
-    return jsonify({
-        'queue_length': scheduled_count,
-        'active_tasks': active_count,
-        'timestamp': datetime.utcnow().isoformat()
-    })
+        # Total queue = scheduled + reserved (waiting tasks)
+        total_queue = scheduled_count + reserved_count
+
+        # Get average processing time from Redis
+        avg_processing_time = 120  # Default 2 minutes
+        try:
+            redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+            times = redis_client.lrange('processing_times:recent', 0, 19)  # Last 20 jobs
+            if times:
+                times_float = [float(t) for t in times]
+                avg_processing_time = sum(times_float) / len(times_float)
+        except Exception as e:
+            print(f"[WARN] Could not get avg processing time: {e}")
+
+        return jsonify({
+            'queue_length': total_queue,
+            'active_tasks': active_count,
+            'avg_processing_time': round(avg_processing_time, 1),
+            'timestamp': datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        print(f"[ERROR] Stats endpoint error: {e}")
+        return jsonify({
+            'queue_length': 0,
+            'active_tasks': 0,
+            'avg_processing_time': 120,
+            'timestamp': datetime.utcnow().isoformat()
+        })
 
 
 
