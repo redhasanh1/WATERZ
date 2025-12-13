@@ -1428,23 +1428,7 @@
 
                 <div class="demo-card">
                     <div id="uploadSection">
-                        <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Upload Your Video or Paste URL</h3>
-
-                        <div style="text-align: center; margin-bottom: 2rem;">
-                            <input type="text" id="videoUrl" placeholder="Paste video link here"
-                                   style="width: 100%; max-width: 600px; padding: 1rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.3); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;">
-                            <button id="loadUrlBtn" style="margin-top: 1rem; padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600;">Import from URL</button>
-                        <div id="urlLoadingProgress" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px;">
-                            <p style="margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">Downloading video...</p>
-                            <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.2); border-radius: 3px; overflow: hidden;">
-                                <div style="width: 100%; height: 100%; background: var(--gradient-primary); animation: loading 1.5s ease-in-out infinite;"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style="text-align: center; margin: 2rem 0; color: var(--text-secondary);">
-                        <p style="margin-bottom: 1rem;">— OR —</p>
-                    </div>
+                        <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Upload Your Video</h3>
 
                     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                         <input type="file" id="fileInput" accept="image/*,video/*" style="display: none;">
@@ -1453,6 +1437,17 @@
                         </svg>
                         <h3 class="upload-title">Drop your file here</h3>
                         <p class="upload-description">or click to browse</p>
+                    </div>
+
+                    <!-- Ad Unit -->
+                    <div style="margin: 1.5rem 0; text-align: center;">
+                        <ins class="adsbygoogle"
+                             style="display:block"
+                             data-ad-client="ca-pub-5993103018552371"
+                             data-ad-slot="auto"
+                             data-ad-format="auto"
+                             data-full-width-responsive="true"></ins>
+                        <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
                     </div>
 
                     <div id="creditEstimate" style="display:none; text-align:center; margin: 10px 0 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 700; padding: 0.75rem 1.5rem; border-radius: 12px; font-size: 1.1rem; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);"></div>
@@ -1981,94 +1976,6 @@
             const file = e.target.files[0];
             if (file) {
                 uploadFile(file);
-            }
-        });
-
-        // URL loading functionality
-        document.getElementById('loadUrlBtn').addEventListener('click', async () => {
-            const url = document.getElementById('videoUrl').value.trim();
-            if (!url) {
-                alert('Please enter a valid URL');
-                return;
-            }
-
-            const btn = document.getElementById('loadUrlBtn');
-            const progressDiv = document.getElementById('urlLoadingProgress');
-
-            btn.textContent = 'Loading...';
-            btn.disabled = true;
-            progressDiv.style.display = 'block';
-
-            try {
-                // Detect if it's a Sora URL and use appropriate endpoint
-                const isSoraUrl = url.includes('sora.chatgpt.com') ||
-                                  url.includes('backend/project_y') ||
-                                  url.includes('/p/s_') ||
-                                  url.startsWith('/backend');
-
-                const endpoint = isSoraUrl
-                    ? `${API_BASE_URL}/api/download-sora`
-                    : `${API_BASE_URL}/api/download-from-url`;
-
-                console.log(`Using endpoint: ${endpoint} for URL: ${url} (Sora: ${isSoraUrl})`);
-
-                // Send URL to backend for downloading
-                const response = await apiFetchUrl(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url })
-                });
-
-                const data = await parseJsonSafe(response);
-
-                if (data.status === 'success') {
-                    // Show video in media player
-                    const videoUrl = `${API_BASE_URL}${data.video_url}`;
-
-                    // Show preview for processing
-                    const videoElem = document.getElementById('previewVideo');
-                    videoElem.src = videoUrl;
-                    try { window.beforeSrc = videoUrl; } catch (err) {}
-                    videoElem.dataset.taskId = data.task_id;
-
-                    // Show professional player
-                    document.getElementById('professionalPlayer').style.display = 'block';
-                    document.getElementById('previewImage').style.display = 'none';
-
-                    // Initialize professional video controls
-                    initProfessionalPlayer(videoElem);
-                    previewContainer.classList.add('active');
-                    // Initialize deferred ad slots now that the container is visible
-                    initDeferredAdsIn(previewContainer);
-
-                    // Show process button
-                    const processBtn = document.getElementById('processBtn');
-                    if (processBtn) processBtn.style.display = 'block';
-
-                    // Show scroll hint
-                    const scrollHint = document.getElementById('scrollHint');
-                    if (scrollHint) scrollHint.style.display = 'block';
-
-                    // Show cleanup button in feature section
-                    const removeObjBtn = document.getElementById('removeObjectBtn');
-                    if (removeObjBtn) removeObjBtn.style.display = 'block';
-
-                    // Show download hint
-                    // Auto-scroll to button after a brief delay
-                    setTimeout(() => {
-                        if (processBtn) processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 500);
-
-                    alert('Video loaded successfully! Ready to start authorized cleanup.');
-                } else {
-                    alert('Error: ' + (data.message || 'Failed to load video'));
-                }
-            } catch (error) {
-                alert('Error loading video: ' + error.message);
-            } finally {
-                btn.textContent = 'Download from URL';
-                btn.disabled = false;
-                progressDiv.style.display = 'none';
             }
         });
 
