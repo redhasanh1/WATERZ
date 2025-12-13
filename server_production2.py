@@ -1424,6 +1424,28 @@ def process_sam2():
     })
 
 
+def validate_video_limits_yolo(video_path, max_duration=60, max_fps=60):
+    """Validate video duration and FPS limits for YOLO processing."""
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return False, "Could not open video file"
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        duration = frame_count / fps if fps > 0 else 0
+        cap.release()
+
+        if duration > max_duration:
+            return False, f"Video too long: {duration:.1f}s (max {max_duration}s)"
+        if fps > max_fps:
+            return False, f"FPS too high: {fps:.1f} (max {max_fps})"
+
+        return True, None
+    except Exception as e:
+        return False, f"Video validation error: {str(e)}"
+
+
 @app.route('/api/process_yolo', methods=['POST'])
 def process_yolo():
     """
@@ -1453,6 +1475,11 @@ def process_yolo():
 
     if not os.path.exists(video_path):
         return jsonify({'error': f'Video not found: {video_path}'}), 404
+
+    # Validate video duration and FPS limits
+    is_valid, error_msg = validate_video_limits_yolo(video_path)
+    if not is_valid:
+        return jsonify({'error': error_msg}), 400
 
     # Create masks directory
     masks_dir = os.path.join(TEMP_DIR, f"{video_id}_yolo_masks")

@@ -1869,6 +1869,18 @@
                             const height = videoElem.videoHeight || 720;
                             const duration = videoElem.duration || 10;
 
+                            // Enforce 60-second maximum duration
+                            const MAX_DURATION_SECONDS = 60;
+                            if (duration > MAX_DURATION_SECONDS) {
+                                alert(`Video too long! Maximum duration is ${MAX_DURATION_SECONDS} seconds.\n\nYour video: ${Math.round(duration)} seconds\n\nPlease upload a shorter video.`);
+                                // Reset the upload
+                                previewContainer.classList.remove('active');
+                                videoElem.src = '';
+                                if (fileInput) fileInput.value = '';
+                                if (creditEstimate) creditEstimate.style.display = 'none';
+                                return;
+                            }
+
                             // Baseline: 720p (1280x720), 10 seconds = 1 credit
                             const basePixels = 1280 * 720;
                             const baseDuration = 10;
