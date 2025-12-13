@@ -2222,12 +2222,14 @@ def trigger_finalization(redis_client, video_id, total_segments):
         from b2sdk.v2 import B2Api, InMemoryAccountInfo
         import time as _upload_time
 
-        B2_KEY_ID = os.getenv('B2_KEY_ID', '00539db5c1104b50000000003')
-        B2_APP_KEY = os.getenv('B2_APP_KEY', 'K005384b8lPoBT11wScxkZ2Gx0fszus')
+        B2_KEY_ID = os.getenv('B2_KEY_ID')
+        B2_APP_KEY = os.getenv('B2_APP_KEY')
         B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
         B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 
-        if os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
+        if not B2_KEY_ID or not B2_APP_KEY:
+            print(f"[B2] Warning: B2 credentials not set - skipping upload")
+        elif os.getenv('B2_UPLOAD_ENABLED', '1') == '1':
             timestamp = int(_upload_time.time())
             remote_path = f"results/{timestamp}_{os.path.basename(final_output)}"
 
@@ -2494,11 +2496,16 @@ def _check_propainter_assets() -> bool:
     if propainter_ready:
         return True
 
+    # Support both Windows (weights/) and Docker (faster-propainter-main/weights/) paths
+    weights_dir = os.path.join(SCRIPT_DIR, 'weights')
+    if not os.path.exists(weights_dir):
+        weights_dir = os.path.join(SCRIPT_DIR, 'faster-propainter-main', 'weights')
+
     required_paths = [
         os.path.join(SCRIPT_DIR, 'faster-propainter-main', 'watermark.py'),
-        os.path.join(SCRIPT_DIR, 'weights', 'ProPainter.pth'),
-        os.path.join(SCRIPT_DIR, 'weights', 'raft-things.pth'),
-        os.path.join(SCRIPT_DIR, 'weights', 'recurrent_flow_completion.pth'),
+        os.path.join(weights_dir, 'ProPainter.pth'),
+        os.path.join(weights_dir, 'raft-things.pth'),
+        os.path.join(weights_dir, 'recurrent_flow_completion.pth'),
     ]
 
     missing = [path for path in required_paths if not os.path.exists(path)]
@@ -2512,9 +2519,14 @@ def _check_propainter_assets() -> bool:
 
     # Check TensorRT DCNv4 files if TensorRT mode is enabled
     if os.getenv('FORCE_TRT_RFCNET', '0') == '1':
+        # Support both Windows (.dll) and Docker (.so) plugin paths
+        plugin_path = os.path.join(SCRIPT_DIR, 'dcnv4_tensorrt_plugin', 'build', 'Release', 'dcnv4_plugin.dll')
+        if not os.path.exists(plugin_path):
+            plugin_path = os.path.join(SCRIPT_DIR, 'libdcnv4_plugin.so')  # Docker path
+
         trt_paths = [
             os.path.join(SCRIPT_DIR, 'engines', 'rfcnet', 'rfcnet_dcnv4_fp16.engine'),
-            os.path.join(SCRIPT_DIR, 'dcnv4_tensorrt_plugin', 'build', 'Release', 'dcnv4_plugin.dll'),
+            plugin_path,
         ]
         trt_missing = [path for path in trt_paths if not os.path.exists(path)]
         if trt_missing:
@@ -2658,14 +2670,18 @@ def broadcast_video_download(self, video_id, video_url, upload_filename):
 
 
 @celery.task(bind=True, name='prepare_video')
-def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id=None):
+def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id=None, masks_dir=None):
     """
     Phase 1: Prepare video for distributed processing
     - Download video if needed
-    - Run YOLO detection on all frames (centralized)
+    - Run YOLO detection on all frames (centralized) OR use pre-downloaded masks
     - Generate masks
     - Detect segments (handles moving watermarks)
     - Workers will use these masks or regenerate if not available
+
+    Args:
+        masks_dir: Optional pre-downloaded masks directory (from _continue_after_masks)
+                   If provided, skip YOLO detection and use these masks
 
     Returns: dict with video_id, segments, metadata for distributed processing
     """
@@ -2786,9 +2802,16 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             print(f"[WARNING]  Failed to send Redis download signal: {e}")
 
         # Create shared directories for distributed access
-        shared_mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{video_id}")
+        # If masks_dir provided (from _continue_after_masks), use it directly!
+        if masks_dir and os.path.isdir(masks_dir):
+            shared_mask_dir = masks_dir
+            print(f"[OK] Using pre-downloaded masks from: {masks_dir}")
+            mask_count = len([f for f in os.listdir(masks_dir) if f.endswith('.png')])
+            print(f"   Found {mask_count} masks - skipping YOLO detection!")
+        else:
+            shared_mask_dir = os.path.join(PROPAINTER_MASK_ROOT, f"{base_name}_{video_id}")
+            os.makedirs(shared_mask_dir, exist_ok=True)
         shared_frames_dir = os.path.join(TEMP_DIR, f"{base_name}_{video_id}_originals")
-        os.makedirs(shared_mask_dir, exist_ok=True)
         os.makedirs(shared_frames_dir, exist_ok=True)
 
         # [RUNNING] CACHE CHECK: Skip YOLO if segments already cached from previous request
@@ -2823,7 +2846,25 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             print(f"[WARNING]  Cache check failed: {e} - will run YOLO")
             segments = None
 
-        # Run YOLO only if not cached
+        # If masks_dir provided (from _continue_after_masks), detect segments from masks instead of YOLO
+        if segments is None and masks_dir and os.path.isdir(masks_dir):
+            print(f"[OK] Detecting segments from pre-downloaded masks...")
+            self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Detecting segments from masks'})
+            try:
+                from segment_detector import detect_segments_from_masks
+                segments = detect_segments_from_masks(
+                    masks_dir,
+                    position_tolerance=int(os.getenv('SEGMENT_POS_TOLERANCE', '50')),
+                    min_segment_length=int(os.getenv('SEGMENT_MIN_LEN_FULL', '3'))
+                )
+                print(f"[OK] Detected {len(segments)} segments from masks")
+                # Count frames with masks for watermark coverage stat
+                frames_with_watermark = len([f for f in os.listdir(masks_dir) if f.endswith('.png')])
+            except Exception as e:
+                print(f"[WARNING] Failed to detect segments from masks: {e}")
+                segments = None
+
+        # Run YOLO only if not cached AND no pre-downloaded masks
         if segments is None:
             print(f"[REGEN] Running YOLO detection on {total_frames} frames...")
             self.update_state(state='PROCESSING', meta={'progress': 10, 'status': f'Detecting watermarks'})
@@ -2986,9 +3027,9 @@ def prepare_video_task(self, video_path, api_base=None, temp_base=None, video_id
             if os.getenv('WRITE_FRAMES_TO_DISK', '0') == '1':
                 print(f"💾 Also writing to disk (backup for remote workers)...")
                 for i in range(frames_processed):
-                    mask_path = os.path.join(shared_mask_dir, f"{i:04d}.png")
+                    mask_path = os.path.join(shared_mask_dir, f"{i:05d}.png")
                     cv2.imwrite(mask_path, all_masks[i])
-                    frame_path = os.path.join(shared_frames_dir, f"{i:04d}.png")
+                    frame_path = os.path.join(shared_frames_dir, f"{i:05d}.png")
                     cv2.imwrite(frame_path, all_frames[i])
             else:
                 print(f"⚡ Skipping disk writes (pure memory for EXTREME SPEED!)")
@@ -3357,32 +3398,33 @@ def process_segment_task(self, segment_data):
                     print(f"   [OK] Loaded {memory_hits} frames from memory (including ±{neighbor_padding} neighbor padding for temporal context!)")
 
             # Fallback: Try other sources if memory cache incomplete
-            if frames_copied < (end_frame - start_frame + 1):
-                for frame_idx in range(start_frame, end_frame + 1):
+            if frames_copied < (padded_end - padded_start + 1):  # Use PADDED count!
+                for frame_idx in range(padded_start, padded_end + 1):  # Use PADDED range!
                     # Skip if already copied from memory
-                    if frame_idx - start_frame < memory_hits:
+                    if frame_idx - padded_start < memory_hits:  # Use padded_start!
                         continue
 
-                    frame_file = f"{frame_idx:04d}.png"
+                    frame_file = f"{frame_idx:05d}.png"  # 5-digit to match WSL format!
+                    local_idx = frame_idx - padded_start  # Local index for segment
 
                     # Priority 2: Local filesystem (if on same machine as prepare task)
-                local_frame = os.path.join(shared_frames_dir, frame_file) if shared_frames_dir else None
-                if local_frame and os.path.exists(local_frame):
-                    dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
-                    shutil.copy2(local_frame, dst)
-                    frames_copied += 1
-                elif origin_base:
-                    # Download individual frame from origin host (serving /temp/)
-                    try:
-                        frame_url = f"{origin_base.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
-                        r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
-                        if r.ok:
-                            dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
-                            with open(dst, 'wb') as f:
-                                f.write(r.content)
-                            frames_copied += 1
-                    except Exception as e:
-                        print(f"[WARNING]  Failed to download frame {frame_idx}: {e}")
+                    local_frame = os.path.join(shared_frames_dir, frame_file) if shared_frames_dir else None
+                    if local_frame and os.path.exists(local_frame):
+                        dst = os.path.join(seg_frames_dir, f"{local_idx:04d}.png")
+                        shutil.copy2(local_frame, dst)
+                        frames_copied += 1
+                    elif origin_base:
+                        # Download individual frame from origin host (serving /temp/)
+                        try:
+                            frame_url = f"{origin_base.rstrip('/')}/temp/{base_name}_{video_id}_originals/{frame_file}"
+                            r = requests.get(frame_url, headers={'ngrok-skip-browser-warning': 'true'}, timeout=10)
+                            if r.ok:
+                                dst = os.path.join(seg_frames_dir, f"{local_idx:04d}.png")
+                                with open(dst, 'wb') as f:
+                                    f.write(r.content)
+                                frames_copied += 1
+                        except Exception as e:
+                            print(f"[WARNING]  Failed to download frame {frame_idx}: {e}")
 
             if frames_copied == 0:
                 # Fallback: fetch original video from API uploads and extract only needed frames
@@ -3408,10 +3450,11 @@ def process_segment_task(self, segment_data):
                             ret, frame = cap2.read()
                             if not ret:
                                 break
-                            if current_frame > end_frame:
+                            if current_frame > padded_end:  # Use PADDED end!
                                 break
-                            if current_frame >= start_frame:
-                                dst = os.path.join(seg_frames_dir, f"{frames_copied:04d}.png")
+                            if current_frame >= padded_start:  # Use PADDED start!
+                                local_idx = current_frame - padded_start  # Proper local index
+                                dst = os.path.join(seg_frames_dir, f"{local_idx:04d}.png")
                                 cv2.imwrite(dst, frame)
                                 frames_copied += 1
                             current_frame += 1
@@ -3460,15 +3503,15 @@ def process_segment_task(self, segment_data):
             try:
                 for abs_frame_idx in masks_needed:
                     # Skip if already got from memory
-                    if abs_frame_idx - start_frame < memory_mask_hits:
+                    if abs_frame_idx - padded_start < memory_mask_hits:
                         continue
 
                     if shared_mask_dir:
-                        mask_filename = f"{abs_frame_idx:04d}.png"
+                        mask_filename = f"{abs_frame_idx:05d}.png"
                         shared_mask_path = os.path.join(shared_mask_dir, mask_filename)
 
                         if os.path.exists(shared_mask_path):
-                            local_idx = abs_frame_idx - start_frame
+                            local_idx = abs_frame_idx - padded_start  # Use padded_start for correct local indexing!
                             local_mask_path = os.path.join(seg_mask_dir, f"{local_idx:04d}.png")
                             shutil.copy2(shared_mask_path, local_mask_path)
                             masks_succeeded += 1
@@ -3493,16 +3536,16 @@ def process_segment_task(self, segment_data):
             self.update_state(state='PROCESSING', meta={'progress': 20, 'status': f'Copying masks'})
 
             try:
-                masks_needed = list(range(start_frame, end_frame + 1))
+                masks_needed = list(range(padded_start, padded_end + 1))  # Use PADDED range for temporal context!
                 masks_succeeded = 0
 
                 for abs_frame_idx in masks_needed:
-                    mask_filename = f"{abs_frame_idx:04d}.png"
+                    mask_filename = f"{abs_frame_idx:05d}.png"
                     shared_mask_path = os.path.join(shared_mask_dir, mask_filename)
 
                     if os.path.exists(shared_mask_path):
                         # Save to local segment mask dir with LOCAL index (0000, 0001, etc.)
-                        local_idx = abs_frame_idx - start_frame
+                        local_idx = abs_frame_idx - padded_start  # Use padded_start for correct local indexing!
                         local_mask_path = os.path.join(seg_mask_dir, f"{local_idx:04d}.png")
                         shutil.copy2(shared_mask_path, local_mask_path)
                         masks_succeeded += 1
@@ -3525,11 +3568,11 @@ def process_segment_task(self, segment_data):
 
             try:
                 import requests
-                masks_needed = list(range(start_frame, end_frame + 1))
+                masks_needed = list(range(padded_start, padded_end + 1))  # Use PADDED range for temporal context!
                 masks_succeeded = 0
 
                 for abs_frame_idx in masks_needed:
-                    mask_filename = f"{abs_frame_idx:04d}.png"
+                    mask_filename = f"{abs_frame_idx:05d}.png"
                     mask_url = f"{origin_base.rstrip('/')}/temp/{os.path.basename(shared_mask_dir)}/{mask_filename}"
 
                     try:
@@ -3537,7 +3580,7 @@ def process_segment_task(self, segment_data):
                         r.raise_for_status()
 
                         # Save to local segment mask dir with LOCAL index (0000, 0001, etc.)
-                        local_idx = abs_frame_idx - start_frame
+                        local_idx = abs_frame_idx - padded_start  # Use padded_start for correct local indexing!
                         local_mask_path = os.path.join(seg_mask_dir, f"{local_idx:04d}.png")
                         with open(local_mask_path, 'wb') as f:
                             f.write(r.content)
@@ -3558,43 +3601,9 @@ def process_segment_task(self, segment_data):
         using_memory_pipeline = (len(segment_frames_memory) == frames_copied and
                                  len(segment_masks_memory) == frames_copied)
 
-        # Fallback: Regenerate masks if not downloaded
-        detector = None
+        # Masks MUST be downloaded - no fallback detection!
         if not masks_downloaded:
-            print(f"   [REGEN] Regenerating masks with YOLO BATCH detection on {frames_copied} frames...")
-            self.update_state(state='PROCESSING', meta={'progress': 25, 'status': f'Detecting watermarks'})
-
-            detector = get_detector()
-            last_valid_bbox = None
-            frames_with_watermark = 0
-            det_conf = 0.15
-
-            # [INIT] EXTREME SPEED: Use batch detection (2.19ms/frame vs 14ms/frame!)
-            # Also fixes TensorRT shape mismatch by using letterbox padding
-            print(f"   [RUNNING] Running BATCH detection (EXTREME SPEED + letterbox padding)...")
-
-            # Get frames for detection (from memory or disk)
-            frames_for_detection = []
-            if using_memory_pipeline:
-                frames_for_detection = segment_frames_memory
-            else:
-                for frame_idx in range(frames_copied):
-                    frame_file = f"{frame_idx:04d}.png"
-                    frame_path = os.path.join(seg_frames_dir, frame_file)
-                    frame = cv2.imread(frame_path)
-                    if frame is not None:
-                        frames_for_detection.append(frame)
-
-            # Batch detect ALL frames at once! (RTX 4090 optimized)
-            all_detections = detector.detect_batch(frames_for_detection, confidence_threshold=det_conf, padding=0, batch_size=128)
-
-            # Find last valid bbox
-            for detections_list in all_detections:
-                if detections_list:
-                    frames_with_watermark += 1
-                    last_valid_bbox = detections_list[0]['bbox']
-
-            print(f"   [OK] Batch detection complete: {frames_with_watermark}/{frames_copied} frames with watermarks")
+            raise RuntimeError(f"Masks not found! B2 download failed for segment. Cannot proceed without masks.")
         else:
             # Masks were downloaded - need to extract bbox from them
             print(f"   [INFO] Using downloaded masks - extracting bbox info...")

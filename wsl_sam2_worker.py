@@ -282,33 +282,15 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
     vid_w = int(cap_check.get(cv2.CAP_PROP_FRAME_WIDTH))
     vid_h = int(cap_check.get(cv2.CAP_PROP_FRAME_HEIGHT))
     cap_check.release()
-    aspect_ratio = max(vid_w, vid_h) / max(1, min(vid_w, vid_h))
-    can_use_trt = aspect_ratio < 1.5  # TensorRT needs roughly square input
-
-    # Try TensorRT engine first (20-30x faster), fall back to PyTorch
+    # Use PyTorch model (TRT batch=64 engine doesn't work with single-frame inference)
     from ultralytics import YOLO
 
-    trt_engine_path = '/mnt/d/watermarkz/runs/detect/new_sora_watermark/weights/best_fp16_batch_wsl.engine'
-    pt_model_path = '/mnt/d/watermarkz/runs/detect/new_sora_watermark/weights/best.pt'
+    pt_model_path = '/mnt/d/watermarkz/runs/detect/sora_watermark_v2/weights/best.pt'
 
-    using_tensorrt = False
-    if can_use_trt and os.path.exists(trt_engine_path):
-        try:
-            model = YOLO(trt_engine_path, task='detect')
-            print(f"[YOLO] Loaded TensorRT engine: {trt_engine_path}")
-            print(f"[YOLO] Expected: ~1-2ms/frame (20-30x faster than PyTorch)")
-            using_tensorrt = True
-        except Exception as e:
-            print(f"[YOLO] TensorRT load failed: {e}, falling back to PyTorch")
-    elif not can_use_trt:
-        print(f"[YOLO] Video {vid_w}x{vid_h} (aspect {aspect_ratio:.1f}) - using PyTorch (TRT needs ~square)")
-
-    if not using_tensorrt:
-        if not os.path.exists(pt_model_path):
-            raise RuntimeError(f"YOLO model not found: {pt_model_path}")
-        model = YOLO(pt_model_path)
-        print(f"[YOLO] Loaded PyTorch model: {pt_model_path}")
-        print(f"[YOLO] TIP: Run build_yolo_trt_wsl.sh to build TensorRT engine for 20-30x speedup")
+    if not os.path.exists(pt_model_path):
+        raise RuntimeError(f"YOLO model not found: {pt_model_path}")
+    model = YOLO(pt_model_path)
+    print(f"[YOLO] Loaded PyTorch model: {pt_model_path}")
 
     # Open video
     self.update_state(state='PROCESSING', meta={'status': 'Opening video', 'progress': 10})
