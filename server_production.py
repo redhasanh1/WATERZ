@@ -5303,8 +5303,8 @@ def download_from_url():
     if request.method == 'OPTIONS':
         return ('', 204)
     """
-    Download video from URL using Playwright (bypasses Cloudflare)
-    Works for most video sites with anti-bot protection
+    Download video from URL - tries direct download first,
+    falls back to Playwright if available (for protected sites)
 
     Request: { "url": "https://..." }
     Response: { "status": "success", "task_id": "...", "video_url": "/uploads/..." }
@@ -5316,7 +5316,7 @@ def download_from_url():
         if not url:
             return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
 
-        # Normalize URL - handle partial URLs from ChatGPT Sora
+        # Normalize URL
         url = url.strip()
 
         # If URL starts with /backend or is a path, prepend Sora domain
@@ -5326,7 +5326,7 @@ def download_from_url():
             else:
                 return jsonify({'status': 'error', 'message': 'URL must start with http:// or https://'}), 400
 
-        print(f"📋 Normalized URL: {url}")
+        print(f"📋 Downloading from URL: {url}")
 
         # Validate URL to prevent SSRF attacks
         if not validate_url(url):
@@ -5334,121 +5334,137 @@ def download_from_url():
 
         # Generate unique filename
         task_id = str(uuid.uuid4())
-        output_path = os.path.join(UPLOAD_DIR, f'{task_id}.mp4')
 
-        # Use Playwright for better Cloudflare bypass
-        from playwright.sync_api import sync_playwright
-        import time
+        # Determine file extension from URL
         import re
-        import html
+        ext_match = re.search(r'\.(mp4|mov|avi|webm|mkv)(\?|$)', url.lower())
+        file_ext = ext_match.group(1) if ext_match else 'mp4'
+        output_path = os.path.join(UPLOAD_DIR, f'{task_id}.{file_ext}')
 
-        with sync_playwright() as p:
-            print("[RUNNING] Launching browser for video download...")
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-features=IsolateOrigins,site-per-process'
-                ]
+        # ============================================
+        # Method 1: Direct download with requests
+        # ============================================
+        import requests as req_lib
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'video/*,*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': url,
+        }
+
+        try:
+            print(f"[DOWNLOAD] Trying direct download...")
+            response = req_lib.get(url, headers=headers, stream=True, timeout=120, allow_redirects=True)
+            response.raise_for_status()
+
+            # Check if response is actually a video
+            content_type = response.headers.get('content-type', '').lower()
+            is_video = (
+                'video' in content_type or
+                'octet-stream' in content_type or
+                url.lower().endswith(('.mp4', '.mov', '.avi', '.webm', '.mkv'))
             )
 
-            context = browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                viewport={'width': 1920, 'height': 1080}
-            )
-
-            page = context.new_page()
-
-            # Hide webdriver
-            page.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-            """)
-
-            print(f"🌐 Navigating to: {url}")
-            page.goto(url, wait_until='domcontentloaded', timeout=30000)
-
-            time.sleep(2)
-
-            print("[POLL] Extracting video URL...")
-
-            # Collect network requests for video URLs
-            video_urls = []
-
-            def handle_response(response):
-                if '.mp4' in response.url or 'video' in response.headers.get('content-type', ''):
-                    video_urls.append(response.url)
-
-            page.on('response', handle_response)
-
-            # Wait for network activity
-            time.sleep(2)
-
-            # Find video URL in page content
-            content = page.content()
-            content_video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)
-            video_urls.extend(content_video_urls)
-
-            if not video_urls:
-                # Try to find video element
-                try:
-                    video_element = page.locator('video').first
-                    video_src = video_element.get_attribute('src')
-                    if video_src:
-                        video_urls = [video_src]
-                    else:
-                        # Try source elements
-                        sources = page.locator('video source').all()
-                        for source in sources:
-                            src = source.get_attribute('src')
-                            if src:
-                                video_urls.append(src)
-                except Exception as e:
-                    print(f"[WARNING]  Error checking video element: {e}")
-
-            if video_urls:
-                video_src = html.unescape(video_urls[0])
-                print(f"[OK] Found video URL: {video_src}")
-
+            if is_video:
                 # Download the video
-                import requests
-                response = requests.get(video_src, stream=True, timeout=300)
-                response.raise_for_status()
+                total_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
 
                 with open(output_path, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                    for chunk in response.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
 
-                browser.close()
-                print(f"[OK] Video downloaded: {output_path}")
+                file_size = os.path.getsize(output_path) / (1024 * 1024)
+                print(f"[OK] Video downloaded: {output_path} ({file_size:.1f}MB)")
 
                 return jsonify({
                     'status': 'success',
                     'task_id': task_id,
-                    'video_url': f'/uploads/{task_id}.mp4'
+                    'video_url': f'/uploads/{task_id}.{file_ext}'
                 })
             else:
-                # Save debug screenshot
-                screenshot_path = os.path.join(TEMP_DIR, f'debug_{task_id}.png')
-                page.screenshot(path=screenshot_path)
-                print(f"📸 Debug screenshot saved: {screenshot_path}")
+                print(f"[WARNING] Response is not a video (content-type: {content_type})")
 
-                # Save page HTML for debugging
-                debug_html_path = os.path.join(TEMP_DIR, f'debug_{task_id}.html')
-                with open(debug_html_path, 'w', encoding='utf-8') as f:
-                    f.write(page.content())
-                print(f"📄 Debug HTML saved: {debug_html_path}")
+        except req_lib.exceptions.RequestException as e:
+            print(f"[WARNING] Direct download failed: {e}")
+
+        # ============================================
+        # Method 2: Playwright browser (if available)
+        # ============================================
+        try:
+            from playwright.sync_api import sync_playwright
+            import time
+            import html
+
+            print("[RUNNING] Trying Playwright browser extraction...")
+
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=['--disable-blink-features=AutomationControlled']
+                )
+
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    viewport={'width': 1920, 'height': 1080}
+                )
+
+                page = context.new_page()
+                page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+
+                print(f"🌐 Navigating to: {url}")
+                page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                time.sleep(3)
+
+                # Find video URLs in page
+                video_urls = []
+                content = page.content()
+                content_video_urls = re.findall(r'https?://[^\s"\'<>]+\.(mp4|mov|webm)[^\s"\'<>]*', content)
+                video_urls.extend([u[0] if isinstance(u, tuple) else u for u in content_video_urls])
+
+                # Try video element
+                if not video_urls:
+                    try:
+                        video_src = page.locator('video').first.get_attribute('src')
+                        if video_src:
+                            video_urls.append(video_src)
+                    except:
+                        pass
 
                 browser.close()
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Could not find video source URL. Debug files saved.',
-                    'debug': {
-                        'screenshot': f'/temp/debug_{task_id}.png',
-                        'html': f'/temp/debug_{task_id}.html'
-                    }
-                }), 404
+
+                if video_urls:
+                    video_src = html.unescape(video_urls[0])
+                    print(f"[OK] Found video URL: {video_src}")
+
+                    # Download the extracted video
+                    response = req_lib.get(video_src, headers=headers, stream=True, timeout=300)
+                    response.raise_for_status()
+
+                    with open(output_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=65536):
+                            f.write(chunk)
+
+                    return jsonify({
+                        'status': 'success',
+                        'task_id': task_id,
+                        'video_url': f'/uploads/{task_id}.{file_ext}'
+                    })
+
+        except ImportError:
+            print("[INFO] Playwright not installed - browser extraction unavailable")
+        except Exception as e:
+            print(f"[WARNING] Playwright extraction failed: {e}")
+
+        # ============================================
+        # All methods failed
+        # ============================================
+        return jsonify({
+            'status': 'error',
+            'message': 'Could not download video. Please use a direct video URL (ending in .mp4, .mov, .webm) or upload the file directly.'
+        }), 400
 
     except Exception as e:
         print(f"[ERROR] Download error: {e}")
