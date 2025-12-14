@@ -192,13 +192,15 @@ B2_UPLOAD_ENABLED = os.getenv('B2_UPLOAD_ENABLED', '1') == '1'
 try:
     from b2sdk.v2 import B2Api, InMemoryAccountInfo
     B2_ENABLED = bool(B2_KEY_ID and B2_APP_KEY)
+    B2_IMPORT_ERROR = None
     if B2_ENABLED:
         print(f"[OK] B2 storage enabled - CDN: {B2_CDN_URL}")
     else:
         print("[WARNING] B2 credentials not set - using local storage")
-except ImportError:
+except Exception as e:
     B2_ENABLED = False
-    print("[WARNING] b2sdk not installed - using local storage")
+    B2_IMPORT_ERROR = str(e)
+    print(f"[WARNING] b2sdk import failed: {e}")
 
 def upload_to_b2(local_path: str, remote_path: str) -> str:
     """Upload a file to B2 and return CDN URL. Returns None on failure."""
@@ -544,7 +546,8 @@ def health_check():
         'b2_app_key_set': bool(B2_APP_KEY),
         'b2_key_id_len': len(B2_KEY_ID) if B2_KEY_ID else 0,
         'b2_app_key_len': len(B2_APP_KEY) if B2_APP_KEY else 0,
-        'b2_cdn': B2_CDN_URL if B2_ENABLED else None
+        'b2_cdn': B2_CDN_URL if B2_ENABLED else None,
+        'b2_import_error': B2_IMPORT_ERROR
     })
 
 # ----------------------------------------------------------------------------
