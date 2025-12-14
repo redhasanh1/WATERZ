@@ -655,7 +655,7 @@ def auth_google_callback():
         with get_db() as conn:
             cur = conn.cursor()
 
-            # Check if user exists
+            # Check if user exists by google_id first
             cur.execute('SELECT id, credits FROM users WHERE google_id = %s', (google_id,))
             user = cur.fetchone()
 
@@ -663,14 +663,24 @@ def auth_google_callback():
                 user_id, credits = user
                 print(f"[AUTH] Existing user logged in: {email}")
             else:
-                # New user - give 5 free credits
-                cur.execute(
-                    'INSERT INTO users (google_id, email, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
-                    (google_id, email, name, 5)
-                )
-                user_id = cur.fetchone()[0]
-                credits = 5
-                print(f"[AUTH] New user registered via Google: {email} (5 free credits)")
+                # Check if user exists by email (registered with email/password)
+                cur.execute('SELECT id, credits FROM users WHERE email = %s', (email,))
+                user = cur.fetchone()
+
+                if user:
+                    # Link Google account to existing email user
+                    user_id, credits = user
+                    cur.execute('UPDATE users SET google_id = %s, name = %s WHERE id = %s', (google_id, name, user_id))
+                    print(f"[AUTH] Linked Google account to existing user: {email}")
+                else:
+                    # New user - give 5 free credits
+                    cur.execute(
+                        'INSERT INTO users (google_id, email, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
+                        (google_id, email, name, 5)
+                    )
+                    user_id = cur.fetchone()[0]
+                    credits = 5
+                    print(f"[AUTH] New user registered via Google: {email} (5 free credits)")
 
             # Create session
             session['user_id'] = user_id
