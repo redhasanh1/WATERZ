@@ -7200,6 +7200,7 @@ def create_checkout_session():
 @app.route('/api/stripe/webhook', methods=['POST'])
 def stripe_webhook():
     """Handle Stripe webhooks for payment events"""
+    print(f"[STRIPE-WEBHOOK] *** WEBHOOK HIT *** STRIPE_ENABLED={STRIPE_ENABLED}")
     if not STRIPE_ENABLED:
         return jsonify({'error': 'Billing is not enabled'}), 503
 
@@ -7219,6 +7220,7 @@ def stripe_webhook():
         data_object = event['data']['object']
 
         print(f"[STRIPE-WEBHOOK] Received: {event_type}")
+        print(f"[STRIPE-WEBHOOK] AUTH_ENABLED={AUTH_ENABLED}, db_pool={'OK' if db_pool else 'NONE'}")
 
         # Handle successful checkout (one-time or subscription)
         if event_type == 'checkout.session.completed':
@@ -7227,9 +7229,15 @@ def stripe_webhook():
             package = metadata.get('package')
             plan = metadata.get('plan')
 
+            # Debug: Log all relevant data
+            print(f"[STRIPE-WEBHOOK] client_reference_id (user_id): {user_id}")
+            print(f"[STRIPE-WEBHOOK] metadata: {metadata}")
+            print(f"[STRIPE-WEBHOOK] package={package}, plan={plan}")
+
             # Determine credit amount
             key = package if package else plan
             credits_to_add = CREDIT_AMOUNTS.get(key, 0)
+            print(f"[STRIPE-WEBHOOK] key={key}, credits_to_add={credits_to_add}")
 
             if credits_to_add > 0 and user_id:
                 # Award credits to user
@@ -7308,6 +7316,14 @@ def stripe_webhook():
                     except Exception as e:
                         print(f"[BILLING] ❌ Failed to add credits for user {user_id}: {e}")
                         import traceback; traceback.print_exc()
+                else:
+                    print(f"[BILLING] ⚠️ AUTH_ENABLED=False - cannot add credits (no database)")
+            else:
+                print(f"[BILLING] ❌ SKIPPED credit addition: credits_to_add={credits_to_add}, user_id={user_id}")
+                if not user_id:
+                    print(f"[BILLING]    Missing user_id! Check client_reference_id in checkout session")
+                if credits_to_add == 0:
+                    print(f"[BILLING]    credits_to_add=0! Check package key '{key}' exists in CREDIT_AMOUNTS")
 
         # Handle subscription renewals
         elif event_type == 'invoice.payment_succeeded':
