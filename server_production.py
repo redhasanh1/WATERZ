@@ -6059,17 +6059,13 @@ def get_upload_url():
         b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
         bucket = b2_api.get_bucket_by_name(B2_BUCKET)
 
-        # Get upload URL from pool or request fresh one (b2sdk v2 API)
-        upload_url, upload_auth_token = b2_api.take_bucket_upload_url(bucket.id_)
-
-        if upload_url is None:
-            # No URLs in pool, get fresh ones from B2 API
-            response = b2_api.raw_api.get_upload_url(
-                b2_api.account_info.get_auth_token(),
-                bucket.id_
-            )
-            upload_url = response['uploadUrl']
-            upload_auth_token = response['authorizationToken']
+        # Get upload URL using raw B2 API (works across all b2sdk versions)
+        response = b2_api.raw_api.get_upload_url(
+            b2_api.account_info.get_auth_token(),
+            bucket.id_
+        )
+        upload_url = response['uploadUrl']
+        upload_auth_token = response['authorizationToken']
 
         print(f"[B2-DIRECT] Generated upload URL for {remote_path}")
 
