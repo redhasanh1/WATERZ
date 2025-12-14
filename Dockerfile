@@ -85,6 +85,9 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 COPY --from=builder /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# Ensure b2sdk is available (may not copy correctly from builder)
+RUN pip install --no-cache-dir b2sdk
+
 # Set working directory
 WORKDIR /app
 
