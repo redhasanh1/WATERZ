@@ -1917,47 +1917,103 @@
             };
             reader.readAsDataURL(file);
 
-            // Upload to server
-            const formData = new FormData();
-            formData.append('file', file);
-
+            // Upload to server (try direct B2 first for zero Railway ingress)
+            let data;
             try {
-                const response = await apiFetchPath(`/api/upload`, {
+                // Step 1: Try to get B2 direct upload URL
+                const uploadUrlResponse = await apiFetchPath('/api/get-upload-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: file.name,
+                        content_type: file.type
+                    })
+                });
+                const uploadUrlData = await parseJsonSafe(uploadUrlResponse);
+
+                if (uploadUrlData.status === 'success' && uploadUrlData.upload_url) {
+                    // Step 2: Upload directly to B2 (bypasses Railway = zero ingress)
+                    console.log('[B2-DIRECT] Uploading directly to B2...');
+                    const b2Response = await fetch(uploadUrlData.upload_url, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': uploadUrlData.auth_token,
+                            'Content-Type': file.type || 'application/octet-stream',
+                            'X-Bz-File-Name': encodeURIComponent(uploadUrlData.remote_path),
+                            'X-Bz-Content-Sha1': 'do_not_verify'
+                        },
+                        body: file
+                    });
+
+                    if (!b2Response.ok) {
+                        throw new Error('B2 upload failed: ' + b2Response.statusText);
+                    }
+
+                    console.log('[B2-DIRECT] Upload complete, notifying server...');
+
+                    // Step 3: Notify server upload is complete
+                    const completeResponse = await apiFetchPath('/api/upload-complete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            task_id: uploadUrlData.task_id,
+                            remote_path: uploadUrlData.remote_path,
+                            cdn_url: uploadUrlData.cdn_url,
+                            filename: file.name
+                        })
+                    });
+                    data = await parseJsonSafe(completeResponse);
+                    console.log('[B2-DIRECT] Server notified:', data);
+                } else {
+                    // Fallback: Upload through Flask (B2 not available)
+                    console.log('[FALLBACK] Using Flask upload...');
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    const response = await apiFetchPath('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    data = await parseJsonSafe(response);
+                }
+            } catch (uploadError) {
+                // Fallback on any error
+                console.log('[FALLBACK] Error with B2, using Flask upload:', uploadError);
+                const formData = new FormData();
+                formData.append('file', file);
+                const response = await apiFetchPath('/api/upload', {
                     method: 'POST',
                     body: formData
                 });
+                data = await parseJsonSafe(response);
+            }
 
-                const data = await parseJsonSafe(response);
+            // Handle upload result
+            if (data && data.status === 'success') {
+                // Store task_id for processing
+                const videoElem = document.getElementById('previewVideo');
+                videoElem.dataset.taskId = data.task_id;
 
-                if (data.status === 'success') {
-                    // Store task_id for processing
-                    const videoElem = document.getElementById('previewVideo');
-                    videoElem.dataset.taskId = data.task_id;
-
-                    // Initialize professional timeline for videos
-                    if (file.type.startsWith('video/')) {
-// initializeTimeline(data.task_id, videoElem); // Removed - using inline VideoTimeline in loadedmetadata
-                    }
-
-                    // Show process button
-                    const processBtn = document.getElementById('processBtn');
-                    if (processBtn) processBtn.style.display = 'block';
-                    const removeObjBtn = document.getElementById('removeObjectBtn');
-                    if (removeObjBtn) removeObjBtn.style.display = 'block';
-
-                    // Show scroll hint
-                    const scrollHint = document.getElementById('scrollHint');
-                    if (scrollHint) scrollHint.style.display = 'block';
-
-                    // Auto-scroll to button after a brief delay
-                    setTimeout(() => {
-                        processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 500);
-                } else {
-                    alert('Upload failed: ' + (data.message || 'Unknown error'));
+                // Initialize professional timeline for videos
+                if (file.type.startsWith('video/')) {
+                    // initializeTimeline(data.task_id, videoElem); // Removed - using inline VideoTimeline in loadedmetadata
                 }
-            } catch (error) {
-                alert('Upload error: ' + error.message);
+
+                // Show process button
+                const processBtn = document.getElementById('processBtn');
+                if (processBtn) processBtn.style.display = 'block';
+                const removeObjBtn = document.getElementById('removeObjectBtn');
+                if (removeObjBtn) removeObjBtn.style.display = 'block';
+
+                // Show scroll hint
+                const scrollHint = document.getElementById('scrollHint');
+                if (scrollHint) scrollHint.style.display = 'block';
+
+                // Auto-scroll to button after a brief delay
+                setTimeout(() => {
+                    processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 500);
+            } else {
+                alert('Upload failed: ' + (data?.message || 'Unknown error'));
             }
         }
 

@@ -5967,6 +5967,102 @@ def check_user_video_rate_limit(user_id, is_admin=False):
     return True
 
 
+# ============================================================================
+# DIRECT B2 UPLOAD (Zero Railway ingress)
+# ============================================================================
+
+@app.route('/api/get-upload-url', methods=['POST', 'OPTIONS'])
+@require_auth
+def get_upload_url():
+    """Get presigned B2 upload URL for direct client upload (zero Railway ingress)"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not B2_ENABLED:
+        return jsonify({'error': 'Direct upload not available', 'fallback': True}), 200
+
+    try:
+        data = request.get_json() or {}
+        filename = data.get('filename', 'video.mp4')
+        content_type = data.get('content_type', 'video/mp4')
+
+        # Validate extension
+        ext = os.path.splitext(filename)[1].lower()
+        allowed_exts = {'.mp4', '.mov', '.avi', '.webm', '.mkv', '.png', '.jpg', '.jpeg', '.gif'}
+        if ext not in allowed_exts:
+            return jsonify({'error': f'File type {ext} not allowed'}), 400
+
+        # Generate unique task ID
+        task_id = str(uuid.uuid4())
+        remote_path = f"uploads/{task_id}{ext}"
+
+        # Get B2 upload URL
+        from b2sdk.v2 import B2Api, InMemoryAccountInfo
+        info = InMemoryAccountInfo()
+        b2_api = B2Api(info)
+        b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+        bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+
+        # Get upload URL and auth token
+        upload_url_info = bucket.get_upload_url()
+
+        print(f"[B2-DIRECT] Generated upload URL for {remote_path}")
+
+        return jsonify({
+            'status': 'success',
+            'task_id': task_id,
+            'upload_url': upload_url_info.upload_url,
+            'auth_token': upload_url_info.authorization_token,
+            'remote_path': remote_path,
+            'cdn_url': f"{B2_CDN_URL}/{remote_path}"
+        })
+
+    except Exception as e:
+        print(f"[B2-DIRECT] Error getting upload URL: {e}")
+        return jsonify({'error': str(e), 'fallback': True}), 200
+
+
+@app.route('/api/upload-complete', methods=['POST', 'OPTIONS'])
+@require_auth
+def upload_complete():
+    """Client notifies that direct B2 upload is complete"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        data = request.get_json() or {}
+        task_id = data.get('task_id')
+        remote_path = data.get('remote_path')
+        cdn_url = data.get('cdn_url')
+        filename = data.get('filename')
+
+        if not task_id or not cdn_url:
+            return jsonify({'error': 'Missing task_id or cdn_url'}), 400
+
+        # Store CDN URL in Redis
+        try:
+            redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+            redis_client.setex(f"upload:{task_id}:cdn_url", 86400, cdn_url)
+            redis_client.setex(f"upload:{task_id}:remote_path", 86400, remote_path)
+            print(f"[B2-DIRECT] Upload complete: {task_id} -> {cdn_url}")
+        except Exception as e:
+            print(f"[B2-DIRECT] Redis store failed: {e}")
+
+        # Get file extension
+        ext = os.path.splitext(filename or remote_path)[1].lower() if filename or remote_path else '.mp4'
+
+        return jsonify({
+            'status': 'success',
+            'task_id': task_id,
+            'video_url': cdn_url,
+            'message': 'Upload complete, ready for processing'
+        })
+
+    except Exception as e:
+        print(f"[B2-DIRECT] Error in upload-complete: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/upload', methods=['POST', 'OPTIONS'])
 @require_auth
 def upload_file():
