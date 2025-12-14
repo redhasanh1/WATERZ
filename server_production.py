@@ -2576,16 +2576,17 @@ def cleanup_old_files():
         except Exception as e:
             print(f"[B2-CLEANUP] Error during B2 cleanup: {e}")
 
+# ⚠️ TESTING: Cleanup runs every 30 seconds for testing - CHANGE BACK TO 600 (10 min) after testing!
 # Schedule cleanup to run every configurable interval
 import threading
 def schedule_cleanup():
     cleanup_old_files()
-    interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '600'))  # 10 minutes default
+    interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '30'))  # 30 seconds for TESTING - change back to 600 (10 min) after!
     threading.Timer(interval, schedule_cleanup).start()
 
 # Start cleanup scheduler
 threading.Thread(target=schedule_cleanup, daemon=True).start()
-cleanup_interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '600'))
+cleanup_interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '30'))
 print(f"[CLEANUP] File cleanup scheduler started (runs every {cleanup_interval}s / {cleanup_interval/60:.1f} min)")
 
 # ============================================================================
