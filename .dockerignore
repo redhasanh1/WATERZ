@@ -61,6 +61,10 @@ test_*.py
 *.engine
 **/*.engine
 
+# EXCEPTION: Pre-built WSL engines for 4090 (skip 15min rebuild on WSL)
+!engines_trt/*.engine
+!engines_trt/**/*.engine
+
 # ONNX models - KEEP these for TRT engine building
 !faster-propainter-main/models/neuflow_things.onnx
 !engines/rfcnet/rfcnet_dcnv4.onnx

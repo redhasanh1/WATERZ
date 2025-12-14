@@ -30,20 +30,45 @@ echo ""
 NEUFLOW_ENGINE="/app/faster-propainter-main/models/neuflow_things_fp16.engine"
 RFCNET_ENGINE="/app/engines/rfcnet/rfcnet_dcnv4_fp16.engine"
 
+# Pre-built WSL engines (built on RTX 4090 WSL2)
+NEUFLOW_ENGINE_WSL="/app/faster-propainter-main/models/neuflow_things_fp16.engine.wsl"
+RFCNET_ENGINE_WSL="/app/engines/rfcnet/rfcnet_dcnv4_fp16.engine.wsl"
+
 # ONNX paths
 NEUFLOW_ONNX="/app/faster-propainter-main/models/neuflow_things.onnx"
 RFCNET_ONNX="/app/engines/rfcnet/rfcnet_dcnv4.onnx"
 
 # ============================================================
+# Detect WSL and use pre-built engines if available
+# ============================================================
+IS_WSL=false
+if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
+    IS_WSL=true
+    echo "[WSL] Detected WSL environment"
+fi
+
+# Check if GPU is RTX 4090 (engines were built for this GPU)
+IS_4090=false
+if echo "$GPU_NAME" | grep -qi "4090"; then
+    IS_4090=true
+    echo "[GPU] RTX 4090 detected - can use pre-built engines"
+fi
+
+# ============================================================
 # Build NeuFlow TRT Engine (if missing)
 # ============================================================
 if [ ! -f "$NEUFLOW_ENGINE" ]; then
-    echo ""
-    echo "[BUILD] NeuFlow TRT engine not found, building..."
-    echo "        This takes ~10 minutes on first run."
-    echo ""
+    # Check for pre-built WSL engine first
+    if [ "$IS_WSL" = true ] && [ "$IS_4090" = true ] && [ -f "$NEUFLOW_ENGINE_WSL" ]; then
+        echo "[WSL] Using pre-built NeuFlow engine (skipping 10min build!)"
+        cp "$NEUFLOW_ENGINE_WSL" "$NEUFLOW_ENGINE"
+        echo "[OK] NeuFlow TRT engine copied from WSL pre-built: $NEUFLOW_ENGINE"
+    elif [ -f "$NEUFLOW_ONNX" ]; then
+        echo ""
+        echo "[BUILD] NeuFlow TRT engine not found, building..."
+        echo "        This takes ~10 minutes on first run."
+        echo ""
 
-    if [ -f "$NEUFLOW_ONNX" ]; then
         # Use CUDNN-only tactics (critical! CUBLAS causes issues)
         trtexec \
             --onnx="$NEUFLOW_ONNX" \
@@ -69,12 +94,18 @@ fi
 DCNV4_PLUGIN="/app/libdcnv4_plugin.so"
 
 if [ ! -f "$RFCNET_ENGINE" ]; then
-    echo ""
-    echo "[BUILD] RFCNet DCNv4 TRT engine not found, building..."
-    echo "        This takes ~5 minutes on first run."
-    echo ""
+    # Check for pre-built WSL engine first
+    if [ "$IS_WSL" = true ] && [ "$IS_4090" = true ] && [ -f "$RFCNET_ENGINE_WSL" ]; then
+        echo "[WSL] Using pre-built RFCNet engine (skipping 5min build!)"
+        mkdir -p "$(dirname "$RFCNET_ENGINE")"
+        cp "$RFCNET_ENGINE_WSL" "$RFCNET_ENGINE"
+        echo "[OK] RFCNet TRT engine copied from WSL pre-built: $RFCNET_ENGINE"
+    elif [ -f "$RFCNET_ONNX" ]; then
+        echo ""
+        echo "[BUILD] RFCNet DCNv4 TRT engine not found, building..."
+        echo "        This takes ~5 minutes on first run."
+        echo ""
 
-    if [ -f "$RFCNET_ONNX" ]; then
         # Ensure output directory exists
         mkdir -p "$(dirname "$RFCNET_ENGINE")"
 
@@ -159,11 +190,85 @@ echo "  Concurrency: $CONCURRENCY"
 echo "============================================================"
 echo ""
 
-# Single worker handles BOTH modes:
-# - YOLO mode: celery queue -> forwards to server_production
-# - SAM2 mode: propainter queue -> handled directly
-exec celery -A server_production2.celery worker \
-    -Q celery,propainter \
-    --loglevel=info \
-    --pool=threads \
-    --concurrency=$CONCURRENCY
+# ============================================================
+# PRODUCTION: Auto-restart loop with crash notifications
+# ============================================================
+send_notification() {
+    MSG="$1"
+    if [ -n "$NOTIFY_WEBHOOK_URL" ]; then
+        curl -s -X POST "$NOTIFY_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": \"$MSG\"}" || true
+    fi
+}
+
+get_crash_reason() {
+    case "$1" in
+        137) echo "OOM Killed (exit 137)" ;;
+        139) echo "Segfault (exit 139)" ;;
+        134) echo "SIGABRT (exit 134)" ;;
+        143) echo "SIGTERM (exit 143)" ;;
+        1)   echo "Error (exit 1)" ;;
+        *)   echo "Unknown (exit $1)" ;;
+    esac
+}
+
+WORKER_NAME="${NOTIFY_WORKER_NAME:-$(hostname)}"
+RESTART_COUNT=0
+MAX_RESTARTS=100  # Prevent infinite loop on persistent errors
+RESTART_DELAY=5   # Seconds between restarts
+
+# NOTE: Startup notification is now sent from WITHIN Celery (worker_ready signal)
+# This ensures notification fires AFTER TRT engines are built and Celery is truly ready
+
+# Production restart loop - auto-recovers from crashes
+while [ $RESTART_COUNT -lt $MAX_RESTARTS ]; do
+    echo ""
+    echo "============================================================"
+    echo "[PRODUCTION] Starting Celery worker in tmux (restart #$RESTART_COUNT)"
+    echo "============================================================"
+
+    # Kill any existing tmux session
+    tmux kill-session -t celery 2>/dev/null || true
+
+    # Run Celery inside tmux (allows reconnecting: tmux attach -t celery)
+    tmux new-session -d -s celery "celery -A server_production2.celery worker \
+        --loglevel=WARNING \
+        --pool=${CELERY_POOL:-threads} \
+        --concurrency=${CONCURRENCY:-4} \
+        -Q celery,propainter; echo '[TMUX] Celery exited with code '\$?; sleep 5"
+
+    echo "[TMUX] Celery running in tmux session 'celery'"
+    echo "[TMUX] To view logs: tmux attach -t celery"
+
+    # Wait for tmux session to exit (celery crashed or stopped)
+    while tmux has-session -t celery 2>/dev/null; do
+        sleep 5
+    done
+
+    EXIT_CODE=1  # Assume error if tmux session ended
+    RESTART_COUNT=$((RESTART_COUNT + 1))
+    REASON=$(get_crash_reason $EXIT_CODE)
+
+    echo ""
+    echo "[CRASH] Celery exited with code $EXIT_CODE ($REASON)"
+    echo "[CRASH] Restart attempt $RESTART_COUNT/$MAX_RESTARTS"
+
+    # Send crash notification
+    send_notification "🔴 Worker **$WORKER_NAME** CRASHED! Reason: $REASON | Restarting in ${RESTART_DELAY}s... (attempt $RESTART_COUNT)"
+
+    # Wait before restart (gives system time to recover from OOM)
+    sleep $RESTART_DELAY
+
+    # Clear VRAM before restart
+    echo "[CLEANUP] Clearing VRAM before restart..."
+    python3 -c "import torch; torch.cuda.empty_cache(); torch.cuda.ipc_collect(); print('[CLEANUP] VRAM cleared')" 2>/dev/null || true
+
+    # Send restart notification
+    send_notification "🔄 Worker **$WORKER_NAME** restarting... (attempt $RESTART_COUNT)"
+done
+
+# If we hit max restarts, something is seriously wrong
+send_notification "💀 Worker **$WORKER_NAME** DEAD! Hit max restarts ($MAX_RESTARTS). Manual intervention required."
+echo "[FATAL] Hit max restarts ($MAX_RESTARTS). Exiting."
+exit 1

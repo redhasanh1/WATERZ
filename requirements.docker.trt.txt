@@ -45,3 +45,6 @@ pyyaml
 addict
 yapf
 future
+
+# GPU monitoring (for accurate VRAM watchdog)
+pynvml

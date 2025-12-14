@@ -48,6 +48,223 @@ def cleanup_vram(context=""):
             print(f"[VRAM] Cleanup {context}: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
     except Exception as e:
         print(f"[VRAM] Cleanup error: {e}")
+
+# [NUCLEAR] Full cleanup - VRAM + temp files + caches (for Salad stability)
+def full_cleanup(video_id=None, context=""):
+    """
+    Nuclear cleanup after each job to prevent crashes on long-running workers.
+    Cleans: VRAM, Python memory, temp files, cached frames.
+    """
+    import gc
+    import shutil
+    import glob as glob_module
+
+    print(f"[CLEANUP] Starting full cleanup {context}...")
+
+    # 1. Delete any lingering local variables holding tensors
+    gc.collect()
+    gc.collect()  # Double collect for circular refs
+
+    # 2. VRAM cleanup
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            try:
+                torch.cuda.ipc_collect()
+            except:
+                pass
+    except:
+        pass
+
+    # 3. Clean temp files for this video
+    if video_id:
+        temp_patterns = [
+            f"/app/temp/{video_id}*",
+            f"/app/temp/*{video_id}*",
+            f"/app/results/{video_id}*",
+            f"/tmp/{video_id}*",
+            f"/tmp/*{video_id}*",
+        ]
+        cleaned_count = 0
+        for pattern in temp_patterns:
+            for path in glob_module.glob(pattern):
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                        cleaned_count += 1
+                    elif os.path.isfile(path):
+                        os.remove(path)
+                        cleaned_count += 1
+                except Exception as e:
+                    print(f"[CLEANUP] Failed to remove {path}: {e}")
+        if cleaned_count > 0:
+            print(f"[CLEANUP] Removed {cleaned_count} temp files/dirs for {video_id}")
+
+    # 4. Clean old temp files (older than 1 hour) to prevent disk buildup
+    try:
+        import time
+        now = time.time()
+        for temp_dir in ['/app/temp', '/tmp']:
+            if os.path.exists(temp_dir):
+                for item in os.listdir(temp_dir):
+                    item_path = os.path.join(temp_dir, item)
+                    try:
+                        # Skip if modified in last hour
+                        if now - os.path.getmtime(item_path) > 3600:
+                            if os.path.isdir(item_path):
+                                shutil.rmtree(item_path, ignore_errors=True)
+                            else:
+                                os.remove(item_path)
+                    except:
+                        pass
+    except:
+        pass
+
+    # 5. Final GC and VRAM status
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            print(f"[CLEANUP] Complete {context}: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+    except:
+        pass
+
+# [WATCHDOG] VRAM timeout watchdog - kills jobs stuck at max VRAM
+class VRAMWatchdog:
+    """
+    Background thread that monitors VRAM usage.
+    If VRAM stays above threshold for too long, sets abort flag.
+    """
+    def __init__(self, threshold_percent=95, timeout_seconds=80):
+        self.threshold = threshold_percent / 100.0
+        self.timeout = timeout_seconds
+        self.abort_flag = False
+        self.high_vram_start = None
+        self._stop = False
+        self._thread = None
+
+    def start(self):
+        import threading
+        self._stop = False
+        self.abort_flag = False
+        self.high_vram_start = None
+        self._thread = threading.Thread(target=self._monitor, daemon=True)
+        self._thread.start()
+        print(f"[WATCHDOG] Started - will abort if >{self.threshold*100:.0f}% VRAM for >{self.timeout}s")
+
+    def stop(self):
+        self._stop = True
+        if self._thread:
+            self._thread.join(timeout=2)
+        print("[WATCHDOG] Stopped")
+
+    def _monitor(self):
+        import time
+
+        # Use pynvml for REAL GPU memory (not just PyTorch allocations)
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            use_pynvml = True
+            print("[WATCHDOG] Using pynvml for accurate VRAM monitoring")
+        except Exception as e:
+            print(f"[WATCHDOG] pynvml unavailable ({e}), falling back to torch")
+            import torch
+            use_pynvml = False
+
+        while not self._stop:
+            try:
+                if use_pynvml:
+                    # Real GPU memory from nvidia-smi
+                    info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    usage = info.used / info.total
+                else:
+                    # Fallback to PyTorch (less accurate)
+                    import torch
+                    if torch.cuda.is_available():
+                        allocated = torch.cuda.memory_allocated()
+                        total = torch.cuda.get_device_properties(0).total_memory
+                        usage = allocated / total
+                    else:
+                        usage = 0
+
+                if usage > self.threshold:
+                    if self.high_vram_start is None:
+                        self.high_vram_start = time.time()
+                        print(f"[WATCHDOG] High VRAM detected: {usage*100:.1f}%")
+                    else:
+                        elapsed = time.time() - self.high_vram_start
+                        if elapsed > self.timeout:
+                            print(f"[WATCHDOG] TIMEOUT! VRAM at {usage*100:.1f}% for {elapsed:.0f}s - KILLING STUCK TASK")
+                            self.abort_flag = True
+                            if use_pynvml:
+                                pynvml.nvmlShutdown()
+                            # SIGKILL the task process - can't be caught, kills immediately
+                            # Celery worker will respawn, tmux will restart if needed
+                            import os, signal
+                            print("[WATCHDOG] Sending SIGKILL to stuck task process...")
+                            os.kill(os.getpid(), signal.SIGKILL)
+                else:
+                    # VRAM dropped below threshold, reset timer
+                    if self.high_vram_start is not None:
+                        print(f"[WATCHDOG] VRAM normalized: {usage*100:.1f}%")
+                    self.high_vram_start = None
+            except Exception as e:
+                print(f"[WATCHDOG] Monitor error: {e}")
+
+            time.sleep(5)  # Check every 5 seconds
+
+        # Cleanup pynvml on stop
+        if use_pynvml:
+            try:
+                pynvml.nvmlShutdown()
+            except:
+                pass
+
+# Global watchdog instance
+_vram_watchdog = None
+
+def start_vram_watchdog():
+    global _vram_watchdog
+    _vram_watchdog = VRAMWatchdog(threshold_percent=95, timeout_seconds=60)
+    _vram_watchdog.start()
+    return _vram_watchdog
+
+def stop_vram_watchdog():
+    global _vram_watchdog
+    if _vram_watchdog:
+        _vram_watchdog.stop()
+        _vram_watchdog = None
+
+def check_vram_abort():
+    """Call this in processing loops to check if we should abort"""
+    global _vram_watchdog
+    if _vram_watchdog and _vram_watchdog.abort_flag:
+        raise MemoryError("[WATCHDOG] Job aborted due to VRAM timeout")
+
+# [NVENC] Check if NVENC hardware encoder is available (cached)
+_NVENC_AVAILABLE = None
+def _check_nvenc_available():
+    """Check if h264_nvenc encoder is available in FFmpeg."""
+    global _NVENC_AVAILABLE
+    if _NVENC_AVAILABLE is not None:
+        return _NVENC_AVAILABLE
+    try:
+        result = subprocess.run(
+            ['ffmpeg', '-hide_banner', '-encoders'],
+            capture_output=True, text=True, timeout=5
+        )
+        _NVENC_AVAILABLE = 'h264_nvenc' in result.stdout
+        print(f"[FFMPEG] NVENC available: {_NVENC_AVAILABLE}")
+    except:
+        _NVENC_AVAILABLE = False
+    return _NVENC_AVAILABLE
 # Parallel segment execution (inside a single video task)
 SAM2_PARALLEL_SEGMENTS = os.getenv('SAM2_PARALLEL_SEGMENTS', '1').lower() in ('1', 'true', 'yes', 'on')
 
@@ -224,10 +441,43 @@ try:
 except Exception:
     pass
 
+# [NOTIFY] Send notification when Celery worker is ACTUALLY ready
+from celery.signals import worker_ready
+
+@worker_ready.connect
+def on_worker_ready(**kwargs):
+    """Send notification when Celery is truly ready (after TRT engines built)"""
+    import requests
+    webhook_url = os.environ.get('NOTIFY_WEBHOOK_URL')
+    worker_name = os.environ.get('NOTIFY_WORKER_NAME', os.uname().nodename if hasattr(os, 'uname') else 'worker')
+
+    if webhook_url:
+        try:
+            import torch
+            gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU"
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory // (1024**2) if torch.cuda.is_available() else 0
+
+            msg = f"🟢 Worker **{worker_name}** is READY! GPU: {gpu_name} ({gpu_mem}MB VRAM)"
+            requests.post(webhook_url, json={"content": msg}, timeout=5)
+            print(f"[NOTIFY] Startup notification sent: {msg}")
+        except Exception as e:
+            print(f"[NOTIFY] Failed to send startup notification: {e}")
+
 # Get FFmpeg/FFprobe executables
 def get_ffmpeg_executables():
     """Get FFmpeg and FFprobe paths - check multiple locations"""
-    # Check local ffmpeg folder first
+    import platform
+    import shutil
+
+    # On Linux/Docker, use system ffmpeg first (avoid Windows .exe files from volume mount)
+    if platform.system() != 'Windows':
+        ffmpeg_path = shutil.which('ffmpeg')
+        ffprobe_path = shutil.which('ffprobe')
+        if ffmpeg_path and ffprobe_path:
+            print(f"[FFmpeg] Using system FFmpeg (Linux): {ffmpeg_path}")
+            return ffmpeg_path, ffprobe_path
+
+    # Check local ffmpeg folder first (Windows)
     ffmpeg_exe = os.path.join(BASE_DIR, 'ffmpeg', 'ffmpeg.exe')
     ffprobe_exe = os.path.join(BASE_DIR, 'ffmpeg', 'ffprobe.exe')
 
@@ -403,6 +653,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         # Generate video ID if not provided
         if not video_id:
             video_id = os.path.basename(video_path).split('.')[0][:8]
+
+        # Start VRAM watchdog - will abort job if VRAM stays >95% for >80s
+        start_vram_watchdog()
 
         # --- 1. Locate video (robust local/remote handling) ---
         from pathlib import PureWindowsPath
@@ -1218,6 +1471,10 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                             result = (seg_idx_done, None, None, (0, 0))
                         segment_results[seg_idx_done] = result
                         completed += 1
+                        # Cleanup VRAM after each segment to prevent accumulation
+                        cleanup_vram(f"after segment {seg_idx_done+1}")
+                        # Check if watchdog triggered abort
+                        check_vram_abort()
                         progress = 30 + int((completed / len(segments)) * 40)
                         self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Processed {completed}/{len(segments)} segments'})
             else:
@@ -1232,6 +1489,8 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     clear_gpu_memory()
                     result = process_segment(seg_idx, start_f, end_f, seg_bbox)
                     segment_results[seg_idx] = result
+                    # Check if watchdog triggered abort
+                    check_vram_abort()
 
             # --- 12. REVOLUTIONARY: Direct VRAM → FFmpeg pipe → NVENC (ZERO disk I/O!) ---
             print(f"[SAM2] Segment processing complete - {len(vram_frames)} frames stored in VRAM")
@@ -1394,8 +1653,13 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         # Do not call update_state with FAILURE meta (Celery will store proper exception info)
         raise
     finally:
-        # Force VRAM cleanup after EVERY task to prevent memory leaks
-        cleanup_vram("finally block")
+        # Stop VRAM watchdog
+        stop_vram_watchdog()
+        # NUCLEAR cleanup after EVERY task to prevent crashes on Salad
+        try:
+            full_cleanup(video_id=video_id, context="after process_sam2_interactive")
+        except:
+            cleanup_vram("finally block fallback")
 
 
 #============================================================================
@@ -1895,6 +2159,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         import cv2, glob, numpy as np, os, json, zipfile, requests
         from watermark import expand_masks_10fps  # not used but keep import parity
         from urllib.parse import urljoin
+
+        # Start VRAM watchdog - will abort job if VRAM stays >95% for >80s
+        start_vram_watchdog()
 
         if not sam2_result or not isinstance(sam2_result, dict):
             raise RuntimeError(f"Invalid sam2_result: {sam2_result}")
@@ -2488,11 +2755,19 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                         result = (seg_idx_done, None, None, (0, 0))
                     segment_results[seg_idx_done] = result
                     completed += 1
+                    # Cleanup VRAM after each segment to prevent accumulation
+                    cleanup_vram(f"after segment {seg_idx_done+1}")
+                    # Check if watchdog triggered abort
+                    check_vram_abort()
                     print(f"[SAM2] Completed {completed}/{len(segments_to_process)} segments")
         else:
             print(f"[SAM2] Processing {len(segments_to_process)} segment(s) sequentially...")
             for seg_idx, (start_f, end_f, seg_bbox) in enumerate(segments_to_process):
                 segment_results[seg_idx] = process_segment_local(seg_idx, start_f, end_f, seg_bbox)
+                # Cleanup VRAM after each segment to prevent accumulation
+                cleanup_vram(f"after segment {seg_idx+1}")
+                # Check if watchdog triggered abort
+                check_vram_abort()
 
         # --- REVOLUTIONARY: Direct VRAM → FFmpeg pipe → NVENC (ZERO disk I/O!) ---
         print(f"[SAM2] Segment processing complete - {len(vram_frames)} frames stored in VRAM")
@@ -2508,7 +2783,15 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         )
         frame_height, frame_width = first_frame.shape[:2]
 
-        # FFmpeg command: pipe rawvideo → NVENC → MP4 with audio from original
+        # Choose encoder: NVENC (GPU) if available, else libx264 (CPU)
+        use_nvenc = _check_nvenc_available()
+        if use_nvenc:
+            encoder_args = ['-c:v', 'h264_nvenc', '-preset', 'p1', '-b:v', '8M', '-bufsize', '16M']
+        else:
+            print("[WARN] NVENC not available, using libx264 (slower)")
+            encoder_args = ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
+
+        # FFmpeg command: pipe rawvideo → encoder → MP4 with audio from original
         ffmpeg_cmd = [
             str(FFMPEG_EXE), '-y',
             '-f', 'rawvideo',
@@ -2520,49 +2803,55 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             '-i', video_path,  # Audio from original
             '-map', '0:v:0',
             '-map', '1:a:0?',
-            '-c:v', 'h264_nvenc',  # GPU encoding!
-            '-preset', 'p1',  # Fastest NVENC preset
-            '-b:v', '8M',
-            '-bufsize', '16M',
+        ] + encoder_args + [
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
             '-b:a', '192k',
             output_path
         ]
 
-        # Start FFmpeg process
-        # NOTE: Use DEVNULL for stdout/stderr to prevent pipe deadlock on long videos!
+        # Start FFmpeg process - capture stderr for debugging
+        print(f"[FFMPEG] Command: {' '.join(ffmpeg_cmd)}")
         proc = subprocess.Popen(
             ffmpeg_cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.PIPE
         )
 
         # Stream ALL frames directly to FFmpeg (processed + unprocessed)
-        for frame_idx in range(total_frames):
-            # Progress logging every 100 frames
-            if frame_idx % 100 == 0:
-                print(f"[SAM2] Encoding frame {frame_idx}/{total_frames}...")
+        try:
+            for frame_idx in range(total_frames):
+                # Progress logging every 100 frames
+                if frame_idx % 100 == 0:
+                    print(f"[SAM2] Encoding frame {frame_idx}/{total_frames}...")
 
-            if frame_idx in vram_frames:
-                # Processed frame from segment
-                frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
-            elif frame_idx in preloaded_frames:
-                # Unprocessed frame from preloaded
-                frame_bgr = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
-            else:
-                print(f"[WARNING] Frame {frame_idx} not found in VRAM, skipping")
-                continue
+                if frame_idx in vram_frames:
+                    # Processed frame from segment
+                    frame_bgr = VRAMCompressor.decompress_frame(vram_frames[frame_idx])
+                elif frame_idx in preloaded_frames:
+                    # Unprocessed frame from preloaded
+                    frame_bgr = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
+                else:
+                    print(f"[WARNING] Frame {frame_idx} not found in VRAM, skipping")
+                    continue
 
-            proc.stdin.write(frame_bgr.tobytes())
+                proc.stdin.write(frame_bgr.tobytes())
 
-        proc.stdin.close()
+            proc.stdin.close()
+        except BrokenPipeError:
+            # FFmpeg crashed - get the error message
+            stderr_output = proc.stderr.read().decode('utf-8', errors='ignore')
+            print(f"[FFMPEG ERROR] FFmpeg crashed! stderr:\n{stderr_output}")
+            raise RuntimeError(f"FFmpeg crashed: {stderr_output[:500]}")
+
         proc.wait(timeout=300)
 
         if proc.returncode != 0:
-            print(f"[ERROR] FFmpeg NVENC encoding failed (code {proc.returncode})")
-            raise RuntimeError(f"Video encoding failed (code {proc.returncode})")
+            stderr_output = proc.stderr.read().decode('utf-8', errors='ignore')
+            print(f"[ERROR] FFmpeg encoding failed (code {proc.returncode})")
+            print(f"[FFMPEG STDERR] {stderr_output}")
+            raise RuntimeError(f"Video encoding failed (code {proc.returncode}): {stderr_output[:500]}")
 
         _encode_time = _time.time() - _encode_start
         print(f"[SAM2] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s ({total_frames/_encode_time:.1f} fps)")
@@ -2638,8 +2927,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             print(f"[CLEANUP] Warning: {cleanup_err}")
         raise
     finally:
-        # Force VRAM cleanup after EVERY task to prevent memory leaks
-        cleanup_vram("finally block")
+        # Stop VRAM watchdog
+        stop_vram_watchdog()
+        # NUCLEAR cleanup after EVERY task to prevent crashes on Salad
+        try:
+            full_cleanup(video_id=video_id, context="after _continue_after_masks")
+        except:
+            cleanup_vram("finally block fallback")
 
 
 # =============================================================================
