@@ -2542,7 +2542,7 @@ def cleanup_old_files():
 
     # Separate max ages for local vs B2 (configurable via env vars)
     local_max_age = int(os.getenv('LOCAL_CLEANUP_MAX_AGE_SECONDS', '3600'))  # 1 hour default
-    b2_max_age = int(os.getenv('B2_CLEANUP_MAX_AGE_SECONDS', '2400'))  # 40 minutes default
+    b2_max_age = int(os.getenv('B2_CLEANUP_MAX_AGE_SECONDS', '30'))  # 30 SECONDS for testing!!
 
     # Clean LOCAL files
     for directory in [UPLOAD_DIR, RESULT_DIR]:
