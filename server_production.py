@@ -7435,14 +7435,14 @@ def get_purchase_history():
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            # Get purchases from local database
+            # Get purchases from local database (user_id stored as string)
             cur.execute('''
                 SELECT id, stripe_session_id, package, credits_awarded, amount_cents, currency, status, created_at
                 FROM purchases
                 WHERE user_id = %s
                 ORDER BY created_at DESC
                 LIMIT 50
-            ''', (user_id,))
+            ''', (str(user_id),))
             rows = cur.fetchall()
 
             purchases = []
