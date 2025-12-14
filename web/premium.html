@@ -575,6 +575,22 @@
                 </div>
 
                 <div class="pricing-grid" style="gap: 2rem;">
+                    <!-- 1 Credit - Test Pack -->
+                    <div class="pricing-card" style="background: linear-gradient(135deg, rgba(255, 193, 7, 0.1), rgba(255, 152, 0, 0.1)); border: 2px dashed #ffc107; transition: all 0.3s ease;">
+                        <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(255, 193, 7, 0.2); border: 1px solid #ffc107; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #ff9800;">TEST</div>
+                        <div class="pricing-header">
+                            <h3>Test Pack</h3>
+                            <div class="pricing-price" style="background: linear-gradient(135deg, #ffc107, #ff9800); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">$0.01</div>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">For testing payments</p>
+                        </div>
+                        <ul class="pricing-features" style="margin: 1.5rem 0;">
+                            <li><strong>1 credit</strong> for testing</li>
+                            <li>Verify payment flow works</li>
+                            <li>Test webhook integration</li>
+                        </ul>
+                        <button class="btn-pricing primary" style="background: linear-gradient(135deg, #ffc107, #ff9800); transition: all 0.3s ease;" onclick="buyCredits('credits_1')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(255, 193, 7, 0.35)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">Buy Test Pack</button>
+                    </div>
+
                     <!-- 5 Credits - Starter -->
                     <div class="pricing-card" style="background: linear-gradient(135deg, rgba(115, 82, 180, 0.05), rgba(151, 121, 212, 0.05)); transition: all 0.3s ease;">
                         <div style="position: absolute; top: 1rem; right: 1rem; background: rgba(115, 82, 180, 0.15); border: 1px solid #7352b4; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #9779d4;">ONE-TIME</div>

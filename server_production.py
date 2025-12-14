@@ -7110,6 +7110,8 @@ if __name__ == '__main__':
 
 # Stripe Price IDs for credit packages (configurable via env vars for test/live switching)
 STRIPE_PRICE_IDS = {
+    # Test pack (1 credit for $0.01)
+    'credits_1': os.getenv('STRIPE_PRICE_ID_CREDITS_1', 'price_1Se59cDbvxhrePJFEXWcF9wZ'),   # Test Pack - $0.01
     # One-time credit packs (5/15/60 credits) - fallback to live prices
     'credits_5': os.getenv('STRIPE_PRICE_ID_CREDITS_5', 'price_1ScgBpDbvxhrePJFnMa5NdJh'),   # Starter Pack - $2.99
     'credits_15': os.getenv('STRIPE_PRICE_ID_CREDITS_15', 'price_1ScgCKDbvxhrePJFGytHR4i5'),  # Basic Pack - $6.99
@@ -7121,6 +7123,8 @@ STRIPE_PRICE_IDS = {
 
 # Credit amounts for each package
 CREDIT_AMOUNTS = {
+    # Test pack
+    'credits_1': 1,
     # One-time credit packs
     'credits_5': 5,
     'credits_15': 15,
@@ -7371,8 +7375,25 @@ def create_portal_session():
             except stripe.error.StripeError as exc:
                 return jsonify({'error': str(exc)}), 400
 
+        # Fallback: find customer by authenticated user's email
         if not customer_id:
-            return jsonify({'error': 'customer_id or session_id is required'}), 400
+            user_id = session.get('user_id')
+            if user_id and AUTH_ENABLED:
+                try:
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        cur.execute('SELECT email FROM users WHERE id = %s', (user_id,))
+                        row = cur.fetchone()
+                        if row:
+                            user_email = row[0]
+                            customers = stripe.Customer.list(email=user_email, limit=1)
+                            if customers.data:
+                                customer_id = customers.data[0].id
+                except Exception as e:
+                    print(f"[BILLING-PORTAL] Could not find customer by email: {e}")
+
+        if not customer_id:
+            return jsonify({'error': 'No Stripe customer found. Please make a purchase first.'}), 400
 
         # Get base URL for return redirect
         base_url = request.host_url.rstrip('/')
@@ -7392,7 +7413,7 @@ def create_portal_session():
 
 @app.route('/api/billing/purchase-history', methods=['GET', 'OPTIONS'])
 def get_purchase_history():
-    """Get user's purchase history from Stripe"""
+    """Get user's purchase history from local database"""
     if request.method == 'OPTIONS':
         return ('', 204)
 
@@ -7401,52 +7422,36 @@ def get_purchase_history():
         return jsonify({'error': 'Not authenticated'}), 401
 
     try:
-        # Get user's email from database
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT email FROM users WHERE id = %s', (user_id,))
-            row = cur.fetchone()
-            if not row:
-                return jsonify({'purchases': []})
-            user_email = row[0]
+            # Get purchases from local database
+            cur.execute('''
+                SELECT id, stripe_session_id, package, credits_awarded, amount_cents, currency, status, created_at
+                FROM purchases
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT 50
+            ''', (user_id,))
+            rows = cur.fetchall()
 
-        # Find Stripe customer by email
-        if not STRIPE_ENABLED:
-            return jsonify({'purchases': []})
-
-        customers = stripe.Customer.list(email=user_email, limit=1)
-        if not customers.data:
-            return jsonify({'purchases': []})
-
-        customer_id = customers.data[0].id
-
-        # Fetch payment intents for this customer
-        payment_intents = stripe.PaymentIntent.list(
-            customer=customer_id,
-            limit=50
-        )
-
-        purchases = []
-        for pi in payment_intents.data:
-            if pi.status == 'succeeded':
-                # Get package info from metadata
-                package = pi.metadata.get('package', 'Unknown')
-                credits = pi.metadata.get('credits', 0)
-
+            purchases = []
+            for row in rows:
                 purchases.append({
-                    'id': pi.id,
-                    'package': package,
-                    'credits_awarded': int(credits) if credits else 0,
-                    'amount_cents': pi.amount,
-                    'currency': pi.currency,
-                    'status': 'completed',
-                    'created_at': datetime.fromtimestamp(pi.created).isoformat()
+                    'id': row[0],
+                    'stripe_session_id': row[1],
+                    'package': row[2] or 'Unknown',
+                    'credits_awarded': row[3] or 0,
+                    'amount_cents': row[4] or 0,
+                    'currency': row[5] or 'usd',
+                    'status': row[6] or 'completed',
+                    'created_at': row[7].isoformat() if row[7] else None
                 })
 
-        return jsonify({'purchases': purchases})
+            return jsonify({'purchases': purchases})
 
     except Exception as e:
         print(f"[PURCHASE-HISTORY-ERROR] {e}")
+        import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
