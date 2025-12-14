@@ -189,15 +189,6 @@ B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
 B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 B2_UPLOAD_ENABLED = os.getenv('B2_UPLOAD_ENABLED', '1') == '1'
 
-# Temporary: Force B2 credentials if env vars not set (for testing)
-if not B2_KEY_ID:
-    B2_KEY_ID = '00539db5c1104b50000000003'
-    B2_APP_KEY = 'K005384b8lPoBT11wScxkZ2Gx0fszus'
-    B2_BUCKET = 'watermarkz'
-    B2_CDN_URL = 'https://markz.humblewoslayer.workers.dev'
-    B2_UPLOAD_ENABLED = True
-    print("[B2] Using hardcoded credentials (temporary - for testing)")
-
 
 try:
     from b2sdk.v2 import B2Api, InMemoryAccountInfo
