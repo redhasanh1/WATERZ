@@ -151,6 +151,19 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
     masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
 
+    # Cleanup temporary files
+    if os.path.exists(temp_frames_dir):
+        shutil.rmtree(temp_frames_dir, ignore_errors=True)
+        print(f"[CLEANUP] Removed frames directory: {temp_frames_dir}")
+
+    # Clean downloaded video if it was in /tmp/
+    if video_path_wsl.startswith('/tmp/') and os.path.exists(video_path_wsl):
+        try:
+            os.remove(video_path_wsl)
+            print(f"[CLEANUP] Removed temporary video: {video_path_wsl}")
+        except Exception as e:
+            print(f"[CLEANUP] Could not remove video: {e}")
+
     return {
         'status': 'success',
         'masks_url': masks_url,
@@ -363,6 +376,21 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
     # Upload to B2
     self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
     masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
+
+    # Cleanup temporary files
+    frames_dir = "/tmp/sam2_frames"
+    if os.path.exists(frames_dir):
+        import shutil
+        shutil.rmtree(frames_dir, ignore_errors=True)
+        print(f"[CLEANUP] Removed frames directory: {frames_dir}")
+
+    # Clean downloaded video if it was in /tmp/
+    if video_path_wsl.startswith('/tmp/') and os.path.exists(video_path_wsl):
+        try:
+            os.remove(video_path_wsl)
+            print(f"[CLEANUP] Removed temporary video: {video_path_wsl}")
+        except Exception as e:
+            print(f"[CLEANUP] Could not remove video: {e}")
 
     return {
         'status': 'success',
