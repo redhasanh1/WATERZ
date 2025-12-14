@@ -540,7 +540,10 @@ def health_check():
         'status': 'ok',
         'message': 'Flask API server running - workers handle processing',
         'b2_enabled': B2_ENABLED,
-        'b2_key_set': bool(B2_KEY_ID),
+        'b2_key_id_set': bool(B2_KEY_ID),
+        'b2_app_key_set': bool(B2_APP_KEY),
+        'b2_key_id_len': len(B2_KEY_ID) if B2_KEY_ID else 0,
+        'b2_app_key_len': len(B2_APP_KEY) if B2_APP_KEY else 0,
         'b2_cdn': B2_CDN_URL if B2_ENABLED else None
     })
 
