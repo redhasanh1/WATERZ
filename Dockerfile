@@ -86,9 +86,11 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 COPY --from=builder /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Upgrade pip and install b2sdk explicitly
-RUN python3.11 -m pip install --upgrade pip && \
-    python3.11 -m pip install --no-cache-dir b2sdk
+# Ensure pip works for python3.11 and install b2sdk
+RUN python3.11 -m ensurepip --upgrade && \
+    python3.11 -m pip install --no-cache-dir --upgrade pip && \
+    python3.11 -m pip install --no-cache-dir b2sdk && \
+    python3.11 -c "import b2sdk; print('b2sdk installed successfully')"
 
 # Set working directory
 WORKDIR /app
