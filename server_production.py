@@ -2545,7 +2545,7 @@ def cleanup_old_files():
     b2_max_age = int(os.getenv('B2_CLEANUP_MAX_AGE_SECONDS', '30'))  # 30 SECONDS for testing!!
 
     # Clean LOCAL files
-    for directory in [UPLOAD_DIR, RESULT_DIR]:
+    for directory in [UPLOAD_DIR, RESULT_DIR, TEMP_DIR]:
         try:
             for filename in os.listdir(directory):
                 file_path = os.path.join(directory, filename)
@@ -2557,24 +2557,24 @@ def cleanup_old_files():
         except Exception as e:
             print(f"[WARNING] Cleanup error in {directory}: {e}")
 
-    # Clean B2 uploads folder
+    # Clean B2 folders (uploads, results, masks)
     if B2_ENABLED:
-        try:
-            print(f"[B2-CLEANUP] Checking B2 uploads folder for files older than {b2_max_age}s ({b2_max_age/60:.1f} min)...")
-            b2_files = list_b2_files(prefix='uploads/')
+        for folder_prefix in ['uploads/', 'results/', 'masks/']:
+            try:
+                print(f"[B2-CLEANUP] Checking B2 {folder_prefix} for files older than {b2_max_age}s ({b2_max_age/60:.1f} min)...")
+                b2_files = list_b2_files(prefix=folder_prefix)
 
-            deleted_count = 0
-            for file_info in b2_files:
-                file_age = current_time - file_info['upload_timestamp']
+                deleted_count = 0
+                for file_info in b2_files:
+                    file_age = current_time - file_info['upload_timestamp']
+                    if file_age > b2_max_age:
+                        if delete_from_b2(file_info['name'], file_info['file_id']):
+                            deleted_count += 1
 
-                if file_age > b2_max_age:
-                    if delete_from_b2(file_info['name'], file_info['file_id']):
-                        deleted_count += 1
-
-            if deleted_count > 0:
-                print(f"[B2-CLEANUP] Deleted {deleted_count} old files from B2")
-        except Exception as e:
-            print(f"[B2-CLEANUP] Error during B2 cleanup: {e}")
+                if deleted_count > 0:
+                    print(f"[B2-CLEANUP] Deleted {deleted_count} old files from {folder_prefix}")
+            except Exception as e:
+                print(f"[B2-CLEANUP] Error cleaning {folder_prefix}: {e}")
 
 # ⚠️ TESTING: Cleanup runs every 30 seconds for testing - CHANGE BACK TO 600 (10 min) after testing!
 # Schedule cleanup to run every configurable interval
