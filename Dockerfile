@@ -58,6 +58,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install runtime dependencies + TensorRT tools (for trtexec)
 RUN apt-get update && apt-get install -y \
     python3.11 \
+    python3.11-distutils \
     python3-pip \
     libgl1-mesa-glx \
     libglib2.0-0 \
@@ -85,8 +86,9 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 COPY --from=builder /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Ensure b2sdk is available (may not copy correctly from builder)
-RUN pip install --no-cache-dir b2sdk
+# Upgrade pip and install b2sdk explicitly
+RUN python3.11 -m pip install --upgrade pip && \
+    python3.11 -m pip install --no-cache-dir b2sdk
 
 # Set working directory
 WORKDIR /app
