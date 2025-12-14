@@ -13,3 +13,4 @@ bcrypt
 psycopg2-binary
 stripe
 Flask-Session
+b2sdk
