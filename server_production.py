@@ -2536,13 +2536,13 @@ from concurrent.futures import ProcessPoolExecutor
 
 # File cleanup - delete files older than configured age
 def cleanup_old_files():
-    """Delete local and B2 files older than configured age"""
+    """Delete local files older than configured age (B2 cleanup handled by lifecycle rules)"""
     import time
     current_time = time.time()
 
-    # Separate max ages for local vs B2 (configurable via env vars)
+    # Local file max age (configurable via env var)
     local_max_age = int(os.getenv('LOCAL_CLEANUP_MAX_AGE_SECONDS', '1800'))  # 30 minutes
-    b2_max_age = int(os.getenv('B2_CLEANUP_MAX_AGE_SECONDS', '3600'))  # 1 hour
+    # Note: B2 file cleanup handled by B2 lifecycle rules (zero Class C transaction costs!)
 
     # Clean LOCAL files
     for directory in [UPLOAD_DIR, RESULT_DIR, TEMP_DIR]:
@@ -2557,24 +2557,10 @@ def cleanup_old_files():
         except Exception as e:
             print(f"[WARNING] Cleanup error in {directory}: {e}")
 
-    # Clean B2 folders (uploads, results, masks)
-    if B2_ENABLED:
-        for folder_prefix in ['uploads/', 'results/', 'masks/']:
-            try:
-                print(f"[B2-CLEANUP] Checking B2 {folder_prefix} for files older than {b2_max_age}s ({b2_max_age/60:.1f} min)...")
-                b2_files = list_b2_files(prefix=folder_prefix)
-
-                deleted_count = 0
-                for file_info in b2_files:
-                    file_age = current_time - file_info['upload_timestamp']
-                    if file_age > b2_max_age:
-                        if delete_from_b2(file_info['name'], file_info['file_id']):
-                            deleted_count += 1
-
-                if deleted_count > 0:
-                    print(f"[B2-CLEANUP] Deleted {deleted_count} old files from {folder_prefix}")
-            except Exception as e:
-                print(f"[B2-CLEANUP] Error cleaning {folder_prefix}: {e}")
+    # B2 cleanup handled by lifecycle rules - no code needed!
+    # Files in uploads/, results/, masks/ are auto-deleted after configured period
+    # Configure via B2 web UI: Bucket Settings → Lifecycle Rules
+    # This eliminates Class C transaction costs from list/delete operations
 
 # Schedule cleanup to run every configurable interval
 import threading
