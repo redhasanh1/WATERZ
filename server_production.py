@@ -538,7 +538,10 @@ def health_check():
     """Basic health endpoint for monitoring."""
     return jsonify({
         'status': 'ok',
-        'message': 'Flask API server running - workers handle processing'
+        'message': 'Flask API server running - workers handle processing',
+        'b2_enabled': B2_ENABLED,
+        'b2_key_set': bool(B2_KEY_ID),
+        'b2_cdn': B2_CDN_URL if B2_ENABLED else None
     })
 
 # ----------------------------------------------------------------------------
