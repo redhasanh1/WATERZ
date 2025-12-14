@@ -7372,6 +7372,16 @@ def create_portal_session():
             try:
                 checkout_session = stripe.checkout.Session.retrieve(session_id)
                 customer_id = checkout_session.customer
+
+                # If no customer attached to session, find by email
+                if not customer_id:
+                    checkout_email = checkout_session.customer_email or (
+                        checkout_session.customer_details.email if checkout_session.customer_details else None
+                    )
+                    if checkout_email:
+                        customers = stripe.Customer.list(email=checkout_email, limit=1)
+                        if customers.data:
+                            customer_id = customers.data[0].id
             except stripe.error.StripeError as exc:
                 return jsonify({'error': str(exc)}), 400
 
