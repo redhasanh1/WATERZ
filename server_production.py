@@ -7399,12 +7399,12 @@ def create_portal_session():
         base_url = request.host_url.rstrip('/')
 
         # Create portal session
-        session = stripe.billing_portal.Session.create(
+        portal_session = stripe.billing_portal.Session.create(
             customer=customer_id,
             return_url=f'{base_url}/premium.html',
         )
 
-        return jsonify({'url': session.url})
+        return jsonify({'url': portal_session.url})
 
     except Exception as e:
         print(f"[BILLING-PORTAL-ERROR] {e}")
