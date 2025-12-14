@@ -1965,26 +1965,15 @@
                     data = await parseJsonSafe(completeResponse);
                     console.log('[B2-DIRECT] Server notified:', data);
                 } else {
-                    // Fallback: Upload through Flask (B2 not available)
-                    console.log('[FALLBACK] Using Flask upload...');
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    const response = await apiFetchPath('/api/upload', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    data = await parseJsonSafe(response);
+                    // B2 not available - FAIL (don't use Railway)
+                    throw new Error('B2 direct upload not available. Please configure B2 storage.');
                 }
             } catch (uploadError) {
-                // Fallback on any error
-                console.log('[FALLBACK] Error with B2, using Flask upload:', uploadError);
-                const formData = new FormData();
-                formData.append('file', file);
-                const response = await apiFetchPath('/api/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                data = await parseJsonSafe(response);
+                console.error('[B2-UPLOAD] Failed - B2 ONLY MODE:', uploadError);
+                alert('Upload failed. B2 direct upload is required.\n\nError: ' + uploadError.message + '\n\nPlease contact support if this persists.');
+                previewContainer.classList.remove('active');
+                if (fileInput) fileInput.value = '';
+                return;  // FAIL HARD - NO RAILWAY FALLBACK
             }
 
             // Handle upload result

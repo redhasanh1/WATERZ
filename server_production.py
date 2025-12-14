@@ -189,6 +189,16 @@ B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
 B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
 B2_UPLOAD_ENABLED = os.getenv('B2_UPLOAD_ENABLED', '1') == '1'
 
+# Temporary: Force B2 credentials if env vars not set (for testing)
+if not B2_KEY_ID:
+    B2_KEY_ID = '00539db5c1104b50000000003'
+    B2_APP_KEY = 'K005384b8lPoBT11wScxkZ2Gx0fszus'
+    B2_BUCKET = 'watermarkz'
+    B2_CDN_URL = 'https://markz.humblewoslayer.workers.dev'
+    B2_UPLOAD_ENABLED = True
+    print("[B2] Using hardcoded credentials (temporary - for testing)")
+
+
 try:
     from b2sdk.v2 import B2Api, InMemoryAccountInfo
     B2_ENABLED = bool(B2_KEY_ID and B2_APP_KEY)
@@ -1301,7 +1311,7 @@ def add_security_headers(response):
     # Referrer policy
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     # Content Security Policy (allow Cloudflare, Google Ads, Fonts, data URIs for videos)
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com https://static.cloudflareinsights.com https://ep2.adtrafficquality.google; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; media-src 'self' data: https://markz.humblewoslayer.workers.dev; connect-src 'self' https:; frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://ep2.adtrafficquality.google https://www.google.com;"
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com https://static.cloudflareinsights.com https://ep2.adtrafficquality.google https://markz.humblewoslayer.workers.dev; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; media-src 'self' data: https://markz.humblewoslayer.workers.dev; connect-src 'self' https:; frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://ep2.adtrafficquality.google https://www.google.com;"
     # Remove server header
     response.headers.pop('Server', None)
     return response
