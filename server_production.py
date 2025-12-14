@@ -13,7 +13,7 @@ import os
 import importlib
 import shutil
 from pathlib import Path
-from email_utils import send_reset_email, send_verification_email, send_receipt_email
+from email_utils import send_reset_email, send_verification_email
 
 # Load environment variables from .env file (for Celery Redis configuration)
 from dotenv import load_dotenv
@@ -7278,44 +7278,6 @@ def stripe_webhook():
                                     print(f"[BILLING] ✅ Purchase recorded in history")
                                 except Exception as pe:
                                     print(f"[BILLING] ⚠️ Failed to record purchase history: {pe}")
-
-                                # Send receipt email
-                                try:
-                                    # Get user email
-                                    cur.execute('SELECT email FROM users WHERE id = %s', (user_id,))
-                                    email_row = cur.fetchone()
-                                    if email_row:
-                                        user_email = email_row[0]
-
-                                        # Get payment method details (last 4 digits)
-                                        card_last4 = ''
-                                        card_brand = 'Card'
-                                        payment_intent_id = data_object.get('payment_intent')
-                                        if payment_intent_id:
-                                            try:
-                                                pi = stripe.PaymentIntent.retrieve(payment_intent_id)
-                                                if pi.payment_method:
-                                                    pm = stripe.PaymentMethod.retrieve(pi.payment_method)
-                                                    if pm.card:
-                                                        card_last4 = pm.card.last4
-                                                        card_brand = pm.card.brand.capitalize() if pm.card.brand else 'Card'
-                                            except Exception as stripe_err:
-                                                print(f"[BILLING] ⚠️ Could not fetch payment method: {stripe_err}")
-
-                                        # Send receipt email in background
-                                        threading.Thread(target=send_receipt_email, args=(
-                                            user_email,
-                                            key,
-                                            credits_to_add,
-                                            data_object.get('amount_total', 0),
-                                            data_object.get('currency', 'usd'),
-                                            card_last4,
-                                            card_brand,
-                                            new_balance
-                                        )).start()
-                                        print(f"[BILLING] 📧 Receipt email queued for {user_email}")
-                                except Exception as email_err:
-                                    print(f"[BILLING] ⚠️ Failed to send receipt email: {email_err}")
                             else:
                                 print(f"[BILLING] ❌ User {user_id} not found in database")
                     except Exception as e:
