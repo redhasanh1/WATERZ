@@ -221,6 +221,51 @@ def upload_to_b2(local_path: str, remote_path: str) -> str:
         print(f"[B2] Upload failed: {e}")
         return None
 
+def list_b2_files(prefix='uploads/'):
+    """List files in B2 bucket with given prefix"""
+    if not B2_ENABLED:
+        return []
+
+    try:
+        from b2sdk.v2 import B2Api, InMemoryAccountInfo
+        info = InMemoryAccountInfo()
+        b2_api = B2Api(info)
+        b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+        bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+
+        # List files with prefix
+        files = []
+        for file_info, _ in bucket.ls(folder_to_list=prefix, fetch_count=1000):
+            files.append({
+                'name': file_info.file_name,
+                'upload_timestamp': file_info.upload_timestamp / 1000,  # Convert from ms to seconds
+                'file_id': file_info.id_
+            })
+
+        return files
+    except Exception as e:
+        print(f"[B2-CLEANUP] Error listing files: {e}")
+        return []
+
+def delete_from_b2(file_name, file_id):
+    """Delete a specific file from B2 by file_id"""
+    if not B2_ENABLED:
+        return False
+
+    try:
+        from b2sdk.v2 import B2Api, InMemoryAccountInfo
+        info = InMemoryAccountInfo()
+        b2_api = B2Api(info)
+        b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+
+        # Delete file version
+        b2_api.delete_file_version(file_id, file_name)
+        print(f"[B2-CLEANUP] Deleted: {file_name}")
+        return True
+    except Exception as e:
+        print(f"[B2-CLEANUP] Error deleting {file_name}: {e}")
+        return False
+
 # Authentication and session management
 from flask import session, redirect, url_for
 try:
@@ -2489,34 +2534,59 @@ propainter_ready = False
 # Each process gets its own CUDA context and model instances
 from concurrent.futures import ProcessPoolExecutor
 
-# File cleanup - delete files older than 1 hour
+# File cleanup - delete files older than configured age
 def cleanup_old_files():
-    """Delete uploaded and processed files older than 1 hour"""
+    """Delete local and B2 files older than configured age"""
     import time
     current_time = time.time()
-    max_age = 3600  # 1 hour
 
+    # Separate max ages for local vs B2 (configurable via env vars)
+    local_max_age = int(os.getenv('LOCAL_CLEANUP_MAX_AGE_SECONDS', '3600'))  # 1 hour default
+    b2_max_age = int(os.getenv('B2_CLEANUP_MAX_AGE_SECONDS', '2400'))  # 40 minutes default
+
+    # Clean LOCAL files
     for directory in [UPLOAD_DIR, RESULT_DIR]:
         try:
             for filename in os.listdir(directory):
                 file_path = os.path.join(directory, filename)
                 if os.path.isfile(file_path):
                     file_age = current_time - os.path.getmtime(file_path)
-                    if file_age > max_age:
+                    if file_age > local_max_age:
                         os.remove(file_path)
-                        print(f"[CLEANUP]  Cleaned up old file: {filename} (age: {file_age/60:.1f} min)")
+                        print(f"[CLEANUP] Cleaned up old local file: {filename} (age: {file_age/60:.1f} min)")
         except Exception as e:
-            print(f"[WARNING]  Cleanup error in {directory}: {e}")
+            print(f"[WARNING] Cleanup error in {directory}: {e}")
 
-# Schedule cleanup to run every 10 minutes
+    # Clean B2 uploads folder
+    if B2_ENABLED:
+        try:
+            print(f"[B2-CLEANUP] Checking B2 uploads folder for files older than {b2_max_age}s ({b2_max_age/60:.1f} min)...")
+            b2_files = list_b2_files(prefix='uploads/')
+
+            deleted_count = 0
+            for file_info in b2_files:
+                file_age = current_time - file_info['upload_timestamp']
+
+                if file_age > b2_max_age:
+                    if delete_from_b2(file_info['name'], file_info['file_id']):
+                        deleted_count += 1
+
+            if deleted_count > 0:
+                print(f"[B2-CLEANUP] Deleted {deleted_count} old files from B2")
+        except Exception as e:
+            print(f"[B2-CLEANUP] Error during B2 cleanup: {e}")
+
+# Schedule cleanup to run every configurable interval
 import threading
 def schedule_cleanup():
     cleanup_old_files()
-    threading.Timer(600, schedule_cleanup).start()  # Run every 10 minutes
+    interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '600'))  # 10 minutes default
+    threading.Timer(interval, schedule_cleanup).start()
 
 # Start cleanup scheduler
 threading.Thread(target=schedule_cleanup, daemon=True).start()
-print("[CLEANUP]  File cleanup scheduler started (runs every 10 minutes)")
+cleanup_interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '600'))
+print(f"[CLEANUP] File cleanup scheduler started (runs every {cleanup_interval}s / {cleanup_interval/60:.1f} min)")
 
 # ============================================================================
 # Model Loading (Shared across workers)
