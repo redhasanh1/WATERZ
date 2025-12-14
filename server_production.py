@@ -6480,6 +6480,52 @@ def admin_migrate_static_to_b2():
     return jsonify(results)
 
 
+@app.route('/admin/migrate-web-assets-to-b2', methods=['POST'])
+def admin_migrate_web_assets_to_b2():
+    """Migrate web static assets (CSS, JS, images) to B2 CDN - CRITICAL for zero egress"""
+    admin_secret = os.getenv('ADMIN_SECRET', 'dev-secret-123')
+
+    if request.headers.get('X-Admin-Secret') != admin_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if not B2_ENABLED:
+        return jsonify({'error': 'B2 not enabled'}), 400
+
+    results = {'migrated': [], 'failed': [], 'skipped': []}
+    web_folder = app.static_folder
+
+    # Extensions to upload
+    static_extensions = ('.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot')
+
+    # Walk through web folder and upload all static assets
+    for root, dirs, files in os.walk(web_folder):
+        for filename in files:
+            if filename.endswith(static_extensions):
+                local_path = os.path.join(root, filename)
+                # Get relative path from web folder
+                rel_path = os.path.relpath(local_path, web_folder)
+                remote_path = f"static/{rel_path}".replace('\\', '/')
+
+                try:
+                    cdn_url = upload_to_b2(local_path, remote_path)
+                    file_size = os.path.getsize(local_path)
+                    results['migrated'].append({
+                        'file': rel_path,
+                        'cdn_url': cdn_url,
+                        'size_kb': round(file_size / 1024, 1)
+                    })
+                    print(f"[MIGRATE-WEB] ✅ {rel_path} ({file_size/1024:.1f}KB) -> {cdn_url}")
+                except Exception as e:
+                    results['failed'].append({'file': rel_path, 'error': str(e)})
+                    print(f"[MIGRATE-WEB] ❌ {rel_path}: {e}")
+
+    total_size = sum(item.get('size_kb', 0) for item in results['migrated'])
+    results['total_size_kb'] = total_size
+    results['message'] = f"Migrated {len(results['migrated'])} files ({total_size:.1f}KB total). These will now be served from CDN!"
+
+    return jsonify(results)
+
+
 @app.route('/admin/upload-video', methods=['POST'])
 def admin_upload_video():
     """Admin endpoint to upload videos to Railway volume"""
@@ -6812,6 +6858,14 @@ def premium_page():
 @app.route('/<path:filename>')
 def serve_static_files(filename):
     """Serve HTML and other static files from web folder"""
+    # Redirect static assets to CDN (zero Railway egress)
+    static_extensions = ('.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot')
+    if B2_ENABLED and filename.endswith(static_extensions):
+        # Redirect to CDN - files must be uploaded to B2 under static/ prefix
+        cdn_url = f"{B2_CDN_URL}/static/{filename}"
+        print(f"[CDN] Redirecting static asset: {filename} -> {cdn_url}")
+        return redirect(cdn_url)
+
     # If already has .html extension, serve directly
     if filename.endswith('.html'):
         return send_file(os.path.join(app.static_folder, filename))
@@ -6822,7 +6876,7 @@ def serve_static_files(filename):
     if os.path.exists(html_path):
         return send_file(html_path)
 
-    # Otherwise serve as static file
+    # Otherwise serve as static file (fallback)
     return send_from_directory(app.static_folder, filename)
 
 
