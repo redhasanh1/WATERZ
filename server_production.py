@@ -7108,12 +7108,12 @@ if __name__ == '__main__':
 # BILLING ENDPOINTS (Stripe)
 # ===================================
 
-# Stripe Price IDs for credit packages
+# Stripe Price IDs for credit packages (configurable via env vars for test/live switching)
 STRIPE_PRICE_IDS = {
-    # One-time credit packs (5/15/60 credits)
-    'credits_5': 'price_1ScgBpDbvxhrePJFnMa5NdJh',   # Starter Pack - $2.99
-    'credits_15': 'price_1ScgCKDbvxhrePJFGytHR4i5',  # Basic Pack - $6.99
-    'credits_60': 'price_1ScgCgDbvxhrePJF6JXX6Wh4',  # Pro Pack - $24.99
+    # One-time credit packs (5/15/60 credits) - fallback to live prices
+    'credits_5': os.getenv('STRIPE_PRICE_ID_CREDITS_5', 'price_1ScgBpDbvxhrePJFnMa5NdJh'),   # Starter Pack - $2.99
+    'credits_15': os.getenv('STRIPE_PRICE_ID_CREDITS_15', 'price_1ScgCKDbvxhrePJFGytHR4i5'),  # Basic Pack - $6.99
+    'credits_60': os.getenv('STRIPE_PRICE_ID_CREDITS_60', 'price_1ScgCgDbvxhrePJF6JXX6Wh4'),  # Pro Pack - $24.99
     # Monthly subscription tiers
     'starter': os.getenv('STRIPE_PRICE_ID_STARTER', ''),
     'pro': os.getenv('STRIPE_PRICE_ID_PRO', ''),
