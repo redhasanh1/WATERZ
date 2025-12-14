@@ -1,12 +1,12 @@
 @echo off
 REM ===================================================================
-REM SAM2 Selection Worker Launcher
-REM Starts the local worker that polls Railway for SAM2 selection jobs
+REM SAM2 Selection Worker Launcher - 4 WORKERS
+REM Starts 4 workers with unique IDs and ports for load distribution
 REM ===================================================================
 
 echo.
 echo ===================================================================
-echo SAM2 SELECTION WORKER
+echo SAM2 SELECTION WORKERS (4x)
 echo ===================================================================
 echo.
 
@@ -30,8 +30,6 @@ if exist venv\Scripts\activate.bat (
     call venv\Scripts\activate.bat
 )
 
-REM SAM2 worker doesn't need DATABASE_URL, only REDIS_URL (set below at line 66)
-
 REM Check dependencies
 echo [INFO] Checking dependencies...
 %PYTHON% -c "import flask" 2>nul
@@ -47,15 +45,26 @@ if errorlevel 1 (
 )
 
 echo.
-echo [INFO] Starting SAM2 Selection Worker...
-echo [INFO] Dashboard will be available at http://localhost:5555
-echo [INFO] Press Ctrl+C to stop
+echo [INFO] Starting 4 SAM2 Selection Workers...
+echo [INFO] Dashboards: http://localhost:5555, 5556, 5557, 5558
+echo [INFO] All workers share 1 GPU (time-slice, not parallel)
+echo [INFO] Press Ctrl+C in each window to stop
 echo.
 
-REM Set Railway Redis URL explicitly (so worker connects to same Redis as Railway backend)
+REM Set Railway Redis URL
 set REDIS_URL=redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930
 
-REM Start worker
-%PYTHON% start_object_server.py
+REM Start 4 workers in separate windows with unique IDs and ports
+start "SAM2-Worker-0" cmd /k "%PYTHON% start_object_server.py --worker-id 0 --port 5555"
+timeout /t 2 >nul
+start "SAM2-Worker-1" cmd /k "%PYTHON% start_object_server.py --worker-id 1 --port 5556"
+timeout /t 2 >nul
+start "SAM2-Worker-2" cmd /k "%PYTHON% start_object_server.py --worker-id 2 --port 5557"
+timeout /t 2 >nul
+start "SAM2-Worker-3" cmd /k "%PYTHON% start_object_server.py --worker-id 3 --port 5558"
 
+echo.
+echo [OK] All 4 workers started!
+echo [INFO] Check dashboards at ports 5555-5558
+echo.
 pause
