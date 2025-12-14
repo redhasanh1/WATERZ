@@ -6063,9 +6063,10 @@ def get_upload_url():
         upload_url, upload_auth_token = b2_api.account_info.take_bucket_upload_url(bucket.id_)
 
         if upload_url is None:
-            # Pool is empty, get fresh upload URL
+            # Pool is empty, get fresh upload URL with all 3 required params
+            api_url = b2_api.account_info.get_api_url()
             auth_token = b2_api.account_info.get_account_auth_token()
-            response = b2_api.raw_api.get_upload_url(auth_token, bucket.id_)
+            response = b2_api.raw_api.get_upload_url(api_url, auth_token, bucket.id_)
             upload_url = response['uploadUrl']
             upload_auth_token = response['authorizationToken']
 
