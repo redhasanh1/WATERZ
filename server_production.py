@@ -5571,10 +5571,25 @@ def download_from_url():
                 file_size = os.path.getsize(output_path) / (1024 * 1024)
                 print(f"[OK] Video downloaded: {output_path} ({file_size:.1f}MB)")
 
+                # Upload to B2 immediately
+                remote_path = f"uploads/{task_id}.{file_ext}"
+                cdn_url = upload_to_b2(output_path, remote_path)
+                if not cdn_url:
+                    return jsonify({'error': 'B2 upload failed'}), 500
+
+                # Store in Redis
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                redis_client.setex(f"upload:{task_id}:cdn_url", 86400, cdn_url)
+                redis_client.setex(f"upload:{task_id}:remote_path", 86400, remote_path)
+
+                # Delete local temp file
+                os.remove(output_path)
+                print(f"[B2] Uploaded to CDN: {cdn_url}")
+
                 return jsonify({
                     'status': 'success',
                     'task_id': task_id,
-                    'video_url': f'/uploads/{task_id}.{file_ext}'
+                    'video_url': cdn_url
                 })
             else:
                 print(f"[WARNING] Response is not a video (content-type: {content_type})")
@@ -5639,10 +5654,25 @@ def download_from_url():
                         for chunk in response.iter_content(chunk_size=65536):
                             f.write(chunk)
 
+                    # Upload to B2 immediately
+                    remote_path = f"uploads/{task_id}.{file_ext}"
+                    cdn_url = upload_to_b2(output_path, remote_path)
+                    if not cdn_url:
+                        return jsonify({'error': 'B2 upload failed'}), 500
+
+                    # Store in Redis
+                    redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                    redis_client.setex(f"upload:{task_id}:cdn_url", 86400, cdn_url)
+                    redis_client.setex(f"upload:{task_id}:remote_path", 86400, remote_path)
+
+                    # Delete local temp file
+                    os.remove(output_path)
+                    print(f"[B2] Uploaded to CDN: {cdn_url}")
+
                     return jsonify({
                         'status': 'success',
                         'task_id': task_id,
-                        'video_url': f'/uploads/{task_id}.{file_ext}'
+                        'video_url': cdn_url
                     })
 
         except ImportError:
@@ -5830,12 +5860,28 @@ def download_sora():
                             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
                             print(f"[OK] Downloaded successfully! Size: {file_size:.2f} MB")
 
+                            # Upload to B2 immediately
+                            remote_path = f"uploads/{task_id}.mp4"
+                            cdn_url = upload_to_b2(output_path, remote_path)
+                            if not cdn_url:
+                                browser.close()
+                                return jsonify({'error': 'B2 upload failed'}), 500
+
+                            # Store in Redis
+                            redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                            redis_client.setex(f"upload:{task_id}:cdn_url", 86400, cdn_url)
+                            redis_client.setex(f"upload:{task_id}:remote_path", 86400, remote_path)
+
+                            # Delete local temp file
+                            os.remove(output_path)
+                            print(f"[B2] Uploaded to CDN: {cdn_url}")
+
                             browser.close()
 
                             return jsonify({
                                 'status': 'success',
                                 'task_id': task_id,
-                                'video_url': f'/uploads/{task_id}.mp4'
+                                'video_url': cdn_url
                             })
                         else:
                             print(f"[WARNING]  Download failed: HTTP {response.status}")
@@ -6075,89 +6121,17 @@ def upload_complete():
 @app.route('/api/upload', methods=['POST', 'OPTIONS'])
 @require_auth
 def upload_file():
+    """DEPRECATED: Use /api/get-upload-url for direct B2 uploads"""
     if request.method == 'OPTIONS':
         return ('', 204)
-    """
-    Upload video/image file (rate limited to 10/hour per IP)
 
-    SECURITY: Validates file type by magic bytes, not just extension.
-    Blocks executables, scripts, and other malicious files.
+    return jsonify({
+        'status': 'error',
+        'message': 'Direct upload disabled. Use /api/get-upload-url for client-side B2 upload.',
+        'migration_endpoint': '/api/get-upload-url'
+    }), 410
 
-    Returns: { "status": "success", "task_id": "uuid" }
-    """
-    try:
-        # Rate limiting
-        client_ip = request.remote_addr
-        if not check_rate_limit(client_ip):
-            return jsonify({
-                'status': 'error',
-                'message': 'Rate limit exceeded. Maximum 10 uploads per hour.'
-            }), 429
 
-        if 'file' not in request.files:
-            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
-
-        file = request.files['file']
-
-        if file.filename == '':
-            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
-
-        # Get and sanitize file extension
-        original_ext = os.path.splitext(file.filename)[1] or '.mp4'
-        ext = original_ext.lower()
-
-        # ============================================
-        # SECURITY: Validate file by magic bytes
-        # ============================================
-        is_valid, detected_type, error_msg = validate_file_magic_bytes(file.stream, ext)
-
-        if not is_valid:
-            print(f"[SECURITY] Blocked upload: {file.filename} - {error_msg}")
-            return jsonify({
-                'status': 'error',
-                'message': f'Invalid file: {error_msg}'
-            }), 400
-
-        # Generate unique task ID
-        task_id = str(uuid.uuid4())
-
-        # Build file path and verify it's within UPLOAD_DIR (prevent path traversal)
-        file_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
-
-        if not is_path_safe(file_path, UPLOAD_DIR):
-            print(f"[SECURITY] Path traversal attempt blocked: {file_path}")
-            return jsonify({
-                'status': 'error',
-                'message': 'Invalid file path'
-            }), 400
-
-        # Save file locally first (needed for B2 upload)
-        file.save(file_path)
-        print(f"[OK] File uploaded (validated {detected_type}): {file_path}")
-
-        # Upload to B2 for CDN serving (zero egress)
-        cdn_url = None
-        if B2_ENABLED:
-            try:
-                remote_path = f"uploads/{task_id}{ext}"
-                cdn_url = upload_to_b2(file_path, remote_path)
-                if cdn_url:
-                    # Store CDN URL in Redis for later retrieval
-                    redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
-                    redis_client.set(f"upload:{task_id}:cdn_url", cdn_url)
-                    print(f"[B2] Upload CDN URL stored: {cdn_url}")
-            except Exception as e:
-                print(f"[B2] Upload or Redis store failed: {e}")
-                # Continue without CDN - local file was already saved
-
-        return jsonify({
-            'status': 'success',
-            'task_id': task_id,
-            'cdn_url': cdn_url  # Frontend/workers can use this directly
-        })
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/api/extract-frames/<task_id>', methods=['GET', 'OPTIONS'])
@@ -6422,46 +6396,25 @@ def process_video():
 
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
-    """Serve uploaded video files - redirect to CDN if available (zero egress)"""
-    # Sanitize filename to prevent path traversal
+    """Redirect to Cloudflare CDN - NO local serving"""
     filename = sanitize_filename(filename)
-
-    # Extract task_id from filename (format: {task_id}.{ext})
     task_id = os.path.splitext(filename)[0]
 
-    # Check Redis for CDN URL (uploaded to B2)
+    # Check Redis for CDN URL
     try:
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
         cdn_url = redis_client.get(f"upload:{task_id}:cdn_url")
         if cdn_url:
-            print(f"[CDN] Redirecting upload {filename} to CDN: {cdn_url}")
+            print(f"[CDN] Redirecting upload {filename} to: {cdn_url}")
             return redirect(cdn_url)
     except Exception as e:
-        print(f"[CDN] Redis lookup failed for {task_id}: {e}")
+        print(f"[CDN] Redis lookup failed: {e}")
 
-    # Check if local file exists
-    file_path = os.path.join(UPLOAD_DIR, filename)
-
-    # If local file exists, upload to B2 first to avoid Railway egress
-    if os.path.exists(file_path) and os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR)):
-        if B2_ENABLED:
-            try:
-                remote_path = f"uploads/{filename}"
-                cdn_url = upload_to_b2(file_path, remote_path)
-                print(f"[SERVE-UPLOAD] ✅ Uploaded to B2 on-the-fly: {cdn_url}")
-                # Store in Redis for future requests
-                redis_client.setex(f"upload:{task_id}:cdn_url", 86400, cdn_url)
-                return redirect(cdn_url)
-            except Exception as b2_err:
-                print(f"[SERVE-UPLOAD] ⚠️ B2 upload failed: {b2_err}")
-
-    # File not found anywhere
-    if not os.path.exists(file_path):
-        return jsonify({'error': 'File not found'}), 404
-
-    # Last resort: serve locally (shouldn't reach here if B2 is working)
-    print(f"[SERVE-UPLOAD] ⚠️ Serving file locally (B2 failed): {filename}")
-    return send_file(file_path)
+    # No fallback to local files - strict B2-only
+    return jsonify({
+        'error': 'File not found in CDN',
+        'message': 'This file was not uploaded to B2 storage'
+    }), 404
 
 
 @app.route('/cool.mp4')
@@ -6694,76 +6647,26 @@ def admin_upload_video():
 
 @app.route('/results/<filename>')
 def serve_result(filename):
-    """Serve processed result files - redirect to CDN if available (zero egress)"""
-    print(f"[SERVE-RESULT] Request for file: {filename} from {request.remote_addr}")
-
-    # Sanitize filename to prevent path traversal
+    """Redirect to Cloudflare CDN - NO local serving"""
     filename = sanitize_filename(filename)
-
-    # Extract task_id from filename (format: {task_id}_processed.ext or {task_id}.ext)
     base_name = os.path.splitext(filename)[0]
-    # Handle both {task_id}_processed and {task_id} formats
     task_id = base_name.replace('_processed', '').replace('_cleaned', '')
 
-    # Check Redis for CDN URL (result uploaded to B2 by worker)
+    # Check Redis for CDN URL
     try:
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
         cdn_url = redis_client.get(f"video:{task_id}:final_path")
         if cdn_url and cdn_url.startswith('http'):
-            print(f"[CDN] Redirecting result {filename} to CDN: {cdn_url}")
-            # Clean up local files if they exist
-            file_path = os.path.join(RESULT_DIR, filename)
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                    print(f"[CLEANUP] Deleted local result after CDN redirect: {filename}")
-                except Exception as e:
-                    print(f"[WARNING] Could not delete local file: {e}")
+            print(f"[CDN] Redirecting result {filename} to: {cdn_url}")
             return redirect(cdn_url)
     except Exception as e:
-        print(f"[CDN] Redis lookup failed for result {task_id}: {e}")
+        print(f"[CDN] Redis lookup failed: {e}")
 
-    # Check if local file exists
-    file_path = os.path.join(RESULT_DIR, filename)
-    print(f"[SERVE-RESULT] Looking for file at: {file_path}")
-    print(f"[SERVE-RESULT] File exists: {os.path.exists(file_path)}")
-
-    # If local file exists, upload to B2 first to avoid Railway egress
-    if os.path.exists(file_path) and os.path.abspath(file_path).startswith(os.path.abspath(RESULT_DIR)):
-        if B2_ENABLED:
-            try:
-                remote_path = f"results/{filename}"
-                cdn_url = upload_to_b2(file_path, remote_path)
-                print(f"[SERVE-RESULT] ✅ Uploaded to B2 on-the-fly: {cdn_url}")
-                # Store in Redis for future requests
-                redis_client.setex(f"video:{task_id}:final_path", 86400, cdn_url)
-                # Clean up local file
-                os.remove(file_path)
-                print(f"[SERVE-RESULT] Cleaned up local file after B2 upload")
-                return redirect(cdn_url)
-            except Exception as b2_err:
-                print(f"[SERVE-RESULT] ⚠️ B2 upload failed: {b2_err}")
-
-    # File not found anywhere
-    if not os.path.exists(file_path):
-        print(f"[SERVE-RESULT] ❌ File not found: {file_path}")
-        return jsonify({'error': 'File not found. Please try processing again.'}), 404
-
-    # Last resort: serve locally (shouldn't reach here if B2 is working)
-    print(f"[SERVE-RESULT] ⚠️ Serving file locally (B2 failed): {filename}")
-    response = send_file(file_path, as_attachment=True, download_name=f'cleaned_{filename}')
-
-    # Schedule file deletion after response is sent
-    @response.call_on_close
-    def delete_files():
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                print(f"[CLEANUP] Deleted result: {filename}")
-        except Exception as e:
-            print(f"[WARNING] Error deleting files: {e}")
-
-    return response
+    # No fallback to local files - strict B2-only
+    return jsonify({
+        'error': 'Result not ready or not found',
+        'message': 'Processing may still be in progress'
+    }), 404
 
 
 @app.route('/demo_videos/<filename>')
@@ -6913,32 +6816,11 @@ def upload_segment():
 
 @app.route('/temp/<path:filepath>')
 def serve_temp_file(filepath):
-    """
-    Serve temporary files for distributed workers.
-    Allows workers to download shared frames, masks, etc.
-
-    Security: Only serve from TEMP_DIR, block path traversal
-    """
-    try:
-        # Sanitize path to prevent directory traversal
-        safe_path = os.path.normpath(filepath).lstrip('/')
-        full_path = os.path.join(TEMP_DIR, safe_path)
-
-        # Verify path is within TEMP_DIR
-        if not os.path.abspath(full_path).startswith(os.path.abspath(TEMP_DIR)):
-            return jsonify({'error': 'Access denied'}), 403
-
-        if not os.path.exists(full_path):
-            return jsonify({'error': 'File not found'}), 404
-
-        if os.path.isfile(full_path):
-            return send_file(full_path)
-        else:
-            return jsonify({'error': 'Not a file'}), 400
-
-    except Exception as e:
-        print(f"[ERROR] Error serving temp file {filepath}: {e}")
-        return jsonify({'error': str(e)}), 500
+    """Redirect to B2 temp files - workers download from CDN"""
+    # Temp files now stored in B2 under temp/ prefix
+    cdn_url = f"{B2_CDN_URL}/temp/{filepath}"
+    print(f"[TEMP] Redirecting to B2: {cdn_url}")
+    return redirect(cdn_url)
 
 
 @app.route('/privacy')
