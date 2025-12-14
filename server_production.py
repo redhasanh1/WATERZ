@@ -2541,8 +2541,8 @@ def cleanup_old_files():
     current_time = time.time()
 
     # Separate max ages for local vs B2 (configurable via env vars)
-    local_max_age = int(os.getenv('LOCAL_CLEANUP_MAX_AGE_SECONDS', '3600'))  # 1 hour default
-    b2_max_age = int(os.getenv('B2_CLEANUP_MAX_AGE_SECONDS', '30'))  # 30 SECONDS for testing!!
+    local_max_age = int(os.getenv('LOCAL_CLEANUP_MAX_AGE_SECONDS', '1800'))  # 30 minutes
+    b2_max_age = int(os.getenv('B2_CLEANUP_MAX_AGE_SECONDS', '3600'))  # 1 hour
 
     # Clean LOCAL files
     for directory in [UPLOAD_DIR, RESULT_DIR, TEMP_DIR]:
@@ -2576,17 +2576,16 @@ def cleanup_old_files():
             except Exception as e:
                 print(f"[B2-CLEANUP] Error cleaning {folder_prefix}: {e}")
 
-# ⚠️ TESTING: Cleanup runs every 30 seconds for testing - CHANGE BACK TO 600 (10 min) after testing!
 # Schedule cleanup to run every configurable interval
 import threading
 def schedule_cleanup():
     cleanup_old_files()
-    interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '30'))  # 30 seconds for TESTING - change back to 600 (10 min) after!
+    interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '3600'))  # 1 hour (3600 seconds)
     threading.Timer(interval, schedule_cleanup).start()
 
 # Start cleanup scheduler
 threading.Thread(target=schedule_cleanup, daemon=True).start()
-cleanup_interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '30'))
+cleanup_interval = int(os.getenv('CLEANUP_INTERVAL_SECONDS', '3600'))
 print(f"[CLEANUP] File cleanup scheduler started (runs every {cleanup_interval}s / {cleanup_interval/60:.1f} min)")
 
 # ============================================================================
