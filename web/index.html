@@ -1310,6 +1310,298 @@
             animation: pulse 2s ease-in-out infinite;
         }
 
+        /* ===== WORKFLOW SIDEBAR LAYOUT ===== */
+
+        /* Two-Column Layout Container */
+        .workflow-container {
+            display: flex;
+            gap: 2rem;
+            margin-top: 2rem;
+            align-items: flex-start;
+            max-width: 1600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* Left Sidebar - 25% Width, Sticky */
+        .workflow-sidebar {
+            width: 25%;
+            min-width: 280px;
+            max-width: 350px;
+            position: sticky;
+            top: 100px;
+            align-self: flex-start;
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.15),
+                        0 5px 20px rgba(240, 147, 251, 0.1);
+            border: 2px solid transparent;
+            background-image: linear-gradient(var(--bg-card), var(--bg-card)),
+                              var(--gradient-rainbow);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+            transition: all 0.3s ease;
+            max-height: calc(100vh - 120px);
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        /* Custom Scrollbar for Sidebar */
+        .workflow-sidebar::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .workflow-sidebar::-webkit-scrollbar-track {
+            background: rgba(102, 126, 234, 0.05);
+            border-radius: 3px;
+        }
+
+        .workflow-sidebar::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 3px;
+        }
+
+        /* Main Content Area - 75% Width */
+        .workflow-main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .workflow-main .demo-card {
+            margin-top: 0;
+        }
+
+        /* Sidebar Header */
+        .sidebar-header {
+            margin-bottom: 2rem;
+            text-align: center;
+            padding-bottom: 1.5rem;
+            border-bottom: 2px solid rgba(102, 126, 234, 0.15);
+        }
+
+        .sidebar-header h3 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .sidebar-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin: 0;
+        }
+
+        /* Step Navigation */
+        .step-navigation {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 1rem;
+            border-radius: 12px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            background: rgba(102, 126, 234, 0.03);
+            border: 2px solid transparent;
+        }
+
+        .step-item:hover {
+            background: rgba(102, 126, 234, 0.08);
+            transform: translateX(4px);
+        }
+
+        .step-item.active {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%,
+                                                 rgba(240, 147, 251, 0.12) 100%);
+            border-color: rgba(102, 126, 234, 0.3);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
+        }
+
+        .step-item.completed {
+            opacity: 0.7;
+        }
+
+        .step-item.completed .step-icon-wrapper {
+            background: var(--bg-gradient-4);
+        }
+
+        /* Step Icon Wrapper */
+        .step-icon-wrapper {
+            flex-shrink: 0;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .step-item.active .step-icon-wrapper {
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% {
+                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            }
+            50% {
+                box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6),
+                            0 0 30px rgba(102, 126, 234, 0.4);
+            }
+        }
+
+        .step-number {
+            color: white;
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .step-item.completed .step-icon-wrapper::after {
+            content: '✓';
+            position: absolute;
+            color: white;
+            font-weight: 700;
+            font-size: 1.3rem;
+        }
+
+        .step-item.completed .step-number {
+            display: none;
+        }
+
+        /* Step Content */
+        .step-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .step-content h4 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0 0 0.25rem 0;
+        }
+
+        .step-content p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* Sidebar Footer */
+        .sidebar-footer {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 2px solid rgba(102, 126, 234, 0.15);
+        }
+
+        .progress-indicator {
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 8px;
+            height: 8px;
+            overflow: hidden;
+            margin-bottom: 0.75rem;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--gradient-primary);
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 8px;
+        }
+
+        .progress-text {
+            text-align: center;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        /* Dark Theme Overrides */
+        html[data-theme="dark"] .workflow-sidebar {
+            background-image: linear-gradient(var(--bg-card), var(--bg-card)),
+                              var(--gradient-rainbow);
+        }
+
+        html[data-theme="dark"] .step-item {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        html[data-theme="dark"] .step-item:hover {
+            background: rgba(102, 126, 234, 0.12);
+        }
+
+        html[data-theme="dark"] .step-item.active {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.18) 0%,
+                                                 rgba(240, 147, 251, 0.18) 100%);
+        }
+
+        /* Responsive Design - Mobile < 768px */
+        @media (max-width: 768px) {
+            .workflow-container {
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+
+            .workflow-sidebar {
+                width: 100%;
+                min-width: 100%;
+                max-width: 100%;
+                position: static;
+                max-height: none;
+                padding: 1.5rem;
+            }
+
+            .sidebar-header h3 {
+                font-size: 1.3rem;
+            }
+
+            .step-navigation {
+                gap: 0.75rem;
+            }
+
+            .step-item {
+                padding: 0.75rem;
+            }
+
+            .step-icon-wrapper {
+                width: 36px;
+                height: 36px;
+            }
+
+            .step-number {
+                font-size: 1rem;
+            }
+
+            .step-content h4 {
+                font-size: 0.95rem;
+            }
+
+            .step-content p {
+                font-size: 0.8rem;
+            }
+
+            .workflow-main .demo-card {
+                padding: 2rem 1.5rem;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -1415,8 +1707,80 @@
                         </p>
                     </div>
                 </div>
+            </div>
 
-                <div class="demo-card">
+            <!-- Workflow Container: Two-Column Layout -->
+            <div class="workflow-container">
+                <!-- Left Sidebar: Step Navigation -->
+                <aside class="workflow-sidebar">
+                    <div class="sidebar-header">
+                        <h3>Your Workflow</h3>
+                        <p class="sidebar-subtitle">Follow these steps</p>
+                    </div>
+
+                    <nav class="step-navigation" role="navigation" aria-label="Workflow steps">
+                        <div class="step-item active" data-step="0" role="button" tabindex="0">
+                            <div class="step-icon-wrapper">
+                                <span class="step-number">1</span>
+                            </div>
+                            <div class="step-content">
+                                <h4>Upload Video</h4>
+                                <p>Choose your video file</p>
+                            </div>
+                        </div>
+
+                        <div class="step-item" data-step="1" role="button" tabindex="0">
+                            <div class="step-icon-wrapper">
+                                <span class="step-number">2</span>
+                            </div>
+                            <div class="step-content">
+                                <h4>Choose Frame</h4>
+                                <p>Select frame to edit</p>
+                            </div>
+                        </div>
+
+                        <div class="step-item" data-step="2" role="button" tabindex="0">
+                            <div class="step-icon-wrapper">
+                                <span class="step-number">3</span>
+                            </div>
+                            <div class="step-content">
+                                <h4>Select Objects</h4>
+                                <p>Click objects to remove</p>
+                            </div>
+                        </div>
+
+                        <div class="step-item" data-step="3" role="button" tabindex="0">
+                            <div class="step-icon-wrapper">
+                                <span class="step-number">4</span>
+                            </div>
+                            <div class="step-content">
+                                <h4>Review Selection</h4>
+                                <p>Verify marked points</p>
+                            </div>
+                        </div>
+
+                        <div class="step-item" data-step="4" role="button" tabindex="0">
+                            <div class="step-icon-wrapper">
+                                <span class="step-number">5</span>
+                            </div>
+                            <div class="step-content">
+                                <h4>Remove Objects</h4>
+                                <p>Process your video</p>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <div class="sidebar-footer">
+                        <div class="progress-indicator">
+                            <div class="progress-bar" style="width: 20%"></div>
+                        </div>
+                        <p class="progress-text">Step 1 of 5</p>
+                    </div>
+                </aside>
+
+                <!-- Right: Main Content Area -->
+                <div class="workflow-main">
+                    <div class="demo-card">
                     <div id="uploadSection">
                         <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Upload Your Video</h3>
 
@@ -1445,12 +1809,6 @@
                     <div class="preview-container" id="previewContainer" style="text-align: center;">
                         <img id="previewImage" class="preview-image" alt="Video preview showing selected objects to remove" style="display: none; max-width: 100%; max-height: 900px;">
                         <div id="videoContainer" style="position: relative; display: inline-block; max-width: 100%; overflow: hidden;">
-                            <!-- Step Indicator - Outside video card -->
-                            <div class="step-indicator" id="stepIndicator" style="display: none;">
-                                <span class="step-number">1</span>
-                                <span class="step-text">Choose a Frame</span>
-                            </div>
-
                             <div style="text-align:left; color: var(--text-secondary); font-weight: 600; margin: 0 0 6px 2px;">Preview</div>
 
                             <!-- Professional Video Player Container -->
@@ -1529,8 +1887,8 @@
 
                         <!-- Mask Selection Controls -->
                         <div id="maskSelectionControls" style="display: none; margin-top: 2rem; padding: 2rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%); border-radius: 16px; border: 2px solid rgba(102, 126, 234, 0.2);">
-                            <h3 style="text-align: center; margin-bottom: 1rem; font-size: 1.4rem; font-weight: 700; color: var(--text-primary);">
-                                <span style="color: #667eea;">Step 1:</span> Click on Objects to Remove
+                            <h3 style="text-align: center; margin-bottom: 1rem; font-size: 1.4rem; font-weight: 700; color: #667eea;">
+                                Click on Objects to Remove
                             </h3>
                             <p style="text-align: center; color: var(--text-secondary); margin-bottom: 1.5rem;">
                                 Click anywhere on the video to mark objects for removal. Green dots show your selections.
@@ -1546,18 +1904,18 @@
                             </div>
 
                             <div id="pointsList" style="display: none; text-align: center; padding: 1.25rem; background: rgba(255, 255, 255, 0.5); border-radius: 12px; margin-top: 1rem; border: 1px solid rgba(102, 126, 234, 0.15);">
-                                <h4 style="font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0; font-size: 1.1rem;">
-                                    <span style="color: #667eea;">Step 2:</span> Review Selection
+                                <h4 style="font-weight: 700; color: #667eea; margin: 0 0 0.5rem 0; font-size: 1.1rem;">
+                                    Review Selection
                                 </h4>
                                 <p style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">Selected Points: <span id="pointCount">0</span></p>
                                 <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">Click on the video to add more points</p>
                             </div>
                         </div>
 
-                        <!-- Step 3: Remove Objects -->
+                        <!-- Remove Objects Section -->
                         <div id="scrollHint" style="display: none; text-align: center; margin-top: 1.5rem; padding: 1.5rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(72, 187, 120, 0.12) 100%); border: 2px solid rgba(102, 126, 234, 0.25); border-radius: 12px;">
-                            <h4 style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">
-                                <span style="color: #667eea;">Step 3:</span> Remove Objects
+                            <h4 style="font-size: 1.2rem; font-weight: 700; color: #667eea; margin: 0 0 0.5rem 0;">
+                                Remove Objects
                             </h4>
                             <p style="font-size: 0.95rem; color: var(--text-secondary); margin: 0;">
                                 Click the button below to start the removal process
@@ -1594,10 +1952,11 @@
                                  data-defer="true"></ins>
                         </div>
                     </div> <!-- End uploadSection -->
-                </div> <!-- End demo-card -->
-                </div>
+                    </div> <!-- End demo-card -->
+                </div> <!-- End workflow-main -->
+            </div> <!-- End workflow-container -->
 
-                <!-- Ad Between Sections -->
+            <!-- Ad Between Sections -->
                 <div class="ad-container" style="margin: 2rem auto; max-width: 728px;">
                     <ins class="adsbygoogle"
                          style="display:block"
@@ -1863,6 +2222,12 @@
                     document.getElementById('professionalPlayer').style.display = 'block';
                     previewImage.style.display = 'none';
 
+                    // Update workflow step: Upload complete
+                    if (typeof StepManager !== 'undefined') {
+                        StepManager.completeStep(0);
+                        StepManager.setActiveStep(1);
+                    }
+
                     // Initialize professional video controls
                     initProfessionalPlayer(videoElem);
                     // Calculate credit cost based on video specs
@@ -1966,6 +2331,7 @@
                     console.log('[B2-DIRECT] Server notified:', data);
                 } else {
                     // Fallback: Upload through Flask (B2 not available)
+                    console.warn('⚠️ [FALLBACK] B2 direct upload not available - using Railway upload (COSTS MONEY!)');
                     console.log('[FALLBACK] Using Flask upload...');
                     const formData = new FormData();
                     formData.append('file', file);
@@ -1977,6 +2343,7 @@
                 }
             } catch (uploadError) {
                 // Fallback on any error
+                console.error('⚠️ [FALLBACK] Error with B2, using Railway upload (COSTS MONEY!):', uploadError);
                 console.log('[FALLBACK] Error with B2, using Flask upload:', uploadError);
                 const formData = new FormData();
                 formData.append('file', file);
@@ -2007,6 +2374,12 @@
                 // Show scroll hint
                 const scrollHint = document.getElementById('scrollHint');
                 if (scrollHint) scrollHint.style.display = 'block';
+
+                // Update workflow step: Review complete, ready to process
+                if (typeof StepManager !== 'undefined') {
+                    StepManager.completeStep(3);
+                    StepManager.setActiveStep(4);
+                }
 
                 // Auto-scroll to button after a brief delay
                 setTimeout(() => {
@@ -2369,6 +2742,12 @@
 
         const processVideo = async () => {
             console.log('Start Cleanup button clicked');
+
+            // Update workflow step: Processing started
+            if (typeof StepManager !== 'undefined') {
+                StepManager.completeStep(4);
+            }
+
             if (!videoElem) {
                 alert('Video element not found');
                 return;
@@ -2919,6 +3298,12 @@
             // Show mask selection controls
             maskControls.style.display = 'block';
 
+            // Update workflow step: Frame chosen, now selecting objects
+            if (typeof StepManager !== 'undefined') {
+                StepManager.completeStep(1);
+                StepManager.setActiveStep(2);
+            }
+
             // Video already has professional scrubber in controls (no thumbnail timeline needed)
 
             // Initialize SAM2Selector
@@ -2985,6 +3370,12 @@
                 resetBtn.disabled = false;
                 video.pause(); // Pause video during selection
                 pointsList.style.display = 'block';
+
+                // Update workflow step: Objects selected, now reviewing
+                if (typeof StepManager !== 'undefined') {
+                    StepManager.completeStep(2);
+                    StepManager.setActiveStep(3);
+                }
 
                 // Enable SAM2 selector
                 if (sam2Selector) {
@@ -3418,6 +3809,75 @@ document.addEventListener('DOMContentLoaded', function() {
     // Toggle theme on click (desktop button)
     if (themeToggle) {
         themeToggle.addEventListener('click', toggleTheme);
+    }
+
+    // ===== STEP MANAGER MODULE =====
+    const StepManager = {
+        currentStep: 0,
+        steps: ['upload', 'choose-frame', 'select-objects', 'review', 'remove'],
+
+        init() {
+            this.updateStepDisplay();
+            this.attachEventListeners();
+        },
+
+        setActiveStep(stepIndex) {
+            this.currentStep = stepIndex;
+            this.updateStepDisplay();
+        },
+
+        completeStep(stepIndex) {
+            const stepItem = document.querySelector(`.step-item[data-step="${stepIndex}"]`);
+            if (stepItem) {
+                stepItem.classList.add('completed');
+                stepItem.classList.remove('active');
+            }
+        },
+
+        updateStepDisplay() {
+            // Remove all active states
+            document.querySelectorAll('.step-item').forEach(item => {
+                item.classList.remove('active');
+            });
+
+            // Set current step as active
+            const activeItem = document.querySelector(`.step-item[data-step="${this.currentStep}"]`);
+            if (activeItem) {
+                activeItem.classList.add('active');
+                // Scroll sidebar to show active step if needed
+                activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            // Update progress bar
+            const progressBar = document.querySelector('.progress-bar');
+            const progressText = document.querySelector('.progress-text');
+            const progress = ((this.currentStep + 1) / this.steps.length) * 100;
+
+            if (progressBar) progressBar.style.width = `${progress}%`;
+            if (progressText) progressText.textContent = `Step ${this.currentStep + 1} of ${this.steps.length}`;
+        },
+
+        attachEventListeners() {
+            // Optional: Allow clicking steps to navigate
+            document.querySelectorAll('.step-item').forEach((item, index) => {
+                item.addEventListener('click', () => {
+                    // Only allow clicking if step is accessible
+                    if (index <= this.currentStep || item.classList.contains('completed')) {
+                        this.setActiveStep(index);
+                    }
+                });
+            });
+        }
+    };
+
+    // Initialize StepManager on DOM ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            StepManager.init();
+        });
+    } else {
+        // DOM already loaded
+        StepManager.init();
     }
 });
 </script>
