@@ -7183,6 +7183,7 @@ def create_checkout_session():
             'success_url': f'{base_url}/success.html?session_id={{CHECKOUT_SESSION_ID}}',
             'cancel_url': f'{base_url}/premium.html',
             'customer_email': user_email,  # Pre-fill with user's actual email
+            'customer_creation': 'always',  # Always create Stripe customer (needed for portal)
             'client_reference_id': user_id,
             'metadata': {
                 'user_id': user_id,
