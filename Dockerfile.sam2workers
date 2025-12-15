@@ -1,0 +1,96 @@
+# ============================================================
+# SAM2 All Workers - TensorRT Edition
+# ============================================================
+# Runs 5 SAM2 workers in a single container:
+#   - 4x TensorRT clicker workers (Flask+Redis) on ports 5555-5558
+#   - 1x Celery sender worker for full-video mask generation
+# ============================================================
+# Usage:
+#   docker build -f Dockerfile.sam2workers -t sam2workers .
+#   docker run --gpus all -e REDIS_URL='redis://...' -p 5555-5558:5555-5558 sam2workers
+# ============================================================
+
+FROM nvcr.io/nvidia/tensorrt:24.12-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# System packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libglib2.0-0 \
+    libgl1 \
+    libgomp1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ============================================================
+# Install Python dependencies
+# ============================================================
+COPY requirements.sam2workers.txt .
+RUN pip install --no-cache-dir -r requirements.sam2workers.txt
+
+# ============================================================
+# Copy SAM2 TRT Inference Code
+# ============================================================
+# Python predictor
+COPY sam2_trt_predictor.py .
+
+# PRE-BUILT TensorRT Engines (skip 10min build!)
+# Built on Docker/Linux with RTX 4090
+COPY sam2_trt_inference/engines_docker/sam2_encoder_fp16.engine ./sam2_trt_inference/engines/
+COPY sam2_trt_inference/engines_docker/sam2_decoder_fp16_dynamic.engine ./sam2_trt_inference/engines/
+
+# Also copy ONNX models (fallback if engines don't match GPU)
+COPY sam2_trt_inference/sam2_pytorch2onnx/output/sam2.1_hiera_tiny_encoder.onnx ./sam2_trt_inference/sam2_pytorch2onnx/output/
+COPY sam2_trt_inference/sam2_pytorch2onnx/output/sam2.1_hiera_tiny_decoder.onnx ./sam2_trt_inference/sam2_pytorch2onnx/output/
+
+# ============================================================
+# Copy Clicker Worker (Flask+Redis)
+# ============================================================
+COPY start_object_server.py .
+
+# ============================================================
+# Copy Celery Sender Worker (SAM2 full-video)
+# ============================================================
+COPY wsl_sam2_worker.py .
+COPY sam2_track_wsl2.py .
+
+# SAM2 PyTorch module + checkpoints (for full-video tracking)
+# These are needed by sam2_track_wsl2.py
+COPY segment-anything-2/ ./segment-anything-2/
+
+# ============================================================
+# Environment Variables
+# ============================================================
+
+# SAM2 TRT Engine paths (built at runtime)
+ENV SAM2_ENCODER_ENGINE=/app/sam2_trt_inference/engines/sam2_encoder_fp16.engine
+ENV SAM2_DECODER_ENGINE=/app/sam2_trt_inference/engines/sam2_decoder_fp16_dynamic.engine
+
+# Python path
+ENV PYTHONPATH=/app:/app/sam2_trt_inference
+
+# B2 Storage (set at runtime via -e flags, defaults in entrypoint)
+# Do NOT put secrets in Dockerfile - pass via: -e B2_KEY_ID=... -e B2_APP_KEY=...
+ENV B2_BUCKET=watermarkz \
+    B2_CDN_URL=https://markz.humblewoslayer.workers.dev
+
+# ============================================================
+# Expose ports for clicker worker dashboards
+# ============================================================
+EXPOSE 5555 5556 5557 5558
+
+# ============================================================
+# Entrypoint
+# ============================================================
+COPY docker-entrypoint-sam2workers.sh .
+RUN chmod +x docker-entrypoint-sam2workers.sh
+
+ENTRYPOINT ["/app/docker-entrypoint-sam2workers.sh"]
