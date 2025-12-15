@@ -631,6 +631,15 @@
             100% { transform: rotate(1turn); }
         }
 
+        @keyframes subtle-glow {
+            0%, 100% {
+                box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5), 0 0 50px rgba(240, 147, 251, 0.3), 0 0 80px rgba(246, 173, 85, 0.2);
+            }
+            50% {
+                box-shadow: 0 8px 30px rgba(102, 126, 234, 0.6), 0 0 60px rgba(240, 147, 251, 0.4), 0 0 100px rgba(246, 173, 85, 0.3);
+            }
+        }
+
         .upload-zone {
             border: 2px dashed rgba(102, 126, 234, 0.3);
             border-radius: 16px;
@@ -1531,13 +1540,13 @@
                             </h3>
 
                             <!-- Pro Tip Box - Enhanced -->
-                            <div style="position: relative; background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%); border-radius: 16px; padding: 2px; margin-bottom: 1.5rem; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4), 0 0 40px rgba(240, 147, 251, 0.2);">
-                                <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%); border-radius: 14px; padding: 1.25rem 1.5rem;">
+                            <div style="position: relative; background: linear-gradient(135deg, #667eea 0%, #764ba2 35%, #f093fb 70%, #f6ad55 100%); border-radius: 16px; padding: 3px; margin-bottom: 1.5rem; box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5), 0 0 50px rgba(240, 147, 251, 0.3), 0 0 80px rgba(246, 173, 85, 0.2); animation: subtle-glow 3s ease-in-out infinite;">
+                                <div style="background: var(--bg-card); border-radius: 13px; padding: 1.25rem 1.5rem; backdrop-filter: blur(10px);">
                                     <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                        <span style="font-size: 1.5rem; filter: drop-shadow(0 2px 4px rgba(102, 126, 234, 0.3));">💡</span>
-                                        <p style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary);">
-                                            <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 700; font-size: 1.05rem;">Pro Tip:</span>
-                                            <span style="color: var(--text-primary);">Multiple clicks define ONE object only</span>
+                                        <span style="font-size: 1.5rem; filter: drop-shadow(0 2px 8px rgba(246, 173, 85, 0.6));">💡</span>
+                                        <p style="margin: 0; font-size: 1rem; font-weight: 600;">
+                                            <span style="background: linear-gradient(135deg, #667eea 0%, #f093fb 50%, #f6ad55 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 700; font-size: 1.1rem;">Pro Tip:</span>
+                                            <span style="background: linear-gradient(135deg, #764ba2 0%, #ed64a6 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 600;"> Multiple clicks define ONE object only</span>
                                         </p>
                                     </div>
                                 </div>
