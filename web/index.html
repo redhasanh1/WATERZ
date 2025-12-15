@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=0.85, maximum-scale=1.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <!-- SEO Optimization -->
     <title>Remove Objects from Videos Online Free - AI Video Editor | MarkRemoverAI</title>
@@ -1069,50 +1069,17 @@
 
         @media (max-width: 768px) {
             .hero {
-                padding: 80px 0 30px;
-                min-height: 50vh;
-            }
-
-            .hero-title {
-                font-size: clamp(1.8rem, 6vw, 2.5rem) !important;
-            }
-
-            .hero-subtitle {
-                font-size: clamp(0.95rem, 3vw, 1.1rem) !important;
-                margin-bottom: 2rem !important;
+                padding: 100px 0 40px;
+                min-height: 60vh;
             }
 
             .demo-card {
-                padding: 1.25rem;
+                padding: 1.5rem;
             }
 
             .upload-zone {
-                padding: 1.5rem 1rem;
-                min-height: 200px;
-            }
-
-            h3, .step-text {
-                font-size: 1.1rem !important;
-            }
-
-            button {
-                font-size: 0.9rem !important;
-                padding: 0.65rem 1.5rem !important;
-            }
-
-            /* Fix video viewer zoom issue on mobile */
-            #videoWrapper {
-                max-width: 100%;
-                overflow: hidden;
-            }
-
-            #professionalPlayer {
-                max-width: 100%;
-            }
-
-            #videoContainer {
-                max-width: 100%;
-                overflow: hidden;
+                padding: 2rem 1rem;
+                min-height: 250px;
             }
 
             .nav-container {
@@ -1170,14 +1137,14 @@
                 padding: 0.5rem 0;
             }
 
-            /* Move user profile to hamburger menu on mobile */
-            .nav-auth {
+            /* Hide user nav on mobile, show in hamburger menu if needed */
+            .nav-auth #userNav {
                 display: none !important;
             }
 
-            /* Profile items will show in hamburger menu */
-            .mobile-profile-item {
-                display: block !important;
+            .nav-auth #signInLink {
+                font-size: 0.85rem;
+                padding: 0.5rem 1rem !important;
             }
 
             /* Hide API chip and theme toggle on mobile (theme is in menu) */
@@ -1366,14 +1333,10 @@
                 </a>
 
                 <ul class="nav-menu" id="navMenu">
-                    <li class="mobile-profile-item" style="display: none;"><a href="profile" id="mobileUserName" style="color: var(--primary); font-weight: 700;"></a></li>
-                    <li class="mobile-profile-item" style="display: none;"><span id="mobileUserCredits" style="color: var(--text-secondary); font-weight: 600;"></span></li>
-                    <li class="mobile-profile-item" id="mobileProfileLink" style="display: none;"><a href="profile" style="color: white; background: var(--gradient-primary); padding: 0.6rem 1.2rem; border-radius: 8px; font-weight: 600; text-decoration: none; display: inline-block; width: 90%; text-align: center;">👤 View My Profile</a></li>
                     <li><a href="premium#pricing">Pricing</a></li>
                     <li><a href="api">API</a></li>
                     <li><a href="contact">Contact</a></li>
                     <li class="mobile-only-menu-item"><button id="mobileThemeToggle" onclick="toggleTheme()" style="background: var(--gradient-primary); border: none; border-radius: 8px; padding: 0.6rem 1.2rem; color: white; font-weight: 600; cursor: pointer; width: 100%;"><span id="mobileThemeIcon">Toggle Theme</span></button></li>
-                    <li class="mobile-profile-item mobile-only-menu-item" id="mobileSignInItem" style="display: none;"><a href="login" style="color: var(--primary); font-weight: 600;">Sign In</a></li>
                 </ul>
             </div>
 
@@ -1383,7 +1346,7 @@
                 <div class="nav-auth">
                     <a href="login" class="nav-cta" id="signInLink">Sign In</a>
                     <ul class="nav-menu" id="userNav" style="display: none;">
-                        <li><a href="profile" id="userName" style="color: var(--primary); font-weight: 600; font-size: 0.85rem; text-decoration: none; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'"></a></li>
+                        <li><a href="profile" id="userEmail" style="color: var(--primary); font-weight: 600; font-size: 0.85rem; text-decoration: none; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'"></a></li>
                         <li><span id="userCredits" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem; white-space: nowrap;">0 credits</span></li>
                     </ul>
                 </div>
@@ -1503,7 +1466,7 @@
                                     </video>
 
                                     <!-- Canvas overlay for mask selection - synced to video rect by JS -->
-                                    <canvas id="maskCanvas" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; pointer-events: none;"></canvas>
+                                    <canvas id="maskCanvas" style="display: none; position: absolute; top: 0; left: 0; cursor: crosshair; pointer-events: none;"></canvas>
 
                                     <!-- Custom Video Controls Overlay -->
                                     <div id="videoControls" style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%); padding: 1.5rem 1rem 1rem; transition: opacity 0.3s;">
@@ -3318,13 +3281,13 @@
       if (signInLink) signInLink.style.display = 'none';
       if (userNav) userNav.style.display = 'flex';
 
-      // Show username in desktop nav
-      const userNameEl = document.getElementById('userName');
-      if (userNameEl) {
-        userNameEl.textContent = userData.name || userData.email.split('@')[0];
+      // Show user email/name
+      const userEmailEl = document.getElementById('userEmail');
+      if (userEmailEl) {
+        userEmailEl.textContent = userData.name || userData.email;
       }
 
-      // Show credits in desktop nav
+      // Show credits
       const userCreditsEl = document.getElementById('userCredits');
       const credits = userData.credits || 0;
       if (userCreditsEl) {
@@ -3334,24 +3297,6 @@
         } else if (credits < 3) {
           userCreditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
         }
-      }
-
-      // Show mobile profile items in hamburger menu
-      const mobileUserNameEl = document.getElementById('mobileUserName');
-      const mobileUserCreditsEl = document.getElementById('mobileUserCredits');
-      const mobileProfileLink = document.getElementById('mobileProfileLink');
-      const mobileSignInItem = document.getElementById('mobileSignInItem');
-
-      if (mobileUserNameEl) {
-        mobileUserNameEl.textContent = '👤 ' + (userData.name || userData.email.split('@')[0]);
-      }
-
-      if (mobileUserCreditsEl) {
-        mobileUserCreditsEl.textContent = '💰 ' + credits + ' credit' + (credits !== 1 ? 's' : '');
-      }
-
-      if (mobileSignInItem) {
-        mobileSignInItem.style.display = 'none';
       }
 
       // Show mobile header credits
@@ -3462,12 +3407,6 @@
             alert('Error deleting account. Please try again.');
           }
         });
-      }
-    } else {
-      // User not logged in - show sign in in mobile menu
-      const mobileSignInItem = document.getElementById('mobileSignInItem');
-      if (mobileSignInItem) {
-        mobileSignInItem.style.display = 'block';
       }
     }
   } catch (e) {
