@@ -806,10 +806,10 @@ def auth_register():
             # Create user with 5 free credits and verification token
             cur.execute(
                 '''INSERT INTO users (email, password_hash, name, credits, email_verified, verification_token, verification_token_expires)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id''',
+                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id, created_at''',
                 (email, password_hash, name or email.split('@')[0], 5, False, verification_token, token_expires)
             )
-            user_id = cur.fetchone()[0]
+            user_id, created_at = cur.fetchone()
 
             # Create session
             session['user_id'] = user_id
@@ -833,7 +833,8 @@ def auth_register():
                     'email': email,
                     'name': session['name'],
                     'credits': 5,
-                    'email_verified': False
+                    'email_verified': False,
+                    'created_at': created_at.isoformat() if created_at else None
                 }
             })
 
@@ -863,13 +864,13 @@ def auth_login():
             cur = conn.cursor()
 
             # Get user
-            cur.execute('SELECT id, password_hash, name, credits, email_verified FROM users WHERE email = %s', (email,))
+            cur.execute('SELECT id, password_hash, name, credits, email_verified, created_at FROM users WHERE email = %s', (email,))
             user = cur.fetchone()
 
             if not user:
                 return jsonify({'error': 'Invalid email or password'}), 401
 
-            user_id, password_hash, name, credits, email_verified = user
+            user_id, password_hash, name, credits, email_verified, created_at = user
 
             # Verify password
             if not bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
@@ -898,7 +899,8 @@ def auth_login():
                     'email': email,
                     'name': name,
                     'credits': credits,
-                    'email_verified': email_verified or False
+                    'email_verified': email_verified or False,
+                    'created_at': created_at.isoformat() if created_at else None
                 }
             })
 
@@ -1053,14 +1055,14 @@ def auth_status():
         # Get current user data from database
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT email, name, credits, email_verified FROM users WHERE id = %s', (user_id,))
+            cur.execute('SELECT email, name, credits, email_verified, created_at FROM users WHERE id = %s', (user_id,))
             user = cur.fetchone()
 
             if not user:
                 session.clear()
                 return jsonify({'authenticated': False})
 
-            email, name, credits, email_verified = user
+            email, name, credits, email_verified, created_at = user
 
             return jsonify({
                 'authenticated': True,
@@ -1069,7 +1071,8 @@ def auth_status():
                     'email': email,
                     'name': name,
                     'credits': credits,
-                    'email_verified': email_verified or False
+                    'email_verified': email_verified or False,
+                    'created_at': created_at.isoformat() if created_at else None
                 }
             })
 

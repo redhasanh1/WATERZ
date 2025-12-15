@@ -1532,6 +1532,9 @@
                             <p style="text-align: center; color: var(--text-secondary); margin-bottom: 1.5rem;">
                                 Click anywhere on the video to mark objects for removal. Green dots show your selections.
                             </p>
+                            <p style="text-align: center; color: #f59e0b; font-size: 0.9rem; font-weight: 600; margin: -0.5rem 0 1rem 0;">
+                                ⚠️ Multiple clicks can only be done for one object
+                            </p>
 
                             <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem;">
                                 <button id="enableSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); transition: all 0.3s ease;">
@@ -1560,6 +1563,14 @@
                                 Click the button below to start the removal process
                             </p>
                         </div>
+
+                        <!-- Processing Time Disclaimer -->
+                        <div id="processingDisclaimer" style="display: none; margin-top: 1rem; padding: 1rem 1.25rem; background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; border-radius: 8px;">
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">
+                                <strong style="color: #f59e0b;">⚠️ Note:</strong> If your job starts processing but hasn't completed after 5 minutes, your mask selection may not have been accurate. Try selecting the object again with different points.
+                            </p>
+                        </div>
+
                         <!-- Ad Before Process Button (deferred init) -->
                         <div class="ad-container" style="margin-top: 1.5rem;">
                             <ins class="adsbygoogle"
@@ -1993,6 +2004,10 @@
                 // Show scroll hint
                 const scrollHint = document.getElementById('scrollHint');
                 if (scrollHint) scrollHint.style.display = 'block';
+
+                // Show processing disclaimer
+                const processingDisclaimer = document.getElementById('processingDisclaimer');
+                if (processingDisclaimer) processingDisclaimer.style.display = 'block';
 
                 // Auto-scroll to button after a brief delay
                 setTimeout(() => {
@@ -3054,6 +3069,8 @@
             updatePointCount();
             resetBtn.disabled = true;
             scrollHint.style.display = 'none';
+            const processingDisclaimer = document.getElementById('processingDisclaimer');
+            if (processingDisclaimer) processingDisclaimer.style.display = 'none';
 
             // Clear mask indicators from timeline
             if (window.videoTimeline) {
@@ -3068,6 +3085,8 @@
             pointCount.textContent = points.length;
             if (points.length === 0) {
                 scrollHint.style.display = 'none';
+                const processingDisclaimer = document.getElementById('processingDisclaimer');
+                if (processingDisclaimer) processingDisclaimer.style.display = 'none';
             }
         }
 
