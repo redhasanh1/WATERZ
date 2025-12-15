@@ -1608,18 +1608,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         except Exception as e:
             print(f"[B2] Upload failed: {e}")
 
-        # --- 16. Cleanup temp files ---
-        print(f"[SAM2] Cleaning up...")
-        for temp_path in [output_dir, masks_dir]:
-            if isinstance(temp_path, str) and os.path.exists(temp_path):
-                if os.path.isdir(temp_path):
-                    shutil.rmtree(temp_path)
-                else:
-                    os.remove(temp_path)
-
+        # 🚀 Return immediately - cleanup happens in finally block!
         self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Complete'})
-
-        print(f"[SAM2] Complete! Output: {output_path}")
+        print(f"[SAM2] Complete! Output: {cdn_url or output_path}")
 
         return {
             'status': 'success',
@@ -2893,17 +2884,8 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         except Exception as e:
             print(f"[B2] Upload failed: {e}")
 
-        # Cleanup temp files on success
-        print(f"[SAM2] Cleaning up...")
-        import shutil as _shutil
-        for temp_path in [output_dir, masks_dir]:
-            if isinstance(temp_path, str) and os.path.exists(temp_path):
-                if os.path.isdir(temp_path):
-                    _shutil.rmtree(temp_path)
-
-        # 🔥 VRAM cleanup before returning
-        cleanup_vram("after SAM2 pipeline")
-
+        # 🚀 Return immediately after upload - cleanup happens in finally block!
+        # This shaves ~3 seconds off user wait time
         return {
             'status': 'success', 'video_id': video_id,
             'video_path': video_path, 'output_path': cdn_url or output_path,

@@ -1,13 +1,13 @@
 # ============================================================
 # SAM2 All Workers - TensorRT Edition
 # ============================================================
-# Runs 5 SAM2 workers in a single container:
-#   - 4x TensorRT clicker workers (Flask+Redis) on ports 5555-5558
+# Runs 9 SAM2 workers in a single container:
+#   - 8x TensorRT clicker workers (Flask+Redis) on ports 5555-5562
 #   - 1x Celery sender worker for full-video mask generation
 # ============================================================
 # Usage:
 #   docker build -f Dockerfile.sam2workers -t sam2workers .
-#   docker run --gpus all -e REDIS_URL='redis://...' -p 5555-5558:5555-5558 sam2workers
+#   docker run --gpus all -e REDIS_URL='redis://...' -p 5555-5562:5555-5562 sam2workers
 # ============================================================
 
 FROM nvcr.io/nvidia/tensorrt:24.12-py3
@@ -85,7 +85,7 @@ ENV B2_BUCKET=watermarkz \
 # ============================================================
 # Expose ports for clicker worker dashboards
 # ============================================================
-EXPOSE 5555 5556 5557 5558
+EXPOSE 5555 5556 5557 5558 5559 5560 5561 5562
 
 # ============================================================
 # Entrypoint

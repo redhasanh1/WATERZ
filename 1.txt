@@ -1,0 +1,274 @@
+
+  ps aux | grep "celery.*worker" | grep -v grep
+
+  2. Kill it if alive:
+
+  pkill -9 -f "celery.*worker"
+
+  3. Install tmux:
+
+  apt-get update && apt-get install -y tmux
+
+  4. Start tmux session and run worker:
+
+cd /app && tmux new -s worker -d "celery -A celery_3070_worker worker -Q processing -c 1 -P solo --loglevel=info"
+
+
+  5. Attach to tmux to see logs:
+
+  tmux attach -t worker
+
+  6. To detach from tmux (leave it running in background):
+
+  Press: Ctrl+B then D
+
+  7. To reattach later:
+
+  tmux attach -t worker
+
+  Copy all those commands and run them! 🚀
+
+////////////////////////
+
+
+  sed -i '41s/from celery import Celery/from celery import Celery, signals/' celery_3070_worker.py
+
+  sed -i '399s/@celery.signals/@signals/' celery_3070_worker.py
+
+  python -m celery -A celery_3070_worker.celery worker -Q processing -c 1 --loglevel=info
+
+
+cd /app && tmux new -s worker -d "python -m celery -A celery_3070_worker.celery worker -Q processing -c 1 --loglevel=info"
+
+////////////////
+
+
+  from celery.signals import worker_process_init
+
+  @worker_process_init.connect
+
+  Not @celery.signals.worker_process_init.connect
+
+  Quick fix - run this on Railway:
+
+  sed -i 's/@celery.signals.worker_process_init.connect/@worker_process_init.connect/' celery_3070_worker.py
+
+  And add the import at top:
+
+  sed -i 's/from celery import Celery/from celery import Celery\nfrom celery.signals import worker_process_init/'     
+  celery_3070_worker.py
+
+  Then run again:
+  python celery_3070_worker.py
+
+
+//////////////
+
+
+
+  Try this - kill everything and start fresh with env vars FIRST:
+
+  pkill -9 -f celery
+  pkill -9 -f python
+
+  # Set vars in shell FIRST
+  export TORCHDYNAMO_DISABLE=1
+  export TORCH_COMPILE_DISABLE=1
+
+  # Verify they're set
+  echo $TORCHDYNAMO_DISABLE
+
+  # Now start
+  celery -A celery_3070_worker worker -Q processing -c 1 -P solo --loglevel=info
+
+  Or add to the Python code itself at the very top of celery_3070_worker.py:
+
+  import os
+  os.environ['TORCHDYNAMO_DISABLE'] = '1'
+  # Must be before ANY torch import
+
+  The meshgrid() missing 'indexing' is torch.compile failing on RAFT code. Disabling dynamo completely should fix     
+  it.
+
+> give me sed command to jsu tput into coe and fi z:) 
+
+● Read(celery_3070_worker.py)
+  ⎿  Read 20 lines
+
+● Run this on Railway to insert the disable line right after import os:
+
+  sed -i '15 a os.environ["TORCHDYNAMO_DISABLE"] = "1"  # Disable torch.compile' /app/celery_3070_worker.py
+
+  Or if you want to see what it does first:
+
+  sed -n '14,18p' /app/celery_3070_worker.py
+  sed '15 a os.environ["TORCHDYNAMO_DISABLE"] = "1"  # Disable torch.compile' /app/celery_3070_worker.py | head       
+  -20
+
+  Then restart the worker:
+
+////////////////////////
+
+● tmux new -s worker "celery -A celery_3070_worker worker -Q processing -c 1 -P solo --loglevel=info"
+
+//////////////////////////
+
+tmux kill-server
+
+
+///////////\
+FIX - Install gcc on Salad:
+  apt-get update && apt-get install -y build-essential
+
+////////////////
+Install curl (Salad containers usually need this)
+apt-get update && apt-get install -y curl
+
+  pip install b2sdk
+//////
+
+tmux new -s worker_3070 "python3 -m celery -A celery_3070_worker worker --loglevel=info --pool=solo -Q processing -n processing@\$(hostname)"
+
+curl -o /app/celery_3070_worker.py https://raw.githubusercontent.com/redhasanh1/watermarkz/main/celery_3070_worker.py
+
+
+  curl -o /app/celery_3070_worker.py https://markz.humblewoslayer.workers.dev/scripts/celery_3070_worker.py      
+
+Here is the clean, correct, copy-paste ready version with the chain operator:
+
+curl -o /app/celery_3070_worker.py https://markz.humblewoslayer.workers.dev/scripts/celery_3070_worker.py && kill 1
+
+
+If you want it to force overwrite, you can use -fsSL:
+
+curl -fsSL -o /app/celery_3070_worker.py https://markz.humblewoslayer.workers.dev/scripts/celery_30
+
+-------------
+been working:   curl -s "https://markz.humblewoslayer.workers.dev/workers/celery_3070_worker.py" -o celery_3070_worker.py      
+
+------------
+
+how for claude? : 
+
+● Upload to B2:
+
+  C:/Users/has/AppData/Local/Programs/Python/Python312/Scripts/b2.exe upload-file watermarkz
+  D:/watermarkz/celery_3070_worker.py workers/celery_3070_worker.py
+
+  Download on Salad (via Cloudflare worker):
+
+  curl "https://markz.humblewoslayer.workers.dev/workers/celery_3070_worker.py" -o celery_3070_worker.py      
+
+
+----------------------------------------
+
+
+////////////////
+
+tmux new -s worker_3070 "python3 -m celery -A celery_3070_worker worker --loglevel=info --pool=solo -Q processing -n processing@\$(hostname)"
+
+
+
+//////////
+
+pkill -9 -f "celery.*worker" ; pkill -9 -f celery ; pkill -9 -f python ; tmux kill-server 2>/dev/null
+
+  curl "https://markz.humblewoslayer.workers.dev/workers/celery_3070_worker.py" -o celery_3070_worker.py
+
+tmux new -s worker_3070 "python3 -m celery -A celery_3070_worker worker --loglevel=info --pool=solo -Q processing -n processing@\$(hostname)"
+
+  tmux attach -t worker
+
+/////////////////
+
+
+
+/////////////////////
+
+finalbranch: 
+
+
+● You have 2 containers. Kill the old one and attach to v5:
+
+  # Kill old container
+  docker stop bca90c42a507 && docker rm bca90c42a507
+
+  # Attach to v5 tmux
+  docker exec -it 84e7dba64bc1 tmux attach -t celery
+
+
+-------------
+
+tmux attach -t celery
+
+tmux new-session -d -s main '/app/docker-entrypoint.sh'
+
+tmux attach -t main
+  docker exec -it watermarkz-worker tmux attach -t celery
+
+-------------
+
+
+docker rm -f watermarkz-worker && docker run --gpus all --name watermarkz-worker --read-only --user 10001:10001 --cap-drop=ALL --cap-add=SYS_NICE --security-opt no-new-privileges:true --tmpfs /tmp:rw,exec,size=4g --tmpfs /app/temp:rw,exec,size=4g --tmpfs /app/uploads:rw,exec,size=4g --tmpfs /app/results:rw,exec,size=4g --tmpfs /app/cache:rw,exec,size=2g --tmpfs /app/faster-propainter-main/models:rw,exec,size=1g --tmpfs /app/engines:rw,exec,size=1g --memory=20g --cpus=8 --pids-limit=512 --restart=on-failure:3 -e REDIS_URL="redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930" -e B2_KEY_ID="00539db5c1104b50000000003" -e B2_APP_KEY="K005384b8lPoBT11wScxkZ2Gx0fszus" -e B2_BUCKET="watermarkz" -e NOTIFY_WEBHOOK_URL="https://ntfy.sh/watermarkz-workers-9f31c" -e NOTIFY_WORKER_NAME="Local-4090" humblewoslayer/watermarkz-celery:v6
+
+
+WORKS::
+docker rm -f watermarkz-worker && docker run --gpus all --name watermarkz-worker --read-only --user 10001:10001 --cap-drop=ALL --cap-add=SYS_NICE --security-opt no-new-privileges:true --tmpfs /tmp:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/temp:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/uploads:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/results:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/cache:rw,exec,size=2g,uid=10001,gid=10001 --tmpfs /app/faster-propainter-main/models:rw,exec,size=1g,uid=10001,gid=10001 --tmpfs /app/engines:rw,exec,size=1g,uid=10001,gid=10001 --memory=20g --cpus=8 --pids-limit=512 --restart=on-failure:3 -e REDIS_URL="redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930" -e B2_KEY_ID="00539db5c1104b50000000003" -e B2_APP_KEY="K005384b8lPoBT11wScxkZ2Gx0fszus" -e B2_BUCKET="watermarkz" -e NOTIFY_WEBHOOK_URL="https://ntfy.sh/watermarkz-workers-9f31c" -e NOTIFY_WORKER_NAME="Local-4090" humblewoslayer/watermarkz-celery:v6
+
+fix maybe: fr top;:
+docker rm -f watermarkz-worker ; docker run --gpus all --name watermarkz-worker --read-only --user 10001:10001 --cap-drop=ALL --cap-add=SYS_NICE --security-opt no-new-privileges:true --tmpfs /tmp:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/temp:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/uploads:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/results:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/cache:rw,exec,size=2g,uid=10001,gid=10001 --tmpfs /app/faster-propainter-main/models:rw,exec,size=1g,uid=10001,gid=10001 --tmpfs /app/engines:rw,exec,size=1g,uid=10001,gid=10001 --memory=20g --cpus=8 --pids-limit=512 --restart=on-failure:3 -e REDIS_URL="redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930" -e B2_KEY_ID="00539db5c1104b50000000003" -e B2_APP_KEY="K005384b8lPoBT11wScxkZ2Gx0fszus" -e B2_BUCKET="watermarkz" -e NOTIFY_WEBHOOK_URL="https://ntfy.sh/watermarkz-workers-9f31c" -e NOTIFY_WORKER_NAME="Local-4090" humblewoslayer/watermarkz-celery:v6
+
+
+
+
+docker kill watermarkz-worker
+
+/////////
+
+for salad sender:   /app/docker-entrypoint-sam2workers.sh
+
+docker rm -f sam2workers ; docker run --gpus all --name sam2workers --read-only --user 10001:10001 --cap-drop=ALL --cap-add=SYS_NICE --security-opt no-new-privileges:true --tmpfs /tmp:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/temp:rw,exec,size=2g,uid=10001,gid=10001 --memory=20g --cpus=8 --pids-limit=512 -e REDIS_URL="redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930" -e B2_KEY_ID="00539db5c1104b50000000003" -e B2_APP_KEY="K005384b8lPoBT11wScxkZ2Gx0fszus" -e B2_BUCKET="watermarkz" -p 5555-5562:5555-5562 humblewoslayer/watermarkz-celery:4090_sender
+
+
+  | Flag                                  | What it does                                                |
+  |---------------------------------------|-------------------------------------------------------------|
+  | --read-only                           | Filesystem is read-only, can't write anywhere except tmpfs  |
+  | --user 10001:10001                    | Runs as non-root user                                       |
+  | --cap-drop=ALL                        | Drops ALL Linux capabilities (no sudo, no raw sockets, etc) |
+  | --cap-add=SYS_NICE                    | Only allows setting process priority (needed for GPU)       |
+  | --security-opt no-new-privileges:true | Can't escalate privileges ever                              |
+  | --tmpfs /tmp:...                      | RAM-based temp dirs, disappear on restart                   |
+  | --memory=20g                          | Hard memory limit                                           |
+  | --cpus=8                              | CPU limit                                                   |
+  | --pids-limit=512                      | Max 512 processes (prevents fork bombs)
+
+
+
+
+
+
+
+ To test externally on Salad with lower workspace, override the entrypoint with a custom build command:
+
+  docker run --gpus all \
+    -e REDIS_URL='...' \
+    --entrypoint /bin/bash \
+    humblewoslayer/watermarkz-celery:4090_sender \
+    -c 'trtexec --onnx=/app/sam2_trt_inference/sam2_pytorch2onnx/output/sam2.1_hiera_tiny_encoder.onnx --saveEngine=/app/sam2_trt_inference/engines/sam2_encoder_fp16.engine --fp16 --memPoolSize=workspace:2048 --builderOptimizationLevel=3'
+
+BUILD:
+trtexec --onnx=/app/sam2_trt_inference/sam2_pytorch2onnx/output/sam2.1_hiera_tiny_decoder.onnx --saveEngine=/app/sam2_trt_inference/engines/sam2_decoder_fp16_dynamic.engine --fp16 --memPoolSize=workspace:2048 --builderOptimizationLevel=3 --minShapes=point_coords:1x2x2,point_labels:1x2,mask_input:1x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1 --optShapes=point_coords:4x2x2,point_labels:4x2,mask_input:4x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1 --maxShapes=point_coords:16x2x2,point_labels:16x2,mask_input:16x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1
+
+
+● Current command has 1/4/16 batch
+trtexec --onnx=/app/sam2_trt_inference/sam2_pytorch2onnx/output/sam2.1_hiera_tiny_decoder.onnx \
+--saveEngine=/app/sam2_trt_inference/engines/sam2_decoder_fp16_dynamic_v2.engine \
+--fp16 \
+--memPoolSize=workspace:4096 \
+--builderOptimizationLevel=5 \
+--minShapes=point_coords:1x2x2,point_labels:1x2,mask_input:1x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1 \
+--optShapes=point_coords:4x2x2,point_labels:4x2,mask_input:4x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1 \
+--maxShapes=point_coords:16x2x2,point_labels:16x2,mask_input:16x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1
+
+
+

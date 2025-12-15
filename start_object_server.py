@@ -47,9 +47,9 @@ if not REDIS_URL:
     else:
         REDIS_URL = 'redis://localhost:6379/0'
 
-# TensorRT Engine Paths
-ENCODER_ENGINE = r"D:\watermarkz\sam2_trt_inference\engines\sam2_encoder_fp16.engine"
-DECODER_ENGINE = r"D:\watermarkz\sam2_trt_inference\engines\sam2_decoder_fp16_dynamic.engine"
+# TensorRT Engine Paths (use env vars for Docker, fallback to Windows paths)
+ENCODER_ENGINE = os.getenv('SAM2_ENCODER_ENGINE', r"D:\watermarkz\sam2_trt_inference\engines\sam2_encoder_fp16.engine")
+DECODER_ENGINE = os.getenv('SAM2_DECODER_ENGINE', r"D:\watermarkz\sam2_trt_inference\engines\sam2_decoder_fp16_dynamic.engine")
 
 # Redis channels/lists
 LIST_REQUEST = 'sam2:selection:request'  # Changed to list for proper load distribution

@@ -68,6 +68,8 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     wget \
     gnupg \
+    tmux \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install TensorRT (includes trtexec)
@@ -86,10 +88,8 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 COPY --from=builder /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Ensure pip works for python3.11 and install b2sdk
-RUN python3.11 -m ensurepip --upgrade && \
-    python3.11 -m pip install --no-cache-dir --upgrade pip && \
-    python3.11 -m pip install --no-cache-dir b2sdk && \
+# Install b2sdk (pip already copied from builder)
+RUN pip install --no-cache-dir b2sdk && \
     python3.11 -c "import b2sdk; print('b2sdk installed successfully')"
 
 # Set working directory
@@ -99,6 +99,7 @@ WORKDIR /app
 COPY server_production.py .
 COPY server_production2.py .
 COPY yolo_detector.py .
+COPY segment_detector.py .
 
 # Copy python_packages directory (custom packages)
 COPY python_packages ./python_packages

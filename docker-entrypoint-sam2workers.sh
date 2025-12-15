@@ -2,8 +2,8 @@
 # ============================================================
 # SAM2 Workers Docker Entrypoint
 # ============================================================
-# Runs 5 SAM2 workers in a single container:
-#   - 4x TensorRT clicker workers (Flask+Redis) on ports 5555-5558
+# Runs 9 SAM2 workers in a single container:
+#   - 8x TensorRT clicker workers (Flask+Redis) on ports 5555-5562
 #   - 1x Celery sender worker for full-video mask generation
 # ============================================================
 
@@ -80,7 +80,6 @@ if [ ! -f "$DECODER_ENGINE" ]; then
         # All inputs must be specified - fixed + dynamic
         # Fixed: image_embed, high_res_feats_0, high_res_feats_1, has_mask_input
         # Dynamic (batch N): point_coords, point_labels, mask_input
-        # NOTE: Using Windows-matching batch sizes (1/64/128) for consistent mask quality
         trtexec \
             --onnx="$DECODER_ONNX" \
             --saveEngine="$DECODER_ENGINE" \
@@ -88,8 +87,8 @@ if [ ! -f "$DECODER_ENGINE" ]; then
             --memPoolSize=workspace:4096 \
             --builderOptimizationLevel=5 \
             --minShapes=point_coords:1x2x2,point_labels:1x2,mask_input:1x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1 \
-            --optShapes=point_coords:64x2x2,point_labels:64x2,mask_input:64x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1 \
-            --maxShapes=point_coords:128x2x2,point_labels:128x2,mask_input:128x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1
+            --optShapes=point_coords:4x2x2,point_labels:4x2,mask_input:4x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1 \
+            --maxShapes=point_coords:16x2x2,point_labels:16x2,mask_input:16x1x256x256,image_embed:1x256x64x64,high_res_feats_0:1x32x256x256,high_res_feats_1:1x64x128x128,has_mask_input:1
 
         echo "[OK] SAM2 Decoder TRT engine built: $DECODER_ENGINE"
     else
@@ -141,19 +140,19 @@ export SAM2_ENCODER_ENGINE="$ENCODER_ENGINE"
 export SAM2_DECODER_ENGINE="$DECODER_ENGINE"
 
 # ============================================================
-# Start 4 TensorRT Clicker Workers (background)
+# Start 8 TensorRT Clicker Workers (background)
 # ============================================================
 echo ""
 echo "============================================================"
-echo "[START] Launching 4 TensorRT Clicker Workers"
+echo "[START] Launching 8 TensorRT Clicker Workers"
 echo "============================================================"
-echo "  Ports: 5555, 5556, 5557, 5558"
+echo "  Ports: 5555-5562"
 echo "  Mode: Flask+Redis pub/sub"
 echo "============================================================"
 echo ""
 
 # Start clicker workers in background
-for i in 0 1 2 3; do
+for i in 0 1 2 3 4 5 6 7; do
     PORT=$((5555 + i))
     echo "[WORKER $i] Starting on port $PORT..."
     python /app/start_object_server.py --worker-id $i --port $PORT &
@@ -161,7 +160,7 @@ for i in 0 1 2 3; do
 done
 
 echo ""
-echo "[OK] 4 Clicker workers started in background"
+echo "[OK] 8 Clicker workers started in background"
 echo ""
 
 # ============================================================

@@ -65,6 +65,9 @@ test_*.py
 !engines_trt/*.engine
 !engines_trt/**/*.engine
 
+# EXCEPTION: Pre-built Docker engines for SAM2 clicker workers
+!sam2_trt_inference/engines_docker/*.engine
+
 # ONNX models - KEEP these for TRT engine building
 !faster-propainter-main/models/neuflow_things.onnx
 !engines/rfcnet/rfcnet_dcnv4.onnx
