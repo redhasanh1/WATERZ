@@ -1353,6 +1353,7 @@
                 <ul class="nav-menu" id="navMenu">
                     <li class="mobile-profile-item" style="display: none;"><a href="profile" id="mobileUserName" style="color: var(--primary); font-weight: 700;"></a></li>
                     <li class="mobile-profile-item" style="display: none;"><span id="mobileUserCredits" style="color: var(--text-secondary); font-weight: 600;"></span></li>
+                    <li class="mobile-profile-item" id="mobileProfileLink" style="display: none;"><a href="profile" style="color: white; background: var(--gradient-primary); padding: 0.6rem 1.2rem; border-radius: 8px; font-weight: 600; text-decoration: none; display: inline-block; width: 90%; text-align: center;">👤 View My Profile</a></li>
                     <li><a href="premium#pricing">Pricing</a></li>
                     <li><a href="api">API</a></li>
                     <li><a href="contact">Contact</a></li>
@@ -3323,6 +3324,7 @@
       // Show mobile profile items in hamburger menu
       const mobileUserNameEl = document.getElementById('mobileUserName');
       const mobileUserCreditsEl = document.getElementById('mobileUserCredits');
+      const mobileProfileLink = document.getElementById('mobileProfileLink');
       const mobileSignInItem = document.getElementById('mobileSignInItem');
 
       if (mobileUserNameEl) {
@@ -3333,6 +3335,10 @@
       if (mobileUserCreditsEl) {
         mobileUserCreditsEl.textContent = '💰 ' + credits + ' credit' + (credits !== 1 ? 's' : '');
         mobileUserCreditsEl.parentElement.style.display = 'block';
+      }
+
+      if (mobileProfileLink) {
+        mobileProfileLink.style.display = 'block';
       }
 
       if (mobileSignInItem) {
