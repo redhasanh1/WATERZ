@@ -728,14 +728,14 @@ def auth_google_callback():
                     cur.execute('UPDATE users SET google_id = %s, name = %s WHERE id = %s', (google_id, name, user_id))
                     print(f"[AUTH] Linked Google account to existing user: {email}")
                 else:
-                    # New user - give 5 free credits
+                    # New user - give 2 free credits
                     cur.execute(
                         'INSERT INTO users (google_id, email, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
-                        (google_id, email, name, 5)
+                        (google_id, email, name, 2)
                     )
                     user_id = cur.fetchone()[0]
-                    credits = 5
-                    print(f"[AUTH] New user registered via Google: {email} (5 free credits)")
+                    credits = 2
+                    print(f"[AUTH] New user registered via Google: {email} (2 free credits)")
 
             # Create session
             session['user_id'] = user_id
@@ -803,11 +803,11 @@ def auth_register():
             verification_token = secrets.token_urlsafe(32)
             token_expires = datetime.utcnow() + timedelta(hours=24)
 
-            # Create user with 5 free credits and verification token
+            # Create user with 2 free credits and verification token
             cur.execute(
                 '''INSERT INTO users (email, password_hash, name, credits, email_verified, verification_token, verification_token_expires)
                    VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id, created_at''',
-                (email, password_hash, name or email.split('@')[0], 5, False, verification_token, token_expires)
+                (email, password_hash, name or email.split('@')[0], 2, False, verification_token, token_expires)
             )
             user_id, created_at = cur.fetchone()
 
