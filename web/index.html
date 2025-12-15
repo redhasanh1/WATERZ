@@ -1400,15 +1400,12 @@
                     Erase anything from your videos instantly — original 4K quality preserved.
                     <br>AI-powered magic that feels effortless. Try free today.
                 </p>
-                <div style="margin: 1rem auto 2rem; max-width: 720px; background: #d93025; color: #fff; padding: 1rem 1.25rem; border-radius: 12px; font-weight: 600; box-shadow: 0 10px 25px rgba(217,48,37,0.35); text-align: center;">
-                    ⚠️ Temporary Notice: Live processing is currently offline while we fix production issues. You can still explore the demo, but object removal jobs will not complete until service is restored.
-                </div>
 
                 <!-- Free Credits Incentive -->
                 <div style="text-align: center; margin: 2rem auto; max-width: 600px; position: relative; z-index: 100;">
                     <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%); border: 2px solid rgba(102, 126, 234, 0.3); border-radius: 16px; padding: 1.5rem; box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2);">
                         <p style="font-size: 1.2rem; font-weight: 700; margin: 0;">
-                            <span style="font-size: 1.4rem; -webkit-text-fill-color: initial; background: none; display: inline-block;">🎁</span> Sign up now and get 5 FREE credits!
+                            <span style="font-size: 1.4rem; -webkit-text-fill-color: initial; background: none; display: inline-block;">🎁</span> Sign up now and get 2 free credits!
                         </p>
                         <p style="font-size: 0.95rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
                             Start removing objects instantly • No credit card required
@@ -1841,7 +1838,7 @@
             // Check if user is logged in
             const user = JSON.parse(localStorage.getItem('user') || '{}');
             if (!user.id || !user.email) {
-                alert('Please sign in to use MarkRemoverAI. Sign up now and get 5 FREE credits!');
+                alert('Please sign in to use MarkRemoverAI. Sign up now and get 2 free credits!');
                 window.location.href = 'login';
                 return;
             }
