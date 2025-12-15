@@ -3344,16 +3344,10 @@
 
       if (mobileUserNameEl) {
         mobileUserNameEl.textContent = '👤 ' + (userData.name || userData.email.split('@')[0]);
-        mobileUserNameEl.parentElement.style.display = 'block';
       }
 
       if (mobileUserCreditsEl) {
         mobileUserCreditsEl.textContent = '💰 ' + credits + ' credit' + (credits !== 1 ? 's' : '');
-        mobileUserCreditsEl.parentElement.style.display = 'block';
-      }
-
-      if (mobileProfileLink) {
-        mobileProfileLink.style.display = 'block';
       }
 
       if (mobileSignInItem) {
