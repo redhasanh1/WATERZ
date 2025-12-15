@@ -7126,16 +7126,25 @@ def sam2_process_video():
         if not points or len(points) == 0:
             return jsonify({'status': 'error', 'message': 'No points selected'}), 400
 
-        # Get video path from task_id
+        # Get video CDN URL from Redis (videos are uploaded directly to B2)
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        cdn_url_key = f"upload:{task_id}:cdn_url"
+        cdn_url = redis_client.get(cdn_url_key)
+
         video_path = None
-        for ext in ['.mp4', '.mov', '.avi', '.webm']:
-            test_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
-            if os.path.exists(test_path):
-                video_path = test_path
-                break
+        if cdn_url:
+            # Video is in B2 - worker will download it
+            video_path = cdn_url.decode('utf-8') if isinstance(cdn_url, bytes) else cdn_url
+        else:
+            # Fallback: check for local file
+            for ext in ['.mp4', '.mov', '.avi', '.webm']:
+                test_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
+                if os.path.exists(test_path):
+                    video_path = test_path
+                    break
 
         if not video_path:
-            return jsonify({'status': 'error', 'message': f'Video not found for task {task_id}'}), 404
+            return jsonify({'status': 'error', 'message': f'Video not found for task {task_id}. CDN URL or local file missing.'}), 404
 
         # Create a unique job ID for this SAM2 processing request
         job_id = f"sam2_{task_id}_{uuid.uuid4().hex[:8]}"
