@@ -1116,6 +1116,7 @@
                 max-width: 100% !important;
                 width: 100% !important;
                 overflow: hidden !important;
+                max-height: 55vh !important;
             }
 
             #professionalPlayer {
@@ -1123,6 +1124,7 @@
                 width: 100% !important;
                 margin: 0 !important;
                 box-sizing: border-box !important;
+                max-height: 55vh !important;
             }
 
             #videoContainer {
@@ -1136,6 +1138,8 @@
             #previewVideo {
                 max-width: 100% !important;
                 width: 100% !important;
+                max-height: 50vh !important;
+                object-fit: contain !important;
             }
 
             .preview-container {
@@ -1181,17 +1185,56 @@
 
             /* Mask selection controls mobile fix */
             #maskSelectionControls {
-                padding: 1rem !important;
-                margin-top: 1rem !important;
+                padding: 0.75rem !important;
+                margin-top: 0.75rem !important;
             }
 
             #maskSelectionControls h3 {
-                font-size: 1.1rem !important;
+                font-size: 1rem !important;
+                margin-bottom: 1rem !important;
             }
 
             #maskSelectionControls button {
-                padding: 0.6rem 1rem !important;
+                padding: 0.5rem 0.8rem !important;
+                font-size: 0.8rem !important;
+            }
+
+            /* Pro Tip box mobile fix */
+            #maskSelectionControls > div:first-of-type {
+                border-radius: 10px !important;
+                padding: 2px !important;
+                margin-bottom: 0.75rem !important;
+            }
+
+            #maskSelectionControls > div:first-of-type > div {
+                padding: 0.75rem 1rem !important;
+                border-radius: 8px !important;
+            }
+
+            #maskSelectionControls > div:first-of-type p {
                 font-size: 0.85rem !important;
+            }
+
+            #maskSelectionControls > div:first-of-type span:first-child {
+                font-size: 1.2rem !important;
+            }
+
+            /* Frame thumbnails smaller on mobile */
+            .frame-thumb {
+                width: 28px !important;
+                height: 21px !important;
+                border-radius: 3px !important;
+            }
+
+            .timeline-nav-btn {
+                width: 28px !important;
+                height: 28px !important;
+                padding: 4px !important;
+            }
+
+            .timeline-label {
+                font-size: 0.85rem !important;
+                margin-bottom: 8px !important;
             }
 
             /* Video controls mobile fix */
