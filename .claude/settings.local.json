@@ -147,7 +147,9 @@
       "Bash(timeout 15 python:*)",
       "Bash(git push:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nRemove Test Pack from pricing page\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n)\")",
-      "WebFetch(domain:b2-sdk-python.readthedocs.io)"
+      "WebFetch(domain:b2-sdk-python.readthedocs.io)",
+      "Bash(grep:*)",
+      "Bash(docker build:*)"
     ],
     "deny": [],
     "ask": []

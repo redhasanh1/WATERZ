@@ -1502,10 +1502,18 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
             output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
 
-            # Get frame dimensions from first available frame
-            first_frame = VRAMCompressor.decompress_frame(
-                vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[min(preloaded_frames.keys())]
-            )
+            # Get frame dimensions from first available frame (handle empty case)
+            if vram_frames:
+                first_frame = VRAMCompressor.decompress_frame(vram_frames[min(vram_frames.keys())])
+            elif preloaded_frames:
+                first_frame = VRAMCompressor.decompress_frame(preloaded_frames[min(preloaded_frames.keys())])
+            else:
+                # Fallback: get dimensions from video file directly
+                _cap = cv2.VideoCapture(video_path)
+                _, first_frame = _cap.read()
+                _cap.release()
+            if first_frame is None:
+                raise ValueError(f"Could not read video file: {video_path}")
             frame_height, frame_width = first_frame.shape[:2]
 
             # FFmpeg command: pipe rawvideo → NVENC → MP4 with audio from original
@@ -2771,10 +2779,18 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
 
-        # Get frame dimensions from first available frame
-        first_frame = VRAMCompressor.decompress_frame(
-            vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[min(preloaded_frames.keys())]
-        )
+        # Get frame dimensions from first available frame (handle empty case)
+        if vram_frames:
+            first_frame = VRAMCompressor.decompress_frame(vram_frames[min(vram_frames.keys())])
+        elif preloaded_frames:
+            first_frame = VRAMCompressor.decompress_frame(preloaded_frames[min(preloaded_frames.keys())])
+        else:
+            # Fallback: get dimensions from video file directly
+            _cap = cv2.VideoCapture(video_path)
+            _, first_frame = _cap.read()
+            _cap.release()
+        if first_frame is None:
+            raise ValueError(f"Could not read video file: {video_path}")
         frame_height, frame_width = first_frame.shape[:2]
 
         # Choose encoder: NVENC (GPU) if available, else libx264 (CPU)

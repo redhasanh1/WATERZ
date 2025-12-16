@@ -1,0 +1,6 @@
+# Minimal patch on top of existing v6
+FROM humblewoslayer/watermarkz-celery:v6
+COPY server_production2.py /app/server_production2.py
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY crop_utils.py /app/crop_utils.py
+COPY segment_detector.py /app/segment_detector.py

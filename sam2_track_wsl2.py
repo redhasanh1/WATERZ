@@ -192,7 +192,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
     # Create output directory
     os.makedirs(output_masks_dir, exist_ok=True)
 
-    CHUNK_SIZE = 64  # Process 64 frames at a time using SAM2's official parameters
+    CHUNK_SIZE = 128  # Process 128 frames at a time (memory optimized for long videos)
 
     # Build predictor
     print(f"[SAM2-Official] Building predictor with official memory management...")
@@ -205,13 +205,13 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
     torch.cuda.empty_cache()
 
     try:
-        # Initialize state with ALL frames - SAM2 handles memory internally
-        print(f"[SAM2-Official] Initializing state for {total_frames} frames...")
+        # Initialize state - KEEP IN VRAM for speed (user has 24GB 4090)
+        print(f"[SAM2-Official] Initializing state for {total_frames} frames (VRAM mode)...")
         inference_state = predictor.init_state(
             video_path=frames_dir,
-            offload_video_to_cpu=True,
-            offload_state_to_cpu=True,
-            async_loading_frames=False,
+            offload_video_to_cpu=False,   # KEEP IN VRAM!
+            offload_state_to_cpu=False,   # KEEP IN VRAM!
+            async_loading_frames=True,    # Enable async for speed
         )
 
         # Add initial prompt
@@ -269,6 +269,9 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
                         chunk_masks += 1
+
+                        # CRITICAL: Release memory immediately to prevent accumulation
+                        del mask_logits, mask
 
                     print(f"[SAM2-Chunk] Chunk {chunk_idx + 1} complete: {chunk_masks} masks")
 
