@@ -140,28 +140,38 @@ export SAM2_ENCODER_ENGINE="$ENCODER_ENGINE"
 export SAM2_DECODER_ENGINE="$DECODER_ENGINE"
 
 # ============================================================
-# Start 8 TensorRT Clicker Workers (background)
+# Start TensorRT Clicker Workers (background)
 # ============================================================
-echo ""
-echo "============================================================"
-echo "[START] Launching 8 TensorRT Clicker Workers"
-echo "============================================================"
-echo "  Ports: 5555-5562"
-echo "  Mode: Flask+Redis pub/sub"
-echo "============================================================"
-echo ""
+NUM_WORKERS=${NUM_WORKERS:-8}  # Default 8, set to 0 for sender-only mode
 
-# Start clicker workers in background
-for i in 0 1 2 3 4 5 6 7; do
-    PORT=$((5555 + i))
-    echo "[WORKER $i] Starting on port $PORT..."
-    python /app/start_object_server.py --worker-id $i --port $PORT &
-    sleep 2  # Stagger GPU loading
-done
+if [ "$NUM_WORKERS" -gt 0 ]; then
+    echo ""
+    echo "============================================================"
+    echo "[START] Launching $NUM_WORKERS TensorRT Clicker Workers"
+    echo "============================================================"
+    echo "  Ports: 5555-$((5555 + NUM_WORKERS - 1))"
+    echo "  Mode: Flask+Redis pub/sub"
+    echo "============================================================"
+    echo ""
 
-echo ""
-echo "[OK] 8 Clicker workers started in background"
-echo ""
+    # Start clicker workers in background
+    for i in $(seq 0 $((NUM_WORKERS - 1))); do
+        PORT=$((5555 + i))
+        echo "[WORKER $i] Starting on port $PORT..."
+        python /app/start_object_server.py --worker-id $i --port $PORT &
+        sleep 2  # Stagger GPU loading
+    done
+
+    echo ""
+    echo "[OK] $NUM_WORKERS Clicker workers started in background"
+    echo ""
+else
+    echo ""
+    echo "============================================================"
+    echo "[SKIP] NUM_WORKERS=0 - Sender-only mode (no clickers)"
+    echo "============================================================"
+    echo ""
+fi
 
 # ============================================================
 # Start Celery Sender Worker (foreground)
