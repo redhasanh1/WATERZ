@@ -215,14 +215,13 @@ get_crash_reason() {
 
 WORKER_NAME="${NOTIFY_WORKER_NAME:-$(hostname)}"
 RESTART_COUNT=0
-MAX_RESTARTS=100  # Prevent infinite loop on persistent errors
 RESTART_DELAY=5   # Seconds between restarts
 
 # NOTE: Startup notification is now sent from WITHIN Celery (worker_ready signal)
 # This ensures notification fires AFTER TRT engines are built and Celery is truly ready
 
-# Production restart loop - auto-recovers from crashes
-while [ $RESTART_COUNT -lt $MAX_RESTARTS ]; do
+# Production restart loop - UNLIMITED restarts for production
+while true; do
     echo ""
     echo "============================================================"
     echo "[PRODUCTION] Starting Celery worker in tmux (restart #$RESTART_COUNT)"
@@ -267,8 +266,3 @@ while [ $RESTART_COUNT -lt $MAX_RESTARTS ]; do
     # Send restart notification
     send_notification "🔄 Worker **$WORKER_NAME** restarting... (attempt $RESTART_COUNT)"
 done
-
-# If we hit max restarts, something is seriously wrong
-send_notification "💀 Worker **$WORKER_NAME** DEAD! Hit max restarts ($MAX_RESTARTS). Manual intervention required."
-echo "[FATAL] Hit max restarts ($MAX_RESTARTS). Exiting."
-exit 1

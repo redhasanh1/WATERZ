@@ -104,105 +104,229 @@ def extract_frames(video_path, output_dir):
     return frame_idx, fps
 
 
+def release_old_frames_complete(inference_state, keep_last=64):
+    """
+    Complete Det-SAM2 memory management implementation
+    Based on Section 3.7 of Det-SAM2 paper
+    """
+    try:
+        if "images" not in inference_state or len(inference_state["images"]) <= keep_last:
+            return
+
+        current_count = len(inference_state["images"])
+        drop_count = current_count - keep_last
+
+        # Create synchronized arrays with proper index mapping
+        new_images = inference_state["images"][drop_count:]
+        new_images_idx = inference_state["images_idx"][drop_count:]
+
+        # Update state with synchronized arrays
+        inference_state["images"] = new_images
+        inference_state["images_idx"] = new_images_idx
+
+        # CRITICAL: Clean output_dict - this is the main memory leak source
+        if "output_dict" in inference_state:
+            output_dict = inference_state["output_dict"]
+            first_kept = new_images_idx[0] if len(new_images_idx) > 0 else 0
+
+            # Clean all frame outputs for dropped frames
+            for key in ["non_cond_frame_outputs", "cond_frame_outputs"]:
+                if key in output_dict:
+                    for old_idx in list(output_dict[key].keys()):
+                        if old_idx < first_kept:
+                            output_dict[key].pop(old_idx, None)
+
+            # Clean consolidated frame indices
+            if "consolidated_frame_inds" in output_dict:
+                consolidated = output_dict["consolidated_frame_inds"]
+                if "cond_frame_outputs" in consolidated:
+                    consolidated["cond_frame_outputs"] = {
+                        idx for idx in consolidated["cond_frame_outputs"]
+                        if idx >= first_kept
+                    }
+
+        # Clean per-object output dictionaries
+        if "output_dict_per_obj" in inference_state:
+            for obj_id, obj_dict in inference_state["output_dict_per_obj"].items():
+                first_kept = new_images_idx[0] if len(new_images_idx) > 0 else 0
+
+                for key in ["non_cond_frame_outputs", "cond_frame_outputs"]:
+                    if key in obj_dict:
+                        for old_idx in list(obj_dict[key].keys()):
+                            if old_idx < first_kept:
+                                obj_dict[key].pop(old_idx, None)
+
+        # Force cleanup
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    except Exception as e:
+        print(f"[SAM2] Det-SAM2 cleanup warning: {e}")
+
+
+def _track_batch(frames_dir, batch_start, batch_end, output_masks_dir, points, labels, bbox, frame_idx_start):
+    """
+    Process a single batch of frames - Det-SAM2 batch processing approach
+    """
+    import shutil
+    import gc
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    batch_size = batch_end - batch_start
+
+    # Create temporary batch directory with only this batch's frames
+    batch_frames_dir = f"/tmp/sam2_batch_{batch_start}"
+    if os.path.exists(batch_frames_dir):
+        shutil.rmtree(batch_frames_dir)
+    os.makedirs(batch_frames_dir, exist_ok=True)
+
+    # Copy only frames for this batch (renumbered from 0)
+    print(f"[SAM2-Batch] Copying frames {batch_start}-{batch_end} to batch directory...")
+    for i in range(batch_start, batch_end):
+        src = os.path.join(frames_dir, f"{i:05d}.jpg")
+        dst = os.path.join(batch_frames_dir, f"{i - batch_start:05d}.jpg")
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+
+    # Load predictor
+    predictor = build_sam2_video_predictor(
+        SAM2_CONFIG,
+        str(SAM2_CHECKPOINT),
+        device=device,
+        vos_optimized=False
+    )
+    torch.cuda.empty_cache()
+
+    # Initialize state for this batch only (much faster!)
+    inference_state = predictor.init_state(
+        video_path=batch_frames_dir,
+        offload_video_to_cpu=True,
+        offload_state_to_cpu=True,
+        async_loading_frames=False,
+    )
+
+    # Adjust prompt frame index for batch (first batch uses original, others use frame 0 with last mask)
+    batch_prompt_frame = 0 if batch_start > 0 else frame_idx_start
+
+    # Add prompt
+    if bbox is not None:
+        box_array = np.array(bbox, dtype=np.float32)
+        predictor.add_new_points_or_box(
+            inference_state=inference_state,
+            frame_idx=batch_prompt_frame,
+            obj_id=1,
+            box=box_array
+        )
+    elif points is not None and len(points) > 0:
+        points_array = np.array([[p[0], p[1]] for p in points], dtype=np.float32)
+        labels_array = np.array(labels, dtype=np.int32) if labels else np.ones(len(points), dtype=np.int32)
+        predictor.add_new_points_or_box(
+            inference_state=inference_state,
+            frame_idx=batch_prompt_frame,
+            obj_id=1,
+            points=points_array,
+            labels=labels_array
+        )
+
+    # Propagate this batch
+    masks_saved = 0
+    last_mask = None
+
+    with torch.inference_mode():
+        with torch.autocast("cuda", dtype=torch.bfloat16, cache_enabled=True):
+            for frame_idx, obj_ids, mask_logits in tqdm(
+                predictor.propagate_in_video(inference_state),
+                total=batch_size,
+                desc=f"Batch {batch_start//200}"
+            ):
+                mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
+                mask_uint8 = (mask * 255).astype(np.uint8)
+
+                # Filter noise
+                if np.sum(mask_uint8 > 127) < 100:
+                    mask_uint8[:] = 0
+
+                # Save with original frame numbering
+                original_frame_idx = batch_start + frame_idx
+                cv2.imwrite(f"{output_masks_dir}/{original_frame_idx:05d}.png", mask_uint8)
+                masks_saved += 1
+                last_mask = mask_uint8
+
+                # Det-SAM2 cleanup
+                if masks_saved % 50 == 0:
+                    release_old_frames_complete(inference_state, keep_last=64)
+                    gc.collect()
+                    torch.cuda.empty_cache()
+
+    # Full cleanup between batches
+    del predictor
+    del inference_state
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
+
+    # Remove batch directory
+    shutil.rmtree(batch_frames_dir, ignore_errors=True)
+
+    return masks_saved, last_mask
+
+
 def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=None, labels=None, bbox=None, frame_idx_start=0):
     """
-    Pure PyTorch SAM2 tracking - works for both point and bbox prompts
+    Pure PyTorch SAM2 tracking with Det-SAM2 batch processing for long videos.
+    Processes videos in batches of 200 frames to prevent memory accumulation during loading.
 
     Args:
         points: List of (x, y) tuples for multiple click points
         labels: List of labels (1=foreground, 0=background) for each point
     """
+    import gc
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     enable_optimizations()
 
     # Create output directory
     os.makedirs(output_masks_dir, exist_ok=True)
 
-    print(f"[SAM2-PyTorch] Loading SAM2 video predictor...")
+    BATCH_SIZE = 200  # Process in batches of 200 frames to prevent memory accumulation
 
-    predictor = build_sam2_video_predictor(
-        SAM2_CONFIG,
-        str(SAM2_CHECKPOINT),
-        device=device,
-        vos_optimized=False  # DISABLED - torch.compile takes too long for testing
-    )
-
-    torch.cuda.empty_cache()
-
-    # Initialize state - use lazy loading to avoid OOM on long videos
-    inference_state = predictor.init_state(
-        video_path=frames_dir,
-        offload_video_to_cpu=True,      # Keep frames on CPU, move to GPU only when needed
-        async_loading_frames=True,       # Lazy load frames instead of pre-allocating all at once
-    )
-
-    # Add prompt (point or bbox) to initialize tracking
-    if bbox is not None:
-        # bbox format: [x1, y1, x2, y2]
-        box_array = np.array(bbox, dtype=np.float32)
-        print(f"[SAM2-PyTorch] Adding bbox prompt: {bbox} on frame {frame_idx_start}")
-        _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-            inference_state=inference_state,
-            frame_idx=frame_idx_start,
-            obj_id=1,
-            box=box_array
-        )
-    elif points is not None and len(points) > 0:
-        # points format: list of (x, y) tuples
-        # labels format: list of 1 (foreground) or 0 (background)
-        points_array = np.array([[p[0], p[1]] for p in points], dtype=np.float32)
-        if labels is not None and len(labels) == len(points):
-            labels_array = np.array(labels, dtype=np.int32)
-        else:
-            # Default all to foreground (1) if labels not provided
-            labels_array = np.ones(len(points), dtype=np.int32)
-        print(f"[SAM2-PyTorch] Adding {len(points)} point prompt(s): {points} on frame {frame_idx_start}")
-        _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-            inference_state=inference_state,
-            frame_idx=frame_idx_start,
-            obj_id=1,
-            points=points_array,
-            labels=labels_array
+    if total_frames <= BATCH_SIZE:
+        # For small videos, process normally (single batch)
+        print(f"[SAM2-PyTorch] Processing {total_frames} frames in single batch...")
+        masks_saved, _ = _track_batch(
+            frames_dir, 0, total_frames, output_masks_dir,
+            points, labels, bbox, frame_idx_start
         )
     else:
-        raise ValueError("Must provide either points or bbox")
+        # For large videos, process in batches
+        num_batches = (total_frames + BATCH_SIZE - 1) // BATCH_SIZE
+        print(f"[SAM2-PyTorch] Processing {total_frames} frames in {num_batches} batches of {BATCH_SIZE}")
 
-    print(f"[SAM2-PyTorch] Propagating {total_frames} frames...")
+        total_masks_saved = 0
+        last_mask = None
 
-    # Propagate
-    masks_saved = 0
-    with torch.inference_mode():
-        with torch.autocast("cuda", dtype=torch.bfloat16, cache_enabled=True):
-            for frame_idx, obj_ids, mask_logits in tqdm(
-                predictor.propagate_in_video(inference_state),
-                total=total_frames,
-                desc="SAM2 Tracking"
-            ):
-                # Get mask
-                mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
-                mask_uint8 = (mask * 255).astype(np.uint8)
+        for batch_idx in range(num_batches):
+            batch_start = batch_idx * BATCH_SIZE
+            batch_end = min(batch_start + BATCH_SIZE, total_frames)
 
-                # Detect empty/noise mask (object off-screen or lost)
-                MIN_MASK_PIXELS = 100  # Ignore noise < 100 pixels
-                mask_pixel_count = np.sum(mask_uint8 > 127)
-                if mask_pixel_count < MIN_MASK_PIXELS:
-                    print(f"[SAM2] Frame {frame_idx}: Object not visible ({mask_pixel_count} px < {MIN_MASK_PIXELS} threshold)")
-                    mask_uint8[:] = 0  # Zero out noise
+            print(f"\n[SAM2-Batch] Processing batch {batch_idx + 1}/{num_batches}: frames {batch_start}-{batch_end}")
 
-                # Save mask
-                cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
-                masks_saved += 1
+            masks_saved, last_mask = _track_batch(
+                frames_dir, batch_start, batch_end, output_masks_dir,
+                points, labels, bbox, frame_idx_start
+            )
+            total_masks_saved += masks_saved
+
+            # Force cleanup between batches
+            gc.collect()
+            torch.cuda.empty_cache()
+
+            print(f"[SAM2-Batch] Batch {batch_idx + 1} complete: {masks_saved} masks saved")
+
+        masks_saved = total_masks_saved
 
     print(f"[SAM2] Complete! Saved {masks_saved} masks to {output_masks_dir}")
-
-    # Cleanup VRAM to prevent accumulation across jobs
-    del predictor
-    del inference_state
-    import gc
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
     print(f"[SAM2] VRAM cleanup complete")
 
     return masks_saved

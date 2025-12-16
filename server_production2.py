@@ -9,6 +9,7 @@ import os
 import sys
 import glob
 import json
+import threading
 from typing import List, Optional, Tuple
 from flask import Flask, request, jsonify
 from celery import Celery, chord
@@ -1503,7 +1504,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
             # Get frame dimensions from first available frame
             first_frame = VRAMCompressor.decompress_frame(
-                vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[0]
+                vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[min(preloaded_frames.keys())]
             )
             frame_height, frame_width = first_frame.shape[:2]
 
@@ -1646,11 +1647,13 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
     finally:
         # Stop VRAM watchdog
         stop_vram_watchdog()
-        # NUCLEAR cleanup after EVERY task to prevent crashes on Salad
-        try:
-            full_cleanup(video_id=video_id, context="after process_sam2_interactive")
-        except:
-            cleanup_vram("finally block fallback")
+        # NUCLEAR cleanup in BACKGROUND thread - doesn't block return to user!
+        def _bg_cleanup():
+            try:
+                full_cleanup(video_id=video_id, context="after process_sam2_interactive")
+            except:
+                cleanup_vram("finally block fallback")
+        threading.Thread(target=_bg_cleanup, daemon=True).start()
 
 
 #============================================================================
@@ -2770,7 +2773,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         # Get frame dimensions from first available frame
         first_frame = VRAMCompressor.decompress_frame(
-            vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[0]
+            vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[min(preloaded_frames.keys())]
         )
         frame_height, frame_width = first_frame.shape[:2]
 
@@ -2911,11 +2914,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
     finally:
         # Stop VRAM watchdog
         stop_vram_watchdog()
-        # NUCLEAR cleanup after EVERY task to prevent crashes on Salad
-        try:
-            full_cleanup(video_id=video_id, context="after _continue_after_masks")
-        except:
-            cleanup_vram("finally block fallback")
+        # NUCLEAR cleanup in BACKGROUND thread - doesn't block return to user!
+        def _bg_cleanup():
+            try:
+                full_cleanup(video_id=video_id, context="after _continue_after_masks")
+            except:
+                cleanup_vram("finally block fallback")
+        threading.Thread(target=_bg_cleanup, daemon=True).start()
 
 
 # =============================================================================
