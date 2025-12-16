@@ -1166,6 +1166,11 @@
                 display: block !important;
             }
 
+            /* Profile items show in hamburger menu when logged in */
+            .mobile-profile-item {
+                display: block !important;
+            }
+
             .nav-cta {
                 margin: 0.5rem 1rem;
             }
@@ -1379,15 +1384,13 @@
                 </a>
 
                 <ul class="nav-menu" id="navMenu">
+                    <li class="mobile-profile-item" style="display: none;"><a href="profile" id="mobileUserName" style="color: var(--primary); font-weight: 700;"></a></li>
+                    <li class="mobile-profile-item" style="display: none;"><span id="mobileUserCredits" style="color: var(--text-secondary); font-weight: 600;"></span></li>
                     <li><a href="premium#pricing">Pricing</a></li>
                     <li><a href="api">API</a></li>
                     <li><a href="contact">Contact</a></li>
                     <li class="mobile-only-menu-item"><button id="mobileThemeToggle" onclick="toggleTheme()" style="background: var(--gradient-primary); border: none; border-radius: 8px; padding: 0.6rem 1.2rem; color: white; font-weight: 600; cursor: pointer; width: 100%;"><span id="mobileThemeIcon">Toggle Theme</span></button></li>
-                    <!-- Mobile Profile/Auth Items -->
-                    <li class="mobile-only-menu-item" id="mobileSignInItem"><a href="login" style="display: block; background: var(--gradient-primary); color: white; padding: 0.8rem 1.5rem; border-radius: 8px; font-weight: 600; text-decoration: none; text-align: center;">Sign In</a></li>
-                    <li class="mobile-only-menu-item mobile-profile-item" id="mobileProfileLink" style="display: none;"><a href="profile" style="display: block; color: var(--primary); padding: 0.8rem 1.5rem; font-weight: 600; text-decoration: none; text-align: center;">View My Profile</a></li>
-                    <li class="mobile-only-menu-item mobile-profile-item" id="mobileCreditsDisplay" style="display: none;"><span id="mobileMenuCredits" style="display: block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.6rem 1.2rem; border-radius: 20px; font-weight: 600; text-align: center;">0 credits</span></li>
-                    <li class="mobile-only-menu-item mobile-profile-item" id="mobileLogoutItem" style="display: none;"><button onclick="logout()" style="width: 100%; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; padding: 0.6rem 1.2rem; border-radius: 8px; font-weight: 600; cursor: pointer;">Sign Out</button></li>
+                    <li class="mobile-profile-item mobile-only-menu-item" id="mobileSignInItem" style="display: none;"><a href="login" style="color: var(--primary); font-weight: 600;">Sign In</a></li>
                 </ul>
             </div>
 
@@ -3357,24 +3360,23 @@
         mobileHeaderCredits.style.display = 'inline-block';
       }
 
-      // Update mobile hamburger menu - hide sign in, show profile items
+      // Update mobile hamburger menu profile items
+      const mobileUserNameEl = document.getElementById('mobileUserName');
+      const mobileUserCreditsEl = document.getElementById('mobileUserCredits');
       const mobileSignInItem = document.getElementById('mobileSignInItem');
-      const mobileProfileLink = document.getElementById('mobileProfileLink');
-      const mobileCreditsDisplay = document.getElementById('mobileCreditsDisplay');
-      const mobileMenuCredits = document.getElementById('mobileMenuCredits');
-      const mobileLogoutItem = document.getElementById('mobileLogoutItem');
 
-      if (mobileSignInItem) mobileSignInItem.style.display = 'none';
-      if (mobileProfileLink) mobileProfileLink.style.display = 'block';
-      if (mobileCreditsDisplay) mobileCreditsDisplay.style.display = 'block';
-      if (mobileLogoutItem) mobileLogoutItem.style.display = 'block';
-      if (mobileMenuCredits) {
-        mobileMenuCredits.textContent = credits + ' credit' + (credits !== 1 ? 's' : '');
-        if (credits === 0) {
-          mobileMenuCredits.style.background = 'rgba(239, 68, 68, 0.9)';
-        } else if (credits < 3) {
-          mobileMenuCredits.style.background = 'rgba(245, 158, 11, 0.9)';
-        }
+      if (mobileUserNameEl) {
+        mobileUserNameEl.textContent = '👤 ' + (userData.name || userData.email.split('@')[0]);
+        mobileUserNameEl.parentElement.style.display = 'block';
+      }
+
+      if (mobileUserCreditsEl) {
+        mobileUserCreditsEl.textContent = '💰 ' + credits + ' credit' + (credits !== 1 ? 's' : '');
+        mobileUserCreditsEl.parentElement.style.display = 'block';
+      }
+
+      if (mobileSignInItem) {
+        mobileSignInItem.style.display = 'none';
       }
 
       // Show verification banner if email not verified
@@ -3479,23 +3481,17 @@
           }
         });
       }
+    } else {
+      // User not logged in - show sign in in mobile menu
+      const mobileSignInItem = document.getElementById('mobileSignInItem');
+      if (mobileSignInItem) {
+        mobileSignInItem.style.display = 'block';
+      }
     }
   } catch (e) {
     console.error('[Auth Check]', e);
   }
 })();
-
-// Logout function
-function logout() {
-  localStorage.removeItem('user');
-  // Call server logout endpoint
-  fetch((window.API_BASE_URL || '') + '/api/auth/logout', {
-    method: 'POST',
-    credentials: 'include'
-  }).finally(() => {
-    window.location.href = '/';
-  });
-}
 </script>
 <!-- Theme Toggle Script -->
 <script>
