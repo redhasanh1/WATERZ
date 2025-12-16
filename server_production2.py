@@ -2227,6 +2227,19 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             video_path = local_video
             print(f"[RECEIVER] Downloaded {len(r.content) / 1024 / 1024:.1f} MB to {local_video}")
 
+        # If video is an HTTPS URL, download it locally (cv2.VideoCapture unreliable with remote URLs)
+        elif video_path.startswith('http://') or video_path.startswith('https://'):
+            filename = os.path.basename(video_path.split('?')[0])  # Strip query params
+            local_video = os.path.join(TEMP_DIR, f"{video_id}_{filename}")
+            print(f"[RECEIVER] Downloading video from URL: {video_path}...")
+            self.update_state(state='PROCESSING', meta={'progress': 8, 'status': 'Downloading video'})
+            r = requests.get(video_path, timeout=300)
+            r.raise_for_status()
+            with open(local_video, 'wb') as f:
+                f.write(r.content)
+            video_path = local_video
+            print(f"[RECEIVER] Downloaded {len(r.content) / 1024 / 1024:.1f} MB to {local_video}")
+
         # Video metadata
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -2543,6 +2556,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 if ret:
                     preloaded_frames[frame_idx] = VRAMCompressor.compress_frame(frame)
             cap_preload.release()
+            # Verify all frames were loaded - fail early with clear error instead of cryptic KeyError
+            if len(preloaded_frames) < total_frames:
+                raise ValueError(f"Could not read all video frames: got {len(preloaded_frames)}/{total_frames}. Video may be corrupted or URL is invalid.")
             print(f"[SAM2] All {len(preloaded_frames)} frames pre-loaded - workers will SHARE!")
 
         def process_segment_local(seg_idx, start_f, end_f, seg_bbox):
@@ -2826,7 +2842,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             ffmpeg_cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE
+            stderr=subprocess.DEVNULL  # DEVNULL prevents deadlock from unbuffered stderr
         )
 
         # Stream ALL frames directly to FFmpeg (processed + unprocessed)
@@ -2850,18 +2866,14 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             proc.stdin.close()
         except BrokenPipeError:
-            # FFmpeg crashed - get the error message
-            stderr_output = proc.stderr.read().decode('utf-8', errors='ignore')
-            print(f"[FFMPEG ERROR] FFmpeg crashed! stderr:\n{stderr_output}")
-            raise RuntimeError(f"FFmpeg crashed: {stderr_output[:500]}")
+            print(f"[FFMPEG ERROR] FFmpeg crashed during encoding")
+            raise RuntimeError(f"FFmpeg crashed during encoding")
 
         proc.wait(timeout=300)
 
         if proc.returncode != 0:
-            stderr_output = proc.stderr.read().decode('utf-8', errors='ignore')
             print(f"[ERROR] FFmpeg encoding failed (code {proc.returncode})")
-            print(f"[FFMPEG STDERR] {stderr_output}")
-            raise RuntimeError(f"Video encoding failed (code {proc.returncode}): {stderr_output[:500]}")
+            raise RuntimeError(f"Video encoding failed (code {proc.returncode})")
 
         _encode_time = _time.time() - _encode_start
         print(f"[SAM2] NVENC encode complete: {total_frames} frames in {_encode_time:.2f}s ({total_frames/_encode_time:.1f} fps)")
