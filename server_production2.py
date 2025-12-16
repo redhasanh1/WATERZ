@@ -1690,7 +1690,7 @@ def process_sam2():
     })
 
 
-def validate_video_limits_yolo(video_path, max_duration=60, max_fps=60):
+def validate_video_limits_yolo(video_path, max_duration=600, max_fps=60):
     """Validate video duration and FPS limits for YOLO processing."""
     try:
         cap = cv2.VideoCapture(video_path)
