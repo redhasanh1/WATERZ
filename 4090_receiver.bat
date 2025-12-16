@@ -153,8 +153,8 @@ REM 400000 = ~630x630, keeps per-frame under 200ms. Lower = more segments = fast
 set MAX_SEGMENT_PIXELS=400000
 
 REM Max pixels AFTER padding - triggers segment splitting AND downsampling if exceeded
-REM 400k = ~632x632 max - prevents OOM on large objects like planes
-set MAX_CROP_PIXELS=400000
+REM 150k = ~387x387 max - very aggressive downsampling for safety
+set MAX_CROP_PIXELS=150000
 
 REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50
