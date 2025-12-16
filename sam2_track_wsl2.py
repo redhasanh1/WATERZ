@@ -41,30 +41,55 @@ except ImportError:
 
 class YUV420FrameStorage:
     """
-    YUV420 compressed frame storage for SAM2 - 8:1 VRAM savings.
-    Drop-in replacement for inference_state["images"].
+    Load frames from disk and compress to YUV420 in SINGLE PASS.
+    No double loading - compress as we load!
     """
 
-    def __init__(self, original_images, device="cuda"):
+    def __init__(self, frames_dir, image_size=1024, device="cuda"):
         import torch.nn.functional as F
+        from PIL import Image
+        import torchvision.transforms as transforms
+
         self.device = device
         self.compressed = []
-        self.original_shape = None
+        self.video_height = None
+        self.video_width = None
 
-        print(f"[YUV420] Compressing {len(original_images)} frames...", flush=True)
-        for i in range(len(original_images)):
-            frame = original_images[i]  # [3, H, W] tensor
-            if self.original_shape is None:
-                self.original_shape = frame.shape
+        # SAM2's normalization constants
+        img_mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(device)
+        img_std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1).to(device)
 
-            # Compress to YUV420
-            compressed = self._compress(frame)
+        # Get frame paths
+        frame_files = sorted([f for f in os.listdir(frames_dir) if f.endswith('.jpg')])
+
+        # SAM2's transform (resize to internal size)
+        transform = transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+        ])
+
+        print(f"[YUV420] Loading & compressing {len(frame_files)} frames (single pass)...", flush=True)
+        for fname in tqdm(frame_files, desc="YUV420 load+compress"):
+            img = Image.open(os.path.join(frames_dir, fname)).convert("RGB")
+
+            # Store original dimensions from first frame
+            if self.video_height is None:
+                self.video_width, self.video_height = img.size
+
+            # Transform to tensor and normalize (like SAM2 does)
+            tensor = transform(img).to(device)  # [3, H, W]
+            tensor = (tensor - img_mean) / img_std
+
+            # Compress immediately to YUV420
+            compressed = self._compress(tensor)
             self.compressed.append(compressed)
 
-        # Calculate compression stats
-        orig_size = len(self.compressed) * 3 * self.original_shape[1] * self.original_shape[2] * 4
-        comp_size = sum(c['y'].numel() + c['u'].numel() + c['v'].numel() for c in self.compressed) * 2  # half = 2 bytes
-        print(f"[YUV420] Compressed: {orig_size/1e9:.2f}GB -> {comp_size/1e9:.2f}GB ({orig_size/comp_size:.1f}:1)", flush=True)
+            del tensor, img
+
+        # Stats
+        orig_size = len(self.compressed) * 3 * image_size * image_size * 4
+        comp_size = sum(c['y'].numel() + c['u'].numel() + c['v'].numel() for c in self.compressed) * 2
+        print(f"[YUV420] Done! {orig_size/1e9:.2f}GB -> {comp_size/1e9:.2f}GB ({orig_size/comp_size:.1f}:1)", flush=True)
         torch.cuda.empty_cache()
 
     def _compress(self, frame):
@@ -190,8 +215,8 @@ def enable_optimizations():
         os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
 
 
-def extract_frames(video_path, output_dir):
-    """Extract frames from video"""
+def extract_frames(video_path, output_dir, max_height=720):
+    """Extract frames from video, resized to 720p for faster loading"""
     if os.path.exists(output_dir):
         import shutil
         shutil.rmtree(output_dir)
@@ -199,14 +224,29 @@ def extract_frames(video_path, output_dir):
 
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # Calculate resize dimensions (maintain aspect ratio)
+    if orig_height > max_height:
+        scale = max_height / orig_height
+        new_width = int(orig_width * scale)
+        new_height = max_height
+        print(f"[SAM2] Resizing {orig_width}x{orig_height} -> {new_width}x{new_height} (faster loading)")
+    else:
+        new_width, new_height = orig_width, orig_height
 
     frame_idx = 0
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        cv2.imwrite(f"{output_dir}/{frame_idx:05d}.jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+        # Resize if needed for faster loading
+        if orig_height > max_height:
+            frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
+
+        cv2.imwrite(f"{output_dir}/{frame_idx:05d}.jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         frame_idx += 1
 
     cap.release()
@@ -315,23 +355,29 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
     torch.cuda.empty_cache()
 
     try:
-        # Initialize state - KEEP IN VRAM for speed (user has 24GB 4090)
-        print(f"[SAM2-Official] Initializing state for {total_frames} frames (VRAM mode)...")
+        # Load frames with YUV420 compression in SINGLE PASS (no double loading!)
+        print(f"[SAM2-YUV420] Loading {total_frames} frames with YUV420 compression...")
+        yuv_frames = YUV420FrameStorage(frames_dir, image_size=1024, device=device)
+
+        # Initialize SAM2 state (disable async - we already loaded frames)
+        print(f"[SAM2-Official] Initializing predictor state...")
         inference_state = predictor.init_state(
             video_path=frames_dir,
-            offload_video_to_cpu=False,   # KEEP IN VRAM!
-            offload_state_to_cpu=False,   # KEEP IN VRAM!
-            async_loading_frames=True,    # Enable async for speed
+            offload_video_to_cpu=False,
+            offload_state_to_cpu=False,
+            async_loading_frames=False,  # DISABLED - we handle loading
         )
 
-        # Wait for async frame loading to complete
+        # Kill SAM2's frame loader thread if it started
         if hasattr(inference_state["images"], 'thread'):
-            print("[SAM2] Waiting for async frame loading...", flush=True)
             inference_state["images"].thread.join()
 
-        # Replace with YUV420 compressed storage (8:1 VRAM savings)
-        print("[SAM2] Applying YUV420 compression to frames...", flush=True)
-        inference_state["images"] = YUV420FrameStorage(inference_state["images"])
+        # Inject our YUV420 compressed frames
+        inference_state["images"] = yuv_frames
+        inference_state["num_frames"] = len(yuv_frames)
+        inference_state["video_height"] = yuv_frames.video_height
+        inference_state["video_width"] = yuv_frames.video_width
+        print(f"[SAM2-YUV420] Injected {len(yuv_frames)} compressed frames", flush=True)
 
         # Add initial prompt
         if bbox is not None:
