@@ -1393,7 +1393,7 @@ UPLOAD_RATE_LIMIT = {}  # IP -> (count, timestamp)
 USER_VIDEO_RATE_LIMIT = {}  # user_id -> list of timestamps
 
 # Video processing limits
-MAX_VIDEO_DURATION_SECONDS = 60  # 1 minute max
+MAX_VIDEO_DURATION_SECONDS = 600  # 10 minute max
 MAX_VIDEO_FPS = 60  # 60fps max
 
 # Input validation
