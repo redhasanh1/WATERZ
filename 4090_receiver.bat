@@ -36,6 +36,15 @@ if not "%TUNNEL_URL%"=="" (
 )
 echo.
 
+REM B2 credentials for mask download and result upload
+set B2_KEY_ID=00539db5c1104b50000000003
+set B2_APP_KEY=K005384b8lPoBT11wScxkZ2Gx0fszus
+set B2_BUCKET=watermarkz
+set B2_CDN_URL=https://markz.humblewoslayer.workers.dev
+set B2_UPLOAD_ENABLED=1
+echo [B2] Credentials loaded for %B2_BUCKET%
+echo.
+
 echo.
 echo ============================================================
 echo 4090 RECEIVER - ProPainter Worker
@@ -143,9 +152,9 @@ REM Max pixels (width*height) per segment's union bbox - prevents huge crops tha
 REM 400000 = ~630x630, keeps per-frame under 200ms. Lower = more segments = faster per segment
 set MAX_SEGMENT_PIXELS=400000
 
-REM Max pixels AFTER padding - triggers segment splitting if exceeded (~775x775 = 600k)
-REM Lower = faster per-frame (600k keeps under 500ms/frame vs 2s at 860k)
-set MAX_CROP_PIXELS=600000
+REM Max pixels AFTER padding - triggers segment splitting AND downsampling if exceeded
+REM 400k = ~632x632 max - prevents OOM on large objects like planes
+set MAX_CROP_PIXELS=400000
 
 REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50

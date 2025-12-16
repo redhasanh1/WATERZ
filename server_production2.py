@@ -9,7 +9,6 @@ import os
 import sys
 import glob
 import json
-import threading
 from typing import List, Optional, Tuple
 from flask import Flask, request, jsonify
 from celery import Celery, chord
@@ -1502,18 +1501,10 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
             output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
 
-            # Get frame dimensions from first available frame (handle empty case)
-            if vram_frames:
-                first_frame = VRAMCompressor.decompress_frame(vram_frames[min(vram_frames.keys())])
-            elif preloaded_frames:
-                first_frame = VRAMCompressor.decompress_frame(preloaded_frames[min(preloaded_frames.keys())])
-            else:
-                # Fallback: get dimensions from video file directly
-                _cap = cv2.VideoCapture(video_path)
-                _, first_frame = _cap.read()
-                _cap.release()
-            if first_frame is None:
-                raise ValueError(f"Could not read video file: {video_path}")
+            # Get frame dimensions from first available frame
+            first_frame = VRAMCompressor.decompress_frame(
+                vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[0]
+            )
             frame_height, frame_width = first_frame.shape[:2]
 
             # FFmpeg command: pipe rawvideo → NVENC → MP4 with audio from original
@@ -1655,13 +1646,11 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
     finally:
         # Stop VRAM watchdog
         stop_vram_watchdog()
-        # NUCLEAR cleanup in BACKGROUND thread - doesn't block return to user!
-        def _bg_cleanup():
-            try:
-                full_cleanup(video_id=video_id, context="after process_sam2_interactive")
-            except:
-                cleanup_vram("finally block fallback")
-        threading.Thread(target=_bg_cleanup, daemon=True).start()
+        # NUCLEAR cleanup after EVERY task to prevent crashes on Salad
+        try:
+            full_cleanup(video_id=video_id, context="after process_sam2_interactive")
+        except:
+            cleanup_vram("finally block fallback")
 
 
 #============================================================================
@@ -2257,6 +2246,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         masks_full = [cv2.imread(mf, cv2.IMREAD_GRAYSCALE) for mf in mask_files]
         masks_full = [m for m in masks_full if m is not None]
 
+        # Resize masks to match video dimensions if needed (WSL may generate at different resolution)
+        if masks_full and masks_full[0] is not None:
+            mask_h, mask_w = masks_full[0].shape[:2]
+            if mask_w != width or mask_h != height:
+                print(f"[SAM2] Resizing {len(masks_full)} masks from {mask_w}x{mask_h} to {width}x{height}...")
+                masks_full = [cv2.resize(m, (width, height), interpolation=cv2.INTER_NEAREST) for m in masks_full]
+
         # DON'T load all frames upfront - use per-segment loading
         total_frames = total_frames_original
         print(f"[SAM2] Video has {total_frames} frames (will load per-segment)")
@@ -2569,11 +2565,32 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 list(seg_bbox),  # Use segment bbox directly in frame coordinates
                 width, height, padding_ratio=SEGMENT_CROP_PAD_RATIO, min_size=128
             )
+
+            # Downsample large crops to prevent OOM (RTX 4090 can handle ~600k pixels max)
+            crop_pixels = seg_crop_w * seg_crop_h
+            scale_factor = 1.0
+            proc_w, proc_h = seg_crop_w, seg_crop_h  # Processing dimensions
+            if MAX_CROP_PIXELS > 0 and crop_pixels > MAX_CROP_PIXELS:
+                scale_factor = (MAX_CROP_PIXELS / crop_pixels) ** 0.5
+                proc_w = int(seg_crop_w * scale_factor)
+                proc_h = int(seg_crop_h * scale_factor)
+                # Ensure dimensions are even (required for video encoding)
+                proc_w = proc_w - (proc_w % 2)
+                proc_h = proc_h - (proc_h % 2)
+                print(f"[SAM2] Crop {seg_crop_w}x{seg_crop_h} ({crop_pixels:,}px) > {MAX_CROP_PIXELS:,} limit")
+                print(f"[SAM2] Downsampling to {proc_w}x{proc_h} ({proc_w*proc_h:,}px) for ProPainter")
+
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
             if movement < 10:
                 neighbor_length, subvideo_length = 2, 30
             else:
                 neighbor_length, subvideo_length = 3, 60
+
+            # For large crops that needed downsampling, reduce subvideo_length to save VRAM
+            if scale_factor < 1.0:
+                subvideo_length = max(15, subvideo_length // 2)
+                print(f"[SAM2] Reduced subvideo_length to {subvideo_length} for large crop")
+
             pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
             pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
             proc_start = start_f - pad_left
@@ -2590,10 +2607,16 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
                 # Apply segment-specific crop directly (seg_crop coords are in frame coords)
                 seg_frame = full_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                # Downsample if needed to prevent OOM
+                if scale_factor < 1.0:
+                    seg_frame = cv2.resize(seg_frame, (proc_w, proc_h), interpolation=cv2.INTER_AREA)
                 seg_frames.append(np.ascontiguousarray(seg_frame))
                 # Crop mask from original all_masks (not pre-cropped)
                 if frame_idx < len(all_masks):
                     seg_mask = all_masks[frame_idx][seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w]
+                    # Downsample mask too (use NEAREST to preserve binary values)
+                    if scale_factor < 1.0:
+                        seg_mask = cv2.resize(seg_mask, (proc_w, proc_h), interpolation=cv2.INTER_NEAREST)
                     seg_masks.append(np.ascontiguousarray(seg_mask))
             if not seg_frames or not seg_masks:
                 print(f"[SAM2] WARNING: Segment {seg_idx+1} has no frames/masks! seg_frames={len(seg_frames)}, seg_masks={len(seg_masks)}")
@@ -2630,9 +2653,13 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                     continue
                 # GET from shared preloaded frames (ZERO disk I/O!)
                 orig_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
+                # Upscale if we downsampled for processing
+                out_frame = output_frames[i]
+                if scale_factor < 1.0:
+                    out_frame = cv2.resize(out_frame, (seg_crop_w, seg_crop_h), interpolation=cv2.INTER_LANCZOS4)
                 # Composite segment output onto original frame (seg_crop coords are in frame coords)
                 orig_frame[seg_crop_y:seg_crop_y + seg_crop_h,
-                          seg_crop_x:seg_crop_x + seg_crop_w] = output_frames[i]
+                          seg_crop_x:seg_crop_x + seg_crop_w] = out_frame
                 # Store in VRAM with YUV420 compression (8:1 ratio!)
                 vram_frames[frame_idx] = VRAMCompressor.compress_frame(orig_frame)
                 processed_frames.add(frame_idx)
@@ -2795,18 +2822,10 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
         output_path = os.path.join(RESULT_DIR, f"{video_id}_sam2_removed.mp4")
 
-        # Get frame dimensions from first available frame (handle empty case)
-        if vram_frames:
-            first_frame = VRAMCompressor.decompress_frame(vram_frames[min(vram_frames.keys())])
-        elif preloaded_frames:
-            first_frame = VRAMCompressor.decompress_frame(preloaded_frames[min(preloaded_frames.keys())])
-        else:
-            # Fallback: get dimensions from video file directly
-            _cap = cv2.VideoCapture(video_path)
-            _, first_frame = _cap.read()
-            _cap.release()
-        if first_frame is None:
-            raise ValueError(f"Could not read video file: {video_path}")
+        # Get frame dimensions from first available frame
+        first_frame = VRAMCompressor.decompress_frame(
+            vram_frames[min(vram_frames.keys())] if vram_frames else preloaded_frames[0]
+        )
         frame_height, frame_width = first_frame.shape[:2]
 
         # Choose encoder: NVENC (GPU) if available, else libx264 (CPU)
@@ -2942,13 +2961,11 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
     finally:
         # Stop VRAM watchdog
         stop_vram_watchdog()
-        # NUCLEAR cleanup in BACKGROUND thread - doesn't block return to user!
-        def _bg_cleanup():
-            try:
-                full_cleanup(video_id=video_id, context="after _continue_after_masks")
-            except:
-                cleanup_vram("finally block fallback")
-        threading.Thread(target=_bg_cleanup, daemon=True).start()
+        # NUCLEAR cleanup after EVERY task to prevent crashes on Salad
+        try:
+            full_cleanup(video_id=video_id, context="after _continue_after_masks")
+        except:
+            cleanup_vram("finally block fallback")
 
 
 # =============================================================================
