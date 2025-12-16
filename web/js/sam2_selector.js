@@ -69,6 +69,18 @@ class SAM2Selector {
             this.handleRightClick(e);
         });
 
+        // Attach touch event listeners for mobile
+        this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent zoom/scroll
+            if (e.touches.length === 1) {
+                this.handleTouch(e.touches[0]);
+            }
+        }, { passive: false });
+
+        this.canvas.addEventListener('touchend', (e) => {
+            e.preventDefault(); // Prevent ghost clicks
+        }, { passive: false });
+
         // Update on window resize
         window.addEventListener('resize', () => this.updateCanvasSize());
 
@@ -168,6 +180,19 @@ class SAM2Selector {
         const point = this.getCanvasPoint(e);
         if (!point) return; // Ignore clicks in letterbox area
         this.addPoint(point.x, point.y, 0);
+    }
+
+    /**
+     * Handle touch - add positive point (single tap = left click)
+     */
+    handleTouch(touch) {
+        if (this.isLoading) return;
+
+        // Touch object has clientX/clientY like mouse events
+        const point = this.getCanvasPoint(touch);
+        if (!point) return; // Ignore touches in letterbox area
+        this.addPoint(point.x, point.y, 1);
+        console.log(`[SAM2Selector] Touch at (${point.x}, ${point.y})`);
     }
 
     /**
