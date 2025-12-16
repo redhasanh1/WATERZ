@@ -113,22 +113,28 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
 
     # Extract frames
     self.update_state(state='PROCESSING', meta={'status': 'Extracting frames', 'progress': 5})
-    total_frames, fps = sam2w.extract_frames(track_src, temp_frames_dir)
+    total_frames, fps, orig_w, orig_h, new_w, new_h = sam2w.extract_frames(track_src, temp_frames_dir)
+
+    # Scale coordinates if frames were resized
+    scale = new_h / orig_h if orig_h != new_h else 1.0
+    if scale != 1.0:
+        print(f"[WSL-SAM2] Scaling coordinates by {scale:.3f} (original {orig_w}x{orig_h} -> {new_w}x{new_h})")
 
     # Run tracking (PyTorch-only in-process; TensorRT hybrid can be added later)
     self.update_state(state='PROCESSING', meta={'status': 'Tracking SAM2', 'progress': 20})
     if prompt_mode == 'point' and points is not None and len(points) > 0:
-        # Convert points to list of (x, y) tuples
-        pts = [(int(p[0]), int(p[1])) for p in points]
+        # Convert points to list of (x, y) tuples and scale
+        pts = [(int(p[0] * scale), int(p[1] * scale)) for p in points]
         # Labels default to all foreground (1) if not provided
         lbls = labels if labels is not None else [1] * len(pts)
-        print(f"[WSL-SAM2] Using {len(pts)} point(s): {pts}")
+        print(f"[WSL-SAM2] Using {len(pts)} scaled point(s): {pts}")
         masks_saved = sam2w.track_video_pytorch_only(
             temp_frames_dir, total_frames, masks_dir_wsl,
             points=pts, labels=lbls, bbox=None, frame_idx_start=int(frame_idx)
         )
     elif prompt_mode == 'bbox' and bbox is not None:
-        bb = [int(x) for x in bbox[:4]]
+        bb = [int(x * scale) for x in bbox[:4]]
+        print(f"[WSL-SAM2] Using scaled bbox: {bb}")
         masks_saved = sam2w.track_video_pytorch_only(
             temp_frames_dir, total_frames, masks_dir_wsl,
             points=None, labels=None, bbox=bb, frame_idx_start=int(frame_idx)
