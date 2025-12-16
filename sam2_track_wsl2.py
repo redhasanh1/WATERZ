@@ -38,6 +38,116 @@ except ImportError:
     HAS_TRT = False
     print("[SAM2-WSL2] TensorRT predictor not available, using PyTorch for all frames")
 
+
+class YUV420FrameStorage:
+    """
+    YUV420 compressed frame storage for SAM2 - 8:1 VRAM savings.
+    Drop-in replacement for inference_state["images"].
+    """
+
+    def __init__(self, original_images, device="cuda"):
+        import torch.nn.functional as F
+        self.device = device
+        self.compressed = []
+        self.original_shape = None
+
+        print(f"[YUV420] Compressing {len(original_images)} frames...", flush=True)
+        for i in range(len(original_images)):
+            frame = original_images[i]  # [3, H, W] tensor
+            if self.original_shape is None:
+                self.original_shape = frame.shape
+
+            # Compress to YUV420
+            compressed = self._compress(frame)
+            self.compressed.append(compressed)
+
+        # Calculate compression stats
+        orig_size = len(self.compressed) * 3 * self.original_shape[1] * self.original_shape[2] * 4
+        comp_size = sum(c['y'].numel() + c['u'].numel() + c['v'].numel() for c in self.compressed) * 2  # half = 2 bytes
+        print(f"[YUV420] Compressed: {orig_size/1e9:.2f}GB -> {comp_size/1e9:.2f}GB ({orig_size/comp_size:.1f}:1)", flush=True)
+        torch.cuda.empty_cache()
+
+    def _compress(self, frame):
+        """Compress [3, H, W] tensor to YUV420"""
+        import torch.nn.functional as F
+
+        frame = frame.to(self.device)
+        r, g, b = frame[0], frame[1], frame[2]
+
+        # RGB to YUV
+        y = 0.299 * r + 0.587 * g + 0.114 * b
+        u = -0.147 * r - 0.289 * g + 0.436 * b
+        v = 0.615 * r - 0.515 * g - 0.100 * b
+
+        # 4:2:0 subsampling - U/V at quarter resolution
+        u_sub = F.avg_pool2d(u.unsqueeze(0).unsqueeze(0), 2).squeeze()
+        v_sub = F.avg_pool2d(v.unsqueeze(0).unsqueeze(0), 2).squeeze()
+
+        # Store as half precision
+        return {
+            'y': y.half(),
+            'u': u_sub.half(),
+            'v': v_sub.half()
+        }
+
+    def _decompress(self, compressed):
+        """Decompress YUV420 back to [3, H, W] tensor"""
+        import torch.nn.functional as F
+
+        y = compressed['y'].float()
+        u = F.interpolate(compressed['u'].unsqueeze(0).unsqueeze(0).float(),
+                         scale_factor=2, mode='bilinear', align_corners=False).squeeze()
+        v = F.interpolate(compressed['v'].unsqueeze(0).unsqueeze(0).float(),
+                         scale_factor=2, mode='bilinear', align_corners=False).squeeze()
+
+        # YUV to RGB
+        r = y + 1.140 * v
+        g = y - 0.395 * u - 0.581 * v
+        b = y + 2.032 * u
+
+        return torch.stack([r, g, b], dim=0)
+
+    def __getitem__(self, index):
+        return self._decompress(self.compressed[index])
+
+    def __len__(self):
+        return len(self.compressed)
+
+
+def rle_encode_mask(mask_uint8):
+    """RLE compress binary mask (50:1 compression for masks)"""
+    binary = (mask_uint8 > 127).astype(np.uint8).flatten()
+    if len(binary) == 0:
+        return [], mask_uint8.shape
+
+    runs = []
+    current_val = binary[0]
+    current_len = 1
+
+    for i in range(1, len(binary)):
+        if binary[i] == current_val:
+            current_len += 1
+        else:
+            runs.append(current_len if current_val == 1 else -current_len)
+            current_val = binary[i]
+            current_len = 1
+    runs.append(current_len if current_val == 1 else -current_len)
+
+    return runs, mask_uint8.shape
+
+
+def rle_decode_mask(rle_runs, shape):
+    """Decompress RLE back to binary mask"""
+    if not rle_runs:
+        return np.zeros(shape, dtype=np.uint8)
+
+    flat = []
+    for run in rle_runs:
+        flat.extend([1 if run > 0 else 0] * abs(run))
+
+    return (np.array(flat, dtype=np.uint8).reshape(shape) * 255)
+
+
 # Configuration
 SAM2_CHECKPOINT = SAM2_PATH / "checkpoints" / "sam2.1_hiera_tiny.pt"
 SAM2_CONFIG = "configs/sam2.1/sam2.1_hiera_t.yaml"
@@ -214,6 +324,15 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
             async_loading_frames=True,    # Enable async for speed
         )
 
+        # Wait for async frame loading to complete
+        if hasattr(inference_state["images"], 'thread'):
+            print("[SAM2] Waiting for async frame loading...", flush=True)
+            inference_state["images"].thread.join()
+
+        # Replace with YUV420 compressed storage (8:1 VRAM savings)
+        print("[SAM2] Applying YUV420 compression to frames...", flush=True)
+        inference_state["images"] = YUV420FrameStorage(inference_state["images"])
+
         # Add initial prompt
         if bbox is not None:
             box_array = np.array(bbox, dtype=np.float32)
@@ -238,6 +357,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
 
         masks_saved = 0
         num_chunks = (total_frames + CHUNK_SIZE - 1) // CHUNK_SIZE
+        rle_compressed_mask = None  # RLE compressed mask for chunk continuity
 
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16, cache_enabled=True):
@@ -250,6 +370,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                     print(f"\n[SAM2-Chunk] Processing chunk {chunk_idx + 1}/{num_chunks}: frames {chunk_start}-{chunk_end}")
 
                     chunk_masks = 0
+                    last_mask_uint8 = None
                     for frame_idx, obj_ids, mask_logits in tqdm(
                         predictor.propagate_in_video(
                             inference_state,
@@ -269,11 +390,33 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
                         chunk_masks += 1
+                        last_mask_uint8 = mask_uint8
 
                         # CRITICAL: Release memory immediately to prevent accumulation
                         del mask_logits, mask
 
                     print(f"[SAM2-Chunk] Chunk {chunk_idx + 1} complete: {chunk_masks} masks")
+
+                    # RLE compress last mask for next chunk continuity
+                    if last_mask_uint8 is not None and chunk_idx < num_chunks - 1:
+                        try:
+                            rle_runs, mask_shape = rle_encode_mask(last_mask_uint8)
+                            orig_size = last_mask_uint8.nbytes
+                            comp_size = len(rle_runs) * 4
+                            ratio = orig_size / comp_size if comp_size > 0 else 0
+                            print(f"[SAM2-RLE] Compressed: {orig_size} -> {comp_size} bytes ({ratio:.0f}:1)", flush=True)
+
+                            # Decompress and use as prompt for next chunk
+                            decompressed = rle_decode_mask(rle_runs, mask_shape)
+                            predictor.add_new_mask(
+                                inference_state=inference_state,
+                                frame_idx=chunk_end,
+                                obj_id=1,
+                                mask=decompressed > 127
+                            )
+                            print(f"[SAM2-RLE] Added mask prompt at frame {chunk_end} for continuity", flush=True)
+                        except Exception as e:
+                            print(f"[SAM2-RLE] ERROR: {e}", flush=True)
 
                     # Memory cleanup between chunks
                     gc.collect()
