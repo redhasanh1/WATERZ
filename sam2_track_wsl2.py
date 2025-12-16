@@ -139,6 +139,46 @@ class YUV420FrameStorage:
         return len(self.compressed)
 
 
+def init_state_yuv420(predictor, frames_dir, device="cuda"):
+    """
+    Initialize SAM2 inference state with YUV420 compressed frames.
+    SKIPS SAM2's load_video_frames() entirely - no double loading!
+    """
+    from collections import OrderedDict
+
+    # Load frames with YUV420 compression (single pass)
+    yuv_frames = YUV420FrameStorage(frames_dir, image_size=predictor.image_size, device=device)
+
+    # Build inference_state manually (same structure as SAM2's init_state)
+    inference_state = {}
+    inference_state["images"] = yuv_frames
+    inference_state["num_frames"] = len(yuv_frames)
+    inference_state["offload_video_to_cpu"] = False
+    inference_state["offload_state_to_cpu"] = False
+    inference_state["video_height"] = yuv_frames.video_height
+    inference_state["video_width"] = yuv_frames.video_width
+    inference_state["device"] = torch.device(device)
+    inference_state["storage_device"] = torch.device(device)
+
+    # Initialize tracking structures (same as SAM2's init_state)
+    inference_state["point_inputs_per_obj"] = {}
+    inference_state["mask_inputs_per_obj"] = {}
+    inference_state["cached_features"] = {}
+    inference_state["constants"] = {}
+    inference_state["obj_id_to_idx"] = OrderedDict()
+    inference_state["obj_idx_to_id"] = OrderedDict()
+    inference_state["obj_ids"] = []
+    inference_state["output_dict_per_obj"] = {}
+    inference_state["temp_output_dict_per_obj"] = {}
+    inference_state["frames_tracked_per_obj"] = {}
+
+    # Warm up visual backbone on frame 0
+    print("[SAM2-YUV420] Warming up visual backbone...", flush=True)
+    predictor._get_image_feature(inference_state, frame_idx=0, batch_size=1)
+
+    return inference_state
+
+
 def rle_encode_mask(mask_uint8):
     """RLE compress binary mask (50:1 compression for masks)"""
     binary = (mask_uint8 > 127).astype(np.uint8).flatten()
@@ -251,7 +291,7 @@ def extract_frames(video_path, output_dir, max_height=720):
 
     cap.release()
     print(f"[SAM2] Extracted {frame_idx} frames @ {fps:.1f} fps")
-    return frame_idx, fps
+    return frame_idx, fps, orig_width, orig_height, new_width, new_height
 
 
 def release_old_frames_complete(inference_state, keep_last=64):
@@ -355,29 +395,10 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
     torch.cuda.empty_cache()
 
     try:
-        # Load frames with YUV420 compression in SINGLE PASS (no double loading!)
-        print(f"[SAM2-YUV420] Loading {total_frames} frames with YUV420 compression...")
-        yuv_frames = YUV420FrameStorage(frames_dir, image_size=1024, device=device)
-
-        # Initialize SAM2 state (disable async - we already loaded frames)
-        print(f"[SAM2-Official] Initializing predictor state...")
-        inference_state = predictor.init_state(
-            video_path=frames_dir,
-            offload_video_to_cpu=False,
-            offload_state_to_cpu=False,
-            async_loading_frames=False,  # DISABLED - we handle loading
-        )
-
-        # Kill SAM2's frame loader thread if it started
-        if hasattr(inference_state["images"], 'thread'):
-            inference_state["images"].thread.join()
-
-        # Inject our YUV420 compressed frames
-        inference_state["images"] = yuv_frames
-        inference_state["num_frames"] = len(yuv_frames)
-        inference_state["video_height"] = yuv_frames.video_height
-        inference_state["video_width"] = yuv_frames.video_width
-        print(f"[SAM2-YUV420] Injected {len(yuv_frames)} compressed frames", flush=True)
+        # Initialize state with YUV420 compression - SKIPS SAM2's frame loading entirely!
+        print(f"[SAM2-YUV420] Initializing with {total_frames} frames (single pass, no double loading)...")
+        inference_state = init_state_yuv420(predictor, frames_dir, device=device)
+        print(f"[SAM2-YUV420] Ready! {inference_state['num_frames']} frames loaded", flush=True)
 
         # Add initial prompt
         if bbox is not None:
@@ -544,7 +565,20 @@ def main():
         sys.exit(1)
 
     # Extract frames
-    total_frames, fps = extract_frames(video_path, temp_frames_dir)
+    total_frames, fps, orig_w, orig_h, new_w, new_h = extract_frames(video_path, temp_frames_dir)
+
+    # Scale coordinates if frames were resized
+    scale = new_h / orig_h if orig_h != new_h else 1.0
+    if scale != 1.0:
+        print(f"[SAM2] Scaling coordinates by {scale:.3f} (original {orig_w}x{orig_h} -> {new_w}x{new_h})")
+
+        if point is not None:
+            point = (int(point[0] * scale), int(point[1] * scale))
+            print(f"[SAM2] Scaled point: {point}")
+
+        if bbox is not None:
+            bbox = [int(c * scale) for c in bbox]
+            print(f"[SAM2] Scaled bbox: {bbox}")
 
     # Run tracking (pure PyTorch - simpler and still fast)
     # Convert single point to list format expected by function
