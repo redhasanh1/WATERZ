@@ -2007,6 +2007,26 @@
             }
         }
 
+        // Update credits display across all UI elements
+        function updateCreditsDisplay(credits) {
+            const creditsEl = document.getElementById('userCredits');
+            if (creditsEl) {
+                creditsEl.textContent = credits + ' credit' + (credits !== 1 ? 's' : '');
+                if (credits === 0) {
+                    creditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
+                } else if (credits < 3) {
+                    creditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
+                } else {
+                    creditsEl.style.background = 'rgba(102, 126, 234, 0.9)';
+                }
+            }
+            // Update mobile credits
+            const mobileCreditsEl = document.getElementById('mobileUserCredits');
+            if (mobileCreditsEl) {
+                mobileCreditsEl.textContent = '\uD83D\uDCB0 ' + credits + ' credit' + (credits !== 1 ? 's' : '');
+            }
+        }
+
         async function uploadFile(file) {
             // Check if user is logged in
             const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -2319,6 +2339,14 @@
                             statusText.textContent = 'Preparing download...';
                             statusText.style.color = '#10b981';
 
+                            // Update credits from server response
+                            if (statusData.new_credits !== undefined) {
+                                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                                user.credits = statusData.new_credits;
+                                localStorage.setItem('user', JSON.stringify(user));
+                                updateCreditsDisplay(statusData.new_credits);
+                            }
+
                             if (statusData.result_url) {
                                 const resultUrl = statusData.result_url.startsWith('http')
                                     ? statusData.result_url
@@ -2383,6 +2411,14 @@
                         progressPercent.textContent = '100%';
                         statusText.textContent = 'Preparing download...';
                         statusText.style.color = '#10b981';
+
+                        // Update credits from server response
+                        if (statusData.new_credits !== undefined) {
+                            const user = JSON.parse(localStorage.getItem('user') || '{}');
+                            user.credits = statusData.new_credits;
+                            localStorage.setItem('user', JSON.stringify(user));
+                            updateCreditsDisplay(statusData.new_credits);
+                        }
 
                         const resultData = statusData.result || {};
                         if (resultData.result_url) {
@@ -2504,6 +2540,9 @@
             console.log('[SAM2] Processing with selected objects...');
             const points = window.sam2Selector.getAllPoints();
             const frameIndex = window.currentFrame || 0;
+            // Get estimated credits from video element
+            const videoElem = document.getElementById('professionalVideo');
+            const estimatedCredits = parseInt(videoElem?.dataset?.estimatedCredits || '1', 10);
 
             statusText.textContent = 'Starting object removal...';
 
@@ -2515,7 +2554,8 @@
                     points: points,
                     video_width: window.sam2Selector.videoWidth,
                     video_height: window.sam2Selector.videoHeight,
-                    frame_index: frameIndex
+                    frame_index: frameIndex,
+                    estimated_credits: estimatedCredits
                 })
             });
 
@@ -2525,6 +2565,14 @@
                 const processTaskId = data.task_id || data.job_id;
                 console.log('[SAM2] Job started:', processTaskId);
                 startStatusPolling(processTaskId);
+
+                // Update credits display (subtract estimated amount, will sync from server on completion)
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                if (user.id && user.credits !== undefined) {
+                    user.credits = Math.max(0, user.credits - estimatedCredits);
+                    localStorage.setItem('user', JSON.stringify(user));
+                    updateCreditsDisplay(user.credits);
+                }
             } else {
                 throw new Error(data.message || 'Processing failed');
             }
@@ -2573,7 +2621,10 @@
                     statusText.textContent = 'Starting AI processing...';
                     // Get user info from localStorage
                 const user = JSON.parse(localStorage.getItem('user') || '{}');
-                const payload = { task_id: taskId };
+                // Get estimated credits from video element
+                const videoElem = document.getElementById('professionalVideo');
+                const estimatedCredits = parseInt(videoElem?.dataset?.estimatedCredits || '1', 10);
+                const payload = { task_id: taskId, estimated_credits: estimatedCredits };
                 if (user.id) {
                     payload.user_id = user.id;
                 }
@@ -2590,19 +2641,11 @@
                     const processTaskId = data.task_id;
                     startStatusPolling(processTaskId);
 
-                    // Update credits display
+                    // Update credits display (subtract estimated amount, will sync from server on completion)
                     if (user.id && user.credits !== undefined) {
-                        user.credits = Math.max(0, user.credits - 1);
+                        user.credits = Math.max(0, user.credits - estimatedCredits);
                         localStorage.setItem('user', JSON.stringify(user));
-                        const creditsEl = document.getElementById('userCredits');
-                        if (creditsEl) {
-                            creditsEl.textContent = user.credits + ' credit' + (user.credits !== 1 ? 's' : '');
-                            if (user.credits === 0) {
-                                creditsEl.style.background = 'rgba(239, 68, 68, 0.9)';
-                            } else if (user.credits < 3) {
-                                creditsEl.style.background = 'rgba(245, 158, 11, 0.9)';
-                            }
-                        }
+                        updateCreditsDisplay(user.credits);
                     }
                 } else {
                     throw new Error(data.message || 'Failed to start processing');
