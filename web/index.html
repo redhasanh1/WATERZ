@@ -389,12 +389,12 @@
             gap: 12px;
             background: rgba(20, 20, 30, 0.95);
             border-radius: 12px;
-            padding: 12px;
+            padding: 10px 12px;
             margin-top: 1rem;
         }
         .timeline-play-btn {
-            width: 44px;
-            height: 44px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
             background: linear-gradient(135deg, #667eea, #764ba2);
             border: none;
@@ -410,63 +410,106 @@
             box-shadow: 0 4px 20px rgba(102, 126, 234, 0.5);
         }
         .timeline-play-btn svg {
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             fill: white;
         }
         .timeline-track-wrapper {
             flex: 1;
             position: relative;
-            height: 48px;
+            height: 44px;
             border-radius: 6px;
-            overflow: hidden;
+            overflow-x: auto;
+            overflow-y: hidden;
             cursor: pointer;
-            background: rgba(0, 0, 0, 0.3);
+            background: rgba(0, 0, 0, 0.4);
+            padding: 4px;
+        }
+        .timeline-track-wrapper::-webkit-scrollbar {
+            height: 4px;
+        }
+        .timeline-track-wrapper::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .timeline-track-wrapper::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.5);
+            border-radius: 2px;
         }
         .thumbnail-track {
             display: flex;
             height: 100%;
-            width: 100%;
+            gap: 3px;
+            min-width: max-content;
         }
         .thumbnail-track .sprite-thumb {
-            height: 100%;
-            flex: 1;
-            min-width: 0;
-            border-radius: 0;
-            border: none;
+            width: 48px;
+            height: 36px;
+            flex-shrink: 0;
+            border-radius: 3px;
+            border: 1px solid rgba(255,255,255,0.15);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.4);
             background-size: cover;
+            background-position: center;
+            transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+        }
+        .thumbnail-track .sprite-thumb:hover {
+            border-color: rgba(102, 126, 234, 0.5);
+            transform: scale(1.05);
+        }
+        .thumbnail-track .sprite-thumb.active {
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.4), 0 2px 8px rgba(102, 126, 234, 0.5);
         }
         .timeline-playhead {
             position: absolute;
             top: 0;
             left: 0;
+            width: 2px;
             height: 100%;
+            background: #fff;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.9), 0 0 16px rgba(102, 126, 234, 0.5);
             pointer-events: none;
             z-index: 10;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            border-radius: 1px;
         }
-        .playhead-cap {
-            width: 14px;
-            height: 10px;
-            background: #fff;
-            border-radius: 3px 3px 0 0;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        /* Hover Preview */
+        .hover-preview {
+            position: absolute;
+            bottom: calc(100% + 10px);
+            left: 0;
+            transform: translateX(-50%);
+            background: rgba(15, 15, 25, 0.98);
+            border: 1px solid rgba(102, 126, 234, 0.5);
+            border-radius: 8px;
+            padding: 6px;
+            pointer-events: none;
+            z-index: 30;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
         }
-        .playhead-line {
-            width: 3px;
-            flex: 1;
-            background: #fff;
-            box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+        .hover-preview-thumb {
+            width: 120px;
+            height: 68px;
+            border-radius: 4px;
+            background-color: #1a1a2e;
+            background-size: auto;
+            background-repeat: no-repeat;
+        }
+        .hover-preview-time {
+            text-align: center;
+            font-size: 0.75rem;
+            color: #fff;
+            margin-top: 6px;
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-weight: 500;
         }
         .timeline-timecodes {
             display: flex;
             justify-content: space-between;
-            padding: 8px 60px 0 60px;
-            font-size: 0.85rem;
+            padding: 6px 56px 0 56px;
+            font-size: 0.8rem;
             color: #888;
             font-family: 'SF Mono', 'Consolas', monospace;
+            user-select: none;
         }
 
         /* Scrubber/Progress Bar */
@@ -1749,14 +1792,17 @@
                                     <svg class="pause-icon" style="display:none" viewBox="0 0 24 24"><rect x="5" y="4" width="5" height="16"/><rect x="14" y="4" width="5" height="16"/></svg>
                                 </button>
 
-                                <!-- Thumbnail Track with Playhead -->
+                                <!-- Thumbnail Track with Playhead + Hover Preview -->
                                 <div id="timelineTrackWrapper" class="timeline-track-wrapper">
                                     <div id="thumbnailTrack" class="thumbnail-track">
                                         <!-- Thumbnails populated by JS (sprite-based) -->
                                     </div>
-                                    <div id="playhead" class="timeline-playhead">
-                                        <div class="playhead-cap"></div>
-                                        <div class="playhead-line"></div>
+                                    <!-- Thin playhead line -->
+                                    <div id="playhead" class="timeline-playhead"></div>
+                                    <!-- Floating hover preview -->
+                                    <div id="hoverPreview" class="hover-preview" style="display:none;">
+                                        <div id="hoverPreviewThumb" class="hover-preview-thumb"></div>
+                                        <div id="hoverPreviewTime" class="hover-preview-time">00:00.00</div>
                                     </div>
                                 </div>
                             </div>
@@ -2984,6 +3030,9 @@
         const durationLabel = document.getElementById('durationLabel');
         const stepIndicator = document.getElementById('stepIndicator');
         const timelineContainer = document.getElementById('videoTimelineContainer');
+        const hoverPreview = document.getElementById('hoverPreview');
+        const hoverPreviewThumb = document.getElementById('hoverPreviewThumb');
+        const hoverPreviewTime = document.getElementById('hoverPreviewTime');
 
         if (!video || !thumbnailStrip) return;
 
@@ -3010,15 +3059,21 @@
             const percent = (video.currentTime / video.duration) * 100;
             if (playhead) playhead.style.left = `${percent}%`;
             if (currentTimeLabel) currentTimeLabel.textContent = formatTimecode(video.currentTime);
+
+            // Highlight active thumbnail based on current time
+            const thumbs = thumbnailStrip.querySelectorAll('.sprite-thumb');
+            thumbs.forEach((thumb, i) => {
+                const thumbTime = parseFloat(thumb.dataset.time) || 0;
+                const nextThumb = thumbs[i + 1];
+                const nextTime = nextThumb ? (parseFloat(nextThumb.dataset.time) || video.duration) : video.duration;
+                const isActive = video.currentTime >= thumbTime && video.currentTime < nextTime;
+                thumb.classList.toggle('active', isActive);
+            });
         }
 
         function updateTimeDisplay() {
             const frameIndex = Math.round(video.currentTime / FRAME_INTERVAL);
             currentFrame = Math.max(0, Math.min(frameIndex, frames.length - 1));
-
-            document.querySelectorAll('.frame-thumb').forEach((thumb, i) => {
-                thumb.classList.toggle('active', i === currentFrame);
-            });
 
             // Update playhead position and timecode
             updatePlayhead();
@@ -3325,11 +3380,53 @@
                 isDragging = true;
                 seekFromTrack(e.clientX);
             });
+
+            // Hover preview - shows floating thumbnail above timeline
+            trackWrapper.addEventListener('mousemove', (e) => {
+                if (!hoverPreview || !video.duration || isDragging) return;
+
+                const rect = trackWrapper.getBoundingClientRect();
+                const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                const time = percent * video.duration;
+
+                // Position the hover preview
+                const previewX = e.clientX - rect.left;
+                // Clamp to keep preview within bounds
+                const clampedX = Math.max(65, Math.min(previewX, rect.width - 65));
+                hoverPreview.style.left = `${clampedX}px`;
+                hoverPreview.style.display = 'block';
+
+                // Update preview thumbnail from sprite
+                if (spritePreview.ready && spritePreview.spriteUrl && hoverPreviewThumb) {
+                    const cue = spritePreview.getCueAt(time);
+                    if (cue) {
+                        const meta = spritePreview.meta || { thumb_width: 160, thumb_height: 90 };
+                        const scaleX = 120 / meta.thumb_width;
+                        const scaleY = 68 / meta.thumb_height;
+                        hoverPreviewThumb.style.backgroundImage = `url(${spritePreview.spriteUrl})`;
+                        hoverPreviewThumb.style.backgroundPosition = `-${cue.x * scaleX}px -${cue.y * scaleY}px`;
+                        hoverPreviewThumb.style.backgroundSize = `${(meta.cols || 10) * 120}px auto`;
+                    }
+                }
+
+                // Update preview time
+                if (hoverPreviewTime) {
+                    hoverPreviewTime.textContent = formatTimecode(time);
+                }
+            });
+
+            trackWrapper.addEventListener('mouseleave', () => {
+                if (hoverPreview) hoverPreview.style.display = 'none';
+            });
         }
 
         // Drag to scrub
         document.addEventListener('mousemove', (e) => {
-            if (isDragging) seekFromTrack(e.clientX);
+            if (isDragging) {
+                seekFromTrack(e.clientX);
+                // Hide hover preview while dragging
+                if (hoverPreview) hoverPreview.style.display = 'none';
+            }
         });
         document.addEventListener('mouseup', () => {
             isDragging = false;
