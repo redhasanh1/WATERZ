@@ -251,7 +251,7 @@ while true; do
 
     echo ""
     echo "[CRASH] Celery exited with code $EXIT_CODE ($REASON)"
-    echo "[CRASH] Restart attempt $RESTART_COUNT/$MAX_RESTARTS"
+    echo "[CRASH] Restart attempt $RESTART_COUNT (unlimited)"
 
     # Send crash notification
     send_notification "🔴 Worker **$WORKER_NAME** CRASHED! Reason: $REASON | Restarting in ${RESTART_DELAY}s... (attempt $RESTART_COUNT)"

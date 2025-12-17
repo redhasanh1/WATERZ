@@ -537,12 +537,23 @@ class SAM2Selector {
      * Update when video time changes
      */
     onVideoTimeUpdate() {
-        const newFrameIndex = Math.floor(this.video.currentTime * (this.video.duration > 0 ? 30 : 30));
+        // Estimate FPS (default 30 if unknown)
+        const fps = this.videoFps || 30;
+        const newFrameIndex = Math.floor(this.video.currentTime * fps);
 
         if (newFrameIndex !== this.currentFrameIndex) {
             this.currentFrameIndex = newFrameIndex;
+            console.log(`[SAM2Selector] Frame changed to ${newFrameIndex}`);
             this.draw();
         }
+    }
+
+    /**
+     * Set video FPS for accurate frame calculation
+     */
+    setVideoFps(fps) {
+        this.videoFps = fps;
+        console.log(`[SAM2Selector] Video FPS set to ${fps}`);
     }
 
     /**

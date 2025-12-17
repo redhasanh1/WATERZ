@@ -2,9 +2,13 @@
 # ============================================================
 # SAM2 Workers Docker Entrypoint
 # ============================================================
-# Runs 9 SAM2 workers in a single container:
-#   - 8x TensorRT clicker workers (Flask+Redis) on ports 5555-5562
-#   - 1x Celery sender worker for full-video mask generation
+# Runs SAM2 workers in a single container:
+#   - N x TensorRT clicker workers (Flask+Redis) on ports 5555+
+#   - 1 x Celery sender worker for full-video mask generation
+# Features:
+#   - tmux session management
+#   - Webhook notifications
+#   - Unlimited auto-restart
 # ============================================================
 
 set -e
@@ -36,6 +40,9 @@ DECODER_ENGINE="/app/sam2_trt_inference/engines/sam2_decoder_fp16_dynamic.engine
 ENCODER_ONNX="/app/sam2_trt_inference/sam2_pytorch2onnx/output/sam2.1_hiera_tiny_encoder.onnx"
 DECODER_ONNX="/app/sam2_trt_inference/sam2_pytorch2onnx/output/sam2.1_hiera_tiny_decoder.onnx"
 
+# Create engines directory
+mkdir -p /app/sam2_trt_inference/engines
+
 # ============================================================
 # Build SAM2 Encoder TRT Engine (if missing)
 # ============================================================
@@ -46,8 +53,6 @@ if [ ! -f "$ENCODER_ENGINE" ]; then
         echo "        This takes ~5 minutes on first run."
         echo ""
 
-        mkdir -p "$(dirname "$ENCODER_ENGINE")"
-
         trtexec \
             --onnx="$ENCODER_ONNX" \
             --saveEngine="$ENCODER_ENGINE" \
@@ -57,9 +62,8 @@ if [ ! -f "$ENCODER_ENGINE" ]; then
 
         echo "[OK] SAM2 Encoder TRT engine built: $ENCODER_ENGINE"
     else
-        echo "[ERROR] SAM2 Encoder ONNX not found: $ENCODER_ONNX"
-        echo "        Cannot start clicker workers without encoder"
-        exit 1
+        echo "[WARN] SAM2 Encoder ONNX not found: $ENCODER_ONNX"
+        echo "       Clicker workers will use PyTorch fallback"
     fi
 else
     echo "[OK] SAM2 Encoder TRT engine exists: $ENCODER_ENGINE"
@@ -75,11 +79,6 @@ if [ ! -f "$DECODER_ENGINE" ]; then
         echo "        This takes ~5 minutes on first run."
         echo ""
 
-        mkdir -p "$(dirname "$DECODER_ENGINE")"
-
-        # All inputs must be specified - fixed + dynamic
-        # Fixed: image_embed, high_res_feats_0, high_res_feats_1, has_mask_input
-        # Dynamic (batch N): point_coords, point_labels, mask_input
         trtexec \
             --onnx="$DECODER_ONNX" \
             --saveEngine="$DECODER_ENGINE" \
@@ -92,9 +91,8 @@ if [ ! -f "$DECODER_ENGINE" ]; then
 
         echo "[OK] SAM2 Decoder TRT engine built: $DECODER_ENGINE"
     else
-        echo "[ERROR] SAM2 Decoder ONNX not found: $DECODER_ONNX"
-        echo "        Cannot start clicker workers without decoder"
-        exit 1
+        echo "[WARN] SAM2 Decoder ONNX not found: $DECODER_ONNX"
+        echo "       Clicker workers will use PyTorch fallback"
     fi
 else
     echo "[OK] SAM2 Decoder TRT engine exists: $DECODER_ENGINE"
@@ -111,14 +109,14 @@ if [ -f "$ENCODER_ENGINE" ]; then
     SIZE=$(du -h "$ENCODER_ENGINE" | cut -f1)
     echo "  SAM2 Encoder:  ENABLED (TRT) - $SIZE"
 else
-    echo "  SAM2 Encoder:  MISSING"
+    echo "  SAM2 Encoder:  PyTorch fallback"
 fi
 
 if [ -f "$DECODER_ENGINE" ]; then
     SIZE=$(du -h "$DECODER_ENGINE" | cut -f1)
     echo "  SAM2 Decoder:  ENABLED (TRT) - $SIZE"
 else
-    echo "  SAM2 Decoder:  MISSING"
+    echo "  SAM2 Decoder:  PyTorch fallback"
 fi
 echo "============================================================"
 echo ""
@@ -132,69 +130,113 @@ fi
 
 echo "[REDIS] Connecting to: ${REDIS_URL:0:40}..."
 
-# ============================================================
-# Set environment for Python workers
-# ============================================================
-export PYTHONPATH=/app:/app/sam2_trt_inference
-export SAM2_ENCODER_ENGINE="$ENCODER_ENGINE"
-export SAM2_DECODER_ENGINE="$DECODER_ENGINE"
-
-# ============================================================
-# Start TensorRT Clicker Workers (background)
-# ============================================================
-NUM_WORKERS=${NUM_WORKERS:-8}  # Default 8, set to 0 for sender-only mode
-
-if [ "$NUM_WORKERS" -gt 0 ]; then
-    echo ""
-    echo "============================================================"
-    echo "[START] Launching $NUM_WORKERS TensorRT Clicker Workers"
-    echo "============================================================"
-    echo "  Ports: 5555-$((5555 + NUM_WORKERS - 1))"
-    echo "  Mode: Flask+Redis pub/sub"
-    echo "============================================================"
-    echo ""
-
-    # Start clicker workers in background
-    for i in $(seq 0 $((NUM_WORKERS - 1))); do
-        PORT=$((5555 + i))
-        echo "[WORKER $i] Starting on port $PORT..."
-        python /app/start_object_server.py --worker-id $i --port $PORT &
-        sleep 2  # Stagger GPU loading
-    done
-
-    echo ""
-    echo "[OK] $NUM_WORKERS Clicker workers started in background"
-    echo ""
-else
-    echo ""
-    echo "============================================================"
-    echo "[SKIP] NUM_WORKERS=0 - Sender-only mode (no clickers)"
-    echo "============================================================"
-    echo ""
-fi
-
-# ============================================================
-# Start Celery Sender Worker (foreground)
-# ============================================================
-echo ""
-echo "============================================================"
-echo "[START] Launching Celery Sender Worker"
-echo "============================================================"
-echo "  Queues: wsl_sam2, wsl_yolo"
-echo "  Pool: solo (CUDA-safe)"
-echo "============================================================"
-echo ""
-
 # Check B2 credentials
 if [ -z "$B2_KEY_ID" ] || [ -z "$B2_APP_KEY" ]; then
     echo "[WARN] B2_KEY_ID or B2_APP_KEY not set - mask uploads will fail!"
     echo "       Pass via: -e B2_KEY_ID=... -e B2_APP_KEY=..."
 fi
-export B2_BUCKET="${B2_BUCKET:-watermarkz}"
-export B2_CDN_URL="${B2_CDN_URL:-https://markz.humblewoslayer.workers.dev}"
 
-# Run Celery sender in foreground (keeps container alive)
-exec celery -A wsl_sam2_worker worker \
-    -Q wsl_sam2,wsl_yolo \
-    --loglevel=info \
-    --pool=solo
+# ============================================================
+# Set environment for Python workers
+# ============================================================
+export PYTHONPATH=/app:/app/sam2_trt_inference:/app/segment-anything-2
+export SAM2_ENCODER_ENGINE="$ENCODER_ENGINE"
+export SAM2_DECODER_ENGINE="$DECODER_ENGINE"
+
+# ============================================================
+# Notification helpers
+# ============================================================
+send_notification() {
+    MSG="$1"
+    if [ -n "$NOTIFY_WEBHOOK_URL" ]; then
+        curl -s -X POST "$NOTIFY_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": \"$MSG\"}" || true
+    fi
+}
+
+get_crash_reason() {
+    case "$1" in
+        137) echo "OOM Killed (exit 137)" ;;
+        139) echo "Segfault (exit 139)" ;;
+        134) echo "SIGABRT (exit 134)" ;;
+        143) echo "SIGTERM (exit 143)" ;;
+        1)   echo "Error (exit 1)" ;;
+        *)   echo "Unknown (exit $1)" ;;
+    esac
+}
+
+WORKER_NAME="${NOTIFY_WORKER_NAME:-SAM2-$(hostname)}"
+RESTART_COUNT=0
+RESTART_DELAY=5
+
+# ============================================================
+# Start ALL workers in ONE tmux session with multiple windows
+# ============================================================
+NUM_WORKERS=${NUM_WORKERS:-4}
+
+echo ""
+echo "============================================================"
+echo "[START] Launching all workers in single tmux session"
+echo "============================================================"
+echo "  Clickers: $NUM_WORKERS (ports 5555-$((5555 + NUM_WORKERS - 1)))"
+echo "  Celery: wsl_sam2, wsl_yolo queues"
+echo "============================================================"
+echo ""
+
+# Kill any existing session
+tmux kill-session -t workers 2>/dev/null || true
+
+# Create main tmux session with first clicker (window 0)
+if [ "$NUM_WORKERS" -gt 0 ]; then
+    tmux new-session -d -s workers -n "clicker_0" \
+        "python /app/start_object_server.py --worker-id 0 --port 5555; echo '[CRASHED] Clicker 0'; sleep infinity"
+    echo "[WINDOW 0] clicker_0 - port 5555"
+    sleep 2
+
+    # Add windows for remaining clickers
+    for i in $(seq 1 $((NUM_WORKERS - 1))); do
+        PORT=$((5555 + i))
+        tmux new-window -t workers -n "clicker_$i" \
+            "python /app/start_object_server.py --worker-id $i --port $PORT; echo '[CRASHED] Clicker $i'; sleep infinity"
+        echo "[WINDOW $i] clicker_$i - port $PORT"
+        sleep 2
+    done
+
+    # Add celery sender as last window
+    CELERY_WINDOW=$NUM_WORKERS
+    tmux new-window -t workers -n "celery" \
+        "celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo; echo '[CRASHED] Celery'; sleep infinity"
+    echo "[WINDOW $CELERY_WINDOW] celery - wsl_sam2,wsl_yolo queues"
+else
+    # No clickers - just celery
+    tmux new-session -d -s workers -n "celery" \
+        "celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo; echo '[CRASHED] Celery'; sleep infinity"
+    echo "[WINDOW 0] celery - wsl_sam2,wsl_yolo queues"
+fi
+
+echo ""
+echo "============================================================"
+echo "[OK] All workers started in tmux session 'workers'"
+echo "============================================================"
+echo "  Attach: docker exec -it <container> tmux attach -t workers"
+echo "  Switch windows: Ctrl+B then 0-$NUM_WORKERS"
+echo "  Detach: Ctrl+B then D"
+echo "============================================================"
+echo ""
+
+# Send startup notification
+send_notification "🟢 Worker **$WORKER_NAME** is READY! GPU: $GPU_NAME (${GPU_MEMORY}MB VRAM) | Clickers: $NUM_WORKERS"
+
+# ============================================================
+# Keep container alive and monitor tmux session
+# ============================================================
+while true; do
+    # Check if tmux session still exists
+    if ! tmux has-session -t workers 2>/dev/null; then
+        echo "[WARN] tmux session 'workers' died, restarting container..."
+        send_notification "🔴 Worker **$WORKER_NAME** tmux session died! Container will restart."
+        exit 1
+    fi
+    sleep 30
+done

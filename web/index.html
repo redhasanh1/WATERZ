@@ -3145,6 +3145,18 @@
                         alert('Selection Error: ' + error);
                     }
                 });
+
+                // Connect video time updates to SAM2Selector for frame tracking
+                video.addEventListener('timeupdate', () => {
+                    if (sam2Selector) sam2Selector.onVideoTimeUpdate();
+                });
+                video.addEventListener('seeked', () => {
+                    if (sam2Selector) {
+                        sam2Selector.onVideoTimeUpdate();
+                        sam2Selector.calculateVideoRenderBounds();
+                        sam2Selector.draw();
+                    }
+                });
             }
         });
 

@@ -1,0 +1,87 @@
+# ============================================================
+# SAM2 Workers - TensorRT Edition
+# Clicker Workers + Celery Sender in one container
+# ============================================================
+# Uses NVIDIA TensorRT container with trtexec built-in
+# Components:
+#   - N x TensorRT Clicker Workers (Flask+Redis) on ports 5555+
+#   - 1 x Celery Sender Worker (mask generation + B2 upload)
+# ============================================================
+
+FROM nvcr.io/nvidia/tensorrt:24.12-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# System packages + tmux for session management
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libglib2.0-0 \
+    libgl1 \
+    libgomp1 \
+    curl \
+    tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ============================================================
+# Install Python dependencies
+# ============================================================
+COPY requirements.sam2workers.txt .
+RUN pip install --no-cache-dir -r requirements.sam2workers.txt
+
+# ---- SAM2 TensorRT Inference ----
+COPY sam2_trt_inference/ ./sam2_trt_inference/
+
+# ---- SAM2 PyTorch (for mask generation) ----
+COPY segment-anything-2/ ./segment-anything-2/
+
+# ---- Worker Scripts ----
+COPY wsl_sam2_worker.py .
+COPY sam2_track_wsl2.py .
+COPY start_object_server.py .
+COPY sam2_trt_predictor.py .
+
+# ---- YOLO Model (for YOLO-mode tasks) ----
+COPY runs/detect/sora_watermark_v2/weights/best.pt ./runs/detect/sora_watermark_v2/weights/
+
+# ---- Pre-built SAM2 TensorRT Engines (skip 10min build!) ----
+# Built on RTX 4090 WSL2 - copied to engines/ at startup if matching GPU
+COPY engines_trt/sam2/sam2_encoder_fp16.engine ./sam2_trt_inference/engines/
+COPY engines_trt/sam2/sam2_decoder_fp16_dynamic.engine ./sam2_trt_inference/engines/
+
+# ---- Entrypoint script ----
+COPY docker-entrypoint-sam2workers.sh .
+RUN chmod +x docker-entrypoint-sam2workers.sh
+
+# ============================================================
+# Environment Variables
+# ============================================================
+
+# SAM2 TensorRT Engine paths
+ENV SAM2_ENCODER_ENGINE=/app/sam2_trt_inference/engines/sam2_encoder_fp16.engine \
+    SAM2_DECODER_ENGINE=/app/sam2_trt_inference/engines/sam2_decoder_fp16_dynamic.engine
+
+# Python path
+ENV PYTHONPATH=/app:/app/sam2_trt_inference:/app/segment-anything-2
+
+# B2 defaults (credentials passed at runtime via -e)
+ENV B2_BUCKET=watermarkz \
+    B2_CDN_URL=https://markz.humblewoslayer.workers.dev
+
+# Worker config - NUM_WORKERS controls TensorRT clicker count
+# Set to 0 for sender-only mode
+ENV NUM_WORKERS=4
+
+# Expose clicker worker ports (5555-5562 for up to 8 workers)
+EXPOSE 5555 5556 5557 5558 5559 5560 5561 5562
+
+# ============================================================
+# ENTRYPOINT - Builds TRT engines on first run, then starts workers
+# ============================================================
+ENTRYPOINT ["/app/docker-entrypoint-sam2workers.sh"]

@@ -152,7 +152,9 @@
       "Bash(docker build:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nFix video processing pipeline reliability issues\n\nThree critical fixes for _continue_after_masks in SAM2 workflow:\n\n1. HTTPS URL Download (lines 2230-2241)\n   - cv2.VideoCapture is unreliable when streaming from remote HTTPS URLs\n   - Metadata reads work (short reads) but full frame streaming fails with\n     \"partial file\" errors causing 0 frames to be read\n   - Now downloads HTTPS URLs to local temp file before processing\n   - Matches existing pattern used for Railway paths (/data/...)\n\n2. Frame Preload Validation (lines 2559-2561)\n   - Previously, if cv2.VideoCapture.read() returned ret=False, frames were\n     silently skipped leaving gaps in preloaded_frames dictionary\n   - This caused cryptic KeyError exceptions later during segment processing\n     (e.g., KeyError: 489, KeyError: 526)\n   - Now validates all expected frames were loaded and fails early with\n     clear error: \"Could not read all video frames: got X/Y\"\n\n3. FFmpeg Stderr Deadlock Fix (line 2845)\n   - Using stderr=subprocess.PIPE without draining it causes deadlock on Windows\n   - When FFmpeg writes warnings to stderr, the 64KB pipe buffer fills up\n   - FFmpeg blocks waiting for buffer to drain, Python blocks on stdin.write\n   - Changed to stderr=subprocess.DEVNULL to prevent deadlock\n   - Updated error handlers to not rely on stderr output\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git checkout:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(docker history:*)",
+      "Bash(git show:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,133 +1,149 @@
-# Production Docker Image for Watermark Removal Pipeline
-# Optimized for NVIDIA RTX 5090 with CUDA 12.1 + TensorRT
-# Worker-only image (connects to external Redis)
+# ============================================================
+# 4090 ProPainter Worker - TensorRT Edition
+# SAM2 Interactive Mode (masks from user clicks, NO YOLO)
+# ============================================================
+# Uses NVIDIA TensorRT container with trtexec built-in
+# Builds 3 components:
+#   1. DCNv4 TensorRT Plugin (during docker build)
+#   2. NeuFlow TRT Engine (on first run)
+#   3. RFCNet DCNv4 TRT Engine (on first run)
+# ============================================================
 
-FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04 AS builder
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-dev \
-    python3-pip \
-    git \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-
-# Upgrade pip
-RUN python3 -m pip install --no-cache-dir --upgrade pip
-
-# Install PyTorch with CUDA 12.1 support
-RUN pip install --no-cache-dir \
-    torch torchvision --index-url https://download.pytorch.org/whl/cu121
-
-# Install TensorRT and core dependencies
-RUN pip install --no-cache-dir \
-    tensorrt \
-    celery[redis] \
-    redis \
-    opencv-python \
-    numpy \
-    Pillow \
-    ultralytics \
-    requests \
-    scipy \
-    scikit-image \
-    ffmpeg-python \
-    flask \
-    flask-cors \
-    python-dotenv \
-    b2sdk \
-    pydantic \
-    bcrypt \
-    tqdm \
-    einops
-
-# ==============================================================================
-# Runtime Stage (Smaller final image)
-# ==============================================================================
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+FROM nvcr.io/nvidia/tensorrt:24.12-py3
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Install runtime dependencies + TensorRT tools (for trtexec)
-RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-distutils \
-    python3-pip \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
+# System packages + build tools for DCNv4 plugin
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    ffmpeg \
-    wget \
-    gnupg \
-    tmux \
+    libglib2.0-0 \
+    libgl1 \
+    libgomp1 \
     curl \
+    cmake \
+    ninja-build \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
-# Install TensorRT (includes trtexec)
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
-    && dpkg -i cuda-keyring_1.1-1_all.deb \
-    && rm cuda-keyring_1.1-1_all.deb \
-    && apt-get update \
-    && apt-get install -y tensorrt \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Install b2sdk (pip already copied from builder)
-RUN pip install --no-cache-dir b2sdk && \
-    python3.11 -c "import b2sdk; print('b2sdk installed successfully')"
-
-# Set working directory
 WORKDIR /app
 
-# Copy application code
+# ============================================================
+# BUILD 1: DCNv4 TensorRT Plugin (compiled during docker build)
+# ============================================================
+COPY dcnv4_tensorrt_plugin/ ./dcnv4_tensorrt_plugin/
+
+# Build DCNv4 plugin - outputs libdcnv4_plugin.so
+# Use fresh build_linux dir to avoid Windows CMakeCache conflicts
+RUN cd dcnv4_tensorrt_plugin && \
+    rm -rf build_linux && mkdir -p build_linux && cd build_linux && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DTENSORRT_DIR=/usr/src/tensorrt \
+        -DCMAKE_CUDA_ARCHITECTURES="75;80;89" \
+        -GNinja && \
+    ninja && \
+    cp libdcnv4_plugin.so /app/libdcnv4_plugin.so && \
+    echo "[BUILD] DCNv4 TensorRT plugin compiled successfully"
+
+# ============================================================
+# Install Python dependencies
+# ============================================================
+COPY requirements.docker.trt.txt .
+RUN pip install --no-cache-dir -r requirements.docker.trt.txt
+
+# ---- Core Python Files ----
 COPY server_production.py .
 COPY server_production2.py .
-COPY yolo_detector.py .
 COPY segment_detector.py .
+COPY crop_utils.py .
+COPY yolo_detector.py .
+# Note: watermark.py is in faster-propainter-main/ (copied below)
 
-# Copy python_packages directory (custom packages)
-COPY python_packages ./python_packages
+# ---- YOLO Model Weights (for YOLO-mode tasks from celery queue) ----
+COPY runs/detect/sora_watermark_v2/weights/best.pt ./runs/detect/sora_watermark_v2/weights/
 
-# Copy ProPainter pipeline
-COPY faster-propainter-main ./faster-propainter-main
+# ---- ProPainter Pipeline (entire directory) ----
+COPY faster-propainter-main/ ./faster-propainter-main/
 
-# Copy YOLO model weights (TensorRT engine builds at runtime)
-COPY runs/detect/sora_watermark_v2/weights/best.pt \
-     ./runs/detect/sora_watermark_v2/weights/best.pt
-COPY weights ./weights
+# ---- ONNX Models for TRT Engine Building ----
+# These will be converted to TRT engines on first run
+COPY engines/rfcnet/rfcnet_dcnv4.onnx ./engines/rfcnet/
 
-# Create necessary directories
-RUN mkdir -p temp uploads results cache pip_cache
+# ---- PRE-BUILT TensorRT Engines (WSL 4090) ----
+# Built on WSL2 with RTX 4090 - skip rebuild if running on same GPU/platform
+COPY engines_trt/neuflow_things_fp16.engine ./faster-propainter-main/models/neuflow_things_fp16.engine.wsl
+COPY engines_trt/rfcnet/rfcnet_dcnv4_fp16.engine ./engines/rfcnet/rfcnet_dcnv4_fp16.engine.wsl
 
-# Environment variables for optimal GPU performance
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONIOENCODING=utf-8 \
-    PYTHONPATH=/app/python_packages:$PYTHONPATH \
-    YOLO_REQUIRE_TENSORRT=0 \
-    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    TORCH_HOME=/app/cache \
-    XDG_CACHE_HOME=/app/cache \
-    OPENCV_TEMP_PATH=/app/temp \
-    PIP_CACHE_DIR=/app/pip_cache
+# ---- Symlink for weights (server_production.py looks in /app/weights/) ----
+RUN ln -sf /app/faster-propainter-main/weights /app/weights
 
-# Copy and set entrypoint script
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+# ---- Entrypoint script (builds TRT engines on first run) ----
+COPY docker-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
+# ============================================================
+# Environment Variables - TENSORRT ENABLED
+# ============================================================
+
+# TensorRT ENABLED - NeuFlow + RFCNet (10-70x faster optical flow!)
+ENV USE_NEUFLOW=1 \
+    FORCE_TRT_RFCNET=1 \
+    ENABLE_DCNV4_RFCNET=1 \
+    FORCE_TRT_RAFT=0 \
+    FORCE_TRT_TRANSFORMER=0 \
+    YOLO_REQUIRE_TENSORRT=0
+
+# DCNv4 Plugin path (built above)
+ENV DCNV4_PLUGIN_PATH=/app/libdcnv4_plugin.so
+
+# FP8 Optimizations (RTX 40xx SM89)
+ENV ENABLE_FP8_TRANSFORMER=1 \
+    ENABLE_FP8_ENCODER=1 \
+    ENABLE_FP8_DECODER=1 \
+    ENABLE_FP8_RFCNET=1
+
+# SAM2 Interactive Mode (NO YOLO - masks from user clicks)
+ENV USE_INTERACTIVE_SAM2=1 \
+    USE_SAM2_TRACKING=0 \
+    SAM2_USE_SEGMENTS=1 \
+    SAM2_PARALLEL_SEGMENTS=1 \
+    SAM2_SEGMENT_DETECTION_MODE=full \
+    SAM2_MASK_DILATION=4
+
+# Segment detection (motion-based)
+ENV SEGMENT_USE_MOTION_DETECTION=1 \
+    SEGMENT_MOTION_THRESHOLD=8 \
+    SEGMENT_MIN_LEN_FULL=3 \
+    SEGMENT_MERGE_GAP_FULL=10 \
+    MAX_SEGMENT_FRAMES=300 \
+    MAX_SEGMENT_PIXELS=400000 \
+    MAX_CROP_PIXELS=150000
+
+# Disabled features
+ENV ENABLE_SAGE_ATTENTION=0 \
+    ENABLE_FLASH_ATTENTION=0 \
+    ENABLE_NVDEC=0 \
+    USE_TORCH_COMPILE=0 \
+    ENABLE_TOKEN_MERGING=0
+
+# Worker config
+ENV CELERY_POOL=threads \
+    CELERY_CONCURRENCY=4 \
+    SEGMENT_WORKERS=2
+
+# Python path
+ENV PYTHONPATH=/app:/app/faster-propainter-main
+
+# API Base URL (NO www!)
+ENV API_BASE_URL=https://markremoverai.com
+
+# ============================================================
+# ENTRYPOINT - Builds TRT engines on first run, then starts worker
+# ============================================================
+# Build 2 & 3 happen here (NeuFlow + RFCNet TRT engines)
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
