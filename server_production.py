@@ -4483,7 +4483,7 @@ def process_image_task(self, image_path):
 
         self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Detecting watermark'})
         detection_start = performance_checkpoint("YOLO Detection")
-        detections = det.detect(img, confidence_threshold=0.20, padding=0)  # Lower threshold for faint watermarks (Sora optimized)
+        detections = det.detect(img, confidence_threshold=0.20, padding=0)  # Lower threshold for faint watermarks
         performance_checkpoint("YOLO Detection", detection_start)
 
         # If no detections, return original
@@ -5641,12 +5641,9 @@ def download_from_url():
         # Normalize URL
         url = url.strip()
 
-        # If URL starts with /backend or is a path, prepend Sora domain
+        # Validate URL format
         if url.startswith('/') or not url.startswith('http'):
-            if 'sora' in url or 'backend/project_y' in url:
-                url = 'https://sora.chatgpt.com' + (url if url.startswith('/') else '/' + url)
-            else:
-                return jsonify({'status': 'error', 'message': 'URL must start with http:// or https://'}), 400
+            return jsonify({'status': 'error', 'message': 'URL must start with http:// or https://'}), 400
 
         print(f"📋 Downloading from URL: {url}")
 
@@ -5828,15 +5825,15 @@ def download_from_url():
         }), 500
 
 
-@app.route('/api/download-sora', methods=['POST', 'OPTIONS'])
-def download_sora():
+@app.route('/api/download-external', methods=['POST', 'OPTIONS'])
+def download_external():
     if request.method == 'OPTIONS':
         return ('', 204)
     """
-    Download Sora video from OpenAI using Playwright bypass + cookies
+    Download video from external URL using Playwright bypass + cookies
     Bypasses Cloudflare protection using saved cookies
 
-    Request: { "url": "https://sora.chatgpt.com/..." or "/backend/project_y/..." }
+    Request: { "url": "https://example.com/video..." }
     Response: { "status": "success", "task_id": "...", "video_url": "/uploads/..." }
     """
     try:
@@ -5846,14 +5843,14 @@ def download_sora():
         if not url:
             return jsonify({'status': 'error', 'message': 'No URL provided'}), 400
 
-        # Normalize URL - handle partial URLs from ChatGPT Sora
+        # Normalize URL
         url = url.strip()
 
-        # If URL starts with /backend or is a path, prepend Sora domain
+        # Require full URL
         if url.startswith('/') or not url.startswith('http'):
-            url = 'https://sora.chatgpt.com' + (url if url.startswith('/') else '/' + url)
+            return jsonify({'status': 'error', 'message': 'URL must start with http:// or https://'}), 400
 
-        print(f"📋 Normalized Sora URL: {url}")
+        print(f"📋 Downloading from external URL: {url}")
 
         # Validate URL to prevent SSRF attacks
         if not validate_url(url):
@@ -5874,7 +5871,7 @@ def download_sora():
         print(f"[POLL] SCRIPT_DIR is: {SCRIPT_DIR}")
 
         with sync_playwright() as p:
-            print("[RUNNING] Launching browser for Sora download...")
+            print("[RUNNING] Launching browser for external download...")
             browser = p.chromium.launch(
                 headless=True,  # Run headless in production
                 args=[
@@ -5902,8 +5899,8 @@ def download_sora():
                 browser.close()
                 return jsonify({
                     'status': 'error',
-                    'message': 'Authentication required for Sora videos. Please contact administrator to set up cookies.',
-                    'hint': 'Sora videos require login cookies from ChatGPT.'
+                    'message': 'Authentication required. Please contact administrator to set up cookies.',
+                    'hint': 'Some external videos require login cookies.'
                 }), 401
 
             page = context.new_page()
@@ -5924,7 +5921,7 @@ def download_sora():
 
             video_src = None
 
-            # Try to find video URLs in page content (works for Sora)
+            # Try to find video URLs in page content
             content = page.content()
             import re
             video_urls = re.findall(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', content)

@@ -2613,44 +2613,20 @@
             progressPercent.textContent = '0%';
 
             try {
-                if (hasSAM2Selection) {
-                    // SAM2 MODE: Use click-based removal
-                    await processSAM2Video(taskId);
-                } else {
-                    // YOLO MODE: Use automatic object detection
-                    statusText.textContent = 'Starting AI processing...';
-                    // Get user info from localStorage
-                const user = JSON.parse(localStorage.getItem('user') || '{}');
-                // Get estimated credits from video element
-                const videoElem = document.getElementById('professionalVideo');
-                const estimatedCredits = parseInt(videoElem?.dataset?.estimatedCredits || '1', 10);
-                const payload = { task_id: taskId, estimated_credits: estimatedCredits };
-                if (user.id) {
-                    payload.user_id = user.id;
-                }
-
-                const response = await apiFetchPath(`/api/process`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                const data = await parseJsonSafe(response);
-
-                if (data.status === 'success') {
-                    const processTaskId = data.task_id;
-                    startStatusPolling(processTaskId);
-
-                    // Update credits display (subtract estimated amount, will sync from server on completion)
-                    if (user.id && user.credits !== undefined) {
-                        user.credits = Math.max(0, user.credits - estimatedCredits);
-                        localStorage.setItem('user', JSON.stringify(user));
-                        updateCreditsDisplay(user.credits);
+                // Require at least one object selection
+                if (!hasSAM2Selection) {
+                    statusText.textContent = 'Please click on at least one object to remove';
+                    statusText.style.color = '#ef4444';
+                    if (processBtnElem) {
+                        processBtnElem.style.display = 'block';
                     }
-                } else {
-                    throw new Error(data.message || 'Failed to start processing');
+                    statusDiv.style.display = 'none';
+                    alert('Please click on the video to select at least one object you want to remove.');
+                    return;
                 }
-                } // end YOLO else block
+
+                // Process with selected objects
+                await processSAM2Video(taskId);
             } catch (error) {
                 statusText.textContent = 'Error: ' + error.message;
                 statusText.style.color = '#ef4444';
