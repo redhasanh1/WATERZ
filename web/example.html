@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Credit Estimate Variations</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #fff;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 40px;
+            color: #667eea;
+        }
+        h2 {
+            text-align: center;
+            margin-bottom: 15px;
+            color: #a0a0c0;
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 40px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .variation {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Variation 1: Current Emoji Version */
+        .v1-card {
+            background: rgba(30,30,50,0.95);
+            border: 1px solid rgba(102,126,234,0.3);
+            border-radius: 12px;
+            padding: 1rem;
+            max-width: 280px;
+            width: 100%;
+        }
+        .v1-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .v1-row:last-child {
+            margin-bottom: 0;
+        }
+        .v1-icon {
+            font-size: 1.1rem;
+        }
+        .v1-text {
+            color: #a0a0c0;
+            font-size: 0.95rem;
+        }
+        .v1-divider {
+            border-top: 1px solid rgba(102,126,234,0.2);
+            padding-top: 10px;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .v1-cost {
+            color: #667eea;
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+
+        /* Variation 2: SVG Icons - Clean Pro */
+        .v2-card {
+            background: rgba(20, 20, 35, 0.95);
+            border: 1px solid rgba(102, 126, 234, 0.2);
+            border-radius: 16px;
+            padding: 20px;
+            max-width: 300px;
+            width: 100%;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+        }
+        .v2-header {
+            font-size: 0.75rem;
+            color: #667eea;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        .v2-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .v2-row:last-of-type {
+            border-bottom: none;
+        }
+        .v2-icon {
+            width: 36px;
+            height: 36px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .v2-icon svg {
+            width: 18px;
+            height: 18px;
+            stroke: #667eea;
+            fill: none;
+            stroke-width: 2;
+        }
+        .v2-info {
+            flex: 1;
+        }
+        .v2-label {
+            font-size: 0.75rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .v2-value {
+            font-size: 1rem;
+            color: #e0e0e0;
+            font-weight: 500;
+        }
+        .v2-total {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(102, 126, 234, 0.3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .v2-total-label {
+            color: #888;
+            font-size: 0.9rem;
+        }
+        .v2-total-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Variation 3: Minimal Horizontal */
+        .v3-card {
+            background: rgba(25, 25, 40, 0.9);
+            border-radius: 12px;
+            padding: 16px 24px;
+            max-width: 400px;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .v3-stats {
+            display: flex;
+            gap: 24px;
+        }
+        .v3-stat {
+            text-align: center;
+        }
+        .v3-stat-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #fff;
+        }
+        .v3-stat-label {
+            font-size: 0.7rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+        }
+        .v3-divider {
+            width: 1px;
+            height: 40px;
+            background: rgba(255,255,255,0.1);
+        }
+        .v3-cost {
+            text-align: center;
+            padding-left: 20px;
+            border-left: 1px solid rgba(102, 126, 234, 0.3);
+        }
+        .v3-cost-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #667eea;
+        }
+        .v3-cost-label {
+            font-size: 0.7rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Variation 4: Badge Style */
+        .v4-card {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+            border: 1px solid rgba(102, 126, 234, 0.25);
+            border-radius: 20px;
+            padding: 20px 28px;
+            max-width: 320px;
+            width: 100%;
+        }
+        .v4-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .v4-badge {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 0.85rem;
+            color: #c0c0d0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .v4-badge svg {
+            width: 14px;
+            height: 14px;
+            stroke: #888;
+            fill: none;
+            stroke-width: 2;
+        }
+        .v4-bottom {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding-top: 14px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+        }
+        .v4-credit-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .v4-credit-icon svg {
+            width: 16px;
+            height: 16px;
+            stroke: #fff;
+            fill: none;
+            stroke-width: 2.5;
+        }
+        .v4-credit-text {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #fff;
+        }
+        .v4-credit-label {
+            color: #888;
+            font-size: 0.85rem;
+        }
+
+        /* Variation 5: Glass Morphism */
+        .v5-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            padding: 24px;
+            max-width: 280px;
+            width: 100%;
+        }
+        .v5-top {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .v5-item {
+            background: rgba(255,255,255,0.03);
+            border-radius: 12px;
+            padding: 14px;
+            text-align: center;
+        }
+        .v5-item-icon {
+            margin-bottom: 6px;
+        }
+        .v5-item-icon svg {
+            width: 20px;
+            height: 20px;
+            stroke: #667eea;
+            fill: none;
+            stroke-width: 2;
+        }
+        .v5-item-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #fff;
+        }
+        .v5-item-label {
+            font-size: 0.7rem;
+            color: #666;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+        .v5-bottom {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2));
+            border-radius: 14px;
+            padding: 16px;
+            text-align: center;
+        }
+        .v5-cost-value {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #fff;
+        }
+        .v5-cost-label {
+            font-size: 0.8rem;
+            color: #a0a0c0;
+            margin-top: 2px;
+        }
+
+        /* Variation 6: Compact Pro */
+        .v6-card {
+            background: #12121f;
+            border: 1px solid #2a2a4a;
+            border-radius: 10px;
+            padding: 16px 20px;
+            max-width: 260px;
+            width: 100%;
+        }
+        .v6-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+        }
+        .v6-row:not(:last-child) {
+            border-bottom: 1px solid #1e1e35;
+        }
+        .v6-label {
+            font-size: 0.8rem;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .v6-label svg {
+            width: 14px;
+            height: 14px;
+            stroke: #555;
+            fill: none;
+            stroke-width: 2;
+        }
+        .v6-value {
+            font-size: 0.9rem;
+            color: #c0c0d0;
+            font-weight: 500;
+        }
+        .v6-total-row {
+            margin-top: 8px;
+            padding-top: 12px;
+            border-top: 2px solid rgba(102, 126, 234, 0.3);
+        }
+        .v6-total-label {
+            font-size: 0.85rem;
+            color: #888;
+            font-weight: 600;
+        }
+        .v6-total-value {
+            font-size: 1.2rem;
+            color: #667eea;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <h1>Credit Estimate Display Variations</h1>
+
+    <div class="grid">
+        <!-- Variation 1: Current Emoji -->
+        <div class="variation">
+            <h2>1. Current (Emoji)</h2>
+            <div class="v1-card">
+                <div class="v1-row">
+                    <span class="v1-icon">&#128249;</span>
+                    <span class="v1-text">10s duration</span>
+                </div>
+                <div class="v1-row">
+                    <span class="v1-icon">&#128208;</span>
+                    <span class="v1-text">480 × 872</span>
+                </div>
+                <div class="v1-divider">
+                    <span class="v1-icon">&#128176;</span>
+                    <span class="v1-cost">1 credit</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Variation 2: SVG Icons Clean Pro -->
+        <div class="variation">
+            <h2>2. Clean Pro (SVG Icons)</h2>
+            <div class="v2-card">
+                <div class="v2-header">Processing Estimate</div>
+                <div class="v2-row">
+                    <div class="v2-icon">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    </div>
+                    <div class="v2-info">
+                        <div class="v2-label">Duration</div>
+                        <div class="v2-value">10 seconds</div>
+                    </div>
+                </div>
+                <div class="v2-row">
+                    <div class="v2-icon">
+                        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                    </div>
+                    <div class="v2-info">
+                        <div class="v2-label">Resolution</div>
+                        <div class="v2-value">480 × 872</div>
+                    </div>
+                </div>
+                <div class="v2-total">
+                    <span class="v2-total-label">Total Cost</span>
+                    <span class="v2-total-value">1 credit</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Variation 3: Minimal Horizontal -->
+        <div class="variation">
+            <h2>3. Minimal Horizontal</h2>
+            <div class="v3-card">
+                <div class="v3-stats">
+                    <div class="v3-stat">
+                        <div class="v3-stat-value">10s</div>
+                        <div class="v3-stat-label">Duration</div>
+                    </div>
+                    <div class="v3-stat">
+                        <div class="v3-stat-value">480×872</div>
+                        <div class="v3-stat-label">Resolution</div>
+                    </div>
+                </div>
+                <div class="v3-cost">
+                    <div class="v3-cost-value">1</div>
+                    <div class="v3-cost-label">Credit</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Variation 4: Badge Style -->
+        <div class="variation">
+            <h2>4. Badge Style</h2>
+            <div class="v4-card">
+                <div class="v4-badges">
+                    <div class="v4-badge">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        10 sec
+                    </div>
+                    <div class="v4-badge">
+                        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                        480 × 872
+                    </div>
+                </div>
+                <div class="v4-bottom">
+                    <div class="v4-credit-icon">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M9 9h6M9 15h4"/></svg>
+                    </div>
+                    <span class="v4-credit-text">1</span>
+                    <span class="v4-credit-label">credit</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Variation 5: Glass Morphism -->
+        <div class="variation">
+            <h2>5. Glass Card</h2>
+            <div class="v5-card">
+                <div class="v5-top">
+                    <div class="v5-item">
+                        <div class="v5-item-icon">
+                            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        </div>
+                        <div class="v5-item-value">10s</div>
+                        <div class="v5-item-label">Duration</div>
+                    </div>
+                    <div class="v5-item">
+                        <div class="v5-item-icon">
+                            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                        </div>
+                        <div class="v5-item-value">480×872</div>
+                        <div class="v5-item-label">Resolution</div>
+                    </div>
+                </div>
+                <div class="v5-bottom">
+                    <div class="v5-cost-value">1</div>
+                    <div class="v5-cost-label">credit required</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Variation 6: Compact Pro -->
+        <div class="variation">
+            <h2>6. Compact Table</h2>
+            <div class="v6-card">
+                <div class="v6-row">
+                    <span class="v6-label">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        Duration
+                    </span>
+                    <span class="v6-value">10 sec</span>
+                </div>
+                <div class="v6-row">
+                    <span class="v6-label">
+                        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                        Resolution
+                    </span>
+                    <span class="v6-value">480 × 872</span>
+                </div>
+                <div class="v6-row v6-total-row">
+                    <span class="v6-total-label">Total</span>
+                    <span class="v6-total-value">1 credit</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
