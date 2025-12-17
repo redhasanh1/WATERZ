@@ -2935,6 +2935,153 @@
             }
         }
 
+        // ============================================================================
+        // SPRITE-BASED INSTANT SCRUBBING
+        // ============================================================================
+
+        class SpritePreview {
+            constructor() {
+                this.cues = [];
+                this.spriteUrl = null;
+                this.ready = false;
+                this.meta = null;
+            }
+
+            async load(taskId) {
+                try {
+                    // Fetch VTT
+                    const vttRes = await fetch(`/api/sprite/${taskId}/thumbs.vtt`);
+                    if (!vttRes.ok) throw new Error('VTT not found');
+                    const vttText = await vttRes.text();
+                    this.parseVTT(vttText);
+
+                    // Fetch metadata
+                    const metaRes = await fetch(`/api/sprite/${taskId}/meta.json`);
+                    if (metaRes.ok) {
+                        this.meta = await metaRes.json();
+                    }
+
+                    // Preload sprite image
+                    this.spriteUrl = `/api/sprite/${taskId}/sprite.jpg`;
+                    await new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.onload = resolve;
+                        img.onerror = reject;
+                        img.src = this.spriteUrl;
+                    });
+
+                    this.ready = true;
+                    console.log('[SPRITE] Loaded successfully:', this.cues.length, 'cues');
+                    return true;
+                } catch (err) {
+                    console.warn('[SPRITE] Failed to load:', err.message);
+                    this.ready = false;
+                    return false;
+                }
+            }
+
+            parseVTT(text) {
+                const lines = text.split('\n');
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].includes('-->')) {
+                        const [startStr, endStr] = lines[i].split('-->').map(s => s.trim());
+                        const start = this.parseTime(startStr);
+                        const end = this.parseTime(endStr);
+                        const nextLine = lines[i + 1] || '';
+                        const xywh = nextLine.match(/#xywh=(\d+),(\d+),(\d+),(\d+)/);
+                        if (xywh) {
+                            this.cues.push({
+                                start, end,
+                                x: +xywh[1], y: +xywh[2],
+                                w: +xywh[3], h: +xywh[4]
+                            });
+                        }
+                    }
+                }
+            }
+
+            parseTime(str) {
+                const parts = str.split(':');
+                if (parts.length === 3) {
+                    return +parts[0] * 3600 + +parts[1] * 60 + parseFloat(parts[2]);
+                }
+                return +parts[0] * 60 + parseFloat(parts[1]);
+            }
+
+            getCueAt(time) {
+                return this.cues.find(c => time >= c.start && time < c.end) || this.cues[0];
+            }
+        }
+
+        const spritePreview = new SpritePreview();
+
+        async function generateFramesFromSprite(taskId) {
+            // Wait for sprite to be ready (poll up to 20 times, 500ms apart)
+            let retries = 0;
+            while (retries < 20) {
+                try {
+                    const res = await fetch(`/api/sprite-status/${taskId}`);
+                    const data = await res.json();
+                    if (data.ready) break;
+                } catch (e) {
+                    console.warn('[SPRITE] Status check failed:', e);
+                }
+                await new Promise(r => setTimeout(r, 500));
+                retries++;
+                if (loadingText) loadingText.textContent = `Generating thumbnails... (${retries}/20)`;
+            }
+
+            // Try to load sprite
+            const loaded = await spritePreview.load(taskId);
+            if (!loaded || !spritePreview.ready) {
+                console.warn('[SPRITE] Not ready after polling, falling back to canvas');
+                return false;
+            }
+
+            // Clear strip and create thumbnails from sprite
+            thumbnailStrip.innerHTML = '';
+            frames = [];
+
+            const meta = spritePreview.meta || { cols: 10, thumb_width: 160, thumb_height: 90 };
+            const thumbDisplayW = 64;
+            const thumbDisplayH = 48;
+            const scaleX = thumbDisplayW / meta.thumb_width;
+            const scaleY = thumbDisplayH / meta.thumb_height;
+
+            spritePreview.cues.forEach((cue, i) => {
+                const div = document.createElement('div');
+                div.className = 'frame-thumb sprite-thumb';
+                div.dataset.index = i;
+                div.dataset.time = cue.start;
+                div.style.cssText = `
+                    width: ${thumbDisplayW}px;
+                    height: ${thumbDisplayH}px;
+                    background-image: url(${spritePreview.spriteUrl});
+                    background-position: -${cue.x * scaleX}px -${cue.y * scaleY}px;
+                    background-size: ${meta.cols * thumbDisplayW}px auto;
+                    flex-shrink: 0;
+                    cursor: pointer;
+                    border-radius: 4px;
+                    border: 2px solid transparent;
+                    box-sizing: border-box;
+                `;
+                div.onclick = () => seekToFrame(i);
+                thumbnailStrip.appendChild(div);
+                frames.push({ element: div, time: cue.start });
+            });
+
+            FRAME_INTERVAL = spritePreview.meta?.interval || 1;
+
+            if (loadingText) loadingText.textContent = `${frames.length} frames ready (instant)`;
+            if (frames.length > 0) {
+                frames[0].element.classList.add('active');
+            }
+
+            console.log('[SPRITE] Thumbnail strip loaded from sprite:', frames.length, 'frames');
+            return true;
+        }
+
+        // Original canvas-based frame generation (fallback for local files)
         async function generateFrames() {
             const duration = video.duration;
             if (!duration || duration === Infinity) return;
@@ -3024,11 +3171,20 @@
         }
 
         // Event listeners
-        video.addEventListener('loadedmetadata', function() {
+        video.addEventListener('loadedmetadata', async function() {
             if (video.duration && video.duration !== Infinity) {
                 // Show step indicator and timeline
                 if (stepIndicator) stepIndicator.style.display = 'flex';
                 if (timelineContainer) timelineContainer.style.display = 'block';
+
+                // Try sprite-based thumbnails first (instant loading from server)
+                const taskId = video.dataset.taskId;
+                if (taskId) {
+                    const usedSprite = await generateFramesFromSprite(taskId);
+                    if (usedSprite) return; // Sprite loaded successfully
+                }
+
+                // Fallback to canvas-based extraction (for local files or when sprite fails)
                 generateFrames();
             }
         });

@@ -6241,10 +6241,21 @@ def upload_complete():
         # Get file extension
         ext = os.path.splitext(filename or remote_path)[1].lower() if filename or remote_path else '.mp4'
 
+        # Trigger sprite sheet generation in background for instant scrubbing
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            sprite_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SpriteGen")
+            sprite_executor.submit(generate_sprite_sheet, cdn_url, task_id)
+            print(f"[B2-DIRECT] Sprite generation triggered for {task_id}")
+        except Exception as sprite_err:
+            print(f"[B2-DIRECT] Sprite generation trigger failed: {sprite_err}")
+
         return jsonify({
             'status': 'success',
             'task_id': task_id,
             'video_url': cdn_url,
+            'sprite_url': f'/api/sprite/{task_id}/sprite.jpg',
+            'vtt_url': f'/api/sprite/{task_id}/thumbs.vtt',
             'message': 'Upload complete, ready for processing'
         })
 
@@ -6392,6 +6403,221 @@ def serve_thumbnail(task_id, filename):
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ============================================================================
+# SPRITE SHEET GENERATION FOR INSTANT SCRUBBING
+# ============================================================================
+
+def format_vtt_time(seconds):
+    """Format seconds as VTT timestamp (HH:MM:SS.mmm)"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
+
+
+def generate_sprite_sheet(video_url, task_id, thumb_width=160, thumb_height=90, interval=1.0, cols=10):
+    """
+    Generate thumbnail sprite sheet + VTT file for instant scrubbing.
+
+    Args:
+        video_url: CDN URL or local path to video
+        task_id: Unique task identifier
+        thumb_width: Width of each thumbnail (default 160)
+        thumb_height: Height of each thumbnail (default 90)
+        interval: Seconds between thumbnails (default 1.0)
+        cols: Number of columns in sprite grid (default 10)
+
+    Returns:
+        dict with sprite_path, vtt_path, duration, or None on error
+    """
+    try:
+        sprite_dir = os.path.join(CACHE_DIR, 'sprites', task_id)
+        os.makedirs(sprite_dir, exist_ok=True)
+
+        # Get video duration using ffprobe
+        probe_cmd = [
+            FFPROBE_EXE, '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'json',
+            video_url
+        ]
+
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if probe_result.returncode != 0:
+            print(f"[SPRITE] ffprobe failed for {task_id}: {probe_result.stderr}")
+            return None
+
+        import json as json_module
+        probe_data = json_module.loads(probe_result.stdout)
+        duration = float(probe_data['format']['duration'])
+
+        # Calculate grid dimensions
+        num_thumbs = int(duration / interval) + 1
+        rows = (num_thumbs + cols - 1) // cols
+
+        # FFmpeg: Extract frames and tile into sprite sheet
+        sprite_path = os.path.join(sprite_dir, 'sprite.jpg')
+
+        # Build filter: fps -> scale -> tile
+        vf_filter = f"fps=1/{interval},scale={thumb_width}:{thumb_height},tile={cols}x{rows}"
+
+        ffmpeg_cmd = [
+            FFMPEG_EXE, '-y',
+            '-i', video_url,
+            '-vf', vf_filter,
+            '-frames:v', '1',
+            '-q:v', '5',  # JPEG quality (2-5 is good)
+            sprite_path
+        ]
+
+        print(f"[SPRITE] Generating sprite for {task_id}: {num_thumbs} thumbs ({cols}x{rows} grid)")
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=120)
+
+        if result.returncode != 0:
+            print(f"[SPRITE] FFmpeg failed for {task_id}: {result.stderr}")
+            return None
+
+        # Generate VTT file
+        vtt_path = os.path.join(sprite_dir, 'thumbs.vtt')
+        with open(vtt_path, 'w') as f:
+            f.write('WEBVTT\n\n')
+            for i in range(num_thumbs):
+                start = i * interval
+                end = min((i + 1) * interval, duration)
+                x = (i % cols) * thumb_width
+                y = (i // cols) * thumb_height
+                f.write(f'{format_vtt_time(start)} --> {format_vtt_time(end)}\n')
+                f.write(f'sprite.jpg#xywh={x},{y},{thumb_width},{thumb_height}\n\n')
+
+        # Also save metadata for frontend
+        meta_path = os.path.join(sprite_dir, 'meta.json')
+        with open(meta_path, 'w') as f:
+            import json as json_module
+            json_module.dump({
+                'duration': duration,
+                'num_thumbs': num_thumbs,
+                'thumb_width': thumb_width,
+                'thumb_height': thumb_height,
+                'cols': cols,
+                'rows': rows,
+                'interval': interval
+            }, f)
+
+        print(f"[SPRITE] Generated sprite for {task_id}: {sprite_path}")
+        return {
+            'sprite_path': sprite_path,
+            'vtt_path': vtt_path,
+            'duration': duration,
+            'num_thumbs': num_thumbs
+        }
+
+    except Exception as e:
+        print(f"[SPRITE] Error generating sprite for {task_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+@app.route('/api/sprite/<task_id>/<filename>')
+def serve_sprite(task_id, filename):
+    """Serve sprite sheet or VTT file"""
+    try:
+        # Sanitize inputs
+        safe_task_id = secure_filename(task_id)
+        safe_filename = secure_filename(filename)
+
+        sprite_dir = os.path.join(CACHE_DIR, 'sprites', safe_task_id)
+        file_path = os.path.join(sprite_dir, safe_filename)
+
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+
+        # Determine MIME type
+        if safe_filename.endswith('.jpg') or safe_filename.endswith('.jpeg'):
+            mimetype = 'image/jpeg'
+        elif safe_filename.endswith('.webp'):
+            mimetype = 'image/webp'
+        elif safe_filename.endswith('.vtt'):
+            mimetype = 'text/vtt'
+        elif safe_filename.endswith('.json'):
+            mimetype = 'application/json'
+        else:
+            mimetype = 'application/octet-stream'
+
+        return send_from_directory(sprite_dir, safe_filename, mimetype=mimetype)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sprite-status/<task_id>')
+def sprite_status(task_id):
+    """Check if sprite is ready for a given task"""
+    try:
+        safe_task_id = secure_filename(task_id)
+        sprite_dir = os.path.join(CACHE_DIR, 'sprites', safe_task_id)
+
+        sprite_path = os.path.join(sprite_dir, 'sprite.jpg')
+        vtt_path = os.path.join(sprite_dir, 'thumbs.vtt')
+        meta_path = os.path.join(sprite_dir, 'meta.json')
+
+        ready = os.path.exists(sprite_path) and os.path.exists(vtt_path)
+
+        response = {'ready': ready}
+
+        # Include metadata if available
+        if ready and os.path.exists(meta_path):
+            with open(meta_path, 'r') as f:
+                import json as json_module
+                response['meta'] = json_module.load(f)
+
+        return jsonify(response)
+
+    except Exception as e:
+        return jsonify({'ready': False, 'error': str(e)}), 500
+
+
+@app.route('/api/generate-sprite/<task_id>', methods=['POST'])
+def trigger_sprite_generation(task_id):
+    """
+    Manually trigger sprite generation for a task.
+    Expects JSON body with 'video_url' (CDN URL).
+    """
+    try:
+        data = request.get_json() or {}
+        video_url = data.get('video_url')
+
+        if not video_url:
+            # Try to get from Redis
+            try:
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                video_url = redis_client.get(f"upload:{task_id}:cdn_url")
+            except:
+                pass
+
+        if not video_url:
+            return jsonify({'error': 'No video_url provided and not found in cache'}), 400
+
+        # Check if already exists
+        safe_task_id = secure_filename(task_id)
+        sprite_path = os.path.join(CACHE_DIR, 'sprites', safe_task_id, 'sprite.jpg')
+        if os.path.exists(sprite_path):
+            return jsonify({'status': 'exists', 'message': 'Sprite already generated'})
+
+        # Generate in background thread
+        from concurrent.futures import ThreadPoolExecutor
+        executor = ThreadPoolExecutor(max_workers=1)
+        executor.submit(generate_sprite_sheet, video_url, task_id)
+
+        return jsonify({
+            'status': 'started',
+            'message': 'Sprite generation started in background'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/process', methods=['POST', 'OPTIONS'])
