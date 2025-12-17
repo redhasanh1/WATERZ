@@ -246,7 +246,8 @@ class SAM2Selector {
             id: this.currentSelectionId++,
             points: [{x, y, label}],  // Single point for this selection
             mask: null,
-            color: color
+            color: color,
+            frame_idx: this.currentFrameIndex  // Store frame at click time
         };
 
         console.log(`[SAM2Selector] New selection #${this.currentSelection.id} at (${x}, ${y}) with color ${this.colorIndex - 1}`);
@@ -264,7 +265,14 @@ class SAM2Selector {
             this.currentSelection.mask = mask;
 
             // Always add as new selection (each click is separate)
-            this.selections.push({...this.currentSelection});
+            // Deep copy to avoid shared references
+            this.selections.push({
+                id: this.currentSelection.id,
+                points: this.currentSelection.points.map(p => ({...p})),
+                mask: this.currentSelection.mask,  // ImageData is immutable
+                color: [...this.currentSelection.color],
+                frame_idx: this.currentSelection.frame_idx
+            });
 
             console.log(`[SAM2Selector] Added selection #${this.currentSelection.id} with color index ${this.colorIndex - 1}`);
 
@@ -366,15 +374,12 @@ class SAM2Selector {
     draw() {
         if (!this.videoWidth) return;
 
-        // Clear canvas
+        // Clear canvas (transparent - video shows through underneath)
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw video frame (scaled)
-        this.ctx.drawImage(
-            this.video,
-            0, 0, this.videoWidth, this.videoHeight,
-            0, 0, this.canvas.width, this.canvas.height
-        );
+        // DON'T draw video - let <video> element handle it
+        // Canvas is now overlay-only, positioned on top of video
+        // This prevents sync issues when scrubbing to different frames
 
         // Draw all mask overlays
         this.drawAllMasks();
