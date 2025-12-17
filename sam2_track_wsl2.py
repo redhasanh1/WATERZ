@@ -139,6 +139,73 @@ class YUV420FrameStorage:
         return len(self.compressed)
 
 
+class YUV420FrameStorageReordered:
+    """
+    Wrapper that provides frames from an existing YUV420FrameStorage in a different order.
+    Used for backward tracking by reversing frame order.
+    """
+
+    def __init__(self, original_storage, frame_indices):
+        """
+        Args:
+            original_storage: YUV420FrameStorage instance
+            frame_indices: List of original frame indices in desired order
+                           e.g., [100, 99, 98, ..., 0] for backward from frame 100
+        """
+        self.original = original_storage
+        self.frame_indices = frame_indices
+        self.video_height = original_storage.video_height
+        self.video_width = original_storage.video_width
+
+    def __getitem__(self, index):
+        # Map new index to original frame index
+        original_idx = self.frame_indices[index]
+        return self.original[original_idx]
+
+    def __len__(self):
+        return len(self.frame_indices)
+
+
+def init_state_reordered(predictor, original_yuv_frames, frame_indices, device="cuda"):
+    """
+    Initialize SAM2 inference state with reordered frames (for backward tracking).
+    Reuses existing YUV420 compressed frames but accesses them in different order.
+    """
+    from collections import OrderedDict
+
+    # Wrap existing frames with new order
+    reordered_frames = YUV420FrameStorageReordered(original_yuv_frames, frame_indices)
+
+    # Build inference_state
+    inference_state = {}
+    inference_state["images"] = reordered_frames
+    inference_state["num_frames"] = len(reordered_frames)
+    inference_state["offload_video_to_cpu"] = False
+    inference_state["offload_state_to_cpu"] = False
+    inference_state["video_height"] = reordered_frames.video_height
+    inference_state["video_width"] = reordered_frames.video_width
+    inference_state["device"] = torch.device(device)
+    inference_state["storage_device"] = torch.device(device)
+
+    # Initialize tracking structures
+    inference_state["point_inputs_per_obj"] = {}
+    inference_state["mask_inputs_per_obj"] = {}
+    inference_state["cached_features"] = {}
+    inference_state["constants"] = {}
+    inference_state["obj_id_to_idx"] = OrderedDict()
+    inference_state["obj_idx_to_id"] = OrderedDict()
+    inference_state["obj_ids"] = []
+    inference_state["output_dict_per_obj"] = {}
+    inference_state["temp_output_dict_per_obj"] = {}
+    inference_state["frames_tracked_per_obj"] = {}
+
+    # Warm up visual backbone on frame 0 (which is original frame_idx_start)
+    print("[SAM2-Reversed] Warming up visual backbone on reversed sequence...", flush=True)
+    predictor._get_image_feature(inference_state, frame_idx=0, batch_size=1)
+
+    return inference_state
+
+
 def init_state_yuv420(predictor, frames_dir, device="cuda"):
     """
     Initialize SAM2 inference state with YUV420 compressed frames.
@@ -398,7 +465,14 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
         # Initialize state with YUV420 compression - SKIPS SAM2's frame loading entirely!
         print(f"[SAM2-YUV420] Initializing with {total_frames} frames (single pass, no double loading)...")
         inference_state = init_state_yuv420(predictor, frames_dir, device=device)
-        print(f"[SAM2-YUV420] Ready! {inference_state['num_frames']} frames loaded", flush=True)
+        actual_frames = inference_state['num_frames']
+        print(f"[SAM2-YUV420] Ready! {actual_frames} frames loaded", flush=True)
+
+        # Clamp frame_idx_start to valid range (frontend may calculate wrong index if FPS differs)
+        if frame_idx_start < 0 or frame_idx_start >= actual_frames:
+            old_idx = frame_idx_start
+            frame_idx_start = max(0, min(frame_idx_start, actual_frames - 1))
+            print(f"[SAM2] WARNING: frame_idx_start {old_idx} out of range, clamped to {frame_idx_start}")
 
         # Add initial prompt
         if bbox is not None:
@@ -424,51 +498,17 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
 
         masks_saved = 0
 
-        # BIDIRECTIONAL PROPAGATION: Start from frame_idx_start, propagate both directions
+        # BIDIRECTIONAL PROPAGATION - simple internal reverse=True
         print(f"\n[SAM2-Bidirectional] Starting from frame {frame_idx_start}, propagating both directions")
 
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16, cache_enabled=True):
 
                 # ============================================================
-                # FORWARD PROPAGATION: frame_idx_start -> end
+                # BACKWARD: frame_idx_start -> 0 (using internal reverse=True)
                 # ============================================================
-                forward_frames = total_frames - frame_idx_start
-                if forward_frames > 0:
-                    print(f"\n[SAM2-Forward] Propagating frames {frame_idx_start} -> {total_frames - 1} ({forward_frames} frames)")
-
-                    for frame_idx, obj_ids, mask_logits in tqdm(
-                        predictor.propagate_in_video(
-                            inference_state,
-                            start_frame_idx=frame_idx_start,
-                            max_frame_num_to_track=forward_frames,
-                            reverse=False
-                        ),
-                        total=forward_frames,
-                        desc="Forward"
-                    ):
-                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
-                        mask_uint8 = (mask * 255).astype(np.uint8)
-
-                        # Filter noise
-                        if np.sum(mask_uint8 > 127) < 100:
-                            mask_uint8[:] = 0
-
-                        cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
-                        masks_saved += 1
-
-                        # Release memory immediately
-                        del mask_logits, mask
-
-                    print(f"[SAM2-Forward] Complete: {forward_frames} masks")
-                    gc.collect()
-                    torch.cuda.empty_cache()
-
-                # ============================================================
-                # BACKWARD PROPAGATION: frame_idx_start -> 0
-                # ============================================================
-                backward_frames = frame_idx_start
-                if backward_frames > 0:
+                backward_frames = frame_idx_start + 1  # Include click frame
+                if frame_idx_start > 0:
                     print(f"\n[SAM2-Backward] Propagating frames {frame_idx_start} -> 0 ({backward_frames} frames)")
 
                     for frame_idx, obj_ids, mask_logits in tqdm(
@@ -484,17 +524,54 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
                         mask_uint8 = (mask * 255).astype(np.uint8)
 
-                        # Filter noise
                         if np.sum(mask_uint8 > 127) < 100:
                             mask_uint8[:] = 0
 
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
-                        # Release memory immediately
                         del mask_logits, mask
 
                     print(f"[SAM2-Backward] Complete: {backward_frames} masks")
+                    gc.collect()
+                    torch.cuda.empty_cache()
+
+                # ============================================================
+                # FORWARD: frame_idx_start -> end
+                # ============================================================
+                forward_frames = actual_frames - frame_idx_start
+                if forward_frames > 0:
+                    if frame_idx_start > 0:
+                        print(f"\n[SAM2-Forward] Propagating frames {frame_idx_start} -> {actual_frames - 1} ({forward_frames} frames)")
+                    else:
+                        print(f"\n[SAM2-Forward] Propagating frames 0 -> {actual_frames - 1} ({forward_frames} frames)")
+
+                    for frame_idx, obj_ids, mask_logits in tqdm(
+                        predictor.propagate_in_video(
+                            inference_state,
+                            start_frame_idx=frame_idx_start,
+                            max_frame_num_to_track=forward_frames,
+                            reverse=False
+                        ),
+                        total=forward_frames,
+                        desc="Forward"
+                    ):
+                        # Skip click frame if already saved by backward
+                        if frame_idx_start > 0 and frame_idx == frame_idx_start:
+                            continue
+
+                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
+                        mask_uint8 = (mask * 255).astype(np.uint8)
+
+                        if np.sum(mask_uint8 > 127) < 100:
+                            mask_uint8[:] = 0
+
+                        cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
+                        masks_saved += 1
+
+                        del mask_logits, mask
+
+                    print(f"[SAM2-Forward] Complete: {forward_frames} masks")
                     gc.collect()
                     torch.cuda.empty_cache()
 

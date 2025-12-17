@@ -40,6 +40,7 @@ COPY sam2_trt_inference/ ./sam2_trt_inference/
 
 # ---- SAM2 PyTorch (for mask generation) ----
 COPY segment-anything-2/ ./segment-anything-2/
+RUN cd /app/segment-anything-2 && rm -rf build *.egg-info && find . -name "*.so" -delete && pip install -e .
 
 # ---- Worker Scripts ----
 COPY wsl_sam2_worker.py .

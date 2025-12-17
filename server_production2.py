@@ -159,8 +159,7 @@ class VRAMWatchdog:
 
     def stop(self):
         self._stop = True
-        if self._thread:
-            self._thread.join(timeout=2)
+        # Don't wait for thread - it's a daemon, will die on its own
         print("[WATCHDOG] Stopped")
 
     def _monitor(self):
@@ -1646,11 +1645,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
     finally:
         # Stop VRAM watchdog
         stop_vram_watchdog()
-        # NUCLEAR cleanup after EVERY task to prevent crashes on Salad
-        try:
-            full_cleanup(video_id=video_id, context="after process_sam2_interactive")
-        except:
-            cleanup_vram("finally block fallback")
+        # NUCLEAR cleanup in BACKGROUND THREAD - don't block task completion!
+        import threading
+        def _bg_cleanup():
+            try:
+                full_cleanup(video_id=video_id, context="after process_sam2_interactive")
+            except:
+                cleanup_vram("finally block fallback")
+        cleanup_thread = threading.Thread(target=_bg_cleanup, daemon=True)
+        cleanup_thread.start()
 
 
 #============================================================================
@@ -2961,11 +2964,15 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
     finally:
         # Stop VRAM watchdog
         stop_vram_watchdog()
-        # NUCLEAR cleanup after EVERY task to prevent crashes on Salad
-        try:
-            full_cleanup(video_id=video_id, context="after _continue_after_masks")
-        except:
-            cleanup_vram("finally block fallback")
+        # NUCLEAR cleanup in BACKGROUND THREAD - don't block task completion!
+        import threading
+        def _bg_cleanup():
+            try:
+                full_cleanup(video_id=video_id, context="after _continue_after_masks")
+            except:
+                cleanup_vram("finally block fallback")
+        cleanup_thread = threading.Thread(target=_bg_cleanup, daemon=True)
+        cleanup_thread.start()
 
 
 # =============================================================================

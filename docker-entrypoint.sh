@@ -30,9 +30,8 @@ echo ""
 NEUFLOW_ENGINE="/app/faster-propainter-main/models/neuflow_things_fp16.engine"
 RFCNET_ENGINE="/app/engines/rfcnet/rfcnet_dcnv4_fp16.engine"
 
-# Pre-built WSL engines (built on RTX 4090 WSL2)
-NEUFLOW_ENGINE_WSL="/app/faster-propainter-main/models/neuflow_things_fp16.engine.wsl"
-RFCNET_ENGINE_WSL="/app/engines/rfcnet/rfcnet_dcnv4_fp16.engine.wsl"
+# Pre-built engines are now copied to final location in Dockerfile
+# No runtime copy needed - works with --read-only filesystem
 
 # ONNX paths
 NEUFLOW_ONNX="/app/faster-propainter-main/models/neuflow_things.onnx"
@@ -58,12 +57,9 @@ fi
 # Build NeuFlow TRT Engine (if missing)
 # ============================================================
 if [ ! -f "$NEUFLOW_ENGINE" ]; then
-    # Check for pre-built WSL engine first
-    if [ "$IS_WSL" = true ] && [ "$IS_4090" = true ] && [ -f "$NEUFLOW_ENGINE_WSL" ]; then
-        echo "[WSL] Using pre-built NeuFlow engine (skipping 10min build!)"
-        cp "$NEUFLOW_ENGINE_WSL" "$NEUFLOW_ENGINE"
-        echo "[OK] NeuFlow TRT engine copied from WSL pre-built: $NEUFLOW_ENGINE"
-    elif [ -f "$NEUFLOW_ONNX" ]; then
+    # Pre-built engines should already be at final location from Dockerfile
+    # This branch only runs if building from scratch (no pre-built available)
+    if [ -f "$NEUFLOW_ONNX" ]; then
         echo ""
         echo "[BUILD] NeuFlow TRT engine not found, building..."
         echo "        This takes ~10 minutes on first run."
@@ -94,13 +90,9 @@ fi
 DCNV4_PLUGIN="/app/libdcnv4_plugin.so"
 
 if [ ! -f "$RFCNET_ENGINE" ]; then
-    # Check for pre-built WSL engine first
-    if [ "$IS_WSL" = true ] && [ "$IS_4090" = true ] && [ -f "$RFCNET_ENGINE_WSL" ]; then
-        echo "[WSL] Using pre-built RFCNet engine (skipping 5min build!)"
-        mkdir -p "$(dirname "$RFCNET_ENGINE")"
-        cp "$RFCNET_ENGINE_WSL" "$RFCNET_ENGINE"
-        echo "[OK] RFCNet TRT engine copied from WSL pre-built: $RFCNET_ENGINE"
-    elif [ -f "$RFCNET_ONNX" ]; then
+    # Pre-built engines should already be at final location from Dockerfile
+    # This branch only runs if building from scratch (no pre-built available)
+    if [ -f "$RFCNET_ONNX" ]; then
         echo ""
         echo "[BUILD] RFCNet DCNv4 TRT engine not found, building..."
         echo "        This takes ~5 minutes on first run."

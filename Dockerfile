@@ -75,9 +75,10 @@ COPY faster-propainter-main/ ./faster-propainter-main/
 COPY engines/rfcnet/rfcnet_dcnv4.onnx ./engines/rfcnet/
 
 # ---- PRE-BUILT TensorRT Engines (WSL 4090) ----
-# Built on WSL2 with RTX 4090 - skip rebuild if running on same GPU/platform
-COPY engines_trt/neuflow_things_fp16.engine ./faster-propainter-main/models/neuflow_things_fp16.engine.wsl
-COPY engines_trt/rfcnet/rfcnet_dcnv4_fp16.engine ./engines/rfcnet/rfcnet_dcnv4_fp16.engine.wsl
+# Built on WSL2 with RTX 4090 - copy to FINAL location (no runtime copy needed)
+# This allows running with --read-only filesystem
+COPY engines_trt/neuflow_things_fp16.engine ./faster-propainter-main/models/neuflow_things_fp16.engine
+COPY engines_trt/rfcnet/rfcnet_dcnv4_fp16.engine ./engines/rfcnet/rfcnet_dcnv4_fp16.engine
 
 # ---- Symlink for weights (server_production.py looks in /app/weights/) ----
 RUN ln -sf /app/faster-propainter-main/weights /app/weights
