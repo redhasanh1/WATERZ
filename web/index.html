@@ -1578,26 +1578,20 @@
                     </div>
 
                     <div id="creditEstimate" style="display:none;">
-                        <div style="background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 24px; padding: 24px; max-width: 280px; margin: 15px auto;">
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
-                                <div style="background: rgba(255,255,255,0.03); border-radius: 12px; padding: 14px; text-align: center;">
-                                    <div style="margin-bottom: 6px;">
-                                        <svg style="width: 20px; height: 20px; stroke: #667eea; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                    </div>
+                        <div style="background: rgba(25, 25, 40, 0.9); border-radius: 12px; padding: 16px 24px; max-width: 400px; margin: 15px auto; display: flex; align-items: center; justify-content: space-between; gap: 20px; border: 1px solid rgba(255,255,255,0.08);">
+                            <div style="display: flex; gap: 24px;">
+                                <div style="text-align: center;">
                                     <div id="creditDuration" style="font-size: 1.1rem; font-weight: 600; color: #fff;">10s</div>
-                                    <div style="font-size: 0.7rem; color: #666; text-transform: uppercase; margin-top: 2px;">Duration</div>
+                                    <div style="font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px;">Duration</div>
                                 </div>
-                                <div style="background: rgba(255,255,255,0.03); border-radius: 12px; padding: 14px; text-align: center;">
-                                    <div style="margin-bottom: 6px;">
-                                        <svg style="width: 20px; height: 20px; stroke: #667eea; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-                                    </div>
+                                <div style="text-align: center;">
                                     <div id="creditResolution" style="font-size: 1.1rem; font-weight: 600; color: #fff;">480×872</div>
-                                    <div style="font-size: 0.7rem; color: #666; text-transform: uppercase; margin-top: 2px;">Resolution</div>
+                                    <div style="font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px;">Resolution</div>
                                 </div>
                             </div>
-                            <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2)); border-radius: 14px; padding: 16px; text-align: center;">
-                                <div id="creditCost" style="font-size: 2rem; font-weight: 800; color: #fff;">1</div>
-                                <div style="font-size: 0.8rem; color: #a0a0c0; margin-top: 2px;">credit required</div>
+                            <div style="text-align: center; padding-left: 20px; border-left: 1px solid rgba(102, 126, 234, 0.3);">
+                                <div id="creditCost" style="font-size: 1.8rem; font-weight: 700; color: #667eea;">1</div>
+                                <div style="font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px;">Credit</div>
                             </div>
                         </div>
                     </div>
@@ -2208,11 +2202,6 @@
                 // Show processing disclaimer
                 const processingDisclaimer = document.getElementById('processingDisclaimer');
                 if (processingDisclaimer) processingDisclaimer.style.display = 'block';
-
-                // Auto-scroll to button after a brief delay
-                setTimeout(() => {
-                    processBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }, 500);
             } else {
                 alert('Upload failed: ' + (data?.message || 'Unknown error'));
             }
