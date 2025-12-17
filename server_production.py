@@ -501,16 +501,25 @@ def require_credits(min_credits=1):
     return decorator
 
 
-def deduct_credit_on_completion(task_id, user_id):
+def deduct_credit_on_completion(task_id):
     """
     Deduct credit only once when task completes successfully.
-    Uses Redis to ensure atomic check-and-set to prevent double-deduction.
+    Looks up user_id from Redis (stored when task was created).
+    Uses atomic check-and-set to prevent double-deduction.
     """
-    if not user_id or not AUTH_ENABLED:
+    if not AUTH_ENABLED:
         return False
 
     try:
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+
+        # Look up user_id from stored task data
+        user_id = redis_client.get(f"task:{task_id}:user_id")
+
+        if not user_id:
+            print(f"[CREDITS] No user_id found for task {task_id}")
+            return False
+
         redis_key = f"credits_deducted:{task_id}"
 
         # Atomic check-and-set - only proceeds if key doesn't exist
@@ -5336,8 +5345,7 @@ def get_status(task_id):
 
                             print(f"[STATUS] ✅ Encoding complete for {video_id}! Returning: {result_url}")
                             # Deduct credit on successful completion
-                            user_id = session.get('user_id')
-                            deduct_credit_on_completion(task_id, user_id)
+                            deduct_credit_on_completion(task_id)
                             return jsonify({
                                 'state': 'SUCCESS',
                                 'result': {'result_url': result_url},
@@ -5468,8 +5476,7 @@ def get_status(task_id):
                                     result_url = f'/results/{filename}'
                                 print(f"[POLL] Background encoding COMPLETE for {video_id}! Returning result_url: {result_url}")
                                 # Deduct credit on successful completion
-                                user_id = session.get('user_id')
-                                deduct_credit_on_completion(task_id, user_id)
+                                deduct_credit_on_completion(task_id)
                                 response['result'] = {
                                     'result_url': result_url
                                 }
@@ -5540,8 +5547,7 @@ def get_status(task_id):
             if isinstance(result_data, dict) and 'metadata' in result_data:
                 response['metadata'] = result_data['metadata']
             # Deduct credit on successful completion
-            user_id = session.get('user_id')
-            deduct_credit_on_completion(task_id, user_id)
+            deduct_credit_on_completion(task_id)
         elif task.state == 'FAILURE':
             response['error'] = str(task.info)
             print(f"[ERROR] Task failed: {task.info}")
@@ -6481,8 +6487,15 @@ def process_video():
                 result = chain(s1, s2).apply_async()
             print(f"[OK] Task queued with ID: {result.id}")
 
-            # NOTE: Credits are now deducted when task completes successfully (in /api/status)
-            # This prevents users from losing credits if processing fails
+            # Store user_id with task for credit deduction on completion
+            user_id = session.get('user_id')
+            if user_id:
+                try:
+                    redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                    redis_client.setex(f"task:{result.id}:user_id", 86400 * 7, str(user_id))
+                    print(f"[CREDITS] Stored user {user_id} for task {result.id}")
+                except Exception as e:
+                    print(f"[CREDITS] Failed to store user_id: {e}")
 
             return jsonify({'status': 'success', 'task_id': result.id})
 
@@ -7041,8 +7054,7 @@ def sam2_status(task_id):
         elif result.state == 'SUCCESS':
             data = result.result or {}
             # Deduct credit on successful completion
-            user_id = session.get('user_id')
-            deduct_credit_on_completion(task_id, user_id)
+            deduct_credit_on_completion(task_id)
             return jsonify({'status': 'completed', 'result_url': data.get('output_path') or data.get('result_url')})
         elif result.state == 'FAILURE':
             return jsonify({'status': 'failed', 'error': str(result.info)})
@@ -7228,6 +7240,15 @@ def sam2_process_video():
                        queue='propainter')
 
         result = chain(s1, s2).apply_async(task_id=job_id)
+
+        # Store user_id with task for credit deduction on completion
+        user_id = session.get('user_id')
+        if user_id:
+            try:
+                redis_client.setex(f"task:{job_id}:user_id", 86400 * 7, str(user_id))
+                print(f"[CREDITS] Stored user {user_id} for SAM2 task {job_id}")
+            except Exception as e:
+                print(f"[CREDITS] Failed to store user_id: {e}")
 
         print(f"[SAM2] Started WSL chain job {job_id} for video {task_id}")
         print(f"[SAM2] Points: {len(wsl_points)}, Video: {video_width}x{video_height}")
