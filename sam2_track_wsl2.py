@@ -423,29 +423,29 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
             print(f"[SAM2-Official] Added point prompt at frame {frame_idx_start}")
 
         masks_saved = 0
-        num_chunks = (total_frames + CHUNK_SIZE - 1) // CHUNK_SIZE
-        rle_compressed_mask = None  # RLE compressed mask for chunk continuity
+
+        # BIDIRECTIONAL PROPAGATION: Start from frame_idx_start, propagate both directions
+        print(f"\n[SAM2-Bidirectional] Starting from frame {frame_idx_start}, propagating both directions")
 
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16, cache_enabled=True):
 
-                # Process in chunks using SAM2's official parameters
-                for chunk_idx in range(num_chunks):
-                    chunk_start = chunk_idx * CHUNK_SIZE
-                    chunk_end = min(chunk_start + CHUNK_SIZE, total_frames)
+                # ============================================================
+                # FORWARD PROPAGATION: frame_idx_start -> end
+                # ============================================================
+                forward_frames = total_frames - frame_idx_start
+                if forward_frames > 0:
+                    print(f"\n[SAM2-Forward] Propagating frames {frame_idx_start} -> {total_frames - 1} ({forward_frames} frames)")
 
-                    print(f"\n[SAM2-Chunk] Processing chunk {chunk_idx + 1}/{num_chunks}: frames {chunk_start}-{chunk_end}")
-
-                    chunk_masks = 0
-                    last_mask_uint8 = None
                     for frame_idx, obj_ids, mask_logits in tqdm(
                         predictor.propagate_in_video(
                             inference_state,
-                            start_frame_idx=chunk_start,
-                            max_frame_num_to_track=CHUNK_SIZE
+                            start_frame_idx=frame_idx_start,
+                            max_frame_num_to_track=forward_frames,
+                            reverse=False
                         ),
-                        total=chunk_end - chunk_start,
-                        desc=f"Chunk {chunk_idx + 1}"
+                        total=forward_frames,
+                        desc="Forward"
                     ):
                         mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
                         mask_uint8 = (mask * 255).astype(np.uint8)
@@ -456,36 +456,45 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
 
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
-                        chunk_masks += 1
-                        last_mask_uint8 = mask_uint8
 
-                        # CRITICAL: Release memory immediately to prevent accumulation
+                        # Release memory immediately
                         del mask_logits, mask
 
-                    print(f"[SAM2-Chunk] Chunk {chunk_idx + 1} complete: {chunk_masks} masks")
+                    print(f"[SAM2-Forward] Complete: {forward_frames} masks")
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
-                    # RLE compress last mask for next chunk continuity
-                    if last_mask_uint8 is not None and chunk_idx < num_chunks - 1:
-                        try:
-                            rle_runs, mask_shape = rle_encode_mask(last_mask_uint8)
-                            orig_size = last_mask_uint8.nbytes
-                            comp_size = len(rle_runs) * 4
-                            ratio = orig_size / comp_size if comp_size > 0 else 0
-                            print(f"[SAM2-RLE] Compressed: {orig_size} -> {comp_size} bytes ({ratio:.0f}:1)", flush=True)
+                # ============================================================
+                # BACKWARD PROPAGATION: frame_idx_start -> 0
+                # ============================================================
+                backward_frames = frame_idx_start
+                if backward_frames > 0:
+                    print(f"\n[SAM2-Backward] Propagating frames {frame_idx_start} -> 0 ({backward_frames} frames)")
 
-                            # Decompress and use as prompt for next chunk
-                            decompressed = rle_decode_mask(rle_runs, mask_shape)
-                            predictor.add_new_mask(
-                                inference_state=inference_state,
-                                frame_idx=chunk_end,
-                                obj_id=1,
-                                mask=decompressed > 127
-                            )
-                            print(f"[SAM2-RLE] Added mask prompt at frame {chunk_end} for continuity", flush=True)
-                        except Exception as e:
-                            print(f"[SAM2-RLE] ERROR: {e}", flush=True)
+                    for frame_idx, obj_ids, mask_logits in tqdm(
+                        predictor.propagate_in_video(
+                            inference_state,
+                            start_frame_idx=frame_idx_start,
+                            max_frame_num_to_track=backward_frames,
+                            reverse=True
+                        ),
+                        total=backward_frames,
+                        desc="Backward"
+                    ):
+                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
+                        mask_uint8 = (mask * 255).astype(np.uint8)
 
-                    # Memory cleanup between chunks
+                        # Filter noise
+                        if np.sum(mask_uint8 > 127) < 100:
+                            mask_uint8[:] = 0
+
+                        cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
+                        masks_saved += 1
+
+                        # Release memory immediately
+                        del mask_logits, mask
+
+                    print(f"[SAM2-Backward] Complete: {backward_frames} masks")
                     gc.collect()
                     torch.cuda.empty_cache()
 

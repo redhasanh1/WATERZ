@@ -2539,7 +2539,12 @@
         const processSAM2Video = async (taskId) => {
             console.log('[SAM2] Processing with selected objects...');
             const points = window.sam2Selector.getAllPoints();
-            const frameIndex = window.currentFrame || 0;
+            // Use frame_idx from first selection, or currentFrameIndex from selector
+            const selections = window.sam2Selector.selections;
+            const frameIndex = (selections && selections.length > 0 && selections[0].frame_idx !== undefined)
+                ? selections[0].frame_idx
+                : (window.sam2Selector.currentFrameIndex || 0);
+            console.log('[SAM2] Using frame_idx:', frameIndex);
             // Get estimated credits from video element
             const videoElem = document.getElementById('professionalVideo');
             const estimatedCredits = parseInt(videoElem?.dataset?.estimatedCredits || '1', 10);
