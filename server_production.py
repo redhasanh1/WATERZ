@@ -500,6 +500,48 @@ def require_credits(min_credits=1):
         return decorated_function
     return decorator
 
+
+def deduct_credit_on_completion(task_id, user_id):
+    """
+    Deduct credit only once when task completes successfully.
+    Uses Redis to ensure atomic check-and-set to prevent double-deduction.
+    """
+    if not user_id or not AUTH_ENABLED:
+        return False
+
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        redis_key = f"credits_deducted:{task_id}"
+
+        # Atomic check-and-set - only proceeds if key doesn't exist
+        if redis_client.setnx(redis_key, "1"):
+            # First time seeing completion - deduct credit
+            redis_client.expire(redis_key, 86400 * 7)  # Expire after 7 days
+
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    'UPDATE users SET credits = credits - 1 WHERE id = %s AND credits >= 1 RETURNING credits',
+                    (user_id,)
+                )
+                deduct_result = cur.fetchone()
+                if deduct_result:
+                    new_balance = deduct_result[0]
+                    print(f"[CREDITS] Deducted 1 credit for user {user_id} on task {task_id} completion. New balance: {new_balance}")
+                    return True
+                else:
+                    print(f"[CREDITS] Deduction failed for user {user_id} - insufficient credits")
+                    return False
+        else:
+            # Already deducted for this task
+            print(f"[CREDITS] Already deducted for task {task_id}, skipping")
+            return False
+
+    except Exception as e:
+        print(f"[CREDITS] Error during deduction: {e}")
+        return False
+
+
 print("[DEBUG] Decorator definitions complete", flush=True)
 print("[DEBUG] About to check REDIS_URL...", flush=True)
 # ----------------------------------------------------------------------------
@@ -1393,7 +1435,7 @@ UPLOAD_RATE_LIMIT = {}  # IP -> (count, timestamp)
 USER_VIDEO_RATE_LIMIT = {}  # user_id -> list of timestamps
 
 # Video processing limits
-MAX_VIDEO_DURATION_SECONDS = 600  # 10 minute max
+MAX_VIDEO_DURATION_SECONDS = 90  # 1 min 30 sec max
 MAX_VIDEO_FPS = 60  # 60fps max
 
 # Input validation
@@ -5293,6 +5335,9 @@ def get_status(task_id):
                                 result_url = f'/results/{filename}'
 
                             print(f"[STATUS] ✅ Encoding complete for {video_id}! Returning: {result_url}")
+                            # Deduct credit on successful completion
+                            user_id = session.get('user_id')
+                            deduct_credit_on_completion(task_id, user_id)
                             return jsonify({
                                 'state': 'SUCCESS',
                                 'result': {'result_url': result_url},
@@ -5422,6 +5467,9 @@ def get_status(task_id):
                                     filename = os.path.basename(final_path)
                                     result_url = f'/results/{filename}'
                                 print(f"[POLL] Background encoding COMPLETE for {video_id}! Returning result_url: {result_url}")
+                                # Deduct credit on successful completion
+                                user_id = session.get('user_id')
+                                deduct_credit_on_completion(task_id, user_id)
                                 response['result'] = {
                                     'result_url': result_url
                                 }
@@ -5491,6 +5539,9 @@ def get_status(task_id):
             }
             if isinstance(result_data, dict) and 'metadata' in result_data:
                 response['metadata'] = result_data['metadata']
+            # Deduct credit on successful completion
+            user_id = session.get('user_id')
+            deduct_credit_on_completion(task_id, user_id)
         elif task.state == 'FAILURE':
             response['error'] = str(task.info)
             print(f"[ERROR] Task failed: {task.info}")
@@ -6430,25 +6481,8 @@ def process_video():
                 result = chain(s1, s2).apply_async()
             print(f"[OK] Task queued with ID: {result.id}")
 
-            # Deduct 1 credit from user's balance after successful task creation
-            user_id = session.get('user_id')
-            if user_id and AUTH_ENABLED:
-                try:
-                    with get_db() as conn:
-                        cur = conn.cursor()
-                        cur.execute(
-                            'UPDATE users SET credits = credits - 1 WHERE id = %s AND credits >= 1 RETURNING credits',
-                            (user_id,)
-                        )
-                        deduct_result = cur.fetchone()
-                        if deduct_result:
-                            new_balance = deduct_result[0]
-                            print(f"[CREDITS] User {user_id} processed video. Task: {result.id}, New balance: {new_balance}")
-                        else:
-                            print(f"[WARNING] Credit deduction failed for user {user_id} - insufficient credits")
-                except Exception as e:
-                    print(f"[ERROR] Failed to deduct credit: {e}")
-                    # Don't fail the request if credit deduction fails - task already queued
+            # NOTE: Credits are now deducted when task completes successfully (in /api/status)
+            # This prevents users from losing credits if processing fails
 
             return jsonify({'status': 'success', 'task_id': result.id})
 
@@ -7006,6 +7040,9 @@ def sam2_status(task_id):
             return jsonify({'status': 'processing', 'progress': info.get('progress', 50), 'message': info.get('status', 'Processing...')})
         elif result.state == 'SUCCESS':
             data = result.result or {}
+            # Deduct credit on successful completion
+            user_id = session.get('user_id')
+            deduct_credit_on_completion(task_id, user_id)
             return jsonify({'status': 'completed', 'result_url': data.get('output_path') or data.get('result_url')})
         elif result.state == 'FAILURE':
             return jsonify({'status': 'failed', 'error': str(result.info)})
@@ -7110,6 +7147,8 @@ def sam2_select_object():
 
 
 @app.route('/api/sam2/process-video', methods=['POST'])
+@require_auth
+@require_credits(min_credits=1)
 def sam2_process_video():
     """
     Trigger SAM2 video processing with user-selected points.
