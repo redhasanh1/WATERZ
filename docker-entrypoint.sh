@@ -227,19 +227,25 @@ while true; do
     sleep 2  # Grace period for processes to fully terminate
 
     # Run Celery inside tmux (allows reconnecting: tmux attach -t celery)
+    # --without-heartbeat: Prevents false crash detection from Redis latency
+    # --without-gossip/mingle: Reduces unnecessary broker traffic
+    # tmux wait-for: Signals when celery exits (no polling needed)
     tmux new-session -d -s celery "celery -A server_production2.celery worker \
         --loglevel=WARNING \
         --pool=${CELERY_POOL:-threads} \
         --concurrency=${CONCURRENCY:-4} \
-        -Q celery,propainter; echo '[TMUX] Celery exited with code '\$?; sleep 5"
+        -Q celery,propainter \
+        --without-heartbeat \
+        --without-gossip \
+        --without-mingle; \
+        echo \$? > /tmp/celery_exit; \
+        tmux wait-for -S celery-done"
 
     echo "[TMUX] Celery running in tmux session 'celery'"
     echo "[TMUX] To view logs: tmux attach -t celery"
 
-    # Wait for tmux session to exit (celery crashed or stopped)
-    while tmux has-session -t celery 2>/dev/null; do
-        sleep 5
-    done
+    # Block until celery exits (no polling - tmux wait-for blocks until signaled)
+    tmux wait-for celery-done
 
     # Double-check: maybe tmux glitched but celery is still running
     sleep 2
@@ -250,7 +256,7 @@ while true; do
         sleep 2
     fi
 
-    EXIT_CODE=1  # Assume error if tmux session ended
+    EXIT_CODE=$(cat /tmp/celery_exit 2>/dev/null || echo 1)  # Get real exit code
     RESTART_COUNT=$((RESTART_COUNT + 1))
     REASON=$(get_crash_reason $EXIT_CODE)
 

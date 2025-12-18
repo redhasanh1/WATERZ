@@ -441,7 +441,7 @@ except Exception:
     pass
 
 # [NOTIFY] Send notification when Celery worker is ACTUALLY ready
-from celery.signals import worker_ready
+from celery.signals import worker_ready, task_postrun
 
 @worker_ready.connect
 def on_worker_ready(**kwargs):
@@ -461,6 +461,14 @@ def on_worker_ready(**kwargs):
             print(f"[NOTIFY] Startup notification sent: {msg}")
         except Exception as e:
             print(f"[NOTIFY] Failed to send startup notification: {e}")
+
+@task_postrun.connect
+def cleanup_after_task(sender=None, task_id=None, task=None, args=None, kwargs=None, retval=None, state=None, **kw):
+    """Clean VRAM after EVERY task completes (success or failure)"""
+    try:
+        cleanup_vram(context=f"task_postrun:{sender.name if sender else 'unknown'}")
+    except Exception as e:
+        print(f"[WARN] task_postrun cleanup failed: {e}")
 
 # Get FFmpeg/FFprobe executables
 def get_ffmpeg_executables():
