@@ -2083,9 +2083,13 @@
                                 creditEstimate.style.display = 'block';
                             }
                         }
-                        // Scroll to player after video loads
+                        // Scroll down to player (one direction only)
                         setTimeout(() => {
-                            document.getElementById('professionalPlayer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            const player = document.getElementById('professionalPlayer');
+                            const rect = player.getBoundingClientRect();
+                            if (rect.top > 100) {
+                                window.scrollBy({ top: rect.top - 100, behavior: 'smooth' });
+                            }
                         }, 100);
                     };
                 }
