@@ -235,42 +235,96 @@ echo ""
 send_notification "🟢 Worker **$WORKER_NAME** is READY! GPU: $GPU_NAME (${GPU_MEMORY}MB VRAM) | Clickers: $NUM_WORKERS"
 
 # ============================================================
-# Monitor workers with zero-CPU blocking (tmux wait-for)
+# Monitor workers with zero-CPU blocking - restart only crashed worker
 # ============================================================
-# Build wait channels for all workers
-WAIT_CHANNELS="celery-done"
-for i in $(seq 0 $((NUM_WORKERS - 1))); do
-    WAIT_CHANNELS="$WAIT_CHANNELS clicker-${i}-done"
-done
+restart_worker() {
+    local WORKER_TYPE=$1
+    local WORKER_ID=$2
 
-echo "[MONITOR] Waiting for any worker to exit (zero-CPU blocking)..."
+    if [ "$WORKER_TYPE" = "celery" ]; then
+        echo "[RESTART] Restarting Celery worker..."
+        tmux kill-window -t workers:celery 2>/dev/null || true
+        sleep 1
+        tmux new-window -t workers -n "celery" \
+            "celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo --without-heartbeat --without-gossip --without-mingle; echo \$? > /tmp/celery_exit; tmux wait-for -S celery-done"
+    else
+        echo "[RESTART] Restarting Clicker $WORKER_ID..."
+        tmux kill-window -t workers:clicker_$WORKER_ID 2>/dev/null || true
+        sleep 1
+        local PORT=$((5555 + WORKER_ID))
+        tmux new-window -t workers -n "clicker_$WORKER_ID" \
+            "python /app/start_object_server.py --worker-id $WORKER_ID --port $PORT; echo \$? > /tmp/clicker_${WORKER_ID}_exit; tmux wait-for -S clicker-${WORKER_ID}-done"
+    fi
+}
 
-# Block until ANY worker exits
-# tmux wait-for with multiple channels waits for ALL by default
-# We need to wait for any ONE, so we use background + wait -n
-for channel in $WAIT_CHANNELS; do
-    tmux wait-for $channel &
-done
-wait -n  # Wait for first one to complete
+RESTART_COUNT=0
 
-# Find which worker crashed
-CRASHED=""
-EXIT_CODE=1
-if [ -f /tmp/celery_exit ]; then
-    CRASHED="Celery"
-    EXIT_CODE=$(cat /tmp/celery_exit)
-    rm -f /tmp/celery_exit
-fi
-for i in $(seq 0 $((NUM_WORKERS - 1))); do
-    if [ -f /tmp/clicker_${i}_exit ]; then
-        CRASHED="Clicker $i"
-        EXIT_CODE=$(cat /tmp/clicker_${i}_exit)
-        rm -f /tmp/clicker_${i}_exit
-        break
+while true; do
+    # Build wait channels for all workers
+    WAIT_CHANNELS="celery-done"
+    for i in $(seq 0 $((NUM_WORKERS - 1))); do
+        WAIT_CHANNELS="$WAIT_CHANNELS clicker-${i}-done"
+    done
+
+    echo "[MONITOR] Waiting for any worker to exit (zero-CPU blocking)..."
+
+    # Block until ANY worker exits
+    for channel in $WAIT_CHANNELS; do
+        tmux wait-for $channel &
+    done
+    wait -n  # Wait for first one to complete
+
+    # Find which worker crashed
+    CRASHED_TYPE=""
+    CRASHED_ID=""
+    EXIT_CODE=1
+
+    if [ -f /tmp/celery_exit ]; then
+        CRASHED_TYPE="celery"
+        EXIT_CODE=$(cat /tmp/celery_exit)
+        rm -f /tmp/celery_exit
+    fi
+
+    for i in $(seq 0 $((NUM_WORKERS - 1))); do
+        if [ -f /tmp/clicker_${i}_exit ]; then
+            CRASHED_TYPE="clicker"
+            CRASHED_ID=$i
+            EXIT_CODE=$(cat /tmp/clicker_${i}_exit)
+            rm -f /tmp/clicker_${i}_exit
+            break
+        fi
+    done
+
+    # If nothing found, check if tmux session died entirely
+    if [ -z "$CRASHED_TYPE" ]; then
+        if ! tmux has-session -t workers 2>/dev/null; then
+            echo "[FATAL] Entire tmux session died, exiting container"
+            send_notification "🔴 Worker **$WORKER_NAME** - tmux session died! Container will restart."
+            exit 1
+        fi
+        echo "[WARN] No crash file found, continuing monitoring..."
+        continue
+    fi
+
+    RESTART_COUNT=$((RESTART_COUNT + 1))
+    REASON=$(get_crash_reason $EXIT_CODE)
+
+    if [ "$CRASHED_TYPE" = "celery" ]; then
+        echo "[CRASH] Celery exited: $REASON (restart #$RESTART_COUNT)"
+        send_notification "🔴 Worker **$WORKER_NAME** - Celery crashed! Reason: $REASON | Restarting... (#$RESTART_COUNT)"
+
+        # Clear VRAM before restart
+        python3 -c "import torch; torch.cuda.empty_cache(); torch.cuda.ipc_collect()" 2>/dev/null || true
+
+        sleep 2
+        restart_worker "celery" ""
+        send_notification "🔄 Worker **$WORKER_NAME** - Celery restarted (#$RESTART_COUNT)"
+    else
+        echo "[CRASH] Clicker $CRASHED_ID exited: $REASON (restart #$RESTART_COUNT)"
+        send_notification "🔴 Worker **$WORKER_NAME** - Clicker $CRASHED_ID crashed! Reason: $REASON | Restarting... (#$RESTART_COUNT)"
+
+        sleep 2
+        restart_worker "clicker" "$CRASHED_ID"
+        send_notification "🔄 Worker **$WORKER_NAME** - Clicker $CRASHED_ID restarted (#$RESTART_COUNT)"
     fi
 done
-
-REASON=$(get_crash_reason $EXIT_CODE)
-echo "[CRASH] $CRASHED exited: $REASON"
-send_notification "🔴 Worker **$WORKER_NAME** - $CRASHED crashed! Reason: $REASON | Container will restart."
-exit $EXIT_CODE
