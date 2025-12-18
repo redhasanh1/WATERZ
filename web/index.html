@@ -268,115 +268,104 @@
 
         /* Timeline Navigation Buttons */
         .timeline-nav-btn {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
             border: none;
             background: linear-gradient(135deg, #667eea, #764ba2);
             color: #fff;
-            font-size: 1.3rem;
             cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.2s ease;
             display: flex;
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
         }
         .timeline-nav-btn:hover {
-            transform: scale(1.1);
-            box-shadow: 0 6px 25px rgba(102, 126, 234, 0.5);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(102, 126, 234, 0.5);
         }
         .timeline-nav-btn:active {
-            transform: scale(0.95);
+            transform: translateY(0) scale(0.98);
         }
         .timeline-nav-btn svg {
-            width: 24px;
-            height: 24px;
+            width: 22px;
+            height: 22px;
         }
 
-        /* Thumbnail Strip */
+        /* Thumbnail Strip - Modern Dark Design */
         .thumbnail-strip {
             flex: 1;
             display: flex;
-            gap: 2px;
+            gap: 4px;
             overflow-x: auto;
-            padding: 8px 4px;
+            padding: 10px 8px;
             scroll-behavior: smooth;
             border-radius: 12px;
-            background: #fff;
-            box-shadow: inset 0 2px 8px rgba(0,0,0,0.05);
+            background: linear-gradient(135deg, rgba(26, 26, 46, 0.95), rgba(45, 45, 68, 0.95));
+            box-shadow: inset 0 2px 12px rgba(0,0,0,0.3), 0 4px 20px rgba(0,0,0,0.2);
         }
         .thumbnail-strip::-webkit-scrollbar {
-            height: 10px;
+            height: 6px;
         }
         .thumbnail-strip::-webkit-scrollbar-track {
-            background: #e8e8f0;
-            border-radius: 5px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
         }
         .thumbnail-strip::-webkit-scrollbar-thumb {
             background: linear-gradient(90deg, #667eea, #764ba2);
-            border-radius: 5px;
-            box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+            border-radius: 3px;
         }
         .thumbnail-strip::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(90deg, #5a6fd6, #6a4190);
+            background: linear-gradient(90deg, #7b8ff0, #8b5cb8);
         }
 
-        /* Frame Thumbnails */
+        /* Frame Thumbnails - Modern Clean Design */
         .frame-thumb {
             flex-shrink: 0;
-            width: 32px;
-            height: 24px;
-            border-radius: 4px;
+            width: 48px;
+            height: 36px;
+            border-radius: 6px;
             overflow: hidden;
             cursor: pointer;
             border: 2px solid transparent;
-            transition: all 0.15s;
+            transition: all 0.2s ease;
             position: relative;
-            background: #e8e8e8;
+            background: linear-gradient(135deg, #1a1a2e, #2d2d44);
         }
         .frame-thumb:hover {
             border-color: #667eea;
-            transform: translateY(-4px);
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+            transform: scale(1.08);
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
         }
         .frame-thumb.active {
-            border-color: #764ba2;
-            box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.3), 0 8px 20px rgba(118, 75, 162, 0.3);
-            transform: translateY(-4px);
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.5), 0 4px 16px rgba(102, 126, 234, 0.4);
+            transform: scale(1.08);
         }
         .frame-thumb img {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
-        .frame-thumb .frame-num {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: rgba(0,0,0,0.7);
-            color: #fff;
-            font-size: 0.5rem;
-            padding: 1px;
-            text-align: center;
-            font-weight: 500;
+        .frame-thumb.placeholder {
+            background: linear-gradient(135deg, #667eea33, #764ba233);
         }
         .frame-thumb.loading {
             display: flex;
             align-items: center;
             justify-content: center;
-            background: linear-gradient(135deg, #e8e8e8, #f5f5f5);
+            background: linear-gradient(135deg, #1a1a2e, #2d2d44);
         }
         .frame-thumb.loading::after {
             content: '';
-            width: 12px;
-            height: 12px;
-            border: 2px solid #ddd;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(102, 126, 234, 0.3);
             border-top-color: #667eea;
             border-radius: 50%;
-            animation: thumbSpin 0.8s linear infinite;
+            animation: thumbSpin 0.6s linear infinite;
         }
         @keyframes thumbSpin {
             to { transform: rotate(360deg); }
@@ -3122,13 +3111,10 @@
                     const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
 
                     frames[i].element.className = 'frame-thumb';
-                    frames[i].element.innerHTML = `
-                        <img src="${dataUrl}" alt="Frame ${i + 1}">
-                        <div class="frame-num">${i + 1}</div>
-                    `;
+                    frames[i].element.innerHTML = `<img src="${dataUrl}" alt="Frame ${i + 1}">`;
                 } catch (e) {
-                    frames[i].element.className = 'frame-thumb';
-                    frames[i].element.innerHTML = `<div class="frame-num">${i + 1}</div>`;
+                    frames[i].element.className = 'frame-thumb placeholder';
+                    frames[i].element.innerHTML = '';
                 }
             }
 
