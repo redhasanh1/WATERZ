@@ -422,7 +422,7 @@
             overflow-x: auto;
             overflow-y: hidden;
             cursor: pointer;
-            background: rgba(0, 0, 0, 0.4);
+            background: linear-gradient(to right, #b86d2a, #d4924a, #b86d2a);
             padding: 4px;
         }
         .timeline-track-wrapper::-webkit-scrollbar {
@@ -445,20 +445,11 @@
             width: 48px;
             height: 36px;
             flex-shrink: 0;
-            border-radius: 3px;
-            border: 1px solid rgba(255,255,255,0.15);
-            box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+            border-radius: 2px;
+            border: none;
+            box-shadow: none;
             background-size: cover;
             background-position: center;
-            transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
-        }
-        .thumbnail-track .sprite-thumb:hover {
-            border-color: rgba(102, 126, 234, 0.5);
-            transform: scale(1.05);
-        }
-        .thumbnail-track .sprite-thumb.active {
-            border-color: #667eea;
-            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.4), 0 2px 8px rgba(102, 126, 234, 0.5);
         }
         .timeline-playhead {
             position: absolute;
@@ -467,10 +458,19 @@
             width: 2px;
             height: 100%;
             background: #fff;
-            box-shadow: 0 0 8px rgba(255, 255, 255, 0.9), 0 0 16px rgba(102, 126, 234, 0.5);
             pointer-events: none;
             z-index: 10;
-            border-radius: 1px;
+        }
+        .timeline-playhead::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 8px;
+            height: 14px;
+            background: #fff;
+            border-radius: 2px;
         }
         /* Hover Preview */
         .hover-preview {
@@ -506,8 +506,8 @@
             display: flex;
             justify-content: space-between;
             padding: 6px 56px 0 56px;
-            font-size: 0.8rem;
-            color: #888;
+            font-size: 0.75rem;
+            color: #fff;
             font-family: 'SF Mono', 'Consolas', monospace;
             user-select: none;
         }
