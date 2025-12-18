@@ -2164,15 +2164,6 @@
                 const videoElem = document.getElementById('previewVideo');
                 videoElem.dataset.taskId = data.task_id;
 
-                // Trigger sprite loading now that we have taskId (fixes race condition)
-                if (videoElem.duration && videoElem.duration !== Infinity) {
-                    generateFramesFromSprite(data.task_id).then(usedSprite => {
-                        if (usedSprite) {
-                            console.log('[SPRITE] Loaded after upload complete');
-                        }
-                    });
-                }
-
                 // Initialize professional timeline for videos
                 if (file.type.startsWith('video/')) {
                     // initializeTimeline(data.task_id, videoElem); // Removed - using inline VideoTimeline in loadedmetadata
@@ -3152,9 +3143,13 @@
         }
 
         function seekToFrame(index) {
-            if (index < 0 || index >= frames.length) return;
+            // Frame-by-frame: step ~1/30th second (one frame at 30fps)
+            const frameTime = 1/30;
+            const direction = index - currentFrame;
+            let newTime = video.currentTime + (direction * frameTime);
+            newTime = Math.max(0, Math.min(video.duration, newTime));
+            video.currentTime = newTime;
             currentFrame = index;
-            video.currentTime = frames[index].time;
             updateTimeDisplay();
         }
 
@@ -3176,15 +3171,8 @@
                 if (stepIndicator) stepIndicator.style.display = 'flex';
                 if (timelineContainer) timelineContainer.style.display = 'block';
 
-                // Try sprite-based thumbnails first (instant loading from server)
-                const taskId = video.dataset.taskId;
-                if (taskId) {
-                    const usedSprite = await generateFramesFromSprite(taskId);
-                    if (usedSprite) return; // Sprite loaded successfully
-                }
-
-                // Fallback to canvas-based extraction (for local files or when sprite fails)
-                generateFrames();
+                // No thumbnail strip - just use video scrubbing directly (zero cost)
+                if (loadingText) loadingText.style.display = 'none';
             }
         });
         video.addEventListener('timeupdate', updateTimeDisplay);
