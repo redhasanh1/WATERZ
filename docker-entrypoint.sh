@@ -196,11 +196,17 @@ send_notification() {
 
 get_crash_reason() {
     case "$1" in
+        0)   echo "Normal shutdown (exit 0)" ;;
+        1)   echo "Error (exit 1)" ;;
+        2)   echo "Bash misuse (exit 2)" ;;
+        126) echo "Permission denied (exit 126)" ;;
+        127) echo "Command not found (exit 127)" ;;
+        130) echo "SIGINT/Ctrl+C (exit 130)" ;;
+        134) echo "SIGABRT (exit 134)" ;;
         137) echo "OOM Killed (exit 137)" ;;
         139) echo "Segfault (exit 139)" ;;
-        134) echo "SIGABRT (exit 134)" ;;
+        141) echo "Broken pipe (exit 141)" ;;
         143) echo "SIGTERM (exit 143)" ;;
-        1)   echo "Error (exit 1)" ;;
         *)   echo "Unknown (exit $1)" ;;
     esac
 }
