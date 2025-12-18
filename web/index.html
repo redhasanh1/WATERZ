@@ -382,136 +382,6 @@
             to { transform: rotate(360deg); }
         }
 
-        /* Professional Timeline Scrubber */
-        .timeline-scrubber {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            background: rgba(20, 20, 30, 0.95);
-            border-radius: 12px;
-            padding: 10px 12px;
-            margin-top: 1rem;
-        }
-        .timeline-play-btn {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .timeline-play-btn:hover {
-            transform: scale(1.05);
-            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.5);
-        }
-        .timeline-play-btn svg {
-            width: 18px;
-            height: 18px;
-            fill: white;
-        }
-        .timeline-track-wrapper {
-            flex: 1;
-            position: relative;
-            height: 44px;
-            border-radius: 6px;
-            overflow-x: auto;
-            overflow-y: hidden;
-            cursor: pointer;
-            background: linear-gradient(to right, #b86d2a, #d4924a, #b86d2a);
-            padding: 4px;
-        }
-        .timeline-track-wrapper::-webkit-scrollbar {
-            height: 4px;
-        }
-        .timeline-track-wrapper::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .timeline-track-wrapper::-webkit-scrollbar-thumb {
-            background: rgba(102, 126, 234, 0.5);
-            border-radius: 2px;
-        }
-        .thumbnail-track {
-            display: flex;
-            height: 100%;
-            gap: 3px;
-            min-width: max-content;
-        }
-        .thumbnail-track .sprite-thumb {
-            width: 48px;
-            height: 36px;
-            flex-shrink: 0;
-            border-radius: 2px;
-            border: none;
-            box-shadow: none;
-            background-size: cover;
-            background-position: center;
-        }
-        .timeline-playhead {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 2px;
-            height: 100%;
-            background: #fff;
-            pointer-events: none;
-            z-index: 10;
-        }
-        .timeline-playhead::before {
-            content: '';
-            position: absolute;
-            top: -2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 8px;
-            height: 14px;
-            background: #fff;
-            border-radius: 2px;
-        }
-        /* Hover Preview */
-        .hover-preview {
-            position: absolute;
-            bottom: calc(100% + 10px);
-            left: 0;
-            transform: translateX(-50%);
-            background: rgba(15, 15, 25, 0.98);
-            border: 1px solid rgba(102, 126, 234, 0.5);
-            border-radius: 8px;
-            padding: 6px;
-            pointer-events: none;
-            z-index: 30;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-        }
-        .hover-preview-thumb {
-            width: 120px;
-            height: 68px;
-            border-radius: 4px;
-            background-color: #1a1a2e;
-            background-size: auto;
-            background-repeat: no-repeat;
-        }
-        .hover-preview-time {
-            text-align: center;
-            font-size: 0.75rem;
-            color: #fff;
-            margin-top: 6px;
-            font-family: 'SF Mono', 'Consolas', monospace;
-            font-weight: 500;
-        }
-        .timeline-timecodes {
-            display: flex;
-            justify-content: space-between;
-            padding: 6px 56px 0 56px;
-            font-size: 0.75rem;
-            color: #fff;
-            font-family: 'SF Mono', 'Consolas', monospace;
-            user-select: none;
-        }
-
         /* Scrubber/Progress Bar */
         .timeline-scrubber-container {
             margin-top: 15px;
@@ -841,8 +711,8 @@
         }
 
         #previewVideo {
-            width: 100%;
-            max-width: 100%;
+            width: auto;
+            max-width: 90%;
             height: auto;
             display: block;
             margin: 0 auto;
@@ -1281,7 +1151,7 @@
             }
 
             .demo-card {
-                padding: 0.75rem;
+                padding: 1.5rem;
             }
 
             .upload-zone {
@@ -1396,27 +1266,8 @@
             }
 
             #previewVideo {
-                width: 100% !important;
-                max-width: 100% !important;
+                max-width: 100%;
                 height: auto;
-            }
-
-            /* Mobile: Make video container full width */
-            #videoContainer {
-                display: block !important;
-                width: 100% !important;
-            }
-
-            #professionalPlayer {
-                width: 100% !important;
-            }
-
-            #videoWrapper {
-                width: 100% !important;
-            }
-
-            #maskCanvas {
-                width: 100% !important;
             }
 
             /* Prevent horizontal overflow without changing layout */
@@ -1616,7 +1467,7 @@
                     <li><a href="api">API</a></li>
                     <li><a href="contact">Contact</a></li>
                     <li class="mobile-only-menu-item"><button id="mobileThemeToggle" onclick="toggleTheme()" style="background: var(--gradient-primary); border: none; border-radius: 8px; padding: 0.6rem 1.2rem; color: white; font-weight: 600; cursor: pointer; width: 100%;"><span id="mobileThemeIcon">Toggle Theme</span></button></li>
-                    <li class="mobile-only-menu-item" id="mobileSignInItem" style="display: none;"><a href="login" style="color: var(--primary); font-weight: 600;">Sign In</a></li>
+                    <li class="mobile-profile-item mobile-only-menu-item" id="mobileSignInItem" style="display: none;"><a href="login" style="color: var(--primary); font-weight: 600;">Sign In</a></li>
                 </ul>
             </div>
 
@@ -1686,8 +1537,8 @@
                     <br><span class="gradient-text">With One Click</span>
                 </h1>
                 <p class="hero-subtitle">
-                    Erase anything from your videos instantly — original 4K quality preserved.
-                    <br>AI-powered magic that feels effortless. Try free today.
+                    Erase anything from your videos instantly — the only tool that preserves your original 4K quality.
+                    <br>AI-powered magic with precision object tracking that feels effortless. Try free today.
                 </p>
 
                 <!-- Free Credits Incentive -->
@@ -1801,38 +1652,33 @@
                             </div>
                         </div>
 
-                        <!-- Professional Timeline Scrubber -->
-                        <div id="videoTimelineContainer" style="display: none;">
-                            <!-- Timeline Scrubber Bar -->
-                            <div class="timeline-scrubber">
-                                <!-- Play/Pause Button -->
-                                <button id="timelinePlayBtn" class="timeline-play-btn" title="Play/Pause">
-                                    <svg class="play-icon" viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20"/></svg>
-                                    <svg class="pause-icon" style="display:none" viewBox="0 0 24 24"><rect x="5" y="4" width="5" height="16"/><rect x="14" y="4" width="5" height="16"/></svg>
+                        <!-- Professional Video Timeline with Thumbnails -->
+                        <div id="videoTimelineContainer" class="timeline-section" style="display: none;">
+                            <div class="timeline-label">Select a frame to edit</div>
+
+                            <div class="timeline-nav-row">
+                                <!-- Left Arrow -->
+                                <button class="timeline-nav-btn" id="timelinePrevBtn" title="Previous frame">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M15 18l-6-6 6-6"/>
+                                    </svg>
                                 </button>
 
-                                <!-- Thumbnail Track with Playhead + Hover Preview -->
-                                <div id="timelineTrackWrapper" class="timeline-track-wrapper">
-                                    <div id="thumbnailTrack" class="thumbnail-track">
-                                        <!-- Thumbnails populated by JS (sprite-based) -->
-                                    </div>
-                                    <!-- Thin playhead line -->
-                                    <div id="playhead" class="timeline-playhead"></div>
-                                    <!-- Floating hover preview -->
-                                    <div id="hoverPreview" class="hover-preview" style="display:none;">
-                                        <div id="hoverPreviewThumb" class="hover-preview-thumb"></div>
-                                        <div id="hoverPreviewTime" class="hover-preview-time">00:00.00</div>
-                                    </div>
+                                <!-- Thumbnail Strip -->
+                                <div class="thumbnail-strip" id="thumbnailStrip">
+                                    <!-- Thumbnails generated by JS -->
                                 </div>
+
+                                <!-- Right Arrow -->
+                                <button class="timeline-nav-btn" id="timelineNextBtn" title="Next frame">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M9 18l6-6-6-6"/>
+                                    </svg>
+                                </button>
                             </div>
 
-                            <!-- Timecodes below -->
-                            <div class="timeline-timecodes">
-                                <span id="currentTimeLabel">00:00.00</span>
-                                <span id="durationLabel">00:00.00</span>
-                            </div>
+                            <div class="timeline-loading-text" id="timelineLoadingText">Loading frames...</div>
 
-                            <div class="timeline-loading-text" id="timelineLoadingText" style="text-align: center; margin-top: 8px; font-size: 0.8rem; color: #666;">Loading frames...</div>
                         </div>
 
                         <!-- Mask Selection Controls -->
@@ -1867,7 +1713,8 @@
                                 <h4 style="font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0; font-size: 1.1rem;">
                                     <span style="color: #667eea;">Step 2:</span> Review Selection
                                 </h4>
-                                <p style="font-weight: 600; color: var(--text-primary); margin-bottom: 0;">Selected Points: <span id="pointCount">0</span></p>
+                                <p style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">Selected Points: <span id="pointCount">0</span></p>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">Click on the video to add more points</p>
                             </div>
                         </div>
 
@@ -2199,6 +2046,7 @@
 
                     // Show professional player
                     document.getElementById('professionalPlayer').style.display = 'block';
+                    document.getElementById('professionalPlayer').scrollIntoView({ behavior: 'smooth', block: 'start' });
                     previewImage.style.display = 'none';
 
                     // Initialize professional video controls
@@ -3036,21 +2884,18 @@
     <script src="js/sam2_selector.js"></script>
 
     <script>
-      // Professional Video Timeline with Sprite Thumbnails + Playhead
+      // New 30fps Video Timeline with Colorful Thumbnails
       (function() {
         const video = document.getElementById('previewVideo');
-        const thumbnailStrip = document.getElementById('thumbnailTrack'); // New ID
+        const thumbnailStrip = document.getElementById('thumbnailStrip');
         const loadingText = document.getElementById('timelineLoadingText');
-        const trackWrapper = document.getElementById('timelineTrackWrapper');
-        const playhead = document.getElementById('playhead');
-        const playBtn = document.getElementById('timelinePlayBtn');
-        const currentTimeLabel = document.getElementById('currentTimeLabel');
-        const durationLabel = document.getElementById('durationLabel');
+        const prevBtn = document.getElementById('timelinePrevBtn');
+        const nextBtn = document.getElementById('timelineNextBtn');
+        const scrubberTrack = document.getElementById('timelineScrubberTrack');
+        const scrubberProgress = document.getElementById('timelineScrubberProgress');
+        const scrubberThumb = document.getElementById('timelineScrubberThumb');
         const stepIndicator = document.getElementById('stepIndicator');
         const timelineContainer = document.getElementById('videoTimelineContainer');
-        const hoverPreview = document.getElementById('hoverPreview');
-        const hoverPreviewThumb = document.getElementById('hoverPreviewThumb');
-        const hoverPreviewTime = document.getElementById('hoverPreviewTime');
 
         if (!video || !thumbnailStrip) return;
 
@@ -3066,35 +2911,29 @@
             return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         }
 
-        function formatTimecode(seconds) {
-            const mins = Math.floor(seconds / 60);
-            const secs = seconds % 60;
-            return `${mins.toString().padStart(2, '0')}:${secs.toFixed(2).padStart(5, '0')}`;
-        }
-
-        function updatePlayhead() {
-            if (!video.duration || isDragging) return;
-            const percent = (video.currentTime / video.duration) * 100;
-            if (playhead) playhead.style.left = `${percent}%`;
-            if (currentTimeLabel) currentTimeLabel.textContent = formatTimecode(video.currentTime);
-
-            // Highlight active thumbnail based on current time
-            const thumbs = thumbnailStrip.querySelectorAll('.sprite-thumb');
-            thumbs.forEach((thumb, i) => {
-                const thumbTime = parseFloat(thumb.dataset.time) || 0;
-                const nextThumb = thumbs[i + 1];
-                const nextTime = nextThumb ? (parseFloat(nextThumb.dataset.time) || video.duration) : video.duration;
-                const isActive = video.currentTime >= thumbTime && video.currentTime < nextTime;
-                thumb.classList.toggle('active', isActive);
-            });
-        }
-
         function updateTimeDisplay() {
             const frameIndex = Math.round(video.currentTime / FRAME_INTERVAL);
             currentFrame = Math.max(0, Math.min(frameIndex, frames.length - 1));
 
-            // Update playhead position and timecode
-            updatePlayhead();
+            document.querySelectorAll('.frame-thumb').forEach((thumb, i) => {
+                thumb.classList.toggle('active', i === currentFrame);
+            });
+
+            const activeThumb = document.querySelector('.frame-thumb.active');
+            if (activeThumb && thumbnailStrip) {
+                // Scroll only within the thumbnail strip, not the whole page
+                const stripRect = thumbnailStrip.getBoundingClientRect();
+                const thumbRect = activeThumb.getBoundingClientRect();
+                const scrollLeft = activeThumb.offsetLeft - (stripRect.width / 2) + (thumbRect.width / 2);
+                thumbnailStrip.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+            }
+
+            // Update scrubber position
+            if (!isDragging && video.duration) {
+                const percent = (video.currentTime / video.duration) * 100;
+                if (scrubberProgress) scrubberProgress.style.width = percent + '%';
+                if (scrubberThumb) scrubberThumb.style.left = percent + '%';
+            }
         }
 
         // ============================================================================
@@ -3321,15 +3160,15 @@
             updateTimeDisplay();
         }
 
-        // Seek from track wrapper click/drag
-        function seekFromTrack(clientX) {
-            if (!trackWrapper || !video.duration) return;
-            const rect = trackWrapper.getBoundingClientRect();
+        // Scrubber drag functionality
+        function seekFromScrubber(clientX) {
+            if (!scrubberTrack) return;
+            const rect = scrubberTrack.getBoundingClientRect();
             const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
             const time = percent * video.duration;
             video.currentTime = time;
-            if (playhead) playhead.style.left = `${percent * 100}%`;
-            if (currentTimeLabel) currentTimeLabel.textContent = formatTimecode(time);
+            if (scrubberProgress) scrubberProgress.style.width = (percent * 100) + '%';
+            if (scrubberThumb) scrubberThumb.style.left = (percent * 100) + '%';
         }
 
         // Event listeners
@@ -3338,9 +3177,6 @@
                 // Show step indicator and timeline
                 if (stepIndicator) stepIndicator.style.display = 'flex';
                 if (timelineContainer) timelineContainer.style.display = 'block';
-
-                // Set duration label
-                if (durationLabel) durationLabel.textContent = formatTimecode(video.duration);
 
                 // Try sprite-based thumbnails first (instant loading from server)
                 const taskId = video.dataset.taskId;
@@ -3355,114 +3191,55 @@
         });
         video.addEventListener('timeupdate', updateTimeDisplay);
 
-        // Play/Pause button
-        if (playBtn) {
-            const playIcon = playBtn.querySelector('.play-icon');
-            const pauseIcon = playBtn.querySelector('.pause-icon');
-
-            playBtn.addEventListener('click', () => {
-                if (video.paused) {
-                    video.play();
-                } else {
-                    video.pause();
-                }
-            });
-
-            video.addEventListener('play', () => {
-                if (playIcon) playIcon.style.display = 'none';
-                if (pauseIcon) pauseIcon.style.display = 'block';
-            });
-
-            video.addEventListener('pause', () => {
-                if (playIcon) playIcon.style.display = 'block';
-                if (pauseIcon) pauseIcon.style.display = 'none';
-            });
-        }
+        if (prevBtn) prevBtn.addEventListener('click', () => seekToFrame(currentFrame - 1));
+        if (nextBtn) nextBtn.addEventListener('click', () => seekToFrame(currentFrame + 1));
 
         // Keyboard navigation
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
             if (e.key === 'ArrowLeft') { e.preventDefault(); seekToFrame(currentFrame - 1); }
             else if (e.key === 'ArrowRight') { e.preventDefault(); seekToFrame(currentFrame + 1); }
-            else if (e.key === ' ') { e.preventDefault(); video.paused ? video.play() : video.pause(); }
         });
 
-        // Track wrapper click to seek
-        if (trackWrapper) {
-            trackWrapper.addEventListener('click', (e) => {
-                if (!isDragging) seekFromTrack(e.clientX);
-            });
-
-            trackWrapper.addEventListener('mousedown', (e) => {
+        // Scrubber events
+        if (scrubberTrack) {
+            scrubberTrack.addEventListener('click', (e) => seekFromScrubber(e.clientX));
+        }
+        if (scrubberThumb) {
+            scrubberThumb.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 isDragging = true;
-                seekFromTrack(e.clientX);
-            });
-
-            // Hover preview - shows floating thumbnail above timeline
-            trackWrapper.addEventListener('mousemove', (e) => {
-                if (!hoverPreview || !video.duration || isDragging) return;
-
-                const rect = trackWrapper.getBoundingClientRect();
-                const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                const time = percent * video.duration;
-
-                // Position the hover preview
-                const previewX = e.clientX - rect.left;
-                // Clamp to keep preview within bounds
-                const clampedX = Math.max(65, Math.min(previewX, rect.width - 65));
-                hoverPreview.style.left = `${clampedX}px`;
-                hoverPreview.style.display = 'block';
-
-                // Update preview thumbnail from sprite
-                if (spritePreview.ready && spritePreview.spriteUrl && hoverPreviewThumb) {
-                    const cue = spritePreview.getCueAt(time);
-                    if (cue) {
-                        const meta = spritePreview.meta || { thumb_width: 160, thumb_height: 90 };
-                        const scaleX = 120 / meta.thumb_width;
-                        const scaleY = 68 / meta.thumb_height;
-                        hoverPreviewThumb.style.backgroundImage = `url(${spritePreview.spriteUrl})`;
-                        hoverPreviewThumb.style.backgroundPosition = `-${cue.x * scaleX}px -${cue.y * scaleY}px`;
-                        hoverPreviewThumb.style.backgroundSize = `${(meta.cols || 10) * 120}px auto`;
-                    }
-                }
-
-                // Update preview time
-                if (hoverPreviewTime) {
-                    hoverPreviewTime.textContent = formatTimecode(time);
-                }
-            });
-
-            trackWrapper.addEventListener('mouseleave', () => {
-                if (hoverPreview) hoverPreview.style.display = 'none';
+                scrubberThumb.classList.add('dragging');
+                video.pause();
             });
         }
-
-        // Drag to scrub
         document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                seekFromTrack(e.clientX);
-                // Hide hover preview while dragging
-                if (hoverPreview) hoverPreview.style.display = 'none';
-            }
+            if (isDragging) seekFromScrubber(e.clientX);
         });
         document.addEventListener('mouseup', () => {
-            isDragging = false;
+            if (isDragging) {
+                isDragging = false;
+                if (scrubberThumb) scrubberThumb.classList.remove('dragging');
+            }
         });
 
-        // Touch support for timeline scrubbing
-        if (trackWrapper) {
-            trackWrapper.addEventListener('touchstart', (e) => {
+        // Touch support
+        if (scrubberThumb) {
+            scrubberThumb.addEventListener('touchstart', (e) => {
                 e.preventDefault();
                 isDragging = true;
-                if (e.touches[0]) seekFromTrack(e.touches[0].clientX);
+                scrubberThumb.classList.add('dragging');
+                video.pause();
             });
         }
         document.addEventListener('touchmove', (e) => {
-            if (isDragging && e.touches[0]) seekFromTrack(e.touches[0].clientX);
+            if (isDragging && e.touches[0]) seekFromScrubber(e.touches[0].clientX);
         });
         document.addEventListener('touchend', () => {
-            isDragging = false;
+            if (isDragging) {
+                isDragging = false;
+                if (scrubberThumb) scrubberThumb.classList.remove('dragging');
+            }
         });
 
         // Export for external use
