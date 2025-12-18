@@ -2035,7 +2035,6 @@
 
                     // Show professional player
                     document.getElementById('professionalPlayer').style.display = 'block';
-                    document.getElementById('professionalPlayer').scrollIntoView({ behavior: 'smooth', block: 'start' });
                     previewImage.style.display = 'none';
 
                     // Initialize professional video controls
@@ -2088,6 +2087,10 @@
                                 creditEstimate.style.display = 'block';
                             }
                         }
+                        // Scroll to player after video loads
+                        setTimeout(() => {
+                            document.getElementById('professionalPlayer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 100);
                     };
                 }
                 previewContainer.classList.add('active');
