@@ -1599,7 +1599,7 @@
                             <!-- Professional Video Player Container -->
                             <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
                                 <div id="videoWrapper" style="position: relative; width: 100%;">
-                                    <video id="previewVideo" style="width: 100%; display: block; background: #000;">
+                                    <video id="previewVideo" playsinline webkit-playsinline preload="metadata" style="width: 100%; display: block; background: #000;">
                                     </video>
 
                                     <!-- Canvas overlay for mask selection - synced to video rect by JS -->
@@ -2797,18 +2797,35 @@
                 timelineScrubber.style.cursor = 'grab';
             });
 
-            // Fullscreen toggle
+            // Fullscreen toggle (with iOS/webkit fallback)
             fullscreenBtn.addEventListener('click', () => {
                 const playerContainer = document.getElementById('professionalPlayer');
+                const video = document.getElementById('previewVideo');
+                const exitIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>';
+                const enterIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
 
-                if (!document.fullscreenElement) {
-                    playerContainer.requestFullscreen().catch(err => {
-                        console.error('Fullscreen error:', err);
-                    });
-                    fullscreenBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>';
+                if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                    // Try standard fullscreen first
+                    if (playerContainer.requestFullscreen) {
+                        playerContainer.requestFullscreen().catch(err => {
+                            console.error('Fullscreen error:', err);
+                            // Fallback: try video element webkit fullscreen (iOS)
+                            if (video.webkitEnterFullscreen) {
+                                video.webkitEnterFullscreen();
+                            }
+                        });
+                    } else if (video.webkitEnterFullscreen) {
+                        // iOS Safari - fullscreen video directly
+                        video.webkitEnterFullscreen();
+                    }
+                    fullscreenBtn.innerHTML = exitIcon;
                 } else {
-                    document.exitFullscreen();
-                    fullscreenBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+                    if (document.exitFullscreen) {
+                        document.exitFullscreen();
+                    } else if (document.webkitExitFullscreen) {
+                        document.webkitExitFullscreen();
+                    }
+                    fullscreenBtn.innerHTML = enterIcon;
                 }
             });
 
