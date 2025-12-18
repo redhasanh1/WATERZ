@@ -841,8 +841,8 @@
         }
 
         #previewVideo {
-            width: auto;
-            max-width: 90%;
+            width: 100%;
+            max-width: 100%;
             height: auto;
             display: block;
             margin: 0 auto;
@@ -1281,7 +1281,7 @@
             }
 
             .demo-card {
-                padding: 1.5rem;
+                padding: 0.75rem;
             }
 
             .upload-zone {
@@ -1396,8 +1396,27 @@
             }
 
             #previewVideo {
-                max-width: 100%;
+                width: 100% !important;
+                max-width: 100% !important;
                 height: auto;
+            }
+
+            /* Mobile: Make video container full width */
+            #videoContainer {
+                display: block !important;
+                width: 100% !important;
+            }
+
+            #professionalPlayer {
+                width: 100% !important;
+            }
+
+            #videoWrapper {
+                width: 100% !important;
+            }
+
+            #maskCanvas {
+                width: 100% !important;
             }
 
             /* Prevent horizontal overflow without changing layout */
@@ -1848,8 +1867,7 @@
                                 <h4 style="font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0; font-size: 1.1rem;">
                                     <span style="color: #667eea;">Step 2:</span> Review Selection
                                 </h4>
-                                <p style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">Selected Points: <span id="pointCount">0</span></p>
-                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">Click on the video to add more points</p>
+                                <p style="font-weight: 600; color: var(--text-primary); margin-bottom: 0;">Selected Points: <span id="pointCount">0</span></p>
                             </div>
                         </div>
 
