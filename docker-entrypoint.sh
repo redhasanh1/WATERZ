@@ -219,8 +219,12 @@ while true; do
     echo "[PRODUCTION] Starting Celery worker in tmux (restart #$RESTART_COUNT)"
     echo "============================================================"
 
-    # Kill any existing tmux session
+    # Kill any existing tmux session AND celery processes
     tmux kill-session -t celery 2>/dev/null || true
+
+    # Kill any orphaned celery processes (prevents duplicates!)
+    pkill -9 -f "celery.*server_production2" 2>/dev/null || true
+    sleep 2  # Grace period for processes to fully terminate
 
     # Run Celery inside tmux (allows reconnecting: tmux attach -t celery)
     tmux new-session -d -s celery "celery -A server_production2.celery worker \
@@ -236,6 +240,15 @@ while true; do
     while tmux has-session -t celery 2>/dev/null; do
         sleep 5
     done
+
+    # Double-check: maybe tmux glitched but celery is still running
+    sleep 2
+    if pgrep -f "celery.*server_production2" > /dev/null 2>&1; then
+        echo "[WARN] Tmux session gone but celery still running - false alarm!"
+        echo "[WARN] Killing orphaned celery and restarting cleanly..."
+        pkill -9 -f "celery.*server_production2" 2>/dev/null || true
+        sleep 2
+    fi
 
     EXIT_CODE=1  # Assume error if tmux session ended
     RESTART_COUNT=$((RESTART_COUNT + 1))
