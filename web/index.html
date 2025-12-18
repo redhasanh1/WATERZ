@@ -2164,6 +2164,15 @@
                 const videoElem = document.getElementById('previewVideo');
                 videoElem.dataset.taskId = data.task_id;
 
+                // Trigger sprite loading now that we have taskId (fixes race condition)
+                if (videoElem.duration && videoElem.duration !== Infinity) {
+                    generateFramesFromSprite(data.task_id).then(usedSprite => {
+                        if (usedSprite) {
+                            console.log('[SPRITE] Loaded after upload complete');
+                        }
+                    });
+                }
+
                 // Initialize professional timeline for videos
                 if (file.type.startsWith('video/')) {
                     // initializeTimeline(data.task_id, videoElem); // Removed - using inline VideoTimeline in loadedmetadata
