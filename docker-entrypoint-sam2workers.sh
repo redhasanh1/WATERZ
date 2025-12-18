@@ -157,11 +157,17 @@ send_notification() {
 
 get_crash_reason() {
     case "$1" in
+        0)   echo "Normal shutdown (exit 0)" ;;
+        1)   echo "Error (exit 1)" ;;
+        2)   echo "Bash misuse (exit 2)" ;;
+        126) echo "Permission denied (exit 126)" ;;
+        127) echo "Command not found (exit 127)" ;;
+        130) echo "SIGINT/Ctrl+C (exit 130)" ;;
+        134) echo "SIGABRT (exit 134)" ;;
         137) echo "OOM Killed (exit 137)" ;;
         139) echo "Segfault (exit 139)" ;;
-        134) echo "SIGABRT (exit 134)" ;;
+        141) echo "Broken pipe (exit 141)" ;;
         143) echo "SIGTERM (exit 143)" ;;
-        1)   echo "Error (exit 1)" ;;
         *)   echo "Unknown (exit $1)" ;;
     esac
 }
@@ -190,7 +196,7 @@ tmux kill-session -t workers 2>/dev/null || true
 # Create main tmux session with first clicker (window 0)
 if [ "$NUM_WORKERS" -gt 0 ]; then
     tmux new-session -d -s workers -n "clicker_0" \
-        "python /app/start_object_server.py --worker-id 0 --port 5555; echo '[CRASHED] Clicker 0'; sleep infinity"
+        "python /app/start_object_server.py --worker-id 0 --port 5555; echo \$? > /tmp/clicker_0_exit; tmux wait-for -S clicker-0-done"
     echo "[WINDOW 0] clicker_0 - port 5555"
     sleep 2
 
@@ -198,20 +204,20 @@ if [ "$NUM_WORKERS" -gt 0 ]; then
     for i in $(seq 1 $((NUM_WORKERS - 1))); do
         PORT=$((5555 + i))
         tmux new-window -t workers -n "clicker_$i" \
-            "python /app/start_object_server.py --worker-id $i --port $PORT; echo '[CRASHED] Clicker $i'; sleep infinity"
+            "python /app/start_object_server.py --worker-id $i --port $PORT; echo \$? > /tmp/clicker_\${i}_exit; tmux wait-for -S clicker-\${i}-done"
         echo "[WINDOW $i] clicker_$i - port $PORT"
         sleep 2
     done
 
-    # Add celery sender as last window
+    # Add celery sender as last window (with heartbeat disabled)
     CELERY_WINDOW=$NUM_WORKERS
     tmux new-window -t workers -n "celery" \
-        "celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo; echo '[CRASHED] Celery'; sleep infinity"
+        "celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo --without-heartbeat --without-gossip --without-mingle; echo \$? > /tmp/celery_exit; tmux wait-for -S celery-done"
     echo "[WINDOW $CELERY_WINDOW] celery - wsl_sam2,wsl_yolo queues"
 else
-    # No clickers - just celery
+    # No clickers - just celery (with heartbeat disabled)
     tmux new-session -d -s workers -n "celery" \
-        "celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo; echo '[CRASHED] Celery'; sleep infinity"
+        "celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo --without-heartbeat --without-gossip --without-mingle; echo \$? > /tmp/celery_exit; tmux wait-for -S celery-done"
     echo "[WINDOW 0] celery - wsl_sam2,wsl_yolo queues"
 fi
 
@@ -229,14 +235,42 @@ echo ""
 send_notification "🟢 Worker **$WORKER_NAME** is READY! GPU: $GPU_NAME (${GPU_MEMORY}MB VRAM) | Clickers: $NUM_WORKERS"
 
 # ============================================================
-# Keep container alive and monitor tmux session
+# Monitor workers with zero-CPU blocking (tmux wait-for)
 # ============================================================
-while true; do
-    # Check if tmux session still exists
-    if ! tmux has-session -t workers 2>/dev/null; then
-        echo "[WARN] tmux session 'workers' died, restarting container..."
-        send_notification "🔴 Worker **$WORKER_NAME** tmux session died! Container will restart."
-        exit 1
-    fi
-    sleep 30
+# Build wait channels for all workers
+WAIT_CHANNELS="celery-done"
+for i in $(seq 0 $((NUM_WORKERS - 1))); do
+    WAIT_CHANNELS="$WAIT_CHANNELS clicker-${i}-done"
 done
+
+echo "[MONITOR] Waiting for any worker to exit (zero-CPU blocking)..."
+
+# Block until ANY worker exits
+# tmux wait-for with multiple channels waits for ALL by default
+# We need to wait for any ONE, so we use background + wait -n
+for channel in $WAIT_CHANNELS; do
+    tmux wait-for $channel &
+done
+wait -n  # Wait for first one to complete
+
+# Find which worker crashed
+CRASHED=""
+EXIT_CODE=1
+if [ -f /tmp/celery_exit ]; then
+    CRASHED="Celery"
+    EXIT_CODE=$(cat /tmp/celery_exit)
+    rm -f /tmp/celery_exit
+fi
+for i in $(seq 0 $((NUM_WORKERS - 1))); do
+    if [ -f /tmp/clicker_${i}_exit ]; then
+        CRASHED="Clicker $i"
+        EXIT_CODE=$(cat /tmp/clicker_${i}_exit)
+        rm -f /tmp/clicker_${i}_exit
+        break
+    fi
+done
+
+REASON=$(get_crash_reason $EXIT_CODE)
+echo "[CRASH] $CRASHED exited: $REASON"
+send_notification "🔴 Worker **$WORKER_NAME** - $CRASHED crashed! Reason: $REASON | Container will restart."
+exit $EXIT_CODE
