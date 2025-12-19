@@ -333,6 +333,82 @@ class SAM2Selector {
     }
 
     /**
+     * Request mask from server using bounding box (from drawing tools)
+     */
+    async requestMaskFromBBox(bbox) {
+        if (!bbox || bbox.length !== 4) {
+            console.error('[SAM2Selector] Invalid bbox:', bbox);
+            return null;
+        }
+
+        if (this.selections.length >= 10) {
+            alert('Maximum 10 selections allowed. Click Reset to start over.');
+            return null;
+        }
+
+        this.isLoading = true;
+
+        try {
+            const frameData = this.captureCurrentFrame();
+            console.log(`[SAM2Selector] Requesting mask for bbox: [${bbox.map(v => v.toFixed(1)).join(', ')}]`);
+
+            const response = await fetch('/api/sam2/select-object', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    frame_data: frameData,
+                    frame_index: this.currentFrameIndex,
+                    bbox: bbox,
+                    prompt_type: 'bbox',
+                    video_width: this.videoWidth,
+                    video_height: this.videoHeight
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success' && data.mask) {
+                const mask = await this.decodeMask(data.mask);
+                console.log(`[SAM2Selector] BBox mask received (${mask.width}x${mask.height})`);
+
+                const color = this.colorPalette[this.colorIndex % this.colorPalette.length];
+                this.colorIndex++;
+
+                const centerX = (bbox[0] + bbox[2]) / 2;
+                const centerY = (bbox[1] + bbox[3]) / 2;
+
+                const selection = {
+                    id: this.currentSelectionId++,
+                    points: [{x: centerX, y: centerY, label: 1}],
+                    bbox: bbox,
+                    mask: mask,
+                    color: color,
+                    frame_idx: this.currentFrameIndex,
+                    prompt_type: 'bbox'
+                };
+
+                this.selections.push(selection);
+                console.log(`[SAM2Selector] Added bbox selection #${selection.id}`);
+
+                if (this.options.onPointsChange) {
+                    this.options.onPointsChange(this.getAllPoints());
+                }
+
+                this.draw();
+                return mask;
+            } else {
+                console.error('[SAM2Selector] Failed to get bbox mask:', data.message);
+                return null;
+            }
+        } catch (error) {
+            console.error('[SAM2Selector] BBox mask request failed:', error);
+            return null;
+        } finally {
+            this.isLoading = false;
+        }
+    }
+
+    /**
      * Capture current video frame as base64
      */
     captureCurrentFrame() {

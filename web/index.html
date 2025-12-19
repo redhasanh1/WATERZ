@@ -1765,8 +1765,65 @@
                         <!-- Mask Selection Controls -->
                         <div id="maskSelectionControls" style="display: none; margin-top: 2rem; padding: 2rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(240, 147, 251, 0.08) 100%); border-radius: 16px; border: 2px solid rgba(102, 126, 234, 0.2);">
                             <h3 style="text-align: center; margin-bottom: 1.5rem; font-size: 1.4rem; font-weight: 700; color: var(--text-primary);">
-                                <span style="color: #667eea;">Step 2:</span> Click on Objects to Remove
+                                <span style="color: #667eea;">Step 2:</span> Select Objects to Remove
                             </h3>
+
+                            <!-- Mode Selection Toggle -->
+                            <div id="maskModeSelector" style="display: flex; justify-content: center; gap: 1rem; margin-bottom: 1.5rem;">
+                                <button id="trackedModeBtn" class="mode-btn mode-active" data-mode="tracked" style="display: flex; flex-direction: column; align-items: center; padding: 1rem 2rem; border-radius: 12px; border: 2px solid #667eea; background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%); cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">
+                                    <span style="font-size: 1.5rem; margin-bottom: 0.5rem;">🎯</span>
+                                    <span style="font-weight: 700; color: var(--text-primary); font-size: 1rem;">Tracked</span>
+                                    <span style="font-size: 0.8rem; color: var(--text-secondary);">Moving objects</span>
+                                </button>
+                                <button id="staticModeBtn" class="mode-btn" data-mode="static" style="display: flex; flex-direction: column; align-items: center; padding: 1rem 2rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); cursor: pointer; transition: all 0.3s ease;">
+                                    <span style="font-size: 1.5rem; margin-bottom: 0.5rem;">📌</span>
+                                    <span style="font-weight: 700; color: var(--text-primary); font-size: 1rem;">Static</span>
+                                    <span style="font-size: 0.8rem; color: var(--text-secondary);">Fixed watermarks</span>
+                                </button>
+                            </div>
+
+                            <!-- Drawing Tools Toolbar -->
+                            <div id="drawingToolbar" style="display: flex; justify-content: center; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+                                <button id="toolClick" class="tool-btn tool-active" data-tool="click" title="Click Selection" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+                                        <path d="M13 13l6 6"/>
+                                    </svg>
+                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">Click</span>
+                                </button>
+                                <button id="toolRect" class="tool-btn" data-tool="rectangle" title="Rectangle" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                    </svg>
+                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">Rectangle</span>
+                                </button>
+                                <button id="toolEllipse" class="tool-btn" data-tool="ellipse" title="Ellipse" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <ellipse cx="12" cy="12" rx="10" ry="6"/>
+                                    </svg>
+                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">Ellipse</span>
+                                </button>
+                                <button id="toolPolygon" class="tool-btn" data-tool="polygon" title="Polygon (double-click to close)" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/>
+                                    </svg>
+                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">Polygon</span>
+                                </button>
+                                <button id="toolBrush" class="tool-btn" data-tool="brush" title="Freehand Brush" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M9.06 11.9l8.07-8.06a2.85 2.85 0 114.03 4.03l-8.06 8.08"/>
+                                        <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 00-3-3.02z"/>
+                                    </svg>
+                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">Brush</span>
+                                </button>
+                            </div>
+
+                            <!-- Brush Size Slider (shown only for brush tool) -->
+                            <div id="brushSizeContainer" style="display: none; justify-content: center; align-items: center; gap: 1rem; margin-bottom: 1.5rem; padding: 0.75rem 1.5rem; background: rgba(102, 126, 234, 0.05); border-radius: 8px;">
+                                <label for="brushSizeSlider" style="font-size: 0.9rem; font-weight: 600; color: var(--text-secondary);">Brush Size:</label>
+                                <input type="range" id="brushSizeSlider" min="5" max="100" value="20" style="width: 150px; cursor: pointer;">
+                                <span id="brushSizeValue" style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); min-width: 40px;">20px</span>
+                            </div>
 
                             <!-- Pro Tip Box - Enhanced -->
                             <div style="position: relative; background: linear-gradient(135deg, #667eea 0%, #764ba2 35%, #f093fb 70%, #f6ad55 100%); border-radius: 16px; padding: 3px; margin-bottom: 1.5rem; box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5), 0 0 50px rgba(240, 147, 251, 0.3), 0 0 80px rgba(246, 173, 85, 0.2); animation: subtle-glow 3s ease-in-out infinite;">
@@ -3028,6 +3085,7 @@
     <!-- SAM2 Timeline and Selection Scripts -->
     
     <script src="js/sam2_selector.js"></script>
+    <script src="js/mask_drawer.js"></script>
 
     <script>
       // New 30fps Video Timeline with Colorful Thumbnails
@@ -3499,6 +3557,96 @@
                     }
                 });
             }
+
+            // Initialize MaskDrawer for shape drawing tools
+            if (typeof MaskDrawer !== 'undefined' && !window.maskDrawer) {
+                console.log('[MaskDrawer] Initializing...');
+                window.maskDrawer = new MaskDrawer(video, canvas, {
+                    mode: 'tracked',
+                    tool: 'click',
+                    sam2Selector: sam2Selector,
+                    onShapeComplete: async (shape, mode) => {
+                        console.log('[MaskDrawer] Shape completed:', shape.type, 'Mode:', mode);
+                        if (mode === 'tracked') {
+                            if (sam2Selector && shape.bbox) {
+                                await sam2Selector.requestMaskFromBBox(shape.bbox);
+                            }
+                        } else {
+                            if (!window.staticMasks) window.staticMasks = [];
+                            window.staticMasks.push({
+                                shape: shape,
+                                mask: window.maskDrawer.shapeToMask(shape)
+                            });
+                        }
+                        updatePointCount();
+                        if (resetBtn) resetBtn.disabled = false;
+                    }
+                });
+                window.maskDrawer.init();
+            }
+
+            // Mode toggle handlers
+            const trackedModeBtn = document.getElementById('trackedModeBtn');
+            const staticModeBtn = document.getElementById('staticModeBtn');
+            if (trackedModeBtn && staticModeBtn) {
+                trackedModeBtn.addEventListener('click', () => {
+                    trackedModeBtn.style.border = '2px solid #667eea';
+                    trackedModeBtn.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%)';
+                    trackedModeBtn.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.3)';
+                    staticModeBtn.style.border = '2px solid rgba(102, 126, 234, 0.2)';
+                    staticModeBtn.style.background = 'var(--bg-card)';
+                    staticModeBtn.style.boxShadow = 'none';
+                    if (window.maskDrawer) window.maskDrawer.setMode('tracked');
+                    window.currentMaskMode = 'tracked';
+                });
+                staticModeBtn.addEventListener('click', () => {
+                    staticModeBtn.style.border = '2px solid #667eea';
+                    staticModeBtn.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%)';
+                    staticModeBtn.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.3)';
+                    trackedModeBtn.style.border = '2px solid rgba(102, 126, 234, 0.2)';
+                    trackedModeBtn.style.background = 'var(--bg-card)';
+                    trackedModeBtn.style.boxShadow = 'none';
+                    if (window.maskDrawer) window.maskDrawer.setMode('static');
+                    window.currentMaskMode = 'static';
+                });
+            }
+
+            // Drawing tool handlers
+            const toolButtons = document.querySelectorAll('#drawingToolbar .tool-btn');
+            const brushSizeContainer = document.getElementById('brushSizeContainer');
+            const brushSizeSlider = document.getElementById('brushSizeSlider');
+            const brushSizeValue = document.getElementById('brushSizeValue');
+            toolButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tool = btn.dataset.tool;
+                    toolButtons.forEach(b => {
+                        if (b === btn) {
+                            b.style.background = 'var(--gradient-primary)';
+                            b.style.color = 'white';
+                            b.style.border = 'none';
+                        } else {
+                            b.style.background = 'var(--bg-card)';
+                            b.style.color = 'var(--text-primary)';
+                            b.style.border = '1px solid rgba(102, 126, 234, 0.2)';
+                        }
+                    });
+                    if (brushSizeContainer) brushSizeContainer.style.display = tool === 'brush' ? 'flex' : 'none';
+                    if (window.maskDrawer) window.maskDrawer.setTool(tool);
+                    if (tool === 'click') {
+                        if (sam2Selector) sam2Selector.enabled = selectionMode;
+                        if (window.maskDrawer) window.maskDrawer.disable();
+                    } else {
+                        if (sam2Selector) sam2Selector.enabled = false;
+                        if (window.maskDrawer && selectionMode) window.maskDrawer.enable();
+                    }
+                });
+            });
+            if (brushSizeSlider && brushSizeValue) {
+                brushSizeSlider.addEventListener('input', (e) => {
+                    brushSizeValue.textContent = e.target.value + 'px';
+                    if (window.maskDrawer) window.maskDrawer.setBrushSize(parseInt(e.target.value));
+                });
+            }
         });
 
         // Window resize handler to recalculate video render bounds for letterbox compensation
@@ -3514,32 +3662,34 @@
         enableBtn.addEventListener('click', function() {
             selectionMode = !selectionMode;
             if (selectionMode) {
-                enableBtn.textContent = 'Selection Mode: ON (Click video!)';
+                enableBtn.textContent = 'Selection Mode: ON';
                 enableBtn.style.background = 'var(--bg-gradient-4)';
                 canvas.style.pointerEvents = 'auto';
                 resetBtn.disabled = false;
                 video.pause(); // Pause video during selection
                 pointsList.style.display = 'block';
 
-                // Enable SAM2 selector
-                if (sam2Selector) {
-                    sam2Selector.enabled = true;
-                    console.log('[SAM2] Selection mode enabled');
+                // Enable based on current tool
+                const currentTool = window.maskDrawer ? window.maskDrawer.getTool() : 'click';
+                if (currentTool === 'click') {
+                    if (sam2Selector) sam2Selector.enabled = true;
+                } else {
+                    if (window.maskDrawer) window.maskDrawer.enable();
                 }
+                console.log('[Selection] Mode enabled, tool:', currentTool);
 
                 // Show test button
                 const testBtn = document.getElementById('testSAM2Btn');
                 if (testBtn) testBtn.style.display = 'inline-block';
             } else {
-                enableBtn.textContent = 'Enable Selection Mode';
+                enableBtn.textContent = 'Select Object';
                 enableBtn.style.background = 'var(--gradient-primary)';
                 canvas.style.pointerEvents = 'none';
 
-                // Disable SAM2 selector
-                if (sam2Selector) {
-                    sam2Selector.enabled = false;
-                    console.log('[SAM2] Selection mode disabled');
-                }
+                // Disable both
+                if (sam2Selector) sam2Selector.enabled = false;
+                if (window.maskDrawer) window.maskDrawer.disable();
+                console.log('[Selection] Mode disabled');
 
                 // Hide test button
                 const testBtn2 = document.getElementById('testSAM2Btn');
@@ -3600,6 +3750,13 @@
             if (sam2Selector) {
                 sam2Selector.reset();
             }
+            // Reset MaskDrawer shapes
+            if (window.maskDrawer) {
+                window.maskDrawer.reset();
+            }
+            // Clear static masks
+            window.staticMasks = [];
+
             updatePointCount();
             resetBtn.disabled = true;
             scrollHint.style.display = 'none';
@@ -3610,6 +3767,7 @@
             if (window.videoTimeline) {
                 window.videoTimeline.clearMaskIndicators();
             }
+            console.log('[Reset] Cleared all selections');
         });
 
         // Draw a green dot on canvas
