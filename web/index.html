@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
     <!-- SEO Optimization -->
     <title>Remove Objects from Videos Online Free - AI Video Editor | MarkRemoverAI</title>
@@ -1165,11 +1165,12 @@
 
         #professionalPlayer.ios-fullscreen #videoControls {
             position: absolute !important;
-            bottom: 0 !important;
+            bottom: env(safe-area-inset-bottom, 20px) !important;
             left: 0 !important;
             right: 0 !important;
             z-index: 10 !important;
             opacity: 1 !important;
+            padding-bottom: 10px !important;
         }
 
         body.ios-fullscreen-active {
