@@ -1816,6 +1816,13 @@
                                     </svg>
                                     <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">Brush</span>
                                 </button>
+                                <button id="toolEraser" class="tool-btn" data-tool="eraser" title="Eraser - Remove parts of mask" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8l10-10c.8-.8 2-.8 2.8 0l5.2 5.2c.8.8.8 2 0 2.8L12 20"/>
+                                        <path d="M18 12L8 22"/>
+                                    </svg>
+                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">Eraser</span>
+                                </button>
                             </div>
 
                             <!-- Brush Size Slider (shown only for brush tool) -->
@@ -3685,7 +3692,7 @@
                             b.style.border = '1px solid rgba(102, 126, 234, 0.2)';
                         }
                     });
-                    if (brushSizeContainer) brushSizeContainer.style.display = tool === 'brush' ? 'flex' : 'none';
+                    if (brushSizeContainer) brushSizeContainer.style.display = (tool === 'brush' || tool === 'eraser') ? 'flex' : 'none';
                     if (window.maskDrawer) window.maskDrawer.setTool(tool);
                     if (tool === 'click') {
                         if (sam2Selector) sam2Selector.enabled = selectionMode;

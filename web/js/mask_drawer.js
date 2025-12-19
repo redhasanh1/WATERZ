@@ -29,8 +29,13 @@ class MaskDrawer {
         this.shapes = [];           // Completed shapes
         this.polygonPoints = [];    // For polygon tool
         this.brushPath = [];        // For brush tool
+        this.eraserPath = [];       // For eraser tool
         this.startPoint = null;
         this.currentPoint = null;
+
+        // Raster mask bitmap (for pixel-level editing with eraser)
+        this.maskBitmap = null;     // Canvas element for bitmap operations
+        this.maskCtx = null;        // 2D context for bitmap
 
         // Video dimensions (native resolution)
         this.videoWidth = 0;
@@ -104,6 +109,87 @@ class MaskDrawer {
     }
 
     /**
+     * Initialize the raster mask bitmap canvas (lazy init)
+     */
+    initMaskBitmap() {
+        if (!this.maskBitmap && this.videoWidth > 0 && this.videoHeight > 0) {
+            this.maskBitmap = document.createElement('canvas');
+            this.maskBitmap.width = this.videoWidth;
+            this.maskBitmap.height = this.videoHeight;
+            this.maskCtx = this.maskBitmap.getContext('2d');
+            // Start with black (no mask)
+            this.maskCtx.fillStyle = '#000000';
+            this.maskCtx.fillRect(0, 0, this.videoWidth, this.videoHeight);
+            console.log('MaskDrawer: Initialized mask bitmap', this.videoWidth, 'x', this.videoHeight);
+        }
+    }
+
+    /**
+     * Bake a shape onto the mask bitmap (white = masked area)
+     */
+    bakeShapeToBitmap(shape) {
+        this.initMaskBitmap();
+        if (!this.maskCtx) return;
+
+        this.maskCtx.fillStyle = '#FFFFFF';
+        this.maskCtx.strokeStyle = '#FFFFFF';
+
+        switch (shape.type) {
+            case 'rectangle':
+                this.maskCtx.fillRect(shape.x, shape.y, shape.width, shape.height);
+                break;
+
+            case 'ellipse':
+                this.maskCtx.beginPath();
+                this.maskCtx.ellipse(shape.cx, shape.cy, shape.rx, shape.ry, 0, 0, 2 * Math.PI);
+                this.maskCtx.fill();
+                break;
+
+            case 'polygon':
+                if (shape.points.length >= 3) {
+                    this.maskCtx.beginPath();
+                    this.maskCtx.moveTo(shape.points[0].x, shape.points[0].y);
+                    for (let i = 1; i < shape.points.length; i++) {
+                        this.maskCtx.lineTo(shape.points[i].x, shape.points[i].y);
+                    }
+                    this.maskCtx.closePath();
+                    this.maskCtx.fill();
+                }
+                break;
+
+            case 'brush':
+                if (shape.points.length >= 2) {
+                    this.maskCtx.lineWidth = shape.brushSize;
+                    this.maskCtx.lineCap = 'round';
+                    this.maskCtx.lineJoin = 'round';
+                    this.maskCtx.beginPath();
+                    this.maskCtx.moveTo(shape.points[0].x, shape.points[0].y);
+                    for (let i = 1; i < shape.points.length; i++) {
+                        this.maskCtx.lineTo(shape.points[i].x, shape.points[i].y);
+                    }
+                    this.maskCtx.stroke();
+                }
+                break;
+        }
+    }
+
+    /**
+     * Rebuild mask bitmap from all shapes (used after undo)
+     */
+    rebuildMaskBitmap() {
+        if (!this.maskBitmap) return;
+
+        // Clear to black
+        this.maskCtx.fillStyle = '#000000';
+        this.maskCtx.fillRect(0, 0, this.videoWidth, this.videoHeight);
+
+        // Rebake all shapes
+        for (const shape of this.shapes) {
+            this.bakeShapeToBitmap(shape);
+        }
+    }
+
+    /**
      * Attach event listeners
      */
     attachListeners() {
@@ -165,6 +251,7 @@ class MaskDrawer {
             case 'ellipse': return 'crosshair';
             case 'polygon': return 'crosshair';
             case 'brush': return 'crosshair';
+            case 'eraser': return 'crosshair';
             default: return 'default';
         }
     }
@@ -206,6 +293,23 @@ class MaskDrawer {
             return;
         }
 
+        // Eraser tool - paint black on mask bitmap
+        if (this.options.tool === 'eraser') {
+            this.isDrawing = true;
+            this.eraserPath = [point];
+            this.initMaskBitmap();
+            // Erase at click point immediately (single click support)
+            if (this.maskCtx) {
+                this.maskCtx.globalCompositeOperation = 'destination-out';
+                this.maskCtx.beginPath();
+                this.maskCtx.arc(point.x, point.y, this.options.brushSize / 2, 0, Math.PI * 2);
+                this.maskCtx.fill();
+                this.maskCtx.globalCompositeOperation = 'source-over';
+            }
+            this.redraw();
+            return;
+        }
+
         // Start drawing for other tools
         this.isDrawing = true;
         this.startPoint = point;
@@ -236,6 +340,23 @@ class MaskDrawer {
             this.brushPath.push(point);
         }
 
+        // Eraser tool - continuous erasing during drag
+        if (this.options.tool === 'eraser') {
+            this.eraserPath.push(point);
+            if (this.maskCtx && this.eraserPath.length >= 2) {
+                const prev = this.eraserPath[this.eraserPath.length - 2];
+                this.maskCtx.globalCompositeOperation = 'destination-out';
+                this.maskCtx.lineWidth = this.options.brushSize;
+                this.maskCtx.lineCap = 'round';
+                this.maskCtx.lineJoin = 'round';
+                this.maskCtx.beginPath();
+                this.maskCtx.moveTo(prev.x, prev.y);
+                this.maskCtx.lineTo(point.x, point.y);
+                this.maskCtx.stroke();
+                this.maskCtx.globalCompositeOperation = 'source-over';
+            }
+        }
+
         this.redraw();
     }
 
@@ -246,6 +367,14 @@ class MaskDrawer {
         if (!this.enabled || !this.isDrawing) return;
 
         const tool = this.options.tool;
+
+        // Eraser tool - just finish, erasing already done during mouse move
+        if (tool === 'eraser') {
+            this.isDrawing = false;
+            this.eraserPath = [];
+            this.redraw();
+            return;
+        }
 
         if (tool === 'rectangle' && this.startPoint && this.currentPoint) {
             const shape = {
@@ -351,6 +480,9 @@ class MaskDrawer {
 
         this.shapes.push(shape);
 
+        // Bake shape to mask bitmap for pixel-level editing support
+        this.bakeShapeToBitmap(shape);
+
         if (this.options.onShapeComplete) {
             this.options.onShapeComplete(shape, this.options.mode);
         }
@@ -442,8 +574,17 @@ class MaskDrawer {
 
     /**
      * Get combined mask for all shapes (base64 PNG)
+     * Uses raster bitmap if available (eraser was used), otherwise generates from shapes
      */
     getAllShapesMask() {
+        // If mask bitmap exists (eraser was used or shapes were baked), use it directly
+        if (this.maskBitmap) {
+            console.log('MaskDrawer: Using bitmap mask (eraser/baked)');
+            return this.maskBitmap.toDataURL('image/png');
+        }
+
+        // Otherwise generate from shapes (fallback)
+        console.log('MaskDrawer: Generating mask from shapes');
         const maskCanvas = document.createElement('canvas');
         maskCanvas.width = this.videoWidth;
         maskCanvas.height = this.videoHeight;
@@ -506,9 +647,17 @@ class MaskDrawer {
     redraw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw completed shapes
-        for (const shape of this.shapes) {
-            this.drawShape(shape, false);
+        // Draw mask bitmap as green overlay (if exists)
+        if (this.maskBitmap) {
+            this.drawGreenOverlay();
+        }
+
+        // Draw shape outlines only when NOT erasing (green overlay is the truth during erasing)
+        if (this.options.tool !== 'eraser') {
+            // Draw completed shapes
+            for (const shape of this.shapes) {
+                this.drawShape(shape, false);
+            }
         }
 
         // Draw current shape being drawn
@@ -542,6 +691,47 @@ class MaskDrawer {
         if (this.options.tool === 'polygon' && this.polygonPoints.length > 0) {
             this.drawPolygonPreview();
         }
+    }
+
+    /**
+     * Draw green overlay from mask bitmap
+     */
+    drawGreenOverlay() {
+        if (!this.maskBitmap || !this.maskCtx) return;
+
+        // Get mask bitmap image data
+        const maskData = this.maskCtx.getImageData(0, 0, this.videoWidth, this.videoHeight);
+        const data = maskData.data;
+
+        // Create green overlay image data
+        const overlayData = this.ctx.createImageData(this.videoWidth, this.videoHeight);
+        const overlay = overlayData.data;
+
+        // Convert white mask to semi-transparent green
+        for (let i = 0; i < data.length; i += 4) {
+            // Check if pixel is white (masked area)
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const a = data[i + 3];
+
+            if (r > 128 || g > 128 || b > 128 || a > 128) {
+                // Green with 40% opacity
+                overlay[i] = 0;       // R
+                overlay[i + 1] = 255; // G
+                overlay[i + 2] = 0;   // B
+                overlay[i + 3] = 102; // A (40% of 255)
+            } else {
+                // Transparent
+                overlay[i] = 0;
+                overlay[i + 1] = 0;
+                overlay[i + 2] = 0;
+                overlay[i + 3] = 0;
+            }
+        }
+
+        // Draw the green overlay
+        this.ctx.putImageData(overlayData, 0, 0);
     }
 
     /**
@@ -665,6 +855,10 @@ class MaskDrawer {
     undoLastShape() {
         if (this.shapes.length > 0) {
             this.shapes.pop();
+            // Rebuild the mask bitmap from remaining shapes
+            if (this.maskBitmap) {
+                this.rebuildMaskBitmap();
+            }
             this.redraw();
             console.log('Undo: removed last shape');
         }
@@ -739,9 +933,13 @@ class MaskDrawer {
         this.shapes = [];
         this.polygonPoints = [];
         this.brushPath = [];
+        this.eraserPath = [];
         this.isDrawing = false;
         this.startPoint = null;
         this.currentPoint = null;
+        // Clear the mask bitmap
+        this.maskBitmap = null;
+        this.maskCtx = null;
         this.redraw();
         console.log('MaskDrawer reset');
     }
