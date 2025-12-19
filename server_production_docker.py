@@ -161,6 +161,7 @@ import json
 import time
 import hashlib
 import uuid
+import base64
 from datetime import datetime, timedelta
 import redis
 import threading
@@ -6738,6 +6739,143 @@ def sam2_select_object():
             'status': 'error',
             'message': 'Local worker timeout - is SAM2 worker running?'
         }), 504
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/process-static-mask', methods=['POST'])
+def process_static_mask():
+    """
+    Process video with static masks (drawn shapes, no SAM2 tracking).
+    Mask is generated client-side and sent as base64 PNG.
+    """
+    try:
+        data = request.json
+        task_id = data.get('task_id')
+        mask_base64 = data.get('mask_base64')
+        video_width = data.get('video_width')
+        video_height = data.get('video_height')
+
+        if not task_id:
+            return jsonify({'status': 'error', 'message': 'Missing task_id'}), 400
+
+        if not mask_base64:
+            return jsonify({'status': 'error', 'message': 'Missing mask_base64'}), 400
+
+        # Strip data URL prefix if present
+        if ',' in mask_base64:
+            mask_base64 = mask_base64.split(',')[1]
+
+        # Decode mask
+        mask_bytes = base64.b64decode(mask_base64)
+        mask_np = cv2.imdecode(np.frombuffer(mask_bytes, np.uint8), cv2.IMREAD_GRAYSCALE)
+
+        if mask_np is None:
+            return jsonify({'status': 'error', 'message': 'Failed to decode mask image'}), 400
+
+        # Get video path from task_id
+        video_path = None
+        for ext in ['.mp4', '.mov', '.avi', '.webm']:
+            test_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
+            if os.path.exists(test_path):
+                video_path = test_path
+                break
+
+        if not video_path:
+            return jsonify({'status': 'error', 'message': f'Video not found for task {task_id}'}), 404
+
+        # Get video info
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return jsonify({'status': 'error', 'message': 'Failed to open video'}), 500
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        vid_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        vid_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+
+        # Resize mask if dimensions don't match video
+        if mask_np.shape[1] != vid_width or mask_np.shape[0] != vid_height:
+            mask_np = cv2.resize(mask_np, (vid_width, vid_height), interpolation=cv2.INTER_NEAREST)
+
+        # Create a unique job ID
+        job_id = f"static_{task_id}_{uuid.uuid4().hex[:8]}"
+
+        # Save masks (replicate for all frames) and create zip
+        masks_dir = os.path.join(TEMP_DIR, f"{job_id}_static_masks")
+        os.makedirs(masks_dir, exist_ok=True)
+
+        print(f"[STATIC] Replicating mask for {total_frames} frames...")
+        for i in range(total_frames):
+            cv2.imwrite(os.path.join(masks_dir, f"{i:05d}.png"), mask_np)
+
+        # Create zip file
+        zip_path = os.path.join(TEMP_DIR, f"{job_id}_masks.zip")
+        shutil.make_archive(zip_path.replace('.zip', ''), 'zip', masks_dir)
+
+        # Upload zip to B2
+        masks_url = None
+        if B2_ENABLED:
+            remote_path = f"masks/{job_id}_masks.zip"
+            masks_url = upload_to_b2(zip_path, remote_path)
+            print(f"[STATIC] Uploaded masks to B2: {masks_url}")
+        else:
+            print(f"[STATIC] B2 not enabled, using local path")
+            masks_url = zip_path
+
+        # Clean up local masks directory (keep zip for now)
+        shutil.rmtree(masks_dir, ignore_errors=True)
+
+        # Get video URL (should already be on B2 from upload)
+        video_url = redis_client.get(f"upload_cdn:{task_id}")
+        if video_url:
+            video_url = video_url.decode() if isinstance(video_url, bytes) else video_url
+        else:
+            # Fall back to direct URL
+            video_ext = os.path.splitext(video_path)[1]
+            video_url = f"{B2_CDN_URL}/uploads/{task_id}{video_ext}"
+
+        print(f"[STATIC] Video URL: {video_url}")
+        print(f"[STATIC] Masks URL: {masks_url}")
+
+        # Get public base URL for result upload
+        def _current_public_base():
+            env_url = os.getenv('TUNNEL_URL')
+            if env_url:
+                return env_url.strip()
+            try:
+                tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
+                if os.path.exists(tunnel_file):
+                    with open(tunnel_file, 'r') as f:
+                        return f.read().strip()
+            except Exception:
+                pass
+            return 'http://localhost:9000'
+
+        api_base = _current_public_base()
+
+        # Send directly to ProPainter queue (skip SAM2)
+        from celery import signature
+
+        sam2_result = {'masks_url': masks_url, 'mode': 'static'}
+
+        s = signature('watermark._continue_after_masks',
+                      args=[sam2_result, video_url, task_id, [], vid_width, vid_height, 0, api_base],
+                      queue='propainter')
+
+        result = s.apply_async(task_id=job_id)
+
+        print(f"[STATIC] Started ProPainter job {job_id} for video {task_id}")
+        print(f"[STATIC] Frames: {total_frames}, Size: {vid_width}x{vid_height}")
+
+        return jsonify({
+            'status': 'success',
+            'job_id': job_id,
+            'task_id': job_id,
+            'message': 'Static mask processing started'
+        })
 
     except Exception as e:
         import traceback

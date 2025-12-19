@@ -154,6 +154,10 @@ class StaticMaskGUI:
         self.draw_start = None
         self.polygon_points: List[Tuple[int, int]] = []
         self.brush_points: List[Tuple[int, int]] = []
+        self.eraser_points: List[Tuple[int, int]] = []
+
+        # Raster mask bitmap (for fine-grained erasing)
+        self.mask_bitmap: Optional[np.ndarray] = None
 
         # Processing state
         self.task_id: Optional[str] = None
@@ -215,7 +219,7 @@ class StaticMaskGUI:
         ttk.Label(tools_frame, text="Tools:").pack(side=tk.LEFT, padx=5)
 
         self.tool_var = tk.StringVar(value='rectangle')
-        tools = [('Rectangle', 'rectangle'), ('Ellipse', 'ellipse'), ('Polygon', 'polygon'), ('Brush', 'brush')]
+        tools = [('Rectangle', 'rectangle'), ('Ellipse', 'ellipse'), ('Polygon', 'polygon'), ('Brush', 'brush'), ('Eraser', 'eraser')]
         for text, value in tools:
             ttk.Radiobutton(tools_frame, text=text, variable=self.tool_var, value=value,
                            command=self._on_tool_change).pack(side=tk.LEFT, padx=5)
@@ -328,9 +332,17 @@ class StaticMaskGUI:
         # Convert to RGB and create copy for drawing
         frame_rgb = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2RGB)
 
-        # Draw shapes on frame
-        for shape in self.shapes:
-            shape.draw_on_image(frame_rgb, color=(0, 255, 0), thickness=2)
+        # Overlay mask bitmap in green (semi-transparent)
+        if self.mask_bitmap is not None:
+            # Create green overlay where mask is white
+            green_overlay = np.zeros_like(frame_rgb)
+            green_overlay[:, :, 1] = self.mask_bitmap  # Green channel = mask
+            frame_rgb = cv2.addWeighted(frame_rgb, 1.0, green_overlay, 0.4, 0)
+
+        # Only draw shape outlines when NOT erasing (green overlay is the truth now)
+        if self.current_tool != 'eraser':
+            for shape in self.shapes:
+                shape.draw_on_image(frame_rgb, color=(0, 255, 0), thickness=2)
 
         # Draw current polygon points if in polygon mode
         if self.current_tool == 'polygon' and self.polygon_points:
@@ -338,6 +350,11 @@ class StaticMaskGUI:
             cv2.polylines(frame_rgb, [pts], isClosed=False, color=(255, 255, 0), thickness=2)
             for pt in self.polygon_points:
                 cv2.circle(frame_rgb, pt, 5, (255, 0, 0), -1)
+
+        # Show eraser cursor preview
+        if self.current_tool == 'eraser' and self.eraser_points:
+            last_pt = self.eraser_points[-1]
+            cv2.circle(frame_rgb, last_pt, self.brush_size // 2, (255, 0, 0), 2)
 
         # Scale frame
         scaled = cv2.resize(frame_rgb, (int(self.video_width * self.scale), int(self.video_height * self.scale)))
@@ -370,6 +387,56 @@ class StaticMaskGUI:
             return (int(vx), int(vy))
         return None
 
+    def _point_in_shape(self, x: int, y: int, shape) -> bool:
+        """Check if point is inside shape"""
+        if shape.type == 'rectangle':
+            return shape.x1 <= x <= shape.x2 and shape.y1 <= y <= shape.y2
+        elif shape.type == 'ellipse':
+            # Ellipse equation
+            dx = (x - shape.cx) / max(shape.rx, 1)
+            dy = (y - shape.cy) / max(shape.ry, 1)
+            return (dx * dx + dy * dy) <= 1
+        elif shape.type == 'polygon':
+            # Point in polygon test using cv2
+            pts = np.array(shape.points, dtype=np.float32)
+            return cv2.pointPolygonTest(pts, (float(x), float(y)), False) >= 0
+        elif shape.type == 'brush':
+            # Check if near any point in brush stroke
+            for px, py in shape.points:
+                if abs(x - px) < shape.brush_size // 2 + 5 and abs(y - py) < shape.brush_size // 2 + 5:
+                    return True
+        return False
+
+    def _find_shape_at_point(self, x: int, y: int) -> Optional[int]:
+        """Find index of shape at point (topmost first), return None if no hit"""
+        for i in range(len(self.shapes) - 1, -1, -1):
+            if self._point_in_shape(x, y, self.shapes[i]):
+                return i
+        return None
+
+    def _init_mask_bitmap(self):
+        """Initialize mask bitmap if not exists"""
+        if self.mask_bitmap is None and self.video_width > 0 and self.video_height > 0:
+            self.mask_bitmap = np.zeros((self.video_height, self.video_width), dtype=np.uint8)
+
+    def _bake_shape_to_mask(self, shape):
+        """Render shape onto mask bitmap (white = mask area)"""
+        self._init_mask_bitmap()
+        if self.mask_bitmap is None:
+            return
+
+        # Draw shape as filled white on mask
+        if shape.type == 'rectangle':
+            cv2.rectangle(self.mask_bitmap, (shape.x1, shape.y1), (shape.x2, shape.y2), 255, -1)
+        elif shape.type == 'ellipse':
+            cv2.ellipse(self.mask_bitmap, (shape.cx, shape.cy), (shape.rx, shape.ry), 0, 0, 360, 255, -1)
+        elif shape.type == 'polygon':
+            pts = np.array(shape.points, dtype=np.int32)
+            cv2.fillPoly(self.mask_bitmap, [pts], 255)
+        elif shape.type == 'brush':
+            pts = np.array(shape.points, dtype=np.int32)
+            cv2.polylines(self.mask_bitmap, [pts], isClosed=False, color=255, thickness=shape.brush_size)
+
     def _on_mouse_down(self, event):
         if self.current_frame is None:
             return
@@ -392,6 +459,7 @@ class StaticMaskGUI:
                     # Close polygon
                     shape = Polygon(self.polygon_points.copy())
                     self.shapes.append(shape)
+                    self._bake_shape_to_mask(shape)
                     self.polygon_points = []
                     self._update_shapes_label()
                     self._update_canvas()
@@ -401,6 +469,15 @@ class StaticMaskGUI:
         elif self.current_tool == 'brush':
             self.is_drawing = True
             self.brush_points = [pt]
+        elif self.current_tool == 'eraser':
+            # Start erasing - paint black on bitmap
+            self.is_drawing = True
+            self.eraser_points = [pt]
+            self._init_mask_bitmap()
+            # Erase at click point immediately (single click support)
+            if self.mask_bitmap is not None:
+                cv2.circle(self.mask_bitmap, pt, self.brush_size // 2, 0, -1)
+            self._update_canvas()
 
     def _on_mouse_move(self, event):
         if not self.is_drawing:
@@ -422,6 +499,15 @@ class StaticMaskGUI:
                     pts = np.array(self.brush_points, dtype=np.int32)
                     cv2.polylines(frame_rgb, [pts], isClosed=False, color=(255, 255, 0), thickness=self.brush_size)
                 self._update_canvas_with_frame(frame_rgb)
+
+        elif self.current_tool == 'eraser':
+            self.eraser_points.append(pt)
+            # Paint black (erase) on mask bitmap
+            if self.mask_bitmap is not None and len(self.eraser_points) >= 2:
+                # Draw line from previous point to current point
+                prev_pt = self.eraser_points[-2]
+                cv2.line(self.mask_bitmap, prev_pt, pt, 0, thickness=self.brush_size)
+            self._update_canvas()
 
         elif self.current_tool in ('rectangle', 'ellipse') and self.draw_start:
             # Draw preview
@@ -463,21 +549,29 @@ class StaticMaskGUI:
         if self.current_tool == 'rectangle' and self.draw_start and pt:
             shape = Rectangle(self.draw_start[0], self.draw_start[1], pt[0], pt[1])
             self.shapes.append(shape)
+            self._bake_shape_to_mask(shape)
             self._update_shapes_label()
 
         elif self.current_tool == 'ellipse' and self.draw_start and pt:
             shape = Ellipse(self.draw_start[0], self.draw_start[1], pt[0], pt[1])
             self.shapes.append(shape)
+            self._bake_shape_to_mask(shape)
             self._update_shapes_label()
 
         elif self.current_tool == 'brush' and len(self.brush_points) > 1:
             shape = BrushStroke(self.brush_points, self.brush_size)
             self.shapes.append(shape)
+            self._bake_shape_to_mask(shape)
             self._update_shapes_label()
+
+        elif self.current_tool == 'eraser' and len(self.eraser_points) > 1:
+            # Eraser already painted black during mouse move, just clean up
+            pass
 
         self.is_drawing = False
         self.draw_start = None
         self.brush_points = []
+        self.eraser_points = []
         self._update_canvas()
 
     def _on_double_click(self, event):
@@ -485,6 +579,7 @@ class StaticMaskGUI:
         if self.current_tool == 'polygon' and len(self.polygon_points) >= 3:
             shape = Polygon(self.polygon_points.copy())
             self.shapes.append(shape)
+            self._bake_shape_to_mask(shape)
             self.polygon_points = []
             self._update_shapes_label()
             self._update_canvas()
@@ -502,7 +597,8 @@ class StaticMaskGUI:
 
     def _on_brush_size(self, value):
         self.brush_size = int(float(value))
-        self.brush_label.configure(text=f"{self.brush_size}px")
+        if hasattr(self, 'brush_label'):
+            self.brush_label.configure(text=f"{self.brush_size}px")
 
     def _on_slider(self, value):
         idx = int(float(value))
@@ -518,12 +614,17 @@ class StaticMaskGUI:
     def _clear_shapes(self):
         self.shapes = []
         self.polygon_points = []
+        self.mask_bitmap = None  # Clear the raster mask too
         self._update_shapes_label()
         self._update_canvas()
 
     def _undo_shape(self):
         if self.shapes:
             self.shapes.pop()
+            # Rebuild mask bitmap from remaining shapes
+            self.mask_bitmap = None
+            for shape in self.shapes:
+                self._bake_shape_to_mask(shape)
             self._update_shapes_label()
             self._update_canvas()
 
@@ -575,13 +676,16 @@ class StaticMaskGUI:
         return (min_x, min_y, max_x, max_y)
 
     def _preview_mask(self):
-        if not self.shapes:
-            messagebox.showinfo("Info", "No shapes to preview. Draw some shapes first.")
+        if self.mask_bitmap is None and not self.shapes:
+            messagebox.showinfo("Info", "No mask to preview. Draw some shapes first.")
             return
 
-        # Generate mask
-        shape_dicts = [s.to_dict() for s in self.shapes]
-        mask = generate_combined_mask(shape_dicts, self.video_width, self.video_height)
+        # Use bitmap if available (supports erasing), otherwise generate from shapes
+        if self.mask_bitmap is not None:
+            mask = self.mask_bitmap.copy()
+        else:
+            shape_dicts = [s.to_dict() for s in self.shapes]
+            mask = generate_combined_mask(shape_dicts, self.video_width, self.video_height)
 
         # Apply dilation
         dilation = self.dilation_var.get()
@@ -614,8 +718,8 @@ class StaticMaskGUI:
             messagebox.showerror("Error", "No video loaded")
             return
 
-        if not self.shapes:
-            messagebox.showerror("Error", "No shapes drawn. Draw at least one shape.")
+        if self.mask_bitmap is None and not self.shapes:
+            messagebox.showerror("Error", "No mask drawn. Draw at least one shape.")
             return
 
         if self.is_processing:
@@ -636,8 +740,13 @@ class StaticMaskGUI:
     def _process_static_mode(self, masks_dir: str):
         """Static mode: Generate mask locally, upload video+masks to B2, send to ProPainter"""
         self._set_status("Generating static mask...")
-        shape_dicts = [s.to_dict() for s in self.shapes]
-        mask = generate_combined_mask(shape_dicts, self.video_width, self.video_height)
+
+        # Use bitmap if available (supports erasing), otherwise generate from shapes
+        if self.mask_bitmap is not None:
+            mask = self.mask_bitmap.copy()
+        else:
+            shape_dicts = [s.to_dict() for s in self.shapes]
+            mask = generate_combined_mask(shape_dicts, self.video_width, self.video_height)
 
         # Apply dilation
         dilation = self.dilation_var.get()

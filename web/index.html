@@ -1778,7 +1778,7 @@
                                 <button id="staticModeBtn" class="mode-btn" data-mode="static" style="display: flex; flex-direction: column; align-items: center; padding: 1rem 2rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); cursor: pointer; transition: all 0.3s ease;">
                                     <span style="font-size: 1.5rem; margin-bottom: 0.5rem;">📌</span>
                                     <span style="font-weight: 700; color: var(--text-primary); font-size: 1rem;">Static</span>
-                                    <span style="font-size: 0.8rem; color: var(--text-secondary);">Fixed watermarks</span>
+                                    <span style="font-size: 0.8rem; color: var(--text-secondary);">Fixed objects</span>
                                 </button>
                             </div>
 
@@ -2753,6 +2753,51 @@
             }
         };
 
+        // Process video with static masks (drawn shapes, no SAM2 tracking)
+        const processStaticVideo = async (taskId) => {
+            console.log('[STATIC] Processing with drawn masks...');
+
+            // Get combined mask from all shapes as base64 PNG
+            const maskBase64 = window.maskDrawer.getAllShapesMask();
+            console.log('[STATIC] Generated mask, length:', maskBase64.length);
+
+            // Get estimated credits from video element
+            const videoElem = document.getElementById('professionalVideo');
+            const estimatedCredits = parseInt(videoElem?.dataset?.estimatedCredits || '1', 10);
+
+            statusText.textContent = 'Uploading mask...';
+
+            const response = await apiFetchPath('/api/process-static-mask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: taskId,
+                    mask_base64: maskBase64,
+                    video_width: window.maskDrawer.videoWidth,
+                    video_height: window.maskDrawer.videoHeight,
+                    estimated_credits: estimatedCredits
+                })
+            });
+
+            const data = await parseJsonSafe(response);
+
+            if (data.status === 'success' || data.status === 'processing') {
+                const processTaskId = data.task_id || data.job_id || taskId;
+                console.log('[STATIC] Job started:', processTaskId);
+                startStatusPolling(processTaskId);
+
+                // Update credits display
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                if (user.id && user.credits !== undefined) {
+                    user.credits = Math.max(0, user.credits - estimatedCredits);
+                    localStorage.setItem('user', JSON.stringify(user));
+                    updateCreditsDisplay(user.credits);
+                }
+            } else {
+                throw new Error(data.message || 'Processing failed');
+            }
+        };
+
         const processVideo = async () => {
             console.log('Start Cleanup button clicked');
             if (!videoElem) {
@@ -2769,12 +2814,18 @@
                 return;
             }
 
+            // CHECK: Does user have static masks drawn?
+            const hasStaticMasks = window.maskDrawer &&
+                                   window.maskDrawer.shapes &&
+                                   window.maskDrawer.shapes.length > 0 &&
+                                   window.currentMaskMode === 'static';
+
             // CHECK: Does user have SAM2 points selected?
             const hasSAM2Selection = window.sam2Selector &&
                                      window.sam2Selector.selections &&
                                      window.sam2Selector.selections.length > 0;
 
-            console.log('Processing mode:', hasSAM2Selection ? 'SAM2 (click-selected objects)' : 'YOLO (automatic detection)');
+            console.log('Processing mode:', hasStaticMasks ? 'STATIC (drawn masks)' : (hasSAM2Selection ? 'SAM2 (click-selected objects)' : 'NONE'));
 
             if (processBtnElem) {
                 processBtnElem.style.display = 'none';
@@ -2788,20 +2839,24 @@
             progressPercent.textContent = '0%';
 
             try {
-                // Require at least one object selection
-                if (!hasSAM2Selection) {
-                    statusText.textContent = 'Please click on at least one object to remove';
+                // Route to appropriate processing mode
+                if (hasStaticMasks) {
+                    // Static mode: use drawn masks, skip SAM2 tracking
+                    await processStaticVideo(taskId);
+                } else if (hasSAM2Selection) {
+                    // Tracked mode: use SAM2 for object tracking
+                    await processSAM2Video(taskId);
+                } else {
+                    // No selection made
+                    statusText.textContent = 'Please draw a mask or click on an object to remove';
                     statusText.style.color = '#ef4444';
                     if (processBtnElem) {
                         processBtnElem.style.display = 'block';
                     }
                     statusDiv.style.display = 'none';
-                    alert('Please click on the video to select at least one object you want to remove.');
+                    alert('Please draw a mask (Static mode) or click on an object (Tracked mode) to remove.');
                     return;
                 }
-
-                // Process with selected objects
-                await processSAM2Video(taskId);
             } catch (error) {
                 statusText.textContent = 'Error: ' + error.message;
                 statusText.style.color = '#ef4444';
