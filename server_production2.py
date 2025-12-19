@@ -2305,6 +2305,10 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         if track_fps and track_fps > 0 and abs(track_fps - 10.0) < 1.0 and total_frames > len(masks_full) >= 2:
             print(f"[SAM2] Expanding {len(masks_full)} masks (tracking @ ~10fps) to {total_frames} full-FPS frames...")
             all_masks = expand_masks_10fps(masks_full, total_frames, original_fps)
+        elif mode == 'static' and len(masks_full) == 1 and total_frames > 1:
+            # Static mode: replicate single mask across all frames (don't truncate video!)
+            print(f"[STATIC] Replicating 1 mask across {total_frames} frames (static watermark mode)")
+            all_masks = [masks_full[0]] * total_frames  # Same reference, memory efficient
         else:
             # Fallback: strict alignment (truncate to shortest)
             if len(masks_full) != total_frames:
