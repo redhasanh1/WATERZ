@@ -1128,6 +1128,50 @@
             object-fit: contain !important;
         }
 
+        /* CSS-based fullscreen for iPhone (native fullscreen API excludes canvas overlay) */
+        #professionalPlayer.ios-fullscreen {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+            z-index: 999999 !important;
+            border-radius: 0 !important;
+            background: #000 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+
+        #professionalPlayer.ios-fullscreen #videoWrapper {
+            width: 100% !important;
+            height: 100% !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            position: relative !important;
+        }
+
+        #professionalPlayer.ios-fullscreen #previewVideo,
+        #professionalPlayer.ios-fullscreen #maskCanvas {
+            max-width: 100% !important;
+            max-height: 100% !important;
+            width: auto !important;
+            height: auto !important;
+            object-fit: contain !important;
+        }
+
+        body.ios-fullscreen-active {
+            overflow: hidden !important;
+        }
+
+        /* Improve touch responsiveness on canvas */
+        #maskCanvas {
+            touch-action: manipulation;
+        }
+
         /* Hide mobile profile items on desktop - only show in hamburger menu on mobile */
         .mobile-profile-item {
             display: none !important;
@@ -1946,6 +1990,11 @@
             const id = setTimeout(() => controller.abort(), timeout);
             return fetch(resource, { ...opts, signal: controller.signal })
                 .finally(() => clearTimeout(id));
+        }
+
+        // Detect iPhone (but not iPad) for iOS-specific fullscreen workaround
+        function isIphone() {
+            return /iPhone/.test(navigator.userAgent) && !window.MSStream;
         }
 
         async function updateApiChip() {
@@ -2804,18 +2853,42 @@
                 const exitIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>';
                 const enterIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
 
+                // iPhone Safari: use CSS-based fullscreen (native API excludes canvas overlay)
+                if (isIphone()) {
+                    if (!playerContainer.classList.contains('ios-fullscreen')) {
+                        // Enter CSS fullscreen
+                        playerContainer.classList.add('ios-fullscreen');
+                        document.body.classList.add('ios-fullscreen-active');
+                        fullscreenBtn.innerHTML = exitIcon;
+                        // Update canvas size after layout change
+                        setTimeout(() => {
+                            if (window.sam2Selector) window.sam2Selector.updateCanvasSize();
+                        }, 100);
+                    } else {
+                        // Exit CSS fullscreen
+                        playerContainer.classList.remove('ios-fullscreen');
+                        document.body.classList.remove('ios-fullscreen-active');
+                        fullscreenBtn.innerHTML = enterIcon;
+                        setTimeout(() => {
+                            if (window.sam2Selector) window.sam2Selector.updateCanvasSize();
+                        }, 100);
+                    }
+                    return;
+                }
+
+                // Standard fullscreen for non-iPhone devices
                 if (!document.fullscreenElement && !document.webkitFullscreenElement) {
                     // Try standard fullscreen first
                     if (playerContainer.requestFullscreen) {
                         playerContainer.requestFullscreen().catch(err => {
                             console.error('Fullscreen error:', err);
-                            // Fallback: try video element webkit fullscreen (iOS)
+                            // Fallback: try video element webkit fullscreen (iPad/other)
                             if (video.webkitEnterFullscreen) {
                                 video.webkitEnterFullscreen();
                             }
                         });
                     } else if (video.webkitEnterFullscreen) {
-                        // iOS Safari - fullscreen video directly
+                        // Webkit Safari - fullscreen video directly
                         video.webkitEnterFullscreen();
                     }
                     fullscreenBtn.innerHTML = exitIcon;
@@ -2843,6 +2916,22 @@
             // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                // Handle Escape for iOS CSS fullscreen
+                if (e.key === 'Escape') {
+                    const playerContainer = document.getElementById('professionalPlayer');
+                    if (playerContainer && playerContainer.classList.contains('ios-fullscreen')) {
+                        e.preventDefault();
+                        playerContainer.classList.remove('ios-fullscreen');
+                        document.body.classList.remove('ios-fullscreen-active');
+                        const enterIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+                        fullscreenBtn.innerHTML = enterIcon;
+                        setTimeout(() => {
+                            if (window.sam2Selector) window.sam2Selector.updateCanvasSize();
+                        }, 100);
+                        return;
+                    }
+                }
 
                 switch(e.key.toLowerCase()) {
                     case ' ':
