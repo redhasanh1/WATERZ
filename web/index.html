@@ -3477,9 +3477,25 @@
                 });
                 video.addEventListener('seeked', () => {
                     if (sam2Selector) {
-                        sam2Selector.onVideoTimeUpdate();
-                        sam2Selector.calculateVideoRenderBounds();
-                        sam2Selector.draw();
+                        // iOS Safari fix: force frame render by play/pause trick
+                        // iOS doesn't immediately render new frame after seeking
+                        if (isIphone() && video.paused) {
+                            video.play().then(() => {
+                                video.pause();
+                                sam2Selector.onVideoTimeUpdate();
+                                sam2Selector.calculateVideoRenderBounds();
+                                sam2Selector.draw();
+                            }).catch(() => {
+                                // Fallback if autoplay blocked
+                                sam2Selector.onVideoTimeUpdate();
+                                sam2Selector.calculateVideoRenderBounds();
+                                sam2Selector.draw();
+                            });
+                        } else {
+                            sam2Selector.onVideoTimeUpdate();
+                            sam2Selector.calculateVideoRenderBounds();
+                            sam2Selector.draw();
+                        }
                     }
                 });
             }

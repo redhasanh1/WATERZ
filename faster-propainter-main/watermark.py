@@ -448,6 +448,54 @@ def get_ref_index(mid_neighbor_id, neighbor_ids, length, ref_stride=10, ref_num=
     return ref_index
 
 
+def warp_background_to_frames(background_frame, pred_flows_bi, video_length, h, w, device):
+    """
+    Warp a background reference image to align with each video frame using cumulative optical flow.
+
+    Args:
+        background_frame: numpy array (H, W, 3) BGR background image
+        pred_flows_bi: tuple of (forward_flows, backward_flows) tensors [1, T-1, 2, H, W]
+        video_length: number of frames in video
+        h, w: processing height and width
+        device: torch device
+
+    Returns:
+        List of numpy arrays (RGB), one warped background per frame
+    """
+    from model.modules.flow_loss_utils import flow_warp
+
+    # Convert BGR background to RGB and resize to processing dimensions
+    bg_rgb = cv2.cvtColor(background_frame, cv2.COLOR_BGR2RGB)
+    bg_resized = cv2.resize(bg_rgb, (w, h))
+
+    # Convert to tensor [1, 3, H, W] normalized to [-1, 1]
+    bg_tensor = torch.from_numpy(bg_resized).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
+    bg_tensor = bg_tensor * 2 - 1
+
+    flows_f, flows_b = pred_flows_bi
+    warped_backgrounds = [bg_resized.copy()]  # Frame 0 = original (no warping needed)
+
+    # Accumulate forward flow from frame 0 to track scene movement
+    cumulative_flow = torch.zeros(1, 2, h, w, device=device)
+
+    for t in range(1, video_length):
+        if t - 1 < flows_f.shape[1]:
+            # Add this frame's forward flow to cumulative
+            cumulative_flow = cumulative_flow + flows_f[:, t-1]
+
+            # Warp background using cumulative flow
+            warped = flow_warp(bg_tensor, cumulative_flow.permute(0, 2, 3, 1))
+
+            # Convert back to numpy RGB [0-255]
+            warped_np = ((warped + 1) / 2).squeeze(0).permute(1, 2, 0).cpu().numpy() * 255
+            warped_backgrounds.append(warped_np.astype(np.uint8))
+        else:
+            # Fallback to last warped frame if we run out of flows
+            warped_backgrounds.append(warped_backgrounds[-1].copy())
+
+    return warped_backgrounds
+
+
 # Thread-local storage for TensorRT contexts - each thread gets its own context
 # This enables TRUE PARALLEL execution without locks or memory corruption
 import threading
@@ -476,6 +524,8 @@ def pipeline(
     masks_array=None,
     use_cached_models=True,  # Enable global model cache for true parallel speedup
     return_frames=False,  # Return frames directly instead of writing to disk
+    background_frame=None,  # Optional: numpy array (H, W, 3) BGR background reference for blending
+    background_alpha=0.5,  # Blend ratio: 0.0 = pure ProPainter, 1.0 = pure background
 ):
 
     # Use fp16 precision during inference to reduce running memory cost
@@ -1553,6 +1603,16 @@ def pipeline(
         flow_time = time.time() - flow_start_time
         print(f"[OK] Flow completion completed in {flow_time:.2f}s")
 
+        # ---- background warping (if provided) ----
+        background_warped = None
+        if background_frame is not None:
+            print("[BG] Warping background to align with frames...")
+            bg_warp_start = time.time()
+            background_warped = warp_background_to_frames(
+                background_frame, pred_flows_bi, video_length, h, w, device
+            )
+            print(f"[BG] Warped background for {len(background_warped)} frames in {time.time() - bg_warp_start:.2f}s")
+
         # ---- image propagation ----
         print("[IMG] Starting image propagation...")
         img_prop_start_time = time.time()
@@ -1671,9 +1731,19 @@ def pipeline(
             )
             for i in range(len(neighbor_ids)):
                 idx = neighbor_ids[i]
-                img = np.array(pred_img[i]).astype(np.uint8) * binary_masks[
-                    i
-                ] + ori_frames[idx] * (1 - binary_masks[i])
+                pred_np = np.array(pred_img[i]).astype(np.uint8)
+
+                # Blend with warped background if available
+                if background_warped is not None and idx < len(background_warped):
+                    # background_warped is already RGB, same as pred_np
+                    bg_frame = background_warped[idx]
+                    # Alpha blend: (1-alpha)*propainter + alpha*background
+                    pred_np = (
+                        (1 - background_alpha) * pred_np.astype(np.float32) +
+                        background_alpha * bg_frame.astype(np.float32)
+                    ).astype(np.uint8)
+
+                img = pred_np * binary_masks[i] + ori_frames[idx] * (1 - binary_masks[i])
                 if comp_frames[idx] is None:
                     comp_frames[idx] = img
                 else:

@@ -156,6 +156,12 @@ REM Max pixels AFTER padding - triggers segment splitting AND downsampling if ex
 REM 150k = ~387x387 max - very aggressive downsampling for safety
 set MAX_CROP_PIXELS=150000
 
+REM Background reference image for large watermark blending (leave empty to disable)
+REM The background is warped using optical flow and blended with ProPainter output
+set BACKGROUND_IMAGE_PATH=D:\watermarkz\videostotrain\firstphoto.jpg
+REM Blend ratio: 0.0 = pure ProPainter, 0.5 = balanced, 1.0 = pure background
+set BACKGROUND_ALPHA=0.5
+
 REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50
 set SEGMENT_MIN_LEN_10FPS=3
