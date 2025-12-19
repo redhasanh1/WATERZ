@@ -164,6 +164,7 @@ class SAM2Selector {
      * Handle left click - add positive point
      */
     handleClick(e) {
+        if (!this.enabled) return;
         if (this.isLoading) return;
 
         const point = this.getCanvasPoint(e);
@@ -175,6 +176,7 @@ class SAM2Selector {
      * Handle right click - add negative point
      */
     handleRightClick(e) {
+        if (!this.enabled) return;
         if (this.isLoading) return;
 
         const point = this.getCanvasPoint(e);
@@ -186,6 +188,7 @@ class SAM2Selector {
      * Handle touch - add positive point (single tap = left click)
      */
     handleTouch(touch) {
+        if (!this.enabled) return;
         if (this.isLoading) return;
 
         // Touch object has clientX/clientY like mouse events
