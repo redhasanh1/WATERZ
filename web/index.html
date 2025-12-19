@@ -1847,7 +1847,7 @@
 
                             <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem;">
                                 <button id="enableSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); transition: all 0.3s ease;">
-                                    Select Object
+                                    Magic Auto Select
                                 </button>
                                 <button id="resetSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--bg-gradient-3); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3); transition: all 0.3s ease;" disabled>
                                     Reset (R)
@@ -3681,6 +3681,19 @@
             toolButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
                     const tool = btn.dataset.tool;
+
+                    // Auto-enable selection mode when drawing tool is selected
+                    if (tool !== 'click' && !selectionMode) {
+                        selectionMode = true;
+                        enableBtn.textContent = 'Auto Select: ON';
+                        enableBtn.style.background = 'var(--bg-gradient-4)';
+                        canvas.style.pointerEvents = 'auto';
+                        resetBtn.disabled = false;
+                        video.pause();
+                        pointsList.style.display = 'block';
+                        console.log('[Selection] Auto-enabled for drawing tool:', tool);
+                    }
+
                     toolButtons.forEach(b => {
                         if (b === btn) {
                             b.style.background = 'var(--gradient-primary)';
@@ -3699,7 +3712,7 @@
                         if (window.maskDrawer) window.maskDrawer.disable();
                     } else {
                         if (sam2Selector) sam2Selector.enabled = false;
-                        if (window.maskDrawer && selectionMode) window.maskDrawer.enable();
+                        if (window.maskDrawer) window.maskDrawer.enable();
                     }
                 });
             });
@@ -3724,7 +3737,7 @@
         enableBtn.addEventListener('click', function() {
             selectionMode = !selectionMode;
             if (selectionMode) {
-                enableBtn.textContent = 'Selection Mode: ON';
+                enableBtn.textContent = 'Auto Select: ON';
                 enableBtn.style.background = 'var(--bg-gradient-4)';
                 canvas.style.pointerEvents = 'auto';
                 resetBtn.disabled = false;
@@ -3744,7 +3757,7 @@
                 const testBtn = document.getElementById('testSAM2Btn');
                 if (testBtn) testBtn.style.display = 'inline-block';
             } else {
-                enableBtn.textContent = 'Select Object';
+                enableBtn.textContent = 'Magic Auto Select';
                 enableBtn.style.background = 'var(--gradient-primary)';
                 canvas.style.pointerEvents = 'none';
 
