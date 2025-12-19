@@ -783,25 +783,35 @@ class StaticMaskGUI:
         return video_url
 
     def _process_tracked_mode(self, masks_dir: str):
-        """Tracked mode: Convert shapes to bbox, send to SAM2 → ProPainter chain"""
+        """Tracked mode: Upload video to B2, send to SAM2 → ProPainter chain"""
         bbox = self._shapes_to_bbox()
         if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
             messagebox.showerror("Error", "Invalid bounding box from shapes")
             return
 
-        self._set_status(f"Sending to SAM2 for tracking... bbox={bbox}")
+        self._set_status(f"Uploading video to B2 for tracking... bbox={bbox}")
 
         def send_task():
             try:
                 from celery import Celery, chain, signature
 
+                # Upload video to B2 first (Docker can't access local Windows paths!)
+                self.root.after(0, lambda: self._set_status(f"Uploading video to B2..."))
+                video_url = self._upload_video_to_b2()
+                if not video_url:
+                    raise RuntimeError("Failed to upload video to B2")
+
+                self.root.after(0, lambda: self._set_status(f"Sending to SAM2 for tracking..."))
+
                 redis_url = self._get_redis_url()
                 celery = Celery('watermark', broker=redis_url)
 
                 # Chain: SAM2 generates masks → ProPainter inpaints
+                # Use Docker temp path (not Windows path!)
+                docker_masks_dir = f"/tmp/{self.task_id}_sam2_masks"
                 s1 = signature(
                     'sam2.generate_masks_fullfps',
-                    args=[self.video_path, masks_dir],
+                    args=[video_url, docker_masks_dir],  # video URL, Docker temp path
                     kwargs={
                         'prompt_mode': 'bbox',
                         'bbox': list(bbox),
@@ -812,7 +822,7 @@ class StaticMaskGUI:
                 )
                 s2 = signature(
                     'watermark._continue_after_masks',
-                    args=[self.video_path, self.task_id, [], self.video_width, self.video_height, self.current_frame_idx, None],
+                    args=[video_url, self.task_id, [], self.video_width, self.video_height, self.current_frame_idx, None],
                     queue='propainter'
                 )
 
@@ -820,7 +830,7 @@ class StaticMaskGUI:
 
                 self.root.after(0, lambda: self._set_status(f"Tracked task submitted: {self.task_id}"))
                 self.root.after(0, lambda: messagebox.showinfo("Success",
-                    f"TRACKED mode task submitted!\n\nTask ID: {self.task_id}\nBBox: {bbox}\nFrame: {self.current_frame_idx}\n\nCheck 4090_sender (SAM2) then 4090_receiver (ProPainter)."))
+                    f"TRACKED mode task submitted!\n\nTask ID: {self.task_id}\nVideo URL: {video_url}\nBBox: {bbox}\nFrame: {self.current_frame_idx}\n\nSAM2 will track object and upload masks to B2."))
 
             except Exception as e:
                 self.root.after(0, lambda: self._set_status(f"Error: {str(e)}"))
