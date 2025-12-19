@@ -371,7 +371,7 @@ class StaticMaskGUI:
         return None
 
     def _on_mouse_down(self, event):
-        if not self.current_frame is not None:
+        if self.current_frame is None:
             return
 
         pt = self._canvas_to_video(event.x, event.y)
@@ -384,6 +384,18 @@ class StaticMaskGUI:
             self.is_drawing = True
             self.draw_start = pt
         elif self.current_tool == 'polygon':
+            # Auto-close polygon if clicking near start point (within 15px)
+            if len(self.polygon_points) >= 3:
+                start = self.polygon_points[0]
+                dist = ((pt[0] - start[0])**2 + (pt[1] - start[1])**2)**0.5
+                if dist < 15:
+                    # Close polygon
+                    shape = Polygon(self.polygon_points.copy())
+                    self.shapes.append(shape)
+                    self.polygon_points = []
+                    self._update_shapes_label()
+                    self._update_canvas()
+                    return
             self.polygon_points.append(pt)
             self._update_canvas()
         elif self.current_tool == 'brush':
