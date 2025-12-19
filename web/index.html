@@ -1143,6 +1143,8 @@
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
+            padding-bottom: env(safe-area-inset-bottom, 20px) !important;
+            box-sizing: border-box !important;
         }
 
         #professionalPlayer.ios-fullscreen #videoWrapper {
@@ -1175,6 +1177,10 @@
 
         body.ios-fullscreen-active {
             overflow: hidden !important;
+        }
+
+        body.ios-fullscreen-active .nav-header {
+            display: none !important;
         }
 
         /* Improve touch responsiveness on canvas */
