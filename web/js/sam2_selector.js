@@ -540,6 +540,10 @@ class SAM2Selector {
         this.selections.forEach(selection => {
             allPoints.push(...selection.points);
         });
+        // Include current selection being built (before mask response)
+        if (this.currentSelection && this.currentSelection.points) {
+            allPoints.push(...this.currentSelection.points);
+        }
         return allPoints;
     }
 
