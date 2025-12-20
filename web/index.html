@@ -1747,17 +1747,36 @@
                             <!-- Advanced Selection Content (Hidden by default) -->
                             <div id="advancedSelectionContent" style="display: none; padding: 1rem; background: rgba(102, 126, 234, 0.03); border-radius: 12px; border: 1px solid rgba(102, 126, 234, 0.1); margin-bottom: 1rem; animation: slideDown 0.3s ease;">
 
-                                <!-- Mode Selection Toggle -->
-                                <div id="maskModeSelector" style="display: flex; justify-content: center; gap: 1rem; margin-bottom: 1.25rem;">
-                                    <button id="trackedModeBtn" class="mode-btn mode-active" data-mode="tracked" style="display: flex; flex-direction: column; align-items: center; padding: 1rem 1.5rem; border-radius: 12px; border: 2px solid #667eea; background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%); cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.25);">
-                                        <span style="font-size: 1.5rem; margin-bottom: 0.4rem;">🎬</span>
-                                        <span style="font-weight: 700; color: var(--text-primary); font-size: 0.95rem;">Moving</span>
-                                        <span style="font-size: 0.75rem; color: var(--text-secondary);">Objects</span>
+                                <!-- Mode Selection Toggle - Design 2: Neon Glow Cards -->
+                                <div id="maskModeSelector" style="display: flex; justify-content: center; gap: 1.25rem; margin-bottom: 1.5rem;">
+                                    <!-- MOVING MODE - Blue -->
+                                    <button id="trackedModeBtn" class="mode-btn mode-active" data-mode="tracked" style="display: flex; flex-direction: column; align-items: center; padding: 1.5rem 2rem; border-radius: 16px; border: 2px solid #3b82f6; background: linear-gradient(145deg, rgba(59, 130, 246, 0.25) 0%, rgba(30, 58, 138, 0.4) 100%); cursor: pointer; transition: all 0.3s ease; min-width: 160px; box-shadow: 0 0 25px rgba(59, 130, 246, 0.3);">
+                                        <svg width="48" height="48" viewBox="0 0 64 64" style="margin-bottom: 0.75rem;">
+                                            <g fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M8 28 L16 28" opacity="0.5"/>
+                                                <path d="M8 32 L20 32"/>
+                                                <path d="M8 36 L16 36" opacity="0.5"/>
+                                                <path d="M38 20 L54 28 L54 44 L38 52 L22 44 L22 28 Z" fill="rgba(59, 130, 246, 0.2)"/>
+                                                <path d="M38 20 L38 36 L54 44"/>
+                                                <path d="M38 36 L22 44"/>
+                                            </g>
+                                        </svg>
+                                        <span style="font-weight: 700; color: #fff; font-size: 1rem; letter-spacing: 0.5px;">MOVING MODE</span>
+                                        <span style="font-size: 0.7rem; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 1px; margin-top: 0.25rem;">Tracks Dynamic Objects</span>
                                     </button>
-                                    <button id="staticModeBtn" class="mode-btn" data-mode="static" style="display: flex; flex-direction: column; align-items: center; padding: 1rem 1.5rem; border-radius: 12px; border: 2px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); cursor: pointer; transition: all 0.3s ease;">
-                                        <span style="font-size: 1.5rem; margin-bottom: 0.4rem;">📍</span>
-                                        <span style="font-weight: 700; color: var(--text-primary); font-size: 0.95rem;">Fixed</span>
-                                        <span style="font-size: 0.75rem; color: var(--text-secondary);">Objects</span>
+                                    <!-- STATIC MODE - Red -->
+                                    <button id="staticModeBtn" class="mode-btn" data-mode="static" style="display: flex; flex-direction: column; align-items: center; padding: 1.5rem 2rem; border-radius: 16px; border: 2px solid rgba(239, 68, 68, 0.3); background: linear-gradient(145deg, rgba(239, 68, 68, 0.1) 0%, rgba(127, 29, 29, 0.2) 100%); cursor: pointer; transition: all 0.3s ease; min-width: 160px;">
+                                        <svg width="48" height="48" viewBox="0 0 64 64" style="margin-bottom: 0.75rem;">
+                                            <g fill="none" stroke-width="2.5" stroke-linecap="round">
+                                                <circle cx="32" cy="32" r="20" stroke="#ef4444"/>
+                                                <circle cx="32" cy="32" r="12" stroke="#ef4444"/>
+                                                <circle cx="32" cy="32" r="5" stroke="#ef4444" fill="rgba(239, 68, 68, 0.3)"/>
+                                                <circle cx="44" cy="20" r="4" stroke="#fff" fill="rgba(255,255,255,0.9)"/>
+                                                <line x1="41" y1="23" x2="37" y2="27" stroke="#fff" stroke-width="2"/>
+                                            </g>
+                                        </svg>
+                                        <span style="font-weight: 700; color: #fff; font-size: 1rem; letter-spacing: 0.5px;">STATIC MODE</span>
+                                        <span style="font-size: 0.7rem; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 1px; margin-top: 0.25rem;">Tracks Static Objects</span>
                                     </button>
                                 </div>
 
@@ -3942,22 +3961,28 @@ console.log('[INLINE] MaskDrawer class loaded');
             // Default to tracked mode
             window.currentMaskMode = 'tracked';
             if (trackedModeBtn && staticModeBtn) {
+                // MOVING MODE (Blue) - click handler
                 trackedModeBtn.addEventListener('click', () => {
-                    trackedModeBtn.style.border = '2px solid #667eea';
-                    trackedModeBtn.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%)';
-                    trackedModeBtn.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.3)';
-                    staticModeBtn.style.border = '2px solid rgba(102, 126, 234, 0.2)';
-                    staticModeBtn.style.background = 'var(--bg-card)';
+                    // Activate blue card
+                    trackedModeBtn.style.border = '2px solid #3b82f6';
+                    trackedModeBtn.style.background = 'linear-gradient(145deg, rgba(59, 130, 246, 0.25) 0%, rgba(30, 58, 138, 0.4) 100%)';
+                    trackedModeBtn.style.boxShadow = '0 0 25px rgba(59, 130, 246, 0.3)';
+                    // Deactivate red card
+                    staticModeBtn.style.border = '2px solid rgba(239, 68, 68, 0.3)';
+                    staticModeBtn.style.background = 'linear-gradient(145deg, rgba(239, 68, 68, 0.1) 0%, rgba(127, 29, 29, 0.2) 100%)';
                     staticModeBtn.style.boxShadow = 'none';
                     if (window.maskDrawer) window.maskDrawer.setMode('tracked');
                     window.currentMaskMode = 'tracked';
                 });
+                // STATIC MODE (Red) - click handler
                 staticModeBtn.addEventListener('click', () => {
-                    staticModeBtn.style.border = '2px solid #667eea';
-                    staticModeBtn.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(240, 147, 251, 0.15) 100%)';
-                    staticModeBtn.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.3)';
-                    trackedModeBtn.style.border = '2px solid rgba(102, 126, 234, 0.2)';
-                    trackedModeBtn.style.background = 'var(--bg-card)';
+                    // Activate red card
+                    staticModeBtn.style.border = '2px solid #ef4444';
+                    staticModeBtn.style.background = 'linear-gradient(145deg, rgba(239, 68, 68, 0.25) 0%, rgba(127, 29, 29, 0.4) 100%)';
+                    staticModeBtn.style.boxShadow = '0 0 25px rgba(239, 68, 68, 0.3)';
+                    // Deactivate blue card
+                    trackedModeBtn.style.border = '2px solid rgba(59, 130, 246, 0.3)';
+                    trackedModeBtn.style.background = 'linear-gradient(145deg, rgba(59, 130, 246, 0.1) 0%, rgba(30, 58, 138, 0.2) 100%)';
                     trackedModeBtn.style.boxShadow = 'none';
                     if (window.maskDrawer) window.maskDrawer.setMode('static');
                     window.currentMaskMode = 'static';
