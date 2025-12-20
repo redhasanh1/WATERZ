@@ -2780,18 +2780,18 @@
                                    window.maskDrawer.shapes.length > 0 &&
                                    window.currentMaskMode === 'static';
 
-            // CHECK: Does user have SAM2 points selected OR drawn shapes in tracked mode?
-            console.log('[DEBUG] maskDrawer:', !!window.maskDrawer, 'shapes:', window.maskDrawer?.shapes?.length, 'mode:', window.currentMaskMode);
-            console.log('[DEBUG] sam2Selector:', !!window.sam2Selector, 'selections:', window.sam2Selector?.selections?.length);
-            const hasSAM2Selection = (window.sam2Selector &&
-                                     window.sam2Selector.selections &&
-                                     window.sam2Selector.selections.length > 0) ||
-                                     (window.maskDrawer &&
-                                     window.maskDrawer.shapes &&
-                                     window.maskDrawer.shapes.length > 0 &&
-                                     window.currentMaskMode === 'tracked');
+            // CHECK: Does user have drawn shapes? (use static processing for any drawn shapes)
+            const hasDrawnShapes = window.maskDrawer &&
+                                   window.maskDrawer.shapes &&
+                                   window.maskDrawer.shapes.length > 0;
 
-            console.log('Processing mode:', hasStaticMasks ? 'STATIC (drawn masks)' : (hasSAM2Selection ? 'SAM2 (click-selected objects)' : 'NONE'));
+            // CHECK: Does user have SAM2 click points? (use SAM2 tracking only for clicks)
+            const hasSAM2Clicks = window.sam2Selector &&
+                                  window.sam2Selector.selections &&
+                                  window.sam2Selector.selections.length > 0;
+
+            console.log('[DEBUG] hasDrawnShapes:', hasDrawnShapes, 'hasSAM2Clicks:', hasSAM2Clicks);
+            console.log('Processing mode:', hasDrawnShapes ? 'STATIC (drawn shapes)' : (hasSAM2Clicks ? 'SAM2 (click-selected)' : 'NONE'));
 
             if (processBtnElem) {
                 processBtnElem.style.display = 'none';
@@ -2806,11 +2806,11 @@
 
             try {
                 // Route to appropriate processing mode
-                if (hasStaticMasks) {
-                    // Static mode: use drawn masks, skip SAM2 tracking
+                if (hasDrawnShapes) {
+                    // Any drawn shapes: use static mask processing
                     await processStaticVideo(taskId);
-                } else if (hasSAM2Selection) {
-                    // Tracked mode: use SAM2 for object tracking
+                } else if (hasSAM2Clicks) {
+                    // SAM2 clicks: use SAM2 for object tracking
                     await processSAM2Video(taskId);
                 } else {
                     // No selection made
