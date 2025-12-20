@@ -158,7 +158,7 @@ set MAX_CROP_PIXELS=150000
 
 REM Background reference image for large watermark blending (leave empty to disable)
 REM The background is warped using optical flow and blended with ProPainter output
-set BACKGROUND_IMAGE_PATH=D:\watermarkz\videostotrain\firstphoto.jpg
+set BACKGROUND_IMAGE_PATH=
 REM Blend ratio: 0.0 = pure ProPainter, 0.5 = balanced, 1.0 = pure background
 set BACKGROUND_ALPHA=0.5
 

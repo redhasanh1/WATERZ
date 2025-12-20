@@ -115,6 +115,18 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
+        // Get current display dimensions for scale calculation
+        const canvasRect = this.canvas.getBoundingClientRect();
+        const displayWidth = canvasRect.width;
+        const displayHeight = canvasRect.height;
+
+        // Guard against invalid rect (canvas not yet laid out)
+        if (displayWidth < 10 || displayHeight < 10) {
+            console.log('[SAM2Selector] Rect invalid, scheduling retry');
+            setTimeout(() => this.updateCanvasSize(), 50);
+            return;
+        }
+
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
@@ -122,16 +134,11 @@ class SAM2Selector {
         // Canvas display size is handled by CSS (100% width/height of parent)
         // No need to set style.width/height - it auto-resizes responsively
 
-        // Get current display dimensions for scale calculation
-        const canvasRect = this.canvas.getBoundingClientRect();
-        const displayWidth = canvasRect.width;
-        const displayHeight = canvasRect.height;
-
         // Calculate scale for coordinate conversion
         this.displayScaleX = displayWidth / this.videoWidth;
         this.displayScaleY = displayHeight / this.videoHeight;
 
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth}x${displayHeight}`);
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth.toFixed(0)}x${displayHeight.toFixed(0)}`);
 
         // Calculate video render bounds for letterbox compensation
         this.calculateVideoRenderBounds();

@@ -229,6 +229,16 @@ else:
     # RAFT can use PyTorch or TensorRT depending on FORCE_TRT_RAFT env var
 from model.recurrent_flow_completion import RecurrentFlowCompleteNet
 from model.propainter import InpaintGenerator
+# TGLDP v2: Use SD-guided model when enabled
+if os.environ.get('USE_SD_GUIDANCE', '0') == '1':
+    try:
+        from model.sd_guided_propainter import SDGuidedInpaintGenerator
+        print("[TGLDP] SDGuidedInpaintGenerator loaded for deep SD injection")
+    except ImportError as e:
+        print(f"[TGLDP] Warning: Could not load SDGuidedInpaintGenerator: {e}")
+        SDGuidedInpaintGenerator = None
+else:
+    SDGuidedInpaintGenerator = None
 from utils.download_util import load_file_from_url
 from core.utils import to_tensors
 from model.misc import get_device
@@ -308,12 +318,18 @@ def read_frame_from_videos(frame_root):
         ("mp4", "mov", "avi", "MP4", "MOV", "AVI")
     ):  # input video path
         video_name = os.path.basename(frame_root)[:-4]
-        vframes, aframes, info = torchvision.io.read_video(
-            filename=frame_root, pts_unit="sec"
-        )  # RGB
-        frames = list(vframes.numpy())
-        frames = [Image.fromarray(f) for f in frames]
-        fps = info["video_fps"]
+        # Use cv2 instead of torchvision (avoids PyAV version issues)
+        cap = cv2.VideoCapture(frame_root)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            # BGR to RGB
+            frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            frames.append(frame)
+        cap.release()
     else:
         video_name = os.path.basename(frame_root)
         frames = []
@@ -1474,9 +1490,10 @@ def pipeline(
     if use_cached_models:
         with _MODEL_CACHE_LOCK:
             if _GLOBAL_MODELS_CACHE[cache_key]['propainter'] is None:
-                # First time loading ProPainter
+                # First time loading ProPainter (or SDGuidedInpaintGenerator if TGLDP enabled)
                 propainter_start = time.time()
-                model = InpaintGenerator(model_path=ckpt_path).to(device, non_blocking=True)
+                ModelClass = SDGuidedInpaintGenerator if SDGuidedInpaintGenerator else InpaintGenerator
+                model = ModelClass(model_path=ckpt_path).to(device, non_blocking=True)
                 model.eval()
                 # THREAD-SAFE FIX: Convert to FP16 during caching, not during inference
                 if use_half:
@@ -1499,8 +1516,9 @@ def pipeline(
             else:
                 model = _GLOBAL_MODELS_CACHE[cache_key]['propainter']
     else:
-        # Legacy behavior
-        model = InpaintGenerator(model_path=ckpt_path).to(device, non_blocking=True)
+        # Legacy behavior (or SDGuidedInpaintGenerator if TGLDP enabled)
+        ModelClass = SDGuidedInpaintGenerator if SDGuidedInpaintGenerator else InpaintGenerator
+        model = ModelClass(model_path=ckpt_path).to(device, non_blocking=True)
         model.eval()
 
         # NOTE: Can't use channels_last - incompatible with video models (5D tensors)
@@ -1852,14 +1870,18 @@ def pipeline(
 
 
 if __name__ == "__main__":
-    video_fp = "./running_car.mp4"
-    mask_fp = "./mask.png"
-    out_fp = "./output.mp4"
+    import argparse
+    parser = argparse.ArgumentParser(description="ProPainter video inpainting")
+    parser.add_argument('--video', default="./running_car.mp4", help="Input video path")
+    parser.add_argument('--mask', default="./mask.png", help="Mask image path (empty for auto)")
+    parser.add_argument('--output', default="./output.mp4", help="Output video path")
+    args = parser.parse_args()
+
     pipeline(
-        video_fp,
-        mask_fp,
-        out_fp,
+        args.video,
+        args.mask if args.mask else None,
+        args.output,
         fp16=True,
         subvideo_length=80,
-        neighbor_length=10,  # Reduced from 20 to 10 (default) = 50% fewer RAFT calls
+        neighbor_length=10,
     )
