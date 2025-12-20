@@ -7509,6 +7509,104 @@ def sam2_process_video():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/process-static-mask', methods=['POST', 'OPTIONS'])
+@require_auth
+@require_credits(min_credits=1)
+def process_static_mask():
+    """
+    Process video with a user-drawn static mask.
+    The same mask is applied to all frames (no tracking).
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        data = request.get_json()
+        task_id = data.get('task_id')
+        mask_base64 = data.get('mask_base64')
+        video_width = data.get('video_width')
+        video_height = data.get('video_height')
+        estimated_credits = data.get('estimated_credits', 1)
+
+        if not task_id:
+            return jsonify({'status': 'error', 'message': 'No task_id provided'}), 400
+        if not mask_base64:
+            return jsonify({'status': 'error', 'message': 'No mask provided'}), 400
+
+        # Find the video file
+        video_path = None
+        for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+            test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+            if os.path.exists(test_path):
+                video_path = test_path
+                break
+
+        if not video_path:
+            return jsonify({'status': 'error', 'message': 'Video not found'}), 404
+
+        # Save the mask as PNG
+        import base64
+        mask_data = mask_base64.split(',')[1] if ',' in mask_base64 else mask_base64
+        mask_bytes = base64.b64decode(mask_data)
+        mask_path = os.path.join(UPLOAD_DIR, f'{task_id}_static_mask.png')
+        with open(mask_path, 'wb') as f:
+            f.write(mask_bytes)
+        print(f"[STATIC MASK] Saved mask to {mask_path}")
+
+        # Queue processing task with static mask
+        from celery import signature
+        import uuid
+
+        def _current_public_base():
+            env_url = os.getenv('TUNNEL_URL')
+            if env_url:
+                return env_url.strip()
+            try:
+                tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
+                if os.path.exists(tunnel_file):
+                    with open(tunnel_file, 'r') as f:
+                        return f.read().strip()
+            except Exception:
+                pass
+            return 'http://localhost:9000'
+
+        api_base = _current_public_base()
+        job_id = f"static_{task_id}_{uuid.uuid4().hex[:8]}"
+
+        # Use the static mask processing task
+        # This task applies the same mask to all frames
+        result = celery.send_task(
+            'watermark.process_static_mask',
+            args=[video_path, mask_path, video_width, video_height, api_base],
+            task_id=job_id,
+            queue='propainter'
+        )
+
+        # Store user_id and estimated credits for deduction on completion
+        user_id = session.get('user_id')
+        if user_id:
+            try:
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                redis_client.setex(f"task:{job_id}:user_id", 86400 * 7, str(user_id))
+                redis_client.setex(f"task:{job_id}:credits", 86400 * 7, str(estimated_credits))
+                print(f"[CREDITS] Stored user {user_id}, credits {estimated_credits} for static mask task {job_id}")
+            except Exception as e:
+                print(f"[CREDITS] Failed to store: {e}")
+
+        print(f"[STATIC MASK] Started job {job_id} for video {task_id}")
+        return jsonify({
+            'status': 'success',
+            'job_id': job_id,
+            'task_id': job_id,
+            'message': 'Static mask processing started'
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 # ============================================================================
 # Run Server
 # ============================================================================
