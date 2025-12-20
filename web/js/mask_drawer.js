@@ -193,6 +193,15 @@ class MaskDrawer {
      * Attach event listeners
      */
     attachListeners() {
+        // CRITICAL: Block clicks from reaching SAM2Selector when drawing tools active
+        // Uses capture phase (true) to run FIRST, before SAM2's click handler
+        this.canvas.addEventListener('click', (e) => {
+            if (this.enabled && this.options.tool !== 'click') {
+                e.stopImmediatePropagation();
+                console.log('[MaskDrawer] Blocked click - drawing tool active:', this.options.tool);
+            }
+        }, true);
+
         this.canvas.addEventListener('mousedown', this._handleMouseDown);
         this.canvas.addEventListener('mousemove', this._handleMouseMove);
         this.canvas.addEventListener('mouseup', this._handleMouseUp);
