@@ -72,6 +72,7 @@ class SAM2Selector {
 
         // Attach touch event listeners for mobile
         this.canvas.addEventListener('touchstart', (e) => {
+            if (!this.enabled) return; // Don't interfere when disabled
             e.preventDefault(); // Prevent zoom/scroll
             if (e.touches.length === 1) {
                 this.handleTouch(e.touches[0]);
@@ -79,6 +80,7 @@ class SAM2Selector {
         }, { passive: false });
 
         this.canvas.addEventListener('touchend', (e) => {
+            if (!this.enabled) return; // Don't interfere when disabled
             e.preventDefault(); // Prevent ghost clicks
         }, { passive: false });
 
