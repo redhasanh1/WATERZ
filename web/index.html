@@ -1786,12 +1786,12 @@
 
                             <!-- Main Selection Tools (Simple) -->
                             <div id="drawingToolbar" style="display: flex; justify-content: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                                <button id="toolClick" class="tool-btn tool-active" data-tool="click" title="Click to auto-detect and select objects" style="display: flex; flex-direction: column; align-items: center; padding: 0.8rem 1.5rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; transition: all 0.2s ease; min-width: 100px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">
+                                <button id="toolClick" class="tool-btn tool-active" data-tool="click" title="Click on objects to select them" style="display: flex; flex-direction: column; align-items: center; padding: 0.8rem 1.5rem; border-radius: 12px; border: none; background: linear-gradient(135deg, #f6ad55 0%, #ed8936 100%); color: white; cursor: pointer; transition: all 0.2s ease; min-width: 100px; box-shadow: 0 4px 15px rgba(237, 137, 54, 0.4);">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
                                         <path d="M13 13l6 6"/>
                                     </svg>
-                                    <span style="font-size: 0.8rem; font-weight: 600; margin-top: 6px;">Autoselect</span>
+                                    <span style="font-size: 0.8rem; font-weight: 600; margin-top: 6px;">Select Object</span>
                                 </button>
                                 <button id="resetSelectionBtn" style="display: flex; flex-direction: column; align-items: center; padding: 0.8rem 1.5rem; border-radius: 12px; border: none; background: var(--bg-gradient-3); color: white; cursor: pointer; font-size: 0.8rem; font-weight: 600; box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3); transition: all 0.3s ease; min-width: 100px;" disabled>
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -4090,12 +4090,14 @@ console.log('[INLINE] MaskDrawer class loaded');
                 });
             }
 
-            // Drawing tool handlers
-            const toolButtons = document.querySelectorAll('#drawingToolbar .tool-btn');
+            // Drawing tool handlers - select ALL tool buttons (main + advanced)
+            const allToolButtons = document.querySelectorAll('.tool-btn[data-tool]');
             const brushSizeContainer = document.getElementById('brushSizeContainer');
             const brushSizeSlider = document.getElementById('brushSizeSlider');
             const brushSizeValue = document.getElementById('brushSizeValue');
-            toolButtons.forEach(btn => {
+            const toolClickBtn = document.getElementById('toolClick');
+
+            allToolButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
                     const tool = btn.dataset.tool;
                     window.currentDrawingTool = tool; // Track globally for click blocker
@@ -4111,15 +4113,31 @@ console.log('[INLINE] MaskDrawer class loaded');
                     }
 
                     // Highlight selected tool button
-                    toolButtons.forEach(b => {
+                    allToolButtons.forEach(b => {
                         if (b === btn) {
-                            b.style.background = 'var(--gradient-primary)';
+                            if (b.id === 'toolClick') {
+                                // Orange for Select Object button
+                                b.style.background = 'linear-gradient(135deg, #f6ad55 0%, #ed8936 100%)';
+                                b.style.boxShadow = '0 4px 15px rgba(237, 137, 54, 0.4)';
+                            } else {
+                                // Purple for other tools
+                                b.style.background = 'var(--gradient-primary)';
+                                b.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.3)';
+                            }
                             b.style.color = 'white';
                             b.style.border = 'none';
                         } else {
-                            b.style.background = 'var(--bg-card)';
+                            if (b.id === 'toolClick') {
+                                // Inactive Select Object - subtle orange
+                                b.style.background = 'var(--bg-card)';
+                                b.style.border = '2px solid rgba(237, 137, 54, 0.3)';
+                                b.style.boxShadow = 'none';
+                            } else {
+                                b.style.background = 'var(--bg-card)';
+                                b.style.border = '1px solid rgba(102, 126, 234, 0.2)';
+                                b.style.boxShadow = 'none';
+                            }
                             b.style.color = 'var(--text-primary)';
-                            b.style.border = '1px solid rgba(102, 126, 234, 0.2)';
                         }
                     });
 
@@ -4135,7 +4153,7 @@ console.log('[INLINE] MaskDrawer class loaded');
                         // Re-enable pointer events for SAM2 (MaskDrawer.disable kills them)
                         canvas.style.pointerEvents = 'auto';
                         canvas.style.cursor = 'crosshair';
-                        console.log('[Tool] ✨ Auto selected - SAM2 enabled');
+                        console.log('[Tool] ✨ Select Object - SAM2 enabled');
                     } else {
                         // Drawing tools = MaskDrawer
                         if (sam2Selector) sam2Selector.enabled = false;
