@@ -1776,19 +1776,14 @@
 
                             <!-- Drawing Tools Toolbar -->
                             <div id="drawingToolbar" style="display: flex; justify-content: center; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
-                                <button id="toolClick" class="tool-btn tool-active" data-tool="click" title="Auto Select - AI-powered object detection" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
+                                <button id="toolClick" class="tool-btn tool-active" data-tool="click" title="Magic Selector - Click to auto-detect objects" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M15 4V2"/>
-                                        <path d="M15 16v-2"/>
-                                        <path d="M8 9h2"/>
-                                        <path d="M20 9h2"/>
-                                        <path d="M17.8 11.8L19 13"/>
-                                        <path d="M15 9h0"/>
-                                        <path d="M17.8 6.2L19 5"/>
-                                        <path d="M3 21l9-9"/>
-                                        <path d="M12.2 6.2L11 5"/>
+                                        <!-- Magic wand with cursor -->
+                                        <path d="M6 3l1 5 5 1-5 1-1 5-1-5-5-1 5-1z"/>
+                                        <path d="M10 13l11 11"/>
+                                        <path d="M18 18l3 3"/>
                                     </svg>
-                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">✨ Auto</span>
+                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">🪄 Magic</span>
                                 </button>
                                 <button id="toolRect" class="tool-btn" data-tool="rectangle" title="Rectangle" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
