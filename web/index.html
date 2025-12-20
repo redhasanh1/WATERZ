@@ -4048,11 +4048,15 @@ console.log('[INLINE] MaskDrawer class loaded');
                     if (tool === 'click') {
                         // ✨ Auto tool = SAM2 tensor clicks
                         if (window.maskDrawer) window.maskDrawer.disable();
-                        if (sam2Selector) sam2Selector.enable(); // Use enable() - sets pointer-events: auto
+                        if (window.sam2Selector) {
+                            window.sam2Selector.enabled = true;
+                            canvas.style.pointerEvents = 'auto';
+                            canvas.style.cursor = 'crosshair';
+                        }
                         console.log('[Tool] ✨ Select Object - SAM2 enabled');
                     } else {
                         // Drawing tools = MaskDrawer
-                        if (sam2Selector) sam2Selector.disable(); // Use disable()
+                        if (window.sam2Selector) window.sam2Selector.enabled = false;
                         if (window.maskDrawer) {
                             window.maskDrawer.enable();
                             console.log('[Tool] MaskDrawer enabled:', window.maskDrawer.enabled);
