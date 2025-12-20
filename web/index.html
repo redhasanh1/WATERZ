@@ -4098,8 +4098,11 @@ console.log('[INLINE] MaskDrawer class loaded');
         // Point and mask rendering handled by SAM2Selector class (no duplicate system needed)
 
         function updatePointCount() {
-            pointCount.textContent = points.length;
-            if (points.length === 0) {
+            // Count SAM2 points + MaskDrawer shapes
+            const shapeCount = (window.maskDrawer && window.maskDrawer.shapes) ? window.maskDrawer.shapes.length : 0;
+            const totalCount = points.length + shapeCount;
+            pointCount.textContent = totalCount;
+            if (totalCount === 0) {
                 scrollHint.style.display = 'none';
                 const processingDisclaimer = document.getElementById('processingDisclaimer');
                 if (processingDisclaimer) processingDisclaimer.style.display = 'none';
