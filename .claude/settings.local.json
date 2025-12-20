@@ -155,7 +155,10 @@
       "Bash(git restore:*)",
       "Bash(docker history:*)",
       "Bash(git show:*)",
-      "Bash(docker run:*)"
+      "Bash(docker run:*)",
+      "Bash(git reset:*)",
+      "Bash(powershell -Command \"Get-Item ''web\\\\js\\\\mask_drawer.js'',''static_mask_generator.py'',''GENERATE_STATIC_MASK.bat'' | Select-Object Name,Length\")",
+      "Bash(ffmpeg:*)"
     ],
     "deny": [],
     "ask": []

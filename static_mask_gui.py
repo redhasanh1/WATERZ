@@ -795,7 +795,7 @@ class StaticMaskGUI:
                 celery.send_task(
                     'watermark._continue_after_masks',
                     args=[sam2_result, video_url, self.task_id, [], self.video_width, self.video_height, 0, None],
-                    queue='propainter'
+                    queue='propainter_local'
                 )
 
                 self.root.after(0, lambda: self._set_status(f"Static task submitted: {self.task_id}"))
@@ -927,8 +927,8 @@ class StaticMaskGUI:
                 redis_url = self._get_redis_url()
                 celery = Celery('watermark', broker=redis_url)
 
-                # Chain: SAM2 generates masks → ProPainter inpaints
-                # Use Docker temp path (not Windows path!)
+                # SAM2 generates masks ONLY - no chain to ProPainter
+                # (We're cutting off the tip so 4090_sender doesn't trigger 4090_receiver)
                 docker_masks_dir = f"/tmp/{self.task_id}_sam2_masks"
                 s1 = signature(
                     'sam2.generate_masks_fullfps',
@@ -939,15 +939,18 @@ class StaticMaskGUI:
                         'frame_idx': self.current_frame_idx,
                         'api_base': None
                     },
-                    queue='wsl_sam2'
+                    queue='wsl_sam2_local'
                 )
-                s2 = signature(
-                    'watermark._continue_after_masks',
-                    args=[video_url, self.task_id, [], self.video_width, self.video_height, self.current_frame_idx, None],
-                    queue='propainter'
-                )
+                # COMMENTED OUT: Chain to ProPainter disabled
+                # s2 = signature(
+                #     'watermark._continue_after_masks',
+                #     args=[video_url, self.task_id, [], self.video_width, self.video_height, self.current_frame_idx, None],
+                #     queue='propainter_local'
+                # )
+                # chain(s1, s2).apply_async(task_id=self.task_id)
 
-                chain(s1, s2).apply_async(task_id=self.task_id)
+                # Just run SAM2 mask generation, no ProPainter chain
+                s1.apply_async(task_id=self.task_id)
 
                 self.root.after(0, lambda: self._set_status(f"Tracked task submitted: {self.task_id}"))
                 self.root.after(0, lambda: messagebox.showinfo("Success",
