@@ -550,6 +550,25 @@ class SAM2Selector {
             has_mask: this.selections.length > 0
         };
     }
+
+    /**
+     * Enable touch/click selection (sets pointer-events: auto)
+     */
+    enable() {
+        this.enabled = true;
+        this.canvas.style.pointerEvents = 'auto';
+        this.canvas.style.cursor = 'crosshair';
+        console.log('[SAM2Selector] Enabled - touch/click active');
+    }
+
+    /**
+     * Disable touch/click selection (sets pointer-events: none)
+     */
+    disable() {
+        this.enabled = false;
+        this.canvas.style.pointerEvents = 'none';
+        console.log('[SAM2Selector] Disabled');
+    }
 }
 
 // Export for use in other scripts
