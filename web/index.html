@@ -1776,14 +1776,13 @@
 
                             <!-- Drawing Tools Toolbar -->
                             <div id="drawingToolbar" style="display: flex; justify-content: center; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
-                                <button id="toolClick" class="tool-btn tool-active" data-tool="click" title="Magic Selector - Click to auto-detect objects" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
+                                <button id="toolClick" class="tool-btn tool-active" data-tool="click" title="Click to auto-detect and select objects" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; transition: all 0.2s ease; min-width: 75px;">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <!-- Magic wand with cursor -->
-                                        <path d="M6 3l1 5 5 1-5 1-1 5-1-5-5-1 5-1z"/>
-                                        <path d="M10 13l11 11"/>
-                                        <path d="M18 18l3 3"/>
+                                        <!-- Pointer/cursor icon -->
+                                        <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+                                        <path d="M13 13l6 6"/>
                                     </svg>
-                                    <span style="font-size: 0.7rem; font-weight: 600; margin-top: 4px;">🪄 Magic</span>
+                                    <span style="font-size: 0.65rem; font-weight: 600; margin-top: 4px;">🖱️ Select</span>
                                 </button>
                                 <button id="toolRect" class="tool-btn" data-tool="rectangle" title="Rectangle" style="display: flex; flex-direction: column; align-items: center; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); background: var(--bg-card); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3574,6 +3573,16 @@
                 });
             }
 
+            // INLINE CLICK BLOCKER - Blocks SAM2 clicks when drawing tools are active
+            // Uses capture phase (true) to run BEFORE SAM2Selector's click handler
+            canvas.addEventListener('click', (e) => {
+                const currentTool = window.currentDrawingTool || 'click';
+                if (currentTool !== 'click') {
+                    e.stopImmediatePropagation();
+                    console.log('[INLINE] Blocked SAM2 click - active tool:', currentTool);
+                }
+            }, true);
+
             // Initialize MaskDrawer for shape drawing tools
             if (typeof MaskDrawer !== 'undefined' && !window.maskDrawer) {
                 console.log('[MaskDrawer] Initializing...');
@@ -3635,6 +3644,7 @@
             toolButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
                     const tool = btn.dataset.tool;
+                    window.currentDrawingTool = tool; // Track globally for click blocker
 
                     // Auto-enable selection mode for ANY tool
                     if (!selectionMode) {
