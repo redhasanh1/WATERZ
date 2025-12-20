@@ -165,7 +165,11 @@ class SAM2Selector {
      * Handle left click - add positive point
      */
     handleClick(e) {
-        if (!this.enabled) return;
+        console.log('[SAM2] handleClick called, enabled =', this.enabled);
+        if (!this.enabled) {
+            console.log('[SAM2] Returning early - disabled');
+            return;
+        }
         if (this.isLoading) return;
 
         const point = this.getCanvasPoint(e);
