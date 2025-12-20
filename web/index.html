@@ -2781,6 +2781,8 @@
                                    window.currentMaskMode === 'static';
 
             // CHECK: Does user have SAM2 points selected OR drawn shapes in tracked mode?
+            console.log('[DEBUG] maskDrawer:', !!window.maskDrawer, 'shapes:', window.maskDrawer?.shapes?.length, 'mode:', window.currentMaskMode);
+            console.log('[DEBUG] sam2Selector:', !!window.sam2Selector, 'selections:', window.sam2Selector?.selections?.length);
             const hasSAM2Selection = (window.sam2Selector &&
                                      window.sam2Selector.selections &&
                                      window.sam2Selector.selections.length > 0) ||
