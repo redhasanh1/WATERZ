@@ -91,42 +91,19 @@ class SAM2Selector {
     }
 
     /**
-     * Calculate actual video render bounds accounting for object-fit: contain
+     * Calculate video render bounds (Theater mode - simplified, no letterbox)
      */
     calculateVideoRenderBounds() {
         if (!this.video.videoWidth) return;
 
-        const canvasRect = this.canvas.getBoundingClientRect();
-        const containerWidth = canvasRect.width;
-        const containerHeight = canvasRect.height;
+        // In theater mode, canvas matches video display exactly
+        const rect = this.canvas.getBoundingClientRect();
+        this.renderWidth = rect.width;
+        this.renderHeight = rect.height;
+        this.offsetX = 0;
+        this.offsetY = 0;
 
-        // Calculate video's aspect ratio
-        const videoAspect = this.video.videoWidth / this.video.videoHeight;
-        const containerAspect = containerWidth / containerHeight;
-
-        let renderWidth, renderHeight, offsetX, offsetY;
-
-        if (videoAspect > containerAspect) {
-            // Video is wider - letterbox top/bottom
-            renderWidth = containerWidth;
-            renderHeight = containerWidth / videoAspect;
-            offsetX = 0;
-            offsetY = (containerHeight - renderHeight) / 2;
-        } else {
-            // Video is taller - pillarbox left/right
-            renderHeight = containerHeight;
-            renderWidth = containerHeight * videoAspect;
-            offsetX = (containerWidth - renderWidth) / 2;
-            offsetY = 0;
-        }
-
-        // Store render bounds for coordinate conversion
-        this.renderWidth = renderWidth;
-        this.renderHeight = renderHeight;
-        this.offsetX = offsetX;
-        this.offsetY = offsetY;
-
-        console.log(`[SAM2Selector] Video render: ${renderWidth.toFixed(1)}x${renderHeight.toFixed(1)}, Offset: (${offsetX.toFixed(1)}, ${offsetY.toFixed(1)})`);
+        console.log(`[SAM2Selector] Theater mode: ${this.renderWidth.toFixed(1)}x${this.renderHeight.toFixed(1)}`);
     }
 
     /**
@@ -206,26 +183,16 @@ class SAM2Selector {
     }
 
     /**
-     * Convert mouse event to canvas coordinates
+     * Convert mouse/touch event to canvas coordinates (Theater mode - direct mapping)
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
-        // Subtract letterbox offset to get position relative to rendered video
-        const relativeX = clickX - this.offsetX;
-        const relativeY = clickY - this.offsetY;
-
-        // Check if click is outside the rendered video area (in letterbox)
-        if (relativeX < 0 || relativeY < 0 || relativeX > this.renderWidth || relativeY > this.renderHeight) {
-            console.log('[SAM2Selector] Click outside video area (in letterbox), ignoring');
-            return null;
-        }
-
-        // Convert to canvas coordinates using actual rendered video dimensions
-        const videoX = Math.floor((relativeX / this.renderWidth) * this.canvas.width);
-        const videoY = Math.floor((relativeY / this.renderHeight) * this.canvas.height);
+        // Theater mode: direct mapping from display to native video coords
+        const videoX = Math.floor((clickX / rect.width) * this.canvas.width);
+        const videoY = Math.floor((clickY / rect.height) * this.canvas.height);
 
         // Clamp to video bounds
         return {

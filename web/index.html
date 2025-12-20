@@ -166,12 +166,7 @@
             background: #e5e7eb;
         }
 
-        /* Professional Video Controls */
-        #fullscreenBtn:hover {
-            background: rgba(255, 255, 255, 0.2) !important;
-            transform: scale(1.05);
-        }
-
+        /* Theater Mode Play Button */
         #playPauseBtn:hover {
             transform: scale(1.1);
         }
@@ -1078,155 +1073,109 @@
             flex-shrink: 0;
         }
 
-        /* Fullscreen video player styles */
-        #professionalPlayer:fullscreen {
-            width: 100vw !important;
-            height: 100vh !important;
-            max-width: 100vw !important;
-            max-height: 100vh !important;
-            border-radius: 0 !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            background: #000 !important;
+        /* Theater Mode - Direct canvas overlay, no fullscreen needed */
+        #professionalPlayer {
+            max-width: 900px;
+            width: 100%;
+            margin: 0 auto;
         }
 
-        #professionalPlayer:fullscreen #videoWrapper {
-            width: 100% !important;
-            height: 100% !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            position: relative !important;
+        #videoWrapper {
+            position: relative;
+            width: 100%;
+            background: #000;
+            border-radius: 12px 12px 0 0;
+            overflow: hidden;
         }
 
-        #professionalPlayer:fullscreen #previewVideo {
-            max-width: 100% !important;
-            max-height: 100% !important;
-            width: auto !important;
-            height: auto !important;
-            object-fit: contain !important;
+        #previewVideo {
+            width: 100%;
+            display: block;
         }
 
-        #professionalPlayer:fullscreen #maskCanvas {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: contain !important;
+        #maskCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
         }
 
-        /* Webkit prefix for Safari/iOS */
-        #professionalPlayer:-webkit-full-screen {
-            width: 100vw !important;
-            height: 100vh !important;
-            max-width: 100vw !important;
-            max-height: 100vh !important;
-            border-radius: 0 !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            background: #000 !important;
+        /* External scrubber bar beneath video */
+        #theaterControls {
+            background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(22, 22, 35, 0.95) 100%);
+            padding: 0.75rem 1rem;
+            border-radius: 0 0 12px 12px;
+            border-top: 1px solid rgba(102, 126, 234, 0.2);
         }
 
-        #professionalPlayer:-webkit-full-screen #videoWrapper {
-            width: 100% !important;
-            height: 100% !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            position: relative !important;
+        #theaterTimeline {
+            position: relative;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 0.75rem;
         }
 
-        #professionalPlayer:-webkit-full-screen #previewVideo {
-            max-width: 100% !important;
-            max-height: 100% !important;
-            width: auto !important;
-            height: auto !important;
-            object-fit: contain !important;
+        #theaterProgress {
+            position: absolute;
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            width: 0%;
+            pointer-events: none;
         }
 
-        #professionalPlayer:-webkit-full-screen #maskCanvas {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: contain !important;
+        #theaterScrubber {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 18px;
+            height: 18px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            cursor: grab;
+            left: 0%;
         }
 
-        /* CSS-based fullscreen for iPhone (native fullscreen API excludes canvas overlay) */
-        #professionalPlayer.ios-fullscreen {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            max-width: 100vw !important;
-            max-height: 100vh !important;
-            z-index: 999999 !important;
-            border-radius: 0 !important;
-            background: #000 !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            padding-bottom: env(safe-area-inset-bottom, 20px) !important;
-            box-sizing: border-box !important;
+        #theaterScrubber:active {
+            cursor: grabbing;
+            transform: translate(-50%, -50%) scale(1.1);
         }
 
-        #professionalPlayer.ios-fullscreen #videoWrapper {
-            width: 100% !important;
-            height: 100% !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            position: relative !important;
+        .theater-controls-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
-        #professionalPlayer.ios-fullscreen #previewVideo,
-        #professionalPlayer.ios-fullscreen #maskCanvas {
-            max-width: 100% !important;
-            max-height: 100% !important;
-            width: auto !important;
-            height: auto !important;
-            object-fit: contain !important;
+        .theater-btn {
+            background: rgba(102, 126, 234, 0.15);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            color: #fff;
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 8px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        #professionalPlayer.ios-fullscreen #videoControls {
-            position: absolute !important;
-            bottom: env(safe-area-inset-bottom, 20px) !important;
-            left: 0 !important;
-            right: 0 !important;
-            z-index: 10 !important;
-            opacity: 1 !important;
-            padding-bottom: 10px !important;
+        .theater-btn:hover {
+            background: rgba(102, 126, 234, 0.3);
+            border-color: rgba(102, 126, 234, 0.5);
         }
 
-        body.ios-fullscreen-active {
-            overflow: hidden !important;
-        }
-
-        body.ios-fullscreen-active .nav-header {
-            display: none !important;
-        }
-
-        /* iOS fullscreen exit button - always visible above mask canvas */
-        #iosFullscreenExit {
-            display: none;
-        }
-
-        body.ios-fullscreen-active #iosFullscreenExit {
-            display: flex !important;
-            position: fixed !important;
-            top: env(safe-area-inset-top, 20px) !important;
-            right: 20px !important;
-            z-index: 1000000 !important;
-            background: rgba(0, 0, 0, 0.7) !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 50% !important;
-            width: 44px !important;
-            height: 44px !important;
-            align-items: center !important;
-            justify-content: center !important;
-            cursor: pointer !important;
-            font-size: 24px !important;
-            font-weight: bold !important;
+        #theaterTime {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.85rem;
+            font-weight: 500;
+            font-family: monospace;
         }
 
         /* Improve touch responsiveness on canvas */
@@ -1683,51 +1632,34 @@
 
                             <div style="text-align:left; color: var(--text-secondary); font-weight: 600; margin: 0 0 6px 2px;">Preview</div>
 
-                            <!-- Professional Video Player Container -->
-                            <div id="professionalPlayer" style="display: none; background: #1a1a2e; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
-                                <div id="videoWrapper" style="position: relative; width: 100%;">
-                                    <video id="previewVideo" playsinline webkit-playsinline preload="metadata" style="width: 100%; display: block; background: #000;">
-                                    </video>
+                            <!-- Theater Mode Video Player - Direct canvas overlay, no fullscreen needed -->
+                            <div id="professionalPlayer" style="display: none; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+                                <!-- Video + Canvas Container -->
+                                <div id="videoWrapper">
+                                    <video id="previewVideo" playsinline webkit-playsinline preload="metadata"></video>
+                                    <canvas id="maskCanvas" style="display: none; pointer-events: none;"></canvas>
+                                </div>
 
-                                    <!-- Canvas overlay for mask selection - synced to video rect by JS -->
-                                    <canvas id="maskCanvas" style="display: none; position: absolute; top: 0; left: 0; cursor: crosshair; pointer-events: none;"></canvas>
+                                <!-- External Scrubber Bar (beneath video) -->
+                                <div id="theaterControls">
+                                    <!-- Timeline -->
+                                    <div id="theaterTimeline">
+                                        <div id="theaterProgress"></div>
+                                        <div id="theaterScrubber"></div>
+                                    </div>
 
-                                    <!-- Custom Video Controls Overlay -->
-                                    <div id="videoControls" style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%); padding: 1.5rem 1rem 1rem; transition: opacity 0.3s;">
-                                        <!-- Timeline Scrubber -->
-                                        <div style="margin-bottom: 1rem;">
-                                            <div id="timelineTrack" style="position: relative; height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; cursor: pointer;">
-                                                <div id="timelineProgress" style="position: absolute; height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); border-radius: 3px; width: 0%;"></div>
-                                                <div id="timelineScrubber" class="timeline-scrubber" style="position: absolute; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: grab; left: 0%;"></div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Control Buttons & Time Display -->
-                                        <div style="display: flex; align-items: center; justify-content: space-between;">
-                                            <div style="display: flex; align-items: center; gap: 1rem;">
-                                                <button id="playPauseBtn" style="background: none; border: none; color: #fff; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
-                                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                                                        <path d="M8 5v14l11-7z"/>
-                                                    </svg>
-                                                </button>
-                                                <div id="timeDisplay" style="color: #fff; font-size: 0.9rem; font-weight: 500; font-family: monospace; min-width: 100px;">
-                                                    0:00 / 0:00
-                                                </div>
-                                            </div>
-
-                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                                <button id="fullscreenBtn" title="Fullscreen" style="background: rgba(255, 255, 255, 0.1); border: none; color: #fff; cursor: pointer; padding: 0.5rem; border-radius: 6px; transition: all 0.2s; display: flex; align-items: center; justify-content: center;">
-                                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                                                    </svg>
-                                                </button>
-                                            </div>
+                                    <!-- Controls Row -->
+                                    <div class="theater-controls-row">
+                                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                            <button id="playPauseBtn" class="theater-btn" title="Play/Pause (Space)">
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M8 5v14l11-7z"/>
+                                                </svg>
+                                            </button>
+                                            <span id="theaterTime">0:00 / 0:00</span>
                                         </div>
                                     </div>
                                 </div>
-
-                                <!-- iOS Fullscreen Exit Button - appears only in iOS fullscreen mode -->
-                                <button id="iosFullscreenExit" onclick="document.getElementById('professionalPlayer').classList.remove('ios-fullscreen'); document.body.classList.remove('ios-fullscreen-active'); if(window.sam2Selector) window.sam2Selector.updateCanvasSize();">✕</button>
                             </div>
                         </div>
 
@@ -1745,10 +1677,10 @@
 
                                 <!-- Thumbnail Strip -->
                                 <div class="thumbnail-strip" id="thumbnailStrip">
-                                    <!-- Fullscreen hint -->
+                                    <!-- Loading hint -->
                                     <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem;">
-                                        <span style="background: linear-gradient(90deg, #f6ad55, #ed8936, #dd6b20); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 1.1rem; font-weight: 600;">
-                                            Enter fullscreen for better selection
+                                        <span style="background: linear-gradient(90deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 1.1rem; font-weight: 600;">
+                                            Click on video to select objects
                                         </span>
                                     </div>
                                 </div>
@@ -2998,21 +2930,20 @@
 //         }
 
         // ==================================================
-        // Professional Video Player Controls
+        // Theater Mode Video Player Controls (Simplified - no fullscreen)
         // ==================================================
         function initProfessionalPlayer(videoElem) {
             const playPauseBtn = document.getElementById('playPauseBtn');
-            const timelineTrack = document.getElementById('timelineTrack');
-            const timelineProgress = document.getElementById('timelineProgress');
-            const timelineScrubber = document.getElementById('timelineScrubber');
-            const timeDisplay = document.getElementById('timeDisplay');
-            const fullscreenBtn = document.getElementById('fullscreenBtn');
-            const videoControls = document.getElementById('videoControls');
+            const theaterTimeline = document.getElementById('theaterTimeline');
+            const theaterProgress = document.getElementById('theaterProgress');
+            const theaterScrubber = document.getElementById('theaterScrubber');
+            const theaterTime = document.getElementById('theaterTime');
 
             let isDragging = false;
 
             // Format time helper
             function formatTime(seconds) {
+                if (!seconds || isNaN(seconds)) return '0:00';
                 const mins = Math.floor(seconds / 60);
                 const secs = Math.floor(seconds % 60);
                 return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -3020,149 +2951,66 @@
 
             // Update timeline and time display
             function updateTimeline() {
+                if (!videoElem.duration) return;
                 const progress = (videoElem.currentTime / videoElem.duration) * 100;
-                timelineProgress.style.width = progress + '%';
-                timelineScrubber.style.left = progress + '%';
-                timeDisplay.textContent = `${formatTime(videoElem.currentTime)} / ${formatTime(videoElem.duration)}`;
+                theaterProgress.style.width = progress + '%';
+                theaterScrubber.style.left = progress + '%';
+                theaterTime.textContent = `${formatTime(videoElem.currentTime)} / ${formatTime(videoElem.duration)}`;
             }
 
             // Play/Pause button
             playPauseBtn.addEventListener('click', () => {
                 if (videoElem.paused) {
                     videoElem.play();
-                    playPauseBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>';
+                    playPauseBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>';
                 } else {
                     videoElem.pause();
-                    playPauseBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+                    playPauseBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
                 }
             });
 
             // Timeline scrubbing
             function seek(clientX) {
-                const rect = timelineTrack.getBoundingClientRect();
+                const rect = theaterTimeline.getBoundingClientRect();
                 const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
                 videoElem.currentTime = percent * videoElem.duration;
             }
 
-            timelineTrack.addEventListener('mousedown', (e) => {
+            theaterTimeline.addEventListener('mousedown', (e) => {
                 isDragging = true;
                 seek(e.clientX);
-                timelineScrubber.style.cursor = 'grabbing';
+            });
+
+            // Touch support for mobile
+            theaterTimeline.addEventListener('touchstart', (e) => {
+                isDragging = true;
+                seek(e.touches[0].clientX);
             });
 
             document.addEventListener('mousemove', (e) => {
-                if (isDragging) {
-                    seek(e.clientX);
-                }
+                if (isDragging) seek(e.clientX);
             });
 
-            document.addEventListener('mouseup', () => {
-                isDragging = false;
-                timelineScrubber.style.cursor = 'grab';
+            document.addEventListener('touchmove', (e) => {
+                if (isDragging) seek(e.touches[0].clientX);
             });
 
-            // Fullscreen toggle (with iOS/webkit fallback)
-            fullscreenBtn.addEventListener('click', () => {
-                const playerContainer = document.getElementById('professionalPlayer');
-                const video = document.getElementById('previewVideo');
-                const exitIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>';
-                const enterIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
-
-                // iPhone Safari: use CSS-based fullscreen (native API excludes canvas overlay)
-                if (isIphone()) {
-                    if (!playerContainer.classList.contains('ios-fullscreen')) {
-                        // Enter CSS fullscreen
-                        playerContainer.classList.add('ios-fullscreen');
-                        document.body.classList.add('ios-fullscreen-active');
-                        fullscreenBtn.innerHTML = exitIcon;
-                        // Update canvas size after layout change
-                        setTimeout(() => {
-                            if (window.sam2Selector) window.sam2Selector.updateCanvasSize();
-                        }, 100);
-                    } else {
-                        // Exit CSS fullscreen
-                        playerContainer.classList.remove('ios-fullscreen');
-                        document.body.classList.remove('ios-fullscreen-active');
-                        fullscreenBtn.innerHTML = enterIcon;
-                        setTimeout(() => {
-                            if (window.sam2Selector) window.sam2Selector.updateCanvasSize();
-                        }, 100);
-                    }
-                    return;
-                }
-
-                // Standard fullscreen for non-iPhone devices
-                if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-                    // Try standard fullscreen first
-                    if (playerContainer.requestFullscreen) {
-                        playerContainer.requestFullscreen().catch(err => {
-                            console.error('Fullscreen error:', err);
-                            // Fallback: try video element webkit fullscreen (iPad/other)
-                            if (video.webkitEnterFullscreen) {
-                                video.webkitEnterFullscreen();
-                            }
-                        });
-                    } else if (video.webkitEnterFullscreen) {
-                        // Webkit Safari - fullscreen video directly
-                        video.webkitEnterFullscreen();
-                    }
-                    fullscreenBtn.innerHTML = exitIcon;
-                } else {
-                    if (document.exitFullscreen) {
-                        document.exitFullscreen();
-                    } else if (document.webkitExitFullscreen) {
-                        document.webkitExitFullscreen();
-                    }
-                    fullscreenBtn.innerHTML = enterIcon;
-                }
-            });
-
-            // Update SAM2 canvas when exiting fullscreen (fixes mask visibility bug)
-            document.addEventListener('fullscreenchange', () => {
-                // Wait for transition to complete, then update canvas
-                setTimeout(() => {
-                    const sam2Selector = window.sam2Selector;
-                    if (sam2Selector && typeof sam2Selector.updateCanvasSize === 'function') {
-                        sam2Selector.updateCanvasSize();
-                    }
-                }, 100);
-            });
+            document.addEventListener('mouseup', () => { isDragging = false; });
+            document.addEventListener('touchend', () => { isDragging = false; });
 
             // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-                // Handle Escape for iOS CSS fullscreen
-                if (e.key === 'Escape') {
-                    const playerContainer = document.getElementById('professionalPlayer');
-                    if (playerContainer && playerContainer.classList.contains('ios-fullscreen')) {
-                        e.preventDefault();
-                        playerContainer.classList.remove('ios-fullscreen');
-                        document.body.classList.remove('ios-fullscreen-active');
-                        const enterIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
-                        fullscreenBtn.innerHTML = enterIcon;
-                        setTimeout(() => {
-                            if (window.sam2Selector) window.sam2Selector.updateCanvasSize();
-                        }, 100);
-                        return;
-                    }
-                }
 
                 switch(e.key.toLowerCase()) {
                     case ' ':
                         e.preventDefault();
                         playPauseBtn.click();
                         break;
-                    case 'f':
-                        e.preventDefault();
-                        fullscreenBtn.click();
-                        break;
                     case 'r':
                         e.preventDefault();
                         const resetBtn = document.getElementById('resetSelectionBtn');
-                        if (resetBtn && !resetBtn.disabled) {
-                            resetBtn.click();
-                        }
+                        if (resetBtn && !resetBtn.disabled) resetBtn.click();
                         break;
                 }
             });
@@ -3172,27 +3020,7 @@
 
             // Initialize on metadata loaded
             videoElem.addEventListener('loadedmetadata', () => {
-                timeDisplay.textContent = `0:00 / ${formatTime(videoElem.duration)}`;
-            });
-
-            // Auto-hide controls on mouse leave
-            const playerContainer = document.getElementById('professionalPlayer');
-            let hideTimeout;
-
-            playerContainer.addEventListener('mousemove', () => {
-                videoControls.style.opacity = '1';
-                clearTimeout(hideTimeout);
-                hideTimeout = setTimeout(() => {
-                    if (!videoElem.paused) {
-                        videoControls.style.opacity = '0.3';
-                    }
-                }, 2000);
-            });
-
-            playerContainer.addEventListener('mouseleave', () => {
-                if (!videoElem.paused) {
-                    videoControls.style.opacity = '0.3';
-                }
+                theaterTime.textContent = `0:00 / ${formatTime(videoElem.duration)}`;
             });
         }
     </script>
@@ -3233,32 +3061,20 @@ class MaskDrawer {
     init() {
         if (!this.video || !this.canvas) { console.error('MaskDrawer: Video or canvas not found'); return; }
         this.updateDimensions(); this.attachListeners();
-        // Handle fullscreen and resize to recalculate coordinates
+        // Theater mode: only need resize handler (no fullscreen)
         this._handleResize = () => { setTimeout(() => this.updateDimensions(), 100); };
-        this._handleFullscreen = () => { setTimeout(() => this.updateDimensions(), 200); };
         window.addEventListener('resize', this._handleResize);
-        document.addEventListener('fullscreenchange', this._handleFullscreen);
-        document.addEventListener('webkitfullscreenchange', this._handleFullscreen);
         console.log('MaskDrawer initialized with tool:', this.options.tool);
     }
     updateDimensions() {
+        // Theater mode: direct mapping, no letterbox offsets needed
         this.videoWidth = this.video.videoWidth || 1920;
         this.videoHeight = this.video.videoHeight || 1080;
-        const rect = this.video.getBoundingClientRect();
-        const displayWidth = rect.width, displayHeight = rect.height;
-        const videoAspect = this.videoWidth / this.videoHeight;
-        const displayAspect = displayWidth / displayHeight;
-        if (videoAspect > displayAspect) {
-            const scaledHeight = displayWidth / videoAspect;
-            this.offsetY = (displayHeight - scaledHeight) / 2; this.offsetX = 0;
-            this.displayScaleX = displayWidth / this.videoWidth;
-            this.displayScaleY = scaledHeight / this.videoHeight;
-        } else {
-            const scaledWidth = displayHeight * videoAspect;
-            this.offsetX = (displayWidth - scaledWidth) / 2; this.offsetY = 0;
-            this.displayScaleX = scaledWidth / this.videoWidth;
-            this.displayScaleY = displayHeight / this.videoHeight;
-        }
+        const rect = this.canvas.getBoundingClientRect();
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.displayScaleX = rect.width / this.videoWidth;
+        this.displayScaleY = rect.height / this.videoHeight;
         this.canvas.width = this.videoWidth; this.canvas.height = this.videoHeight;
     }
     initMaskBitmap() {
@@ -3589,10 +3405,6 @@ class MaskDrawer {
     destroy() {
         this.detachListeners(); this.reset();
         if (this._handleResize) window.removeEventListener('resize', this._handleResize);
-        if (this._handleFullscreen) {
-            document.removeEventListener('fullscreenchange', this._handleFullscreen);
-            document.removeEventListener('webkitfullscreenchange', this._handleFullscreen);
-        }
     }
 }
 console.log('[INLINE] MaskDrawer class loaded');
