@@ -1853,9 +1853,6 @@
                             </div>
 
                             <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem;">
-                                <button id="enableSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--gradient-primary); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); transition: all 0.3s ease;">
-                                    ✨ Magic Auto Select
-                                </button>
                                 <button id="resetSelectionBtn" style="padding: 0.8rem 2rem; border-radius: 12px; border: none; background: var(--bg-gradient-3); color: white; cursor: pointer; font-size: 1rem; font-weight: 600; box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3); transition: all 0.3s ease;" disabled>
                                     Reset (R)
                                 </button>
@@ -3526,7 +3523,7 @@
         const video = document.getElementById('previewVideo');
         const canvas = document.getElementById('maskCanvas');
         const maskControls = document.getElementById('maskSelectionControls');
-        const enableBtn = document.getElementById('enableSelectionBtn');
+        // enableBtn removed - tools auto-enable now
         const resetBtn = document.getElementById('resetSelectionBtn');
         const pointsList = document.getElementById('pointsList');
         const pointCount = document.getElementById('pointCount');
@@ -3689,21 +3686,17 @@
                 btn.addEventListener('click', () => {
                     const tool = btn.dataset.tool;
 
-                    // Auto-enable selection mode when DRAWING tool is selected (not click/auto)
-                    if (tool !== 'click') {
-                        if (!selectionMode) {
-                            selectionMode = true;
-                            canvas.style.pointerEvents = 'auto';
-                            resetBtn.disabled = false;
-                            video.pause();
-                            pointsList.style.display = 'block';
-                            console.log('[Selection] Auto-enabled for drawing tool:', tool);
-                        }
-                        // Turn OFF Magic Auto Select button (drawing mode, not SAM2)
-                        enableBtn.textContent = '✨ Magic Auto Select';
-                        enableBtn.style.background = 'var(--gradient-primary)';
+                    // Auto-enable selection mode for ANY tool
+                    if (!selectionMode) {
+                        selectionMode = true;
+                        canvas.style.pointerEvents = 'auto';
+                        resetBtn.disabled = false;
+                        video.pause();
+                        pointsList.style.display = 'block';
+                        console.log('[Selection] Auto-enabled for tool:', tool);
                     }
 
+                    // Highlight selected tool button
                     toolButtons.forEach(b => {
                         if (b === btn) {
                             b.style.background = 'var(--gradient-primary)';
@@ -3715,15 +3708,22 @@
                             b.style.border = '1px solid rgba(102, 126, 234, 0.2)';
                         }
                     });
+
+                    // Show brush size for brush/eraser
                     if (brushSizeContainer) brushSizeContainer.style.display = (tool === 'brush' || tool === 'eraser') ? 'flex' : 'none';
+
                     if (window.maskDrawer) window.maskDrawer.setTool(tool);
+
                     if (tool === 'click') {
-                        // Click tool = SAM2 (only works if Magic Auto Select is ON)
-                        if (sam2Selector) sam2Selector.enabled = selectionMode;
+                        // ✨ Auto tool = SAM2 tensor clicks
+                        if (sam2Selector) sam2Selector.enabled = true;
                         if (window.maskDrawer) window.maskDrawer.disable();
+                        console.log('[Tool] ✨ Auto selected - SAM2 enabled');
                     } else {
+                        // Drawing tools = MaskDrawer
                         if (sam2Selector) sam2Selector.enabled = false;
                         if (window.maskDrawer) window.maskDrawer.enable();
+                        console.log('[Tool] Drawing tool selected:', tool);
                     }
                 });
             });
@@ -3741,60 +3741,6 @@
                 sam2Selector.calculateVideoRenderBounds();
                 sam2Selector.draw();
                 console.log('[SAM2] Recalculated render bounds on resize');
-            }
-        });
-
-        // Enable/disable SAM2 Magic Auto Select mode
-        enableBtn.addEventListener('click', function() {
-            selectionMode = !selectionMode;
-            if (selectionMode) {
-                enableBtn.textContent = '✨ Auto Select: ON';
-                enableBtn.style.background = 'var(--bg-gradient-4)';
-                canvas.style.pointerEvents = 'auto';
-                resetBtn.disabled = false;
-                video.pause(); // Pause video during selection
-                pointsList.style.display = 'block';
-
-                // Magic Auto Select = SAM2 tensor clicks
-                // Set tool to click and enable SAM2
-                if (window.maskDrawer) {
-                    window.maskDrawer.setTool('click');
-                    window.maskDrawer.disable();
-                }
-                if (sam2Selector) sam2Selector.enabled = true;
-
-                // Highlight the ✨ Auto tool button
-                const toolButtons = document.querySelectorAll('#drawingToolbar .tool-btn');
-                toolButtons.forEach(b => {
-                    if (b.dataset.tool === 'click') {
-                        b.style.background = 'var(--gradient-primary)';
-                        b.style.color = 'white';
-                        b.style.border = 'none';
-                    } else {
-                        b.style.background = 'var(--bg-card)';
-                        b.style.color = 'var(--text-primary)';
-                        b.style.border = '1px solid rgba(102, 126, 234, 0.2)';
-                    }
-                });
-
-                console.log('[Selection] Magic Auto Select enabled (SAM2)');
-
-                // Show test button
-                const testBtn = document.getElementById('testSAM2Btn');
-                if (testBtn) testBtn.style.display = 'inline-block';
-            } else {
-                enableBtn.textContent = '✨ Magic Auto Select';
-                enableBtn.style.background = 'var(--gradient-primary)';
-                canvas.style.pointerEvents = 'none';
-
-                // Disable SAM2
-                if (sam2Selector) sam2Selector.enabled = false;
-                if (window.maskDrawer) window.maskDrawer.disable();
-                console.log('[Selection] Magic Auto Select disabled');
-
-                // Hide test button
-                const testBtn2 = document.getElementById('testSAM2Btn');
-                if (testBtn2) testBtn2.style.display = 'none';
             }
         });
 
