@@ -23,6 +23,7 @@ class SAM2Selector {
         this.currentSelectionId = 0;
         this.currentSelection = null; // Active selection being built with multiple clicks
         this.isLoading = false;
+        this.enabled = false; // Starts disabled - only enabled when ✨ Auto tool is selected
 
         // NUCLEAR NEON palette - maximum saturation, eye-melting colors
         this.colorPalette = [
