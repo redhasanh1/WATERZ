@@ -402,6 +402,12 @@ def contact_page():
     return send_file('contact.html')
 
 
+@app.route('/ads.txt')
+def ads_txt():
+    """Redirect to Ezoic managed ads.txt"""
+    return redirect('https://srv.adstxtmanager.com/19390/markremoverai.com', code=301)
+
+
 @app.route('/css/<path:path>')
 def serve_css(path):
     """Serve CSS files with path traversal protection"""
