@@ -7515,12 +7515,24 @@ def sam2_process_video():
 def process_static_mask():
     """
     Process video with a user-drawn static mask.
-    The same mask is applied to all frames (no tracking).
+    Same flow as local static_mask_gui.py:
+    1. Decode mask from base64
+    2. Get video frame count
+    3. Replicate mask for all frames
+    4. Zip and upload masks to B2
+    5. Call watermark._continue_after_masks (same as SAM2)
     """
     if request.method == 'OPTIONS':
         return ('', 204)
 
     try:
+        import base64
+        import cv2
+        import zipfile
+        import shutil
+        import uuid
+        import time
+
         data = request.get_json()
         task_id = data.get('task_id')
         mask_base64 = data.get('mask_base64')
@@ -7533,7 +7545,13 @@ def process_static_mask():
         if not mask_base64:
             return jsonify({'status': 'error', 'message': 'No mask provided'}), 400
 
-        # Find the video file
+        # Get video URL from Redis (already uploaded by user)
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        video_url = redis_client.get(f"upload:{task_id}:cdn_url")
+        if not video_url:
+            return jsonify({'status': 'error', 'message': 'Video URL not found - please re-upload'}), 404
+
+        # Find local video file to get frame count
         video_path = None
         for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
             test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
@@ -7541,43 +7559,73 @@ def process_static_mask():
                 video_path = test_path
                 break
 
-        if not video_path:
-            return jsonify({'status': 'error', 'message': 'Video not found'}), 404
+        # Get frame count from video (try cv2 if available, else use fallback)
+        total_frames = 100  # Default fallback
+        try:
+            if video_path and os.path.exists(video_path):
+                cap = cv2.VideoCapture(video_path)
+                if cap.isOpened():
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 100
+                    cap.release()
+        except Exception as cv_err:
+            print(f"[STATIC MASK] cv2 not available, using fallback frame count: {cv_err}")
+            # Try to get frame count from Redis metadata if stored
+            try:
+                stored_frames = redis_client.get(f"upload:{task_id}:frames")
+                if stored_frames:
+                    total_frames = int(stored_frames)
+            except:
+                pass
+        print(f"[STATIC MASK] Video has {total_frames} frames")
 
-        # Save the mask as PNG
-        import base64
+        # Decode mask from base64
         mask_data = mask_base64.split(',')[1] if ',' in mask_base64 else mask_base64
         mask_bytes = base64.b64decode(mask_data)
-        mask_path = os.path.join(UPLOAD_DIR, f'{task_id}_static_mask.png')
-        with open(mask_path, 'wb') as f:
-            f.write(mask_bytes)
-        print(f"[STATIC MASK] Saved mask to {mask_path}")
 
-        # Queue processing task with static mask
-        from celery import signature
-        import uuid
+        # Create masks directory and replicate mask for all frames
+        masks_dir = os.path.join(TEMP_DIR, f'{task_id}_static_masks')
+        os.makedirs(masks_dir, exist_ok=True)
 
-        def _current_public_base():
-            env_url = os.getenv('TUNNEL_URL')
-            if env_url:
-                return env_url.strip()
-            try:
-                tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
-                if os.path.exists(tunnel_file):
-                    with open(tunnel_file, 'r') as f:
-                        return f.read().strip()
-            except Exception:
-                pass
-            return 'http://localhost:9000'
+        # Write the same mask for each frame (0000.png, 0001.png, etc.)
+        for i in range(total_frames):
+            mask_path = os.path.join(masks_dir, f'{i:04d}.png')
+            with open(mask_path, 'wb') as f:
+                f.write(mask_bytes)
+        print(f"[STATIC MASK] Created {total_frames} mask files")
 
-        api_base = _current_public_base()
+        # Zip masks
+        zip_path = os.path.join(TEMP_DIR, f'{task_id}_masks.zip')
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for mask_file in sorted(os.listdir(masks_dir)):
+                zf.write(os.path.join(masks_dir, mask_file), mask_file)
+        print(f"[STATIC MASK] Zipped masks to {zip_path}")
+
+        # Upload masks to B2
+        timestamp = int(time.time())
+        remote_path = f"masks/{timestamp}_{task_id}_masks.zip"
+        masks_url = upload_to_b2(zip_path, remote_path)
+
+        if not masks_url:
+            return jsonify({'status': 'error', 'message': 'Failed to upload masks to B2'}), 500
+        print(f"[STATIC MASK] Uploaded masks to B2: {masks_url}")
+
+        # Cleanup local files
+        shutil.rmtree(masks_dir, ignore_errors=True)
+        os.remove(zip_path)
+
+        # Queue task using same flow as SAM2
         job_id = f"static_{task_id}_{uuid.uuid4().hex[:8]}"
 
-        # Use the static mask processing task
-        # This task applies the same mask to all frames
-        result = celery.send_task(
-            'watermark.process_static_mask',
-            args=[video_path, mask_path, video_width, video_height, api_base],
+        # sam2_result format expected by _continue_after_masks
+        sam2_result = {
+            'masks_url': masks_url,
+            'mode': 'static'
+        }
+
+        # Send task to worker (same task as SAM2 uses)
+        celery.send_task(
+            'watermark._continue_after_masks',
+            args=[sam2_result, video_url, task_id, [], video_width, video_height, 0, None],
             task_id=job_id,
             queue='propainter'
         )
@@ -7586,7 +7634,6 @@ def process_static_mask():
         user_id = session.get('user_id')
         if user_id:
             try:
-                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
                 redis_client.setex(f"task:{job_id}:user_id", 86400 * 7, str(user_id))
                 redis_client.setex(f"task:{job_id}:credits", 86400 * 7, str(estimated_credits))
                 print(f"[CREDITS] Stored user {user_id}, credits {estimated_credits} for static mask task {job_id}")
@@ -7594,6 +7641,9 @@ def process_static_mask():
                 print(f"[CREDITS] Failed to store: {e}")
 
         print(f"[STATIC MASK] Started job {job_id} for video {task_id}")
+        print(f"[STATIC MASK] Video URL: {video_url}")
+        print(f"[STATIC MASK] Masks URL: {masks_url}")
+
         return jsonify({
             'status': 'success',
             'job_id': job_id,
