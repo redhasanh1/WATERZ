@@ -2780,10 +2780,14 @@
                                    window.maskDrawer.shapes.length > 0 &&
                                    window.currentMaskMode === 'static';
 
-            // CHECK: Does user have SAM2 points selected?
-            const hasSAM2Selection = window.sam2Selector &&
+            // CHECK: Does user have SAM2 points selected OR drawn shapes in tracked mode?
+            const hasSAM2Selection = (window.sam2Selector &&
                                      window.sam2Selector.selections &&
-                                     window.sam2Selector.selections.length > 0;
+                                     window.sam2Selector.selections.length > 0) ||
+                                     (window.maskDrawer &&
+                                     window.maskDrawer.shapes &&
+                                     window.maskDrawer.shapes.length > 0 &&
+                                     window.currentMaskMode === 'tracked');
 
             console.log('Processing mode:', hasStaticMasks ? 'STATIC (drawn masks)' : (hasSAM2Selection ? 'SAM2 (click-selected objects)' : 'NONE'));
 
@@ -3099,7 +3103,7 @@
 
     <!-- SAM2 Timeline and Selection Scripts -->
     
-    <script src="js/sam2_selector.js?v=4"></script>
+    <script src="js/sam2_selector.js?v=5"></script>
     <!-- MaskDrawer INLINED to bypass Cloudflare Worker routing issue -->
     <script>
 /**
