@@ -3233,6 +3233,12 @@ class MaskDrawer {
     init() {
         if (!this.video || !this.canvas) { console.error('MaskDrawer: Video or canvas not found'); return; }
         this.updateDimensions(); this.attachListeners();
+        // Handle fullscreen and resize to recalculate coordinates
+        this._handleResize = () => { setTimeout(() => this.updateDimensions(), 100); };
+        this._handleFullscreen = () => { setTimeout(() => this.updateDimensions(), 200); };
+        window.addEventListener('resize', this._handleResize);
+        document.addEventListener('fullscreenchange', this._handleFullscreen);
+        document.addEventListener('webkitfullscreenchange', this._handleFullscreen);
         console.log('MaskDrawer initialized with tool:', this.options.tool);
     }
     updateDimensions() {
@@ -3323,7 +3329,19 @@ class MaskDrawer {
         if (!this.enabled) return;
         const point = this.screenToVideo(e.clientX, e.clientY);
         if (this.options.tool === 'click') return;
-        if (this.options.tool === 'polygon') { this.polygonPoints.push(point); this.redraw(); return; }
+        if (this.options.tool === 'polygon') {
+            // Check if clicking near start point to close polygon (within 20px)
+            if (this.polygonPoints.length >= 3) {
+                const start = this.polygonPoints[0];
+                const dist = Math.sqrt(Math.pow(point.x - start.x, 2) + Math.pow(point.y - start.y, 2));
+                if (dist < 20) {
+                    this.completeShape({ type: 'polygon', points: [...this.polygonPoints] });
+                    this.polygonPoints = []; this.redraw();
+                    return;
+                }
+            }
+            this.polygonPoints.push(point); this.redraw(); return;
+        }
         if (this.options.tool === 'eraser') {
             this.isDrawing = true; this.eraserPath = [point]; this.initMaskBitmap();
             if (this.maskCtx) {
@@ -3511,27 +3529,71 @@ class MaskDrawer {
     }
     drawPolygonPreview() {
         if (this.polygonPoints.length === 0) return;
-        for (const point of this.polygonPoints) { this.ctx.beginPath(); this.ctx.arc(point.x, point.y, 5, 0, 2 * Math.PI); this.ctx.fillStyle = '#667eea'; this.ctx.fill(); this.ctx.strokeStyle = '#ffffff'; this.ctx.stroke(); }
-        if (this.polygonPoints.length >= 2) { this.ctx.beginPath(); this.ctx.moveTo(this.polygonPoints[0].x, this.polygonPoints[0].y);
-            for (let i = 1; i < this.polygonPoints.length; i++) this.ctx.lineTo(this.polygonPoints[i].x, this.polygonPoints[i].y); this.ctx.strokeStyle = '#667eea'; this.ctx.stroke(); }
-        if (this.currentPoint && this.polygonPoints.length > 0) { this.ctx.beginPath(); this.ctx.setLineDash([5, 5]);
+        // Draw lines between points
+        if (this.polygonPoints.length >= 2) {
+            this.ctx.beginPath(); this.ctx.moveTo(this.polygonPoints[0].x, this.polygonPoints[0].y);
+            for (let i = 1; i < this.polygonPoints.length; i++) this.ctx.lineTo(this.polygonPoints[i].x, this.polygonPoints[i].y);
+            this.ctx.strokeStyle = '#667eea'; this.ctx.lineWidth = 2; this.ctx.stroke();
+        }
+        // Draw dots with glow effect
+        for (let i = 0; i < this.polygonPoints.length; i++) {
+            const point = this.polygonPoints[i];
+            const isFirst = i === 0;
+            const radius = isFirst ? 10 : 7;
+            // Outer glow
+            this.ctx.beginPath(); this.ctx.arc(point.x, point.y, radius + 4, 0, 2 * Math.PI);
+            this.ctx.fillStyle = isFirst ? 'rgba(246, 173, 85, 0.3)' : 'rgba(102, 126, 234, 0.3)'; this.ctx.fill();
+            // Main dot with gradient
+            const grad = this.ctx.createRadialGradient(point.x - 2, point.y - 2, 0, point.x, point.y, radius);
+            if (isFirst) { grad.addColorStop(0, '#ffd700'); grad.addColorStop(1, '#ed8936'); }
+            else { grad.addColorStop(0, '#a78bfa'); grad.addColorStop(1, '#667eea'); }
+            this.ctx.beginPath(); this.ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI);
+            this.ctx.fillStyle = grad; this.ctx.fill();
+            this.ctx.strokeStyle = '#ffffff'; this.ctx.lineWidth = 2; this.ctx.stroke();
+            // "Click to close" indicator on first point
+            if (isFirst && this.polygonPoints.length >= 3) {
+                this.ctx.beginPath(); this.ctx.arc(point.x, point.y, radius + 8, 0, 2 * Math.PI);
+                this.ctx.strokeStyle = 'rgba(246, 173, 85, 0.6)'; this.ctx.setLineDash([3, 3]); this.ctx.stroke(); this.ctx.setLineDash([]);
+            }
+        }
+        // Preview line to cursor
+        if (this.currentPoint && this.polygonPoints.length > 0) {
+            this.ctx.beginPath(); this.ctx.setLineDash([5, 5]);
             this.ctx.moveTo(this.polygonPoints[this.polygonPoints.length - 1].x, this.polygonPoints[this.polygonPoints.length - 1].y);
-            this.ctx.lineTo(this.currentPoint.x, this.currentPoint.y); this.ctx.strokeStyle = '#a78bfa'; this.ctx.stroke(); this.ctx.setLineDash([]);
-            if (this.polygonPoints.length >= 2) { this.ctx.beginPath(); this.ctx.setLineDash([5, 5]);
-                this.ctx.moveTo(this.currentPoint.x, this.currentPoint.y); this.ctx.lineTo(this.polygonPoints[0].x, this.polygonPoints[0].y);
-                this.ctx.strokeStyle = 'rgba(167, 139, 250, 0.5)'; this.ctx.stroke(); this.ctx.setLineDash([]); }
+            this.ctx.lineTo(this.currentPoint.x, this.currentPoint.y);
+            this.ctx.strokeStyle = '#a78bfa'; this.ctx.lineWidth = 2; this.ctx.stroke(); this.ctx.setLineDash([]);
+            // Preview closing line
+            if (this.polygonPoints.length >= 2) {
+                this.ctx.beginPath(); this.ctx.setLineDash([5, 5]);
+                this.ctx.moveTo(this.currentPoint.x, this.currentPoint.y);
+                this.ctx.lineTo(this.polygonPoints[0].x, this.polygonPoints[0].y);
+                this.ctx.strokeStyle = 'rgba(246, 173, 85, 0.5)'; this.ctx.stroke(); this.ctx.setLineDash([]);
+            }
         }
     }
     undoLastShape() { if (this.shapes.length > 0) { this.shapes.pop(); if (this.maskBitmap) this.rebuildMaskBitmap(); this.redraw(); } }
     setMode(mode) { this.options.mode = mode; if (this.options.onModeChange) this.options.onModeChange(mode); }
-    setTool(tool) { this.cancelDrawing(); this.options.tool = tool; this.canvas.style.cursor = 'crosshair'; if (this.options.onToolChange) this.options.onToolChange(tool); }
+    setTool(tool) {
+        this.cancelDrawing();
+        this.startPoint = null; this.currentPoint = null; // Clear ghost shapes
+        this.options.tool = tool; this.canvas.style.cursor = 'crosshair';
+        this.redraw(); // Force redraw to clear any lingering previews
+        if (this.options.onToolChange) this.options.onToolChange(tool);
+    }
     setBrushSize(size) { this.options.brushSize = Math.max(5, Math.min(100, size)); }
     getMode() { return this.options.mode; }
     getTool() { return this.options.tool; }
     getShapes() { return this.shapes; }
     getShapeCount() { return this.shapes.length; }
     reset() { this.shapes = []; this.polygonPoints = []; this.brushPath = []; this.eraserPath = []; this.isDrawing = false; this.startPoint = null; this.currentPoint = null; this.maskBitmap = null; this.maskCtx = null; this.redraw(); }
-    destroy() { this.detachListeners(); this.reset(); }
+    destroy() {
+        this.detachListeners(); this.reset();
+        if (this._handleResize) window.removeEventListener('resize', this._handleResize);
+        if (this._handleFullscreen) {
+            document.removeEventListener('fullscreenchange', this._handleFullscreen);
+            document.removeEventListener('webkitfullscreenchange', this._handleFullscreen);
+        }
+    }
 }
 console.log('[INLINE] MaskDrawer class loaded');
     </script>
