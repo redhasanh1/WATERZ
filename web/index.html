@@ -3242,7 +3242,15 @@ class MaskDrawer {
         this.isDrawing = true; this.startPoint = point;
         if (this.options.tool === 'brush') {
             this.brushPath = [point];
-            this.redraw(); // Show brush dot immediately on click
+            this.initMaskBitmap(); // Ensure mask exists
+            // Draw dot directly to mask (GREEN immediately)
+            if (this.maskCtx) {
+                this.maskCtx.fillStyle = '#FFFFFF';
+                this.maskCtx.beginPath();
+                this.maskCtx.arc(point.x, point.y, this.options.brushSize / 2, 0, Math.PI * 2);
+                this.maskCtx.fill();
+            }
+            this.redraw();
         }
     }
     handleMouseMove(e) {
@@ -3251,7 +3259,21 @@ class MaskDrawer {
         this.currentPoint = point;
         if (this.options.tool === 'polygon' && this.polygonPoints.length > 0) { this.redraw(); return; }
         if (!this.isDrawing) return;
-        if (this.options.tool === 'brush') this.brushPath.push(point);
+        if (this.options.tool === 'brush') {
+            this.brushPath.push(point);
+            // Draw directly to mask (like eraser) - GREEN immediately
+            if (this.maskCtx && this.brushPath.length >= 2) {
+                const prev = this.brushPath[this.brushPath.length - 2];
+                this.maskCtx.strokeStyle = '#FFFFFF';
+                this.maskCtx.lineWidth = this.options.brushSize;
+                this.maskCtx.lineCap = 'round';
+                this.maskCtx.lineJoin = 'round';
+                this.maskCtx.beginPath();
+                this.maskCtx.moveTo(prev.x, prev.y);
+                this.maskCtx.lineTo(point.x, point.y);
+                this.maskCtx.stroke();
+            }
+        }
         if (this.options.tool === 'eraser') {
             this.eraserPath.push(point);
             if (this.maskCtx && this.eraserPath.length >= 2) {
@@ -3268,6 +3290,8 @@ class MaskDrawer {
         if (!this.enabled || !this.isDrawing) return;
         const tool = this.options.tool;
         if (tool === 'eraser') { this.isDrawing = false; this.eraserPath = []; this.redraw(); return; }
+        // Brush draws directly to mask (like eraser), no separate shape needed
+        if (tool === 'brush') { this.isDrawing = false; this.brushPath = []; this.redraw(); return; }
         if (tool === 'rectangle' && this.startPoint && this.currentPoint) {
             const shape = { type: 'rectangle', x: Math.min(this.startPoint.x, this.currentPoint.x), y: Math.min(this.startPoint.y, this.currentPoint.y),
                 width: Math.abs(this.currentPoint.x - this.startPoint.x), height: Math.abs(this.currentPoint.y - this.startPoint.y) };
@@ -3276,8 +3300,6 @@ class MaskDrawer {
             const shape = { type: 'ellipse', cx: (this.startPoint.x + this.currentPoint.x) / 2, cy: (this.startPoint.y + this.currentPoint.y) / 2,
                 rx: Math.abs(this.currentPoint.x - this.startPoint.x) / 2, ry: Math.abs(this.currentPoint.y - this.startPoint.y) / 2 };
             if (shape.rx > 5 && shape.ry > 5) this.completeShape(shape);
-        } else if (tool === 'brush' && this.brushPath.length > 2) {
-            this.completeShape({ type: 'brush', points: [...this.brushPath], brushSize: this.options.brushSize });
         }
         this.isDrawing = false; this.startPoint = null; this.brushPath = []; this.redraw();
     }
@@ -3405,10 +3427,7 @@ class MaskDrawer {
             if (this.options.tool === 'rectangle') this.drawShape({ type: 'rectangle', x: Math.min(this.startPoint.x, this.currentPoint.x), y: Math.min(this.startPoint.y, this.currentPoint.y), width: Math.abs(this.currentPoint.x - this.startPoint.x), height: Math.abs(this.currentPoint.y - this.startPoint.y) }, true);
             else if (this.options.tool === 'ellipse') this.drawShape({ type: 'ellipse', cx: (this.startPoint.x + this.currentPoint.x) / 2, cy: (this.startPoint.y + this.currentPoint.y) / 2, rx: Math.abs(this.currentPoint.x - this.startPoint.x) / 2, ry: Math.abs(this.currentPoint.y - this.startPoint.y) / 2 }, true);
         }
-        // Brush preview - separate condition, just needs brushPath (shows immediately)
-        if (this.isDrawing && this.options.tool === 'brush' && this.brushPath.length > 0) {
-            this.drawShape({ type: 'brush', points: this.brushPath, brushSize: this.options.brushSize }, true);
-        }
+        // Brush draws directly to mask (no preview needed - shows as green immediately)
         if (this.options.tool === 'polygon' && this.polygonPoints.length > 0) this.drawPolygonPreview();
     }
     drawGreenOverlay() {
