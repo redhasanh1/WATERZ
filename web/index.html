@@ -2721,9 +2721,15 @@
             const maskBase64 = window.maskDrawer.getAllShapesMask();
             console.log('[STATIC] Generated mask, length:', maskBase64.length);
 
-            // Get estimated credits from video element
+            // Get estimated credits and frame count from video element
             const videoElem = document.getElementById('professionalVideo');
             const estimatedCredits = parseInt(videoElem?.dataset?.estimatedCredits || '1', 10);
+
+            // Estimate frame count from video duration (assume 30fps if unknown)
+            const duration = videoElem?.duration || 10;
+            const fps = 30;  // Common assumption; most videos are 24-30fps
+            const estimatedFrameCount = Math.ceil(duration * fps);
+            console.log('[STATIC] Estimated frames:', estimatedFrameCount, 'from duration:', duration);
 
             statusText.textContent = 'Uploading mask...';
 
@@ -2735,7 +2741,8 @@
                     mask_base64: maskBase64,
                     video_width: window.maskDrawer.videoWidth,
                     video_height: window.maskDrawer.videoHeight,
-                    estimated_credits: estimatedCredits
+                    estimated_credits: estimatedCredits,
+                    frame_count: estimatedFrameCount
                 })
             });
 
@@ -2744,6 +2751,57 @@
             if (data.status === 'success' || data.status === 'processing') {
                 const processTaskId = data.task_id || data.job_id || taskId;
                 console.log('[STATIC] Job started:', processTaskId);
+                startStatusPolling(processTaskId);
+
+                // Update credits display
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                if (user.id && user.credits !== undefined) {
+                    user.credits = Math.max(0, user.credits - estimatedCredits);
+                    localStorage.setItem('user', JSON.stringify(user));
+                    updateCreditsDisplay(user.credits);
+                }
+            } else {
+                throw new Error(data.message || 'Processing failed');
+            }
+        };
+
+        // Process shapes with SAM2 tracking (tracked mode with drawn shapes)
+        const processTrackedShapes = async (taskId) => {
+            console.log('[TRACKED] Processing shapes with SAM2 tracking...');
+
+            // Get bounding box from all drawn shapes
+            const bbox = window.maskDrawer.getShapesBoundingBox();
+            if (!bbox) {
+                throw new Error('No shapes to track');
+            }
+            console.log('[TRACKED] Shapes bbox:', bbox);
+
+            // Get estimated credits from video element
+            const videoElem = document.getElementById('professionalVideo');
+            const estimatedCredits = parseInt(videoElem?.dataset?.estimatedCredits || '1', 10);
+            const frameIndex = window.sam2Selector?.currentFrameIndex || 0;
+
+            statusText.textContent = 'Starting SAM2 tracking from shapes...';
+
+            const response = await apiFetchPath('/api/sam2/process-video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: taskId,
+                    prompt_mode: 'bbox',
+                    bbox: bbox,
+                    video_width: window.maskDrawer.videoWidth,
+                    video_height: window.maskDrawer.videoHeight,
+                    frame_index: frameIndex,
+                    estimated_credits: estimatedCredits
+                })
+            });
+
+            const data = await parseJsonSafe(response);
+
+            if (data.status === 'success') {
+                const processTaskId = data.task_id || data.job_id;
+                console.log('[TRACKED] Job started:', processTaskId);
                 startStatusPolling(processTaskId);
 
                 // Update credits display
@@ -2774,24 +2832,28 @@
                 return;
             }
 
-            // CHECK: Does user have static masks drawn?
-            const hasStaticMasks = window.maskDrawer &&
-                                   window.maskDrawer.shapes &&
-                                   window.maskDrawer.shapes.length > 0 &&
-                                   window.currentMaskMode === 'static';
-
-            // CHECK: Does user have drawn shapes? (use static processing for any drawn shapes)
+            // CHECK: Does user have drawn shapes?
             const hasDrawnShapes = window.maskDrawer &&
                                    window.maskDrawer.shapes &&
                                    window.maskDrawer.shapes.length > 0;
 
-            // CHECK: Does user have SAM2 click points? (use SAM2 tracking only for clicks)
+            // CHECK: Does user have SAM2 click points?
             const hasSAM2Clicks = window.sam2Selector &&
                                   window.sam2Selector.selections &&
                                   window.sam2Selector.selections.length > 0;
 
-            console.log('[DEBUG] hasDrawnShapes:', hasDrawnShapes, 'hasSAM2Clicks:', hasSAM2Clicks);
-            console.log('Processing mode:', hasDrawnShapes ? 'STATIC (drawn shapes)' : (hasSAM2Clicks ? 'SAM2 (click-selected)' : 'NONE'));
+            // CHECK: What mode is selected?
+            const isTrackedMode = window.currentMaskMode === 'tracked';
+            const isStaticMode = window.currentMaskMode === 'static';
+
+            console.log('[DEBUG] hasDrawnShapes:', hasDrawnShapes, 'hasSAM2Clicks:', hasSAM2Clicks, 'mode:', window.currentMaskMode);
+
+            // Determine processing mode based on selections and mode
+            let processingMode = 'NONE';
+            if (hasDrawnShapes && isTrackedMode) processingMode = 'TRACKED (shapes → SAM2 bbox)';
+            else if (hasDrawnShapes && isStaticMode) processingMode = 'STATIC (shapes → same mask)';
+            else if (hasSAM2Clicks) processingMode = 'SAM2 (click-selected)';
+            console.log('Processing mode:', processingMode);
 
             if (processBtnElem) {
                 processBtnElem.style.display = 'none';
@@ -2805,12 +2867,15 @@
             progressPercent.textContent = '0%';
 
             try {
-                // Route to appropriate processing mode
-                if (hasDrawnShapes) {
-                    // Any drawn shapes: use static mask processing
+                // Route to appropriate processing mode based on selections AND mode
+                if (hasDrawnShapes && isTrackedMode) {
+                    // Shapes in TRACKED mode: convert to bbox, use SAM2 for tracking
+                    await processTrackedShapes(taskId);
+                } else if (hasDrawnShapes && isStaticMode) {
+                    // Shapes in STATIC mode: use same mask for all frames
                     await processStaticVideo(taskId);
                 } else if (hasSAM2Clicks) {
-                    // SAM2 clicks: use SAM2 for object tracking
+                    // SAM2 clicks: always use SAM2 for object tracking
                     await processSAM2Video(taskId);
                 } else {
                     // No selection made
@@ -3346,6 +3411,31 @@ class MaskDrawer {
             }
         }
         return maskCanvas.toDataURL('image/png');
+    }
+    getShapesBoundingBox() {
+        // Returns [x1, y1, x2, y2] in VIDEO coordinates (not canvas coordinates)
+        if (!this.shapes || this.shapes.length === 0) return null;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const shape of this.shapes) {
+            switch (shape.type) {
+                case 'rectangle':
+                    minX = Math.min(minX, shape.x); minY = Math.min(minY, shape.y);
+                    maxX = Math.max(maxX, shape.x + shape.width); maxY = Math.max(maxY, shape.y + shape.height);
+                    break;
+                case 'ellipse':
+                    minX = Math.min(minX, shape.cx - shape.rx); minY = Math.min(minY, shape.cy - shape.ry);
+                    maxX = Math.max(maxX, shape.cx + shape.rx); maxY = Math.max(maxY, shape.cy + shape.ry);
+                    break;
+                case 'polygon':
+                case 'brush':
+                    for (const pt of shape.points) { minX = Math.min(minX, pt.x); minY = Math.min(minY, pt.y); maxX = Math.max(maxX, pt.x); maxY = Math.max(maxY, pt.y); }
+                    break;
+            }
+        }
+        // Clamp to canvas bounds and return as video coordinates
+        minX = Math.max(0, Math.floor(minX)); minY = Math.max(0, Math.floor(minY));
+        maxX = Math.min(this.videoWidth, Math.ceil(maxX)); maxY = Math.min(this.videoHeight, Math.ceil(maxY));
+        return [minX, minY, maxX, maxY];
     }
     redraw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);

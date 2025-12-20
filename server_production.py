@@ -7411,6 +7411,8 @@ def sam2_process_video():
         data = request.json
         task_id = data.get('task_id')
         points = data.get('points', [])
+        bbox = data.get('bbox')  # [x1, y1, x2, y2] for bbox mode
+        prompt_mode = data.get('prompt_mode', 'point')  # 'point' or 'bbox'
         video_width = data.get('video_width')
         video_height = data.get('video_height')
         frame_index = data.get('frame_index', 0)
@@ -7418,8 +7420,13 @@ def sam2_process_video():
         if not task_id:
             return jsonify({'status': 'error', 'message': 'Missing task_id'}), 400
 
-        if not points or len(points) == 0:
-            return jsonify({'status': 'error', 'message': 'No points selected'}), 400
+        # Validate based on prompt mode
+        if prompt_mode == 'bbox':
+            if not bbox or len(bbox) != 4:
+                return jsonify({'status': 'error', 'message': 'Invalid bbox (need [x1, y1, x2, y2])'}), 400
+        else:
+            if not points or len(points) == 0:
+                return jsonify({'status': 'error', 'message': 'No points selected'}), 400
 
         # Get video CDN URL from Redis (videos are uploaded directly to B2)
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
@@ -7463,21 +7470,30 @@ def sam2_process_video():
         # Create masks directory
         masks_dir = f"/tmp/{task_id}_sam2_masks"
 
-        # Convert points from frontend format to WSL worker format
-        # Frontend sends: [{x, y, label, ...}, ...]
-        # WSL worker expects: points=[(x,y), ...], labels=[1, 1, ...]
-        wsl_points = [(int(p.get('x', 0)), int(p.get('y', 0))) for p in points]
-        wsl_labels = [int(p.get('label', 1)) for p in points]
-
         # Chain: WSL SAM2 mask generation → Windows ProPainter inpainting
         from celery import signature, chain
 
+        # Build kwargs based on prompt mode
+        if prompt_mode == 'bbox':
+            # Bbox mode: use bounding box for SAM2 tracking
+            wsl_bbox = [int(x) for x in bbox]  # [x1, y1, x2, y2]
+            s1_kwargs = {'prompt_mode': 'bbox', 'bbox': wsl_bbox, 'frame_idx': frame_index, 'api_base': api_base}
+            print(f"[SAM2] Mode: bbox, bbox={wsl_bbox}")
+        else:
+            # Point mode: use click points for SAM2 tracking
+            # Frontend sends: [{x, y, label, ...}, ...]
+            # WSL worker expects: points=[(x,y), ...], labels=[1, 1, ...]
+            wsl_points = [(int(p.get('x', 0)), int(p.get('y', 0))) for p in points]
+            wsl_labels = [int(p.get('label', 1)) for p in points]
+            s1_kwargs = {'prompt_mode': 'point', 'points': wsl_points, 'labels': wsl_labels, 'frame_idx': frame_index, 'api_base': api_base}
+            print(f"[SAM2] Mode: point, points={len(wsl_points)}")
+
         s1 = signature('sam2.generate_masks_fullfps',
                        args=[video_path, masks_dir],
-                       kwargs={'prompt_mode': 'point', 'points': wsl_points, 'labels': wsl_labels, 'frame_idx': frame_index, 'api_base': api_base},
+                       kwargs=s1_kwargs,
                        queue='wsl_sam2')
         s2 = signature('watermark._continue_after_masks',
-                       args=[video_path, task_id, points, video_width, video_height, frame_index, api_base],
+                       args=[video_path, task_id, points or [], video_width, video_height, frame_index, api_base],
                        queue='propainter')
 
         result = chain(s1, s2).apply_async(task_id=job_id)
@@ -7494,7 +7510,7 @@ def sam2_process_video():
                 print(f"[CREDITS] Failed to store: {e}")
 
         print(f"[SAM2] Started WSL chain job {job_id} for video {task_id}")
-        print(f"[SAM2] Points: {len(wsl_points)}, Video: {video_width}x{video_height}")
+        print(f"[SAM2] Prompt mode: {prompt_mode}, Video: {video_width}x{video_height}")
         print(f"[SAM2] Queue flow: wsl_sam2 -> propainter")
         return jsonify({
             'status': 'success',
@@ -7538,6 +7554,7 @@ def process_static_mask():
         video_width = data.get('video_width')
         video_height = data.get('video_height')
         estimated_credits = data.get('estimated_credits', 1)
+        frame_count_from_client = data.get('frame_count')  # From frontend video metadata
 
         if not task_id:
             return jsonify({'status': 'error', 'message': 'No task_id provided'}), 400
@@ -7550,31 +7567,32 @@ def process_static_mask():
         if not video_url:
             return jsonify({'status': 'error', 'message': 'Video URL not found - please re-upload'}), 404
 
-        # Get frame count - try cv2, else use fallback or Redis metadata
-        total_frames = 100  # Default fallback
-        try:
-            import cv2
-            video_path = None
-            for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
-                test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
-                if os.path.exists(test_path):
-                    video_path = test_path
-                    break
-            if video_path and os.path.exists(video_path):
-                cap = cv2.VideoCapture(video_path)
-                if cap.isOpened():
-                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 100
-                    cap.release()
-        except Exception as cv_err:
-            print(f"[STATIC MASK] cv2 not available: {cv_err}")
-            # Try to get frame count from Redis metadata if stored
+        # Get frame count - prefer client-provided, then cv2, then Redis, then fallback
+        total_frames = frame_count_from_client or 100  # Use client estimate if provided
+        if not frame_count_from_client:
             try:
-                stored_frames = redis_client.get(f"upload:{task_id}:frames")
-                if stored_frames:
-                    total_frames = int(stored_frames)
-            except:
-                pass
-        print(f"[STATIC MASK] Using {total_frames} frames")
+                import cv2
+                video_path = None
+                for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+                    test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+                    if os.path.exists(test_path):
+                        video_path = test_path
+                        break
+                if video_path and os.path.exists(video_path):
+                    cap = cv2.VideoCapture(video_path)
+                    if cap.isOpened():
+                        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 100
+                        cap.release()
+            except Exception as cv_err:
+                print(f"[STATIC MASK] cv2 not available: {cv_err}")
+                # Try to get frame count from Redis metadata if stored
+                try:
+                    stored_frames = redis_client.get(f"upload:{task_id}:frames")
+                    if stored_frames:
+                        total_frames = int(stored_frames)
+                except:
+                    pass
+        print(f"[STATIC MASK] Using {total_frames} frames (from_client={frame_count_from_client is not None})")
 
         # Decode mask from base64
         mask_data = mask_base64.split(',')[1] if ',' in mask_base64 else mask_base64
