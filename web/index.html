@@ -3167,9 +3167,18 @@ class MaskDrawer {
                 } break;
             case 'brush':
                 if (shape.points.length >= 2) {
-                    this.maskCtx.lineWidth = shape.brushSize; this.maskCtx.lineCap = 'round'; this.maskCtx.lineJoin = 'round';
-                    this.maskCtx.beginPath(); this.maskCtx.moveTo(shape.points[0].x, shape.points[0].y);
-                    for (let i = 1; i < shape.points.length; i++) this.maskCtx.lineTo(shape.points[i].x, shape.points[i].y);
+                    this.maskCtx.lineWidth = shape.brushSize;
+                    this.maskCtx.lineCap = 'round';
+                    this.maskCtx.lineJoin = 'round';
+                    this.maskCtx.beginPath();
+                    this.maskCtx.moveTo(shape.points[0].x, shape.points[0].y);
+                    for (let i = 1; i < shape.points.length; i++) {
+                        const midX = (shape.points[i-1].x + shape.points[i].x) / 2;
+                        const midY = (shape.points[i-1].y + shape.points[i].y) / 2;
+                        this.maskCtx.quadraticCurveTo(shape.points[i-1].x, shape.points[i-1].y, midX, midY);
+                    }
+                    const last = shape.points[shape.points.length - 1];
+                    this.maskCtx.lineTo(last.x, last.y);
                     this.maskCtx.stroke();
                 } break;
         }
@@ -3312,9 +3321,18 @@ class MaskDrawer {
             case 'ellipse': maskCtx.beginPath(); maskCtx.ellipse(shape.cx, shape.cy, shape.rx, shape.ry, 0, 0, 2 * Math.PI); maskCtx.fill(); break;
             case 'polygon': if (shape.points.length >= 3) { maskCtx.beginPath(); maskCtx.moveTo(shape.points[0].x, shape.points[0].y);
                 for (let i = 1; i < shape.points.length; i++) maskCtx.lineTo(shape.points[i].x, shape.points[i].y); maskCtx.closePath(); maskCtx.fill(); } break;
-            case 'brush': if (shape.points.length >= 2) { maskCtx.lineWidth = shape.brushSize; maskCtx.lineCap = 'round'; maskCtx.lineJoin = 'round';
+            case 'brush': if (shape.points.length >= 2) {
+                maskCtx.lineWidth = shape.brushSize; maskCtx.lineCap = 'round'; maskCtx.lineJoin = 'round';
                 maskCtx.beginPath(); maskCtx.moveTo(shape.points[0].x, shape.points[0].y);
-                for (let i = 1; i < shape.points.length; i++) maskCtx.lineTo(shape.points[i].x, shape.points[i].y); maskCtx.stroke(); } break;
+                for (let i = 1; i < shape.points.length; i++) {
+                    const midX = (shape.points[i-1].x + shape.points[i].x) / 2;
+                    const midY = (shape.points[i-1].y + shape.points[i].y) / 2;
+                    maskCtx.quadraticCurveTo(shape.points[i-1].x, shape.points[i-1].y, midX, midY);
+                }
+                const last = shape.points[shape.points.length - 1];
+                maskCtx.lineTo(last.x, last.y);
+                maskCtx.stroke();
+            } break;
         }
         return maskCanvas.toDataURL('image/png');
     }
@@ -3331,9 +3349,18 @@ class MaskDrawer {
                 case 'ellipse': maskCtx.beginPath(); maskCtx.ellipse(shape.cx, shape.cy, shape.rx, shape.ry, 0, 0, 2 * Math.PI); maskCtx.fill(); break;
                 case 'polygon': if (shape.points.length >= 3) { maskCtx.beginPath(); maskCtx.moveTo(shape.points[0].x, shape.points[0].y);
                     for (let i = 1; i < shape.points.length; i++) maskCtx.lineTo(shape.points[i].x, shape.points[i].y); maskCtx.closePath(); maskCtx.fill(); } break;
-                case 'brush': if (shape.points.length >= 2) { maskCtx.lineWidth = shape.brushSize; maskCtx.lineCap = 'round'; maskCtx.lineJoin = 'round';
+                case 'brush': if (shape.points.length >= 2) {
+                    maskCtx.lineWidth = shape.brushSize; maskCtx.lineCap = 'round'; maskCtx.lineJoin = 'round';
                     maskCtx.beginPath(); maskCtx.moveTo(shape.points[0].x, shape.points[0].y);
-                    for (let i = 1; i < shape.points.length; i++) maskCtx.lineTo(shape.points[i].x, shape.points[i].y); maskCtx.stroke(); } break;
+                    for (let i = 1; i < shape.points.length; i++) {
+                        const midX = (shape.points[i-1].x + shape.points[i].x) / 2;
+                        const midY = (shape.points[i-1].y + shape.points[i].y) / 2;
+                        maskCtx.quadraticCurveTo(shape.points[i-1].x, shape.points[i-1].y, midX, midY);
+                    }
+                    const last = shape.points[shape.points.length - 1];
+                    maskCtx.lineTo(last.x, last.y);
+                    maskCtx.stroke();
+                } break;
             }
         }
         return maskCanvas.toDataURL('image/png');
@@ -3400,10 +3427,24 @@ class MaskDrawer {
             case 'ellipse': this.ctx.beginPath(); this.ctx.ellipse(shape.cx, shape.cy, shape.rx, shape.ry, 0, 0, 2 * Math.PI); this.ctx.fill(); this.ctx.stroke(); break;
             case 'polygon': if (shape.points.length >= 3) { this.ctx.beginPath(); this.ctx.moveTo(shape.points[0].x, shape.points[0].y);
                 for (let i = 1; i < shape.points.length; i++) this.ctx.lineTo(shape.points[i].x, shape.points[i].y); this.ctx.closePath(); this.ctx.fill(); this.ctx.stroke(); } break;
-            case 'brush': if (shape.points.length >= 2) { this.ctx.lineWidth = shape.brushSize; this.ctx.lineCap = 'round'; this.ctx.lineJoin = 'round';
-                this.ctx.strokeStyle = fillColor; this.ctx.beginPath(); this.ctx.moveTo(shape.points[0].x, shape.points[0].y);
-                for (let i = 1; i < shape.points.length; i++) this.ctx.lineTo(shape.points[i].x, shape.points[i].y); this.ctx.stroke();
-                this.ctx.lineWidth = 2; this.ctx.strokeStyle = strokeColor; this.ctx.stroke(); } break;
+            case 'brush': if (shape.points.length >= 2) {
+                this.ctx.lineWidth = shape.brushSize;
+                this.ctx.lineCap = 'round';
+                this.ctx.lineJoin = 'round';
+                this.ctx.strokeStyle = fillColor;
+                this.ctx.beginPath();
+                this.ctx.moveTo(shape.points[0].x, shape.points[0].y);
+                // Use quadratic curves for smooth professional brush strokes
+                for (let i = 1; i < shape.points.length; i++) {
+                    const midX = (shape.points[i-1].x + shape.points[i].x) / 2;
+                    const midY = (shape.points[i-1].y + shape.points[i].y) / 2;
+                    this.ctx.quadraticCurveTo(shape.points[i-1].x, shape.points[i-1].y, midX, midY);
+                }
+                // Draw to final point
+                const last = shape.points[shape.points.length - 1];
+                this.ctx.lineTo(last.x, last.y);
+                this.ctx.stroke();
+            } break;
         }
     }
     drawPolygonPreview() {
