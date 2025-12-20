@@ -3240,7 +3240,10 @@ class MaskDrawer {
             this.redraw(); return;
         }
         this.isDrawing = true; this.startPoint = point;
-        if (this.options.tool === 'brush') this.brushPath = [point];
+        if (this.options.tool === 'brush') {
+            this.brushPath = [point];
+            this.redraw(); // Show brush dot immediately on click
+        }
     }
     handleMouseMove(e) {
         if (!this.enabled) return;
@@ -3401,7 +3404,10 @@ class MaskDrawer {
         if (this.isDrawing && this.startPoint && this.currentPoint) {
             if (this.options.tool === 'rectangle') this.drawShape({ type: 'rectangle', x: Math.min(this.startPoint.x, this.currentPoint.x), y: Math.min(this.startPoint.y, this.currentPoint.y), width: Math.abs(this.currentPoint.x - this.startPoint.x), height: Math.abs(this.currentPoint.y - this.startPoint.y) }, true);
             else if (this.options.tool === 'ellipse') this.drawShape({ type: 'ellipse', cx: (this.startPoint.x + this.currentPoint.x) / 2, cy: (this.startPoint.y + this.currentPoint.y) / 2, rx: Math.abs(this.currentPoint.x - this.startPoint.x) / 2, ry: Math.abs(this.currentPoint.y - this.startPoint.y) / 2 }, true);
-            else if (this.options.tool === 'brush' && this.brushPath.length > 0) this.drawShape({ type: 'brush', points: this.brushPath, brushSize: this.options.brushSize }, true);
+        }
+        // Brush preview - separate condition, just needs brushPath (shows immediately)
+        if (this.isDrawing && this.options.tool === 'brush' && this.brushPath.length > 0) {
+            this.drawShape({ type: 'brush', points: this.brushPath, brushSize: this.options.brushSize }, true);
         }
         if (this.options.tool === 'polygon' && this.polygonPoints.length > 0) this.drawPolygonPreview();
     }
@@ -3427,23 +3433,29 @@ class MaskDrawer {
             case 'ellipse': this.ctx.beginPath(); this.ctx.ellipse(shape.cx, shape.cy, shape.rx, shape.ry, 0, 0, 2 * Math.PI); this.ctx.fill(); this.ctx.stroke(); break;
             case 'polygon': if (shape.points.length >= 3) { this.ctx.beginPath(); this.ctx.moveTo(shape.points[0].x, shape.points[0].y);
                 for (let i = 1; i < shape.points.length; i++) this.ctx.lineTo(shape.points[i].x, shape.points[i].y); this.ctx.closePath(); this.ctx.fill(); this.ctx.stroke(); } break;
-            case 'brush': if (shape.points.length >= 2) {
+            case 'brush': if (shape.points.length >= 1) {
+                this.ctx.fillStyle = fillColor;
+                this.ctx.strokeStyle = fillColor;
                 this.ctx.lineWidth = shape.brushSize;
                 this.ctx.lineCap = 'round';
                 this.ctx.lineJoin = 'round';
-                this.ctx.strokeStyle = fillColor;
+                // Draw starting dot for immediate feedback
                 this.ctx.beginPath();
-                this.ctx.moveTo(shape.points[0].x, shape.points[0].y);
-                // Use quadratic curves for smooth professional brush strokes
-                for (let i = 1; i < shape.points.length; i++) {
-                    const midX = (shape.points[i-1].x + shape.points[i].x) / 2;
-                    const midY = (shape.points[i-1].y + shape.points[i].y) / 2;
-                    this.ctx.quadraticCurveTo(shape.points[i-1].x, shape.points[i-1].y, midX, midY);
+                this.ctx.arc(shape.points[0].x, shape.points[0].y, shape.brushSize / 2, 0, Math.PI * 2);
+                this.ctx.fill();
+                // Draw path if more than 1 point
+                if (shape.points.length >= 2) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(shape.points[0].x, shape.points[0].y);
+                    for (let i = 1; i < shape.points.length; i++) {
+                        const midX = (shape.points[i-1].x + shape.points[i].x) / 2;
+                        const midY = (shape.points[i-1].y + shape.points[i].y) / 2;
+                        this.ctx.quadraticCurveTo(shape.points[i-1].x, shape.points[i-1].y, midX, midY);
+                    }
+                    const last = shape.points[shape.points.length - 1];
+                    this.ctx.lineTo(last.x, last.y);
+                    this.ctx.stroke();
                 }
-                // Draw to final point
-                const last = shape.points[shape.points.length - 1];
-                this.ctx.lineTo(last.x, last.y);
-                this.ctx.stroke();
             } break;
         }
     }
