@@ -1,0 +1,13 @@
+# TGLDP: SD-Guided Latent Diffusion for ProPainter
+# These dependencies are optional - ProPainter works without them
+
+# Core SD dependencies
+diffusers>=0.25.0
+transformers>=4.36.0
+accelerate>=0.25.0
+
+# For xformers memory efficient attention (optional but recommended)
+# xformers>=0.0.23
+
+# For TensorRT conversion (optional)
+# torch-tensorrt>=2.0.0

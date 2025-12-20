@@ -162,6 +162,20 @@ set BACKGROUND_IMAGE_PATH=D:\watermarkz\videostotrain\firstphoto.jpg
 REM Blend ratio: 0.0 = pure ProPainter, 0.5 = balanced, 1.0 = pure background
 set BACKGROUND_ALPHA=0.5
 
+REM ============================================================
+REM TGLDP: SD-Guided Latent Diffusion for Hard Regions
+REM ============================================================
+REM Enable SD hallucination for regions ProPainter struggles with
+set USE_SD_GUIDANCE=1
+REM Number of SD denoising steps (3-5 recommended for speed)
+set SD_INFERENCE_STEPS=3
+REM Classifier-free guidance scale (7.5 default)
+set SD_GUIDANCE_SCALE=7.5
+REM Quantile threshold for "hard" region detection (0.8 = top 20%)
+set SD_HARD_REGION_THRESHOLD=0.8
+REM Blend ratio for SD features (0.0 = pure ProPainter, 1.0 = pure SD)
+set SD_BLEND_RATIO=0.5
+
 REM Legacy average-based detection params (used when SEGMENT_USE_MOTION_DETECTION=0)
 set SEGMENT_POS_TOLERANCE=50
 set SEGMENT_MIN_LEN_10FPS=3
@@ -182,6 +196,8 @@ echo   - ProPainter: In-memory arrays (ZERO disk I/O!)
 echo   - Optical Flow: NeuFlow v2 TensorRT FP16
 echo   - RFCNet: TensorRT FP16 + DCNv4 plugin
 echo   - FP8 Optimizations: ENABLED
+echo   - TGLDP SD Guidance: %USE_SD_GUIDANCE% (steps=%SD_INFERENCE_STEPS%)
+echo   - Background Blend: %BACKGROUND_ALPHA% from firstphoto.jpg
 echo ============================================================
 echo.
 
@@ -205,4 +221,4 @@ echo.
 
 REM UNIFIED WORKER: server_production2 imports server_production tasks
 REM Handles both SAM2 interactive AND YOLO chord in ONE worker
-"%PYTHON_PATH%" -u -m celery -A server_production2.celery worker -Q celery,propainter --loglevel=info --pool=threads --concurrency=4
+"%PYTHON_PATH%" -u -m celery -A server_production2.celery worker -Q propainter_local --loglevel=info --pool=threads --concurrency=4

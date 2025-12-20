@@ -31,8 +31,15 @@ set B2_CDN_URL=https://markz.humblewoslayer.workers.dev
 echo [B2] Upload enabled to %B2_BUCKET%
 echo.
 
-REM Start WSL Celery worker
-echo Starting WSL worker on queues: wsl_sam2, wsl_yolo
+REM TGLDP v2: SD-Guided Enhancement for hard regions
+set USE_SD_GUIDANCE=1
+set SD_INFERENCE_STEPS=3
+set SD_HARD_REGION_THRESHOLD=0.15
+echo [TGLDP] SD Guidance enabled (v2)
 echo.
 
-wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export B2_CDN_URL='%B2_CDN_URL%' && celery -A wsl_sam2_worker worker -Q wsl_sam2,wsl_yolo --loglevel=info --pool=solo"
+REM Start WSL Celery worker
+echo Starting WSL worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
+echo.
+
+wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export B2_CDN_URL='%B2_CDN_URL%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"

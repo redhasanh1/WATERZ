@@ -233,6 +233,36 @@ from utils.download_util import load_file_from_url
 from core.utils import to_tensors
 from model.misc import get_device
 
+# TGLDP v2.0: SD-Guided Latent Diffusion for Hard Regions
+# Deep injection into ProPainter encoder (not post-processing!)
+USE_SD_GUIDANCE = os.environ.get('USE_SD_GUIDANCE', '0') == '1'
+_TGLDP_V2 = None
+
+def get_tgldp_v2():
+    """Lazy-load TGLDP v2 module on first use."""
+    global _TGLDP_V2
+    if _TGLDP_V2 is None and USE_SD_GUIDANCE:
+        try:
+            import sys
+            # Add parent dir to path for sd_guidance module
+            parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+            from sd_guidance.tgldp_integration import TGLDPv2Module
+            firstphoto = os.environ.get('BACKGROUND_IMAGE_PATH', '')
+            _TGLDP_V2 = TGLDPv2Module(
+                firstphoto_path=firstphoto,
+                hard_frame_ratio=0.15,
+                device="cuda",
+            )
+            print("[TGLDP v2] SD-Guided deep injection initialized")
+        except Exception as e:
+            print(f"[TGLDP v2] Could not initialize: {e}")
+            import traceback
+            traceback.print_exc()
+            _TGLDP_V2 = False  # Mark as failed
+    return _TGLDP_V2 if _TGLDP_V2 else None
+
 # from mytimer import timer_decorator
 
 import warnings
@@ -1729,6 +1759,11 @@ def pipeline(
                 .numpy()
                 .astype(np.uint8)
             )
+
+            # NOTE: TGLDP v2 uses deep encoder injection via SDGuidedInpaintGenerator
+            # The SD latents are pre-generated and injected at the encoder level
+            # Post-processing (v1) is deprecated - see sd_guided_propainter.py
+
             for i in range(len(neighbor_ids)):
                 idx = neighbor_ids[i]
                 pred_np = np.array(pred_img[i]).astype(np.uint8)

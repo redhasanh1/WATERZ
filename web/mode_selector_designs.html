@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mode Selector - 10 Design Variations</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
+            min-height: 100vh;
+            padding: 2rem;
+            color: #fff;
+        }
+        h1 { text-align: center; margin-bottom: 1rem; font-weight: 300; color: #667eea; }
+        h2 { text-align: center; margin: 3rem 0 1.5rem; font-weight: 500; color: #a0a0a0; font-size: 1rem; text-transform: uppercase; letter-spacing: 2px; }
+        .design-section {
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+            padding: 2rem;
+            background: rgba(0,0,0,0.2);
+            border-radius: 20px;
+        }
+
+        /* ============================================ */
+        /* DESIGN 1: Glass Cards (Like Reference Image) */
+        /* ============================================ */
+        .design1 .mode-card {
+            background: linear-gradient(145deg, rgba(40, 40, 60, 0.6) 0%, rgba(30, 30, 45, 0.8) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 2.5rem 3rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+            min-width: 220px;
+            text-align: center;
+        }
+        .design1 .mode-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        }
+        .design1 .mode-card.active {
+            border-color: #667eea;
+            box-shadow: 0 0 30px rgba(102, 126, 234, 0.3);
+        }
+        .design1 .icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 1.5rem;
+        }
+        .design1 .title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+        .design1 .subtitle {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.5);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* ============================================ */
+        /* DESIGN 2: Neon Glow Cards */
+        /* ============================================ */
+        .design2 .mode-card {
+            background: rgba(15, 15, 25, 0.9);
+            border: 2px solid transparent;
+            border-radius: 20px;
+            padding: 2rem 2.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 200px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .design2 .mode-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 20px;
+            padding: 2px;
+            background: linear-gradient(135deg, transparent 40%, rgba(102, 126, 234, 0.5) 100%);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            mask-composite: exclude;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .design2 .mode-card:hover::before { opacity: 1; }
+        .design2 .mode-card.moving:hover { box-shadow: 0 0 40px rgba(59, 130, 246, 0.4); }
+        .design2 .mode-card.static:hover { box-shadow: 0 0 40px rgba(239, 68, 68, 0.4); }
+        .design2 .icon { width: 56px; height: 56px; margin: 0 auto 1rem; }
+        .design2 .title { font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; }
+        .design2 .subtitle { font-size: 0.7rem; color: #666; }
+
+        /* ============================================ */
+        /* DESIGN 3: Pill Toggle */
+        /* ============================================ */
+        .design3 {
+            background: rgba(30, 30, 45, 0.8);
+            border-radius: 50px;
+            padding: 6px;
+            display: inline-flex;
+            gap: 4px;
+        }
+        .design3 .mode-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        .design3 .mode-btn:hover { color: #fff; }
+        .design3 .mode-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        .design3 .icon { width: 24px; height: 24px; }
+        .design3 .title { font-size: 0.9rem; font-weight: 600; }
+
+        /* ============================================ */
+        /* DESIGN 4: Minimal Line Cards */
+        /* ============================================ */
+        .design4 .mode-card {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 180px;
+            text-align: center;
+        }
+        .design4 .mode-card:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+        .design4 .mode-card.active {
+            background: rgba(102, 126, 234, 0.1);
+            border-color: #667eea;
+        }
+        .design4 .icon { width: 48px; height: 48px; margin: 0 auto 1rem; opacity: 0.8; }
+        .design4 .title { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
+        .design4 .subtitle { font-size: 0.7rem; color: #555; }
+
+        /* ============================================ */
+        /* DESIGN 5: Gradient Border Cards */
+        /* ============================================ */
+        .design5 .mode-card {
+            position: relative;
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 2rem 2.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 200px;
+            text-align: center;
+        }
+        .design5 .mode-card::before {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border-radius: 18px;
+            background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
+            z-index: -1;
+            opacity: 0.3;
+            transition: opacity 0.3s;
+        }
+        .design5 .mode-card:hover::before { opacity: 0.6; }
+        .design5 .mode-card.active::before { opacity: 1; }
+        .design5 .icon { width: 52px; height: 52px; margin: 0 auto 1rem; }
+        .design5 .title { font-size: 1rem; font-weight: 700; margin-bottom: 0.3rem; }
+        .design5 .subtitle { font-size: 0.7rem; color: #888; }
+
+        /* ============================================ */
+        /* DESIGN 6: Icon-Focused Circles */
+        /* ============================================ */
+        .design6 .mode-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            cursor: pointer;
+            padding: 1rem;
+        }
+        .design6 .icon-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(40, 40, 60, 0.8);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        .design6 .mode-card:hover .icon-circle {
+            transform: scale(1.1);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        .design6 .mode-card.active .icon-circle.moving {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            border-color: #3b82f6;
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
+        }
+        .design6 .mode-card.active .icon-circle.static {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            border-color: #ef4444;
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.5);
+        }
+        .design6 .icon { width: 36px; height: 36px; }
+        .design6 .title { font-size: 0.85rem; font-weight: 600; }
+
+        /* ============================================ */
+        /* DESIGN 7: Side-by-Side Compact */
+        /* ============================================ */
+        .design7 {
+            display: flex;
+            background: rgba(30, 30, 45, 0.6);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .design7 .mode-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        .design7 .mode-btn:first-child { border-right: 1px solid rgba(255, 255, 255, 0.1); }
+        .design7 .mode-btn:hover { background: rgba(255, 255, 255, 0.05); color: #fff; }
+        .design7 .mode-btn.active {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.3), rgba(118, 75, 162, 0.3));
+            color: #fff;
+        }
+        .design7 .icon { width: 20px; height: 20px; }
+        .design7 .title { font-size: 0.85rem; font-weight: 500; }
+
+        /* ============================================ */
+        /* DESIGN 8: Floating Cards with Shadow */
+        /* ============================================ */
+        .design8 .mode-card {
+            background: linear-gradient(145deg, #252540, #1e1e35);
+            border-radius: 24px;
+            padding: 2.5rem;
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            min-width: 200px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        .design8 .mode-card:hover {
+            transform: translateY(-10px) scale(1.02);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        }
+        .design8 .mode-card.active.moving {
+            box-shadow: 0 25px 50px rgba(59, 130, 246, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        }
+        .design8 .mode-card.active.static {
+            box-shadow: 0 25px 50px rgba(239, 68, 68, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        }
+        .design8 .icon { width: 56px; height: 56px; margin: 0 auto 1.25rem; }
+        .design8 .title { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.4rem; }
+        .design8 .subtitle { font-size: 0.7rem; color: #666; letter-spacing: 1px; }
+
+        /* ============================================ */
+        /* DESIGN 9: Tab Style */
+        /* ============================================ */
+        .design9 {
+            display: flex;
+            gap: 0;
+        }
+        .design9 .mode-tab {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1.25rem 2rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            background: rgba(30, 30, 45, 0.5);
+            color: rgba(255, 255, 255, 0.5);
+            border-bottom: 3px solid transparent;
+        }
+        .design9 .mode-tab:first-child { border-radius: 12px 0 0 12px; }
+        .design9 .mode-tab:last-child { border-radius: 0 12px 12px 0; }
+        .design9 .mode-tab:hover { color: #fff; background: rgba(40, 40, 55, 0.8); }
+        .design9 .mode-tab.active {
+            background: rgba(50, 50, 70, 0.9);
+            color: #fff;
+            border-bottom-color: #667eea;
+        }
+        .design9 .icon { width: 22px; height: 22px; }
+        .design9 .title { font-size: 0.9rem; font-weight: 600; }
+
+        /* ============================================ */
+        /* DESIGN 10: Neumorphic */
+        /* ============================================ */
+        .design10 .mode-card {
+            background: #1e1e30;
+            border-radius: 20px;
+            padding: 2rem 2.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 200px;
+            text-align: center;
+            box-shadow: 8px 8px 20px #0d0d18, -8px -8px 20px #2f2f48;
+        }
+        .design10 .mode-card:hover {
+            box-shadow: 4px 4px 10px #0d0d18, -4px -4px 10px #2f2f48;
+        }
+        .design10 .mode-card.active {
+            box-shadow: inset 4px 4px 10px #0d0d18, inset -4px -4px 10px #2f2f48;
+        }
+        .design10 .icon { width: 52px; height: 52px; margin: 0 auto 1rem; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); }
+        .design10 .title { font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; }
+        .design10 .subtitle { font-size: 0.7rem; color: #555; }
+
+        /* SVG Icons */
+        .icon-moving { color: #3b82f6; }
+        .icon-static { color: #ef4444; }
+    </style>
+</head>
+<body>
+    <h1>Mode Selector Designs</h1>
+
+    <!-- SVG Definitions -->
+    <svg style="display: none;">
+        <!-- Moving Mode Icon (3D Cube with Motion) -->
+        <symbol id="icon-moving" viewBox="0 0 64 64">
+            <g fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Motion lines -->
+                <path d="M8 28 L16 28" opacity="0.5"/>
+                <path d="M8 32 L20 32"/>
+                <path d="M8 36 L16 36" opacity="0.5"/>
+                <!-- 3D Cube -->
+                <path d="M38 20 L54 28 L54 44 L38 52 L22 44 L22 28 Z" fill="rgba(59, 130, 246, 0.2)"/>
+                <path d="M38 20 L38 36 L54 44"/>
+                <path d="M38 36 L22 44"/>
+                <path d="M38 20 L54 28"/>
+                <path d="M38 20 L22 28"/>
+            </g>
+        </symbol>
+        <!-- Static Mode Icon (Target) -->
+        <symbol id="icon-static" viewBox="0 0 64 64">
+            <g fill="none" stroke-width="2.5" stroke-linecap="round">
+                <!-- Outer ring -->
+                <circle cx="32" cy="32" r="22" stroke="#ef4444"/>
+                <!-- Middle ring -->
+                <circle cx="32" cy="32" r="14" stroke="#ef4444"/>
+                <!-- Inner circle -->
+                <circle cx="32" cy="32" r="6" stroke="#ef4444" fill="rgba(239, 68, 68, 0.3)"/>
+                <!-- Pin top -->
+                <circle cx="44" cy="20" r="5" stroke="#fff" fill="rgba(255, 255, 255, 0.9)"/>
+                <line x1="40" y1="24" x2="36" y2="28" stroke="#fff" stroke-width="2"/>
+            </g>
+        </symbol>
+    </svg>
+
+    <!-- DESIGN 1: Glass Cards -->
+    <h2>1. Glass Cards (Reference Style)</h2>
+    <div class="design-section design1">
+        <div class="mode-card active">
+            <svg class="icon"><use href="#icon-moving"/></svg>
+            <div class="title">MOVING MODE</div>
+            <div class="subtitle">Tracks Dynamic Objects</div>
+        </div>
+        <div class="mode-card">
+            <svg class="icon"><use href="#icon-static"/></svg>
+            <div class="title">STATIC MODE</div>
+            <div class="subtitle">Tracks Static Objects</div>
+        </div>
+    </div>
+
+    <!-- DESIGN 2: Neon Glow -->
+    <h2>2. Neon Glow Cards</h2>
+    <div class="design-section design2">
+        <div class="mode-card moving">
+            <svg class="icon"><use href="#icon-moving"/></svg>
+            <div class="title">Moving Mode</div>
+            <div class="subtitle">Dynamic objects</div>
+        </div>
+        <div class="mode-card static">
+            <svg class="icon"><use href="#icon-static"/></svg>
+            <div class="title">Static Mode</div>
+            <div class="subtitle">Fixed objects</div>
+        </div>
+    </div>
+
+    <!-- DESIGN 3: Pill Toggle -->
+    <h2>3. Pill Toggle</h2>
+    <div class="design-section">
+        <div class="design3">
+            <button class="mode-btn active">
+                <svg class="icon"><use href="#icon-moving"/></svg>
+                <span class="title">Moving</span>
+            </button>
+            <button class="mode-btn">
+                <svg class="icon"><use href="#icon-static"/></svg>
+                <span class="title">Static</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- DESIGN 4: Minimal Line -->
+    <h2>4. Minimal Line Cards</h2>
+    <div class="design-section design4">
+        <div class="mode-card active">
+            <svg class="icon"><use href="#icon-moving"/></svg>
+            <div class="title">Moving</div>
+            <div class="subtitle">Track motion</div>
+        </div>
+        <div class="mode-card">
+            <svg class="icon"><use href="#icon-static"/></svg>
+            <div class="title">Static</div>
+            <div class="subtitle">Fixed position</div>
+        </div>
+    </div>
+
+    <!-- DESIGN 5: Gradient Border -->
+    <h2>5. Gradient Border Cards</h2>
+    <div class="design-section design5">
+        <div class="mode-card active">
+            <svg class="icon"><use href="#icon-moving"/></svg>
+            <div class="title">MOVING</div>
+            <div class="subtitle">Dynamic tracking</div>
+        </div>
+        <div class="mode-card">
+            <svg class="icon"><use href="#icon-static"/></svg>
+            <div class="title">STATIC</div>
+            <div class="subtitle">Position lock</div>
+        </div>
+    </div>
+
+    <!-- DESIGN 6: Icon Circles -->
+    <h2>6. Icon-Focused Circles</h2>
+    <div class="design-section design6">
+        <div class="mode-card active">
+            <div class="icon-circle moving">
+                <svg class="icon" style="color: #fff;"><use href="#icon-moving"/></svg>
+            </div>
+            <div class="title">Moving</div>
+        </div>
+        <div class="mode-card">
+            <div class="icon-circle static">
+                <svg class="icon"><use href="#icon-static"/></svg>
+            </div>
+            <div class="title">Static</div>
+        </div>
+    </div>
+
+    <!-- DESIGN 7: Compact Split -->
+    <h2>7. Compact Split</h2>
+    <div class="design-section">
+        <div class="design7">
+            <button class="mode-btn active">
+                <svg class="icon"><use href="#icon-moving"/></svg>
+                <span class="title">Moving</span>
+            </button>
+            <button class="mode-btn">
+                <svg class="icon"><use href="#icon-static"/></svg>
+                <span class="title">Static</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- DESIGN 8: Floating Shadow -->
+    <h2>8. Floating Shadow Cards</h2>
+    <div class="design-section design8">
+        <div class="mode-card moving active">
+            <svg class="icon"><use href="#icon-moving"/></svg>
+            <div class="title">MOVING</div>
+            <div class="subtitle">DYNAMIC OBJECTS</div>
+        </div>
+        <div class="mode-card static">
+            <svg class="icon"><use href="#icon-static"/></svg>
+            <div class="title">STATIC</div>
+            <div class="subtitle">FIXED OBJECTS</div>
+        </div>
+    </div>
+
+    <!-- DESIGN 9: Tab Style -->
+    <h2>9. Tab Style</h2>
+    <div class="design-section">
+        <div class="design9">
+            <button class="mode-tab active">
+                <svg class="icon"><use href="#icon-moving"/></svg>
+                <span class="title">Moving Mode</span>
+            </button>
+            <button class="mode-tab">
+                <svg class="icon"><use href="#icon-static"/></svg>
+                <span class="title">Static Mode</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- DESIGN 10: Neumorphic -->
+    <h2>10. Neumorphic</h2>
+    <div class="design-section design10">
+        <div class="mode-card">
+            <svg class="icon"><use href="#icon-moving"/></svg>
+            <div class="title">Moving</div>
+            <div class="subtitle">Track motion</div>
+        </div>
+        <div class="mode-card active">
+            <svg class="icon"><use href="#icon-static"/></svg>
+            <div class="title">Static</div>
+            <div class="subtitle">Fixed position</div>
+        </div>
+    </div>
+
+    <script>
+        // Add click handlers to all interactive elements
+        document.querySelectorAll('.mode-card, .mode-btn, .mode-tab').forEach(el => {
+            el.addEventListener('click', function() {
+                const parent = this.closest('.design-section, .design3, .design7, .design9');
+                parent.querySelectorAll('.mode-card, .mode-btn, .mode-tab').forEach(s => s.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>
