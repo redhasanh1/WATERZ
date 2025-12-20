@@ -3343,6 +3343,10 @@ class MaskDrawer {
     }
     redraw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        // Redraw SAM2 masks first (so MaskDrawer shapes appear on top)
+        if (this.options.sam2Selector && typeof this.options.sam2Selector.draw === 'function') {
+            this.options.sam2Selector.draw();
+        }
         if (this.maskBitmap) this.drawGreenOverlay();
         if (this.options.tool !== 'eraser') for (const shape of this.shapes) this.drawShape(shape, false);
         if (this.isDrawing && this.startPoint && this.currentPoint) {
