@@ -3584,6 +3584,7 @@
             }, true);
 
             // Initialize MaskDrawer for shape drawing tools
+            console.log('[DEBUG] MaskDrawer class defined:', typeof MaskDrawer !== 'undefined');
             if (typeof MaskDrawer !== 'undefined' && !window.maskDrawer) {
                 console.log('[MaskDrawer] Initializing...');
                 window.maskDrawer = new MaskDrawer(video, canvas, {
@@ -3682,7 +3683,12 @@
                     } else {
                         // Drawing tools = MaskDrawer
                         if (sam2Selector) sam2Selector.enabled = false;
-                        if (window.maskDrawer) window.maskDrawer.enable();
+                        if (window.maskDrawer) {
+                            window.maskDrawer.enable();
+                            console.log('[Tool] MaskDrawer enabled:', window.maskDrawer.enabled);
+                        } else {
+                            console.log('[Tool] WARNING: window.maskDrawer is undefined!');
+                        }
                         console.log('[Tool] Drawing tool selected:', tool);
                     }
                 });
