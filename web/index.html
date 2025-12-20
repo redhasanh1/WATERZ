@@ -2411,8 +2411,8 @@
         const startStatusPolling = (processTaskId) => {
             localStorage.setItem(ACTIVE_TASK_KEY, processTaskId);
 
-            // Detect SAM2 jobs by prefix
-            const isSAM2Job = processTaskId.startsWith('sam2_');
+            // Detect SAM2/static jobs by prefix (both use SAM2 status endpoint)
+            const isSAM2Job = processTaskId.startsWith('sam2_') || processTaskId.startsWith('static_');
             const statusEndpoint = isSAM2Job
                 ? `/api/sam2/status/${processTaskId}`
                 : `/api/status/${processTaskId}`;
