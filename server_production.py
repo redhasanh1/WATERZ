@@ -7527,7 +7527,6 @@ def process_static_mask():
 
     try:
         import base64
-        import cv2
         import zipfile
         import shutil
         import uuid
@@ -7551,24 +7550,23 @@ def process_static_mask():
         if not video_url:
             return jsonify({'status': 'error', 'message': 'Video URL not found - please re-upload'}), 404
 
-        # Find local video file to get frame count
-        video_path = None
-        for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
-            test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
-            if os.path.exists(test_path):
-                video_path = test_path
-                break
-
-        # Get frame count from video (try cv2 if available, else use fallback)
+        # Get frame count - try cv2, else use fallback or Redis metadata
         total_frames = 100  # Default fallback
         try:
+            import cv2
+            video_path = None
+            for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+                test_path = os.path.join(UPLOAD_DIR, f'{task_id}{ext}')
+                if os.path.exists(test_path):
+                    video_path = test_path
+                    break
             if video_path and os.path.exists(video_path):
                 cap = cv2.VideoCapture(video_path)
                 if cap.isOpened():
                     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 100
                     cap.release()
         except Exception as cv_err:
-            print(f"[STATIC MASK] cv2 not available, using fallback frame count: {cv_err}")
+            print(f"[STATIC MASK] cv2 not available: {cv_err}")
             # Try to get frame count from Redis metadata if stored
             try:
                 stored_frames = redis_client.get(f"upload:{task_id}:frames")
@@ -7576,7 +7574,7 @@ def process_static_mask():
                     total_frames = int(stored_frames)
             except:
                 pass
-        print(f"[STATIC MASK] Video has {total_frames} frames")
+        print(f"[STATIC MASK] Using {total_frames} frames")
 
         # Decode mask from base64
         mask_data = mask_base64.split(',')[1] if ',' in mask_base64 else mask_base64

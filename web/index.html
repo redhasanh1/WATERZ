@@ -3926,6 +3926,8 @@ console.log('[INLINE] MaskDrawer class loaded');
             // Mode toggle handlers
             const trackedModeBtn = document.getElementById('trackedModeBtn');
             const staticModeBtn = document.getElementById('staticModeBtn');
+            // Default to tracked mode
+            window.currentMaskMode = 'tracked';
             if (trackedModeBtn && staticModeBtn) {
                 trackedModeBtn.addEventListener('click', () => {
                     trackedModeBtn.style.border = '2px solid #667eea';
