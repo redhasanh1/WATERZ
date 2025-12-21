@@ -24,7 +24,7 @@ import subprocess
 
 # Add paths
 sys.path.insert(0, str(Path(__file__).parent))
-SAM2_PATH = Path(__file__).parent / "SAM2Long"
+SAM2_PATH = Path(__file__).parent / "segment-anything-2"
 sys.path.insert(0, str(SAM2_PATH))
 
 # Import SAM2 PyTorch
@@ -818,7 +818,6 @@ def init_state_reordered(predictor, original_yuv_frames, frame_indices, device="
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["tracking_has_started"] = False  # SAM2Long compatibility
     inference_state["frames_already_tracked"] = {}
     inference_state["output_dict"] = {
         "cond_frame_outputs": {},
@@ -828,9 +827,6 @@ def init_state_reordered(predictor, original_yuv_frames, frame_indices, device="
         "cond_frame_outputs": set(),
         "non_cond_frame_outputs": set(),
     }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree (hybrid GPU/CPU)
-    inference_state["iou_thre"] = 0.1
-    inference_state["uncertainty"] = 2
 
     # Warm up visual backbone on frame 0 (which is original frame_idx_start)
     print("[SAM2-Reversed] Warming up visual backbone on reversed sequence...", flush=True)
@@ -871,7 +867,6 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["tracking_has_started"] = False  # SAM2Long compatibility
     inference_state["frames_already_tracked"] = {}
     inference_state["output_dict"] = {
         "cond_frame_outputs": {},
@@ -881,9 +876,6 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
         "cond_frame_outputs": set(),
         "non_cond_frame_outputs": set(),
     }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree (hybrid GPU/CPU)
-    inference_state["iou_thre"] = 0.1
-    inference_state["uncertainty"] = 2
 
     # Warm up visual backbone on frame 0
     print("[SAM2-YUV420] Warming up visual backbone...", flush=True)
@@ -936,7 +928,6 @@ def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["tracking_has_started"] = False  # SAM2Long compatibility
     inference_state["frames_already_tracked"] = {}
     inference_state["output_dict"] = {
         "cond_frame_outputs": {},
@@ -946,9 +937,6 @@ def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_
         "cond_frame_outputs": set(),
         "non_cond_frame_outputs": set(),
     }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree (hybrid GPU/CPU)
-    inference_state["iou_thre"] = 0.1
-    inference_state["uncertainty"] = 2
 
     # Store reference for cleanup
     inference_state["_dali_streamer"] = dali_streamer
@@ -1244,7 +1232,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                 if frame_idx_start > 0:
                     print(f"\n[SAM2-Backward] Propagating frames {frame_idx_start} -> 0 ({backward_frames} frames)")
 
-                    for frame_idx, obj_ids, mask_logits in tqdm(
+                    for frame_idx, obj_ids, video_res_masks in tqdm(
                         predictor.propagate_in_video(
                             inference_state,
                             start_frame_idx=frame_idx_start,
@@ -1254,7 +1242,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         total=backward_frames,
                         desc="Backward"
                     ):
-                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
+                        mask = (video_res_masks[0] > 0.0).cpu().numpy().squeeze()
                         mask_uint8 = (mask * 255).astype(np.uint8)
 
                         if np.sum(mask_uint8 > 127) < 100:
@@ -1263,7 +1251,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
-                        del mask_logits, mask
+                        del video_res_masks, mask
 
                     print(f"[SAM2-Backward] Complete: {backward_frames} masks")
                     gc.collect()
@@ -1279,23 +1267,22 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                     else:
                         print(f"\n[SAM2-Forward] Propagating frames 0 -> {actual_frames - 1} ({forward_frames} frames)")
 
-                    # SAM2Long returns (obj_ids, mask_list) instead of yielding per-frame
-                    obj_ids, mask_list = predictor.propagate_in_video(
-                        inference_state,
-                        start_frame_idx=frame_idx_start,
-                        max_frame_num_to_track=forward_frames,
-                        reverse=False
-                    )
-
-                    # Save masks - mask_list[i] corresponds to frame (start_frame_idx + i)
-                    for i, mask_logits in enumerate(tqdm(mask_list, desc="Forward")):
-                        frame_idx = frame_idx_start + i
-
+                    # Original SAM2 yields (frame_idx, obj_ids, video_res_masks) per frame
+                    for frame_idx, obj_ids, video_res_masks in tqdm(
+                        predictor.propagate_in_video(
+                            inference_state,
+                            start_frame_idx=frame_idx_start,
+                            max_frame_num_to_track=forward_frames,
+                            reverse=False
+                        ),
+                        desc="Forward",
+                        total=forward_frames
+                    ):
                         # Skip click frame if already saved by backward
                         if frame_idx_start > 0 and frame_idx == frame_idx_start:
                             continue
 
-                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
+                        mask = (video_res_masks[0] > 0.0).cpu().numpy().squeeze()
                         mask_uint8 = (mask * 255).astype(np.uint8)
 
                         if np.sum(mask_uint8 > 127) < 100:
@@ -1304,7 +1291,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
-                        del mask_logits, mask
+                        del video_res_masks, mask
 
                     print(f"[SAM2-Forward] Complete: {forward_frames} masks")
                     gc.collect()
