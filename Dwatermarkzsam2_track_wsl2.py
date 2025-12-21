@@ -24,7 +24,7 @@ import subprocess
 
 # Add paths
 sys.path.insert(0, str(Path(__file__).parent))
-SAM2_PATH = Path(__file__).parent / "SAM2Long"
+SAM2_PATH = Path(__file__).parent / "segment-anything-2"
 sys.path.insert(0, str(SAM2_PATH))
 
 # Import SAM2 PyTorch
@@ -818,19 +818,6 @@ def init_state_reordered(predictor, original_yuv_frames, frame_indices, device="
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["tracking_has_started"] = False  # SAM2Long compatibility
-    inference_state["frames_already_tracked"] = {}
-    inference_state["output_dict"] = {
-        "cond_frame_outputs": {},
-        "non_cond_frame_outputs": {},
-    }
-    inference_state["consolidated_frame_inds"] = {
-        "cond_frame_outputs": set(),
-        "non_cond_frame_outputs": set(),
-    }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree pathways
-    inference_state["iou_thre"] = 0.1
-    inference_state["uncertainty"] = 2
 
     # Warm up visual backbone on frame 0 (which is original frame_idx_start)
     print("[SAM2-Reversed] Warming up visual backbone on reversed sequence...", flush=True)
@@ -871,19 +858,6 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["tracking_has_started"] = False  # SAM2Long compatibility
-    inference_state["frames_already_tracked"] = {}
-    inference_state["output_dict"] = {
-        "cond_frame_outputs": {},
-        "non_cond_frame_outputs": {},
-    }
-    inference_state["consolidated_frame_inds"] = {
-        "cond_frame_outputs": set(),
-        "non_cond_frame_outputs": set(),
-    }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree pathways
-    inference_state["iou_thre"] = 0.1
-    inference_state["uncertainty"] = 2
 
     # Warm up visual backbone on frame 0
     print("[SAM2-YUV420] Warming up visual backbone...", flush=True)
@@ -936,19 +910,6 @@ def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["tracking_has_started"] = False  # SAM2Long compatibility
-    inference_state["frames_already_tracked"] = {}
-    inference_state["output_dict"] = {
-        "cond_frame_outputs": {},
-        "non_cond_frame_outputs": {},
-    }
-    inference_state["consolidated_frame_inds"] = {
-        "cond_frame_outputs": set(),
-        "non_cond_frame_outputs": set(),
-    }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree pathways
-    inference_state["iou_thre"] = 0.1
-    inference_state["uncertainty"] = 2
 
     # Store reference for cleanup
     inference_state["_dali_streamer"] = dali_streamer
