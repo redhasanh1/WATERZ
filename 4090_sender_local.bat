@@ -52,6 +52,12 @@ wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export 
 echo [PURGE] Done - queues cleared!
 echo.
 
+REM CLEAR WSL RAM CACHE - Free up garbage collected memory
+echo [RAM] Clearing WSL memory cache (not killing processes)...
+wsl -e bash -c "sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null 2>&1 || echo 'Note: Need sudo for cache clear'"
+echo [RAM] Cache cleared!
+echo.
+
 REM Start WSL Celery worker
 echo Starting WSL worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
 echo.
