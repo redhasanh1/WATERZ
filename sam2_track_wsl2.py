@@ -828,7 +828,7 @@ def init_state_reordered(predictor, original_yuv_frames, frame_indices, device="
         "cond_frame_outputs": set(),
         "non_cond_frame_outputs": set(),
     }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree pathways
+    inference_state["num_pathway"] = 3  # SAM2Long memory tree (hybrid GPU/CPU)
     inference_state["iou_thre"] = 0.1
     inference_state["uncertainty"] = 2
 
@@ -881,7 +881,7 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
         "cond_frame_outputs": set(),
         "non_cond_frame_outputs": set(),
     }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree pathways
+    inference_state["num_pathway"] = 3  # SAM2Long memory tree (hybrid GPU/CPU)
     inference_state["iou_thre"] = 0.1
     inference_state["uncertainty"] = 2
 
@@ -946,7 +946,7 @@ def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_
         "cond_frame_outputs": set(),
         "non_cond_frame_outputs": set(),
     }
-    inference_state["num_pathway"] = 3  # SAM2Long memory tree pathways
+    inference_state["num_pathway"] = 3  # SAM2Long memory tree (hybrid GPU/CPU)
     inference_state["iou_thre"] = 0.1
     inference_state["uncertainty"] = 2
 
