@@ -818,15 +818,6 @@ def init_state_reordered(predictor, original_yuv_frames, frame_indices, device="
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["frames_already_tracked"] = {}
-    inference_state["output_dict"] = {
-        "cond_frame_outputs": {},
-        "non_cond_frame_outputs": {},
-    }
-    inference_state["consolidated_frame_inds"] = {
-        "cond_frame_outputs": set(),
-        "non_cond_frame_outputs": set(),
-    }
 
     # Warm up visual backbone on frame 0 (which is original frame_idx_start)
     print("[SAM2-Reversed] Warming up visual backbone on reversed sequence...", flush=True)
@@ -867,15 +858,6 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["frames_already_tracked"] = {}
-    inference_state["output_dict"] = {
-        "cond_frame_outputs": {},
-        "non_cond_frame_outputs": {},
-    }
-    inference_state["consolidated_frame_inds"] = {
-        "cond_frame_outputs": set(),
-        "non_cond_frame_outputs": set(),
-    }
 
     # Warm up visual backbone on frame 0
     print("[SAM2-YUV420] Warming up visual backbone...", flush=True)
@@ -928,15 +910,6 @@ def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_
     inference_state["output_dict_per_obj"] = {}
     inference_state["temp_output_dict_per_obj"] = {}
     inference_state["frames_tracked_per_obj"] = {}
-    inference_state["frames_already_tracked"] = {}
-    inference_state["output_dict"] = {
-        "cond_frame_outputs": {},
-        "non_cond_frame_outputs": {},
-    }
-    inference_state["consolidated_frame_inds"] = {
-        "cond_frame_outputs": set(),
-        "non_cond_frame_outputs": set(),
-    }
 
     # Store reference for cleanup
     inference_state["_dali_streamer"] = dali_streamer
@@ -1232,7 +1205,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                 if frame_idx_start > 0:
                     print(f"\n[SAM2-Backward] Propagating frames {frame_idx_start} -> 0 ({backward_frames} frames)")
 
-                    for frame_idx, obj_ids, video_res_masks in tqdm(
+                    for frame_idx, obj_ids, mask_logits in tqdm(
                         predictor.propagate_in_video(
                             inference_state,
                             start_frame_idx=frame_idx_start,
@@ -1242,7 +1215,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         total=backward_frames,
                         desc="Backward"
                     ):
-                        mask = (video_res_masks[0] > 0.0).cpu().numpy().squeeze()
+                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
                         mask_uint8 = (mask * 255).astype(np.uint8)
 
                         if np.sum(mask_uint8 > 127) < 100:
@@ -1251,7 +1224,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
-                        del video_res_masks, mask
+                        del mask_logits, mask
 
                     print(f"[SAM2-Backward] Complete: {backward_frames} masks")
                     gc.collect()
@@ -1267,22 +1240,21 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                     else:
                         print(f"\n[SAM2-Forward] Propagating frames 0 -> {actual_frames - 1} ({forward_frames} frames)")
 
-                    # Original SAM2 yields (frame_idx, obj_ids, video_res_masks) per frame
-                    for frame_idx, obj_ids, video_res_masks in tqdm(
+                    for frame_idx, obj_ids, mask_logits in tqdm(
                         predictor.propagate_in_video(
                             inference_state,
                             start_frame_idx=frame_idx_start,
                             max_frame_num_to_track=forward_frames,
                             reverse=False
                         ),
-                        desc="Forward",
-                        total=forward_frames
+                        total=forward_frames,
+                        desc="Forward"
                     ):
                         # Skip click frame if already saved by backward
                         if frame_idx_start > 0 and frame_idx == frame_idx_start:
                             continue
 
-                        mask = (video_res_masks[0] > 0.0).cpu().numpy().squeeze()
+                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
                         mask_uint8 = (mask * 255).astype(np.uint8)
 
                         if np.sum(mask_uint8 > 127) < 100:
@@ -1291,7 +1263,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
-                        del video_res_masks, mask
+                        del mask_logits, mask
 
                     print(f"[SAM2-Forward] Complete: {forward_frames} masks")
                     gc.collect()
