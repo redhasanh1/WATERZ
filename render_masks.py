@@ -61,6 +61,14 @@ def select_output_file():
     return output_path
 
 
+def find_source_video(masks_folder):
+    """Find the H.265 source video used for tracking (stored in masks folder)"""
+    for f in os.listdir(masks_folder):
+        if f.endswith(('.mp4', '.mkv', '.avi')) and not f.startswith('output'):
+            return os.path.join(masks_folder, f)
+    return None
+
+
 def load_mask(masks_folder, frame_idx):
     """Load mask for given frame index"""
     mask_path = os.path.join(masks_folder, f"{frame_idx:05d}.png")
@@ -99,21 +107,38 @@ def main():
     print("Mask Overlay Renderer - Output to Video File")
     print("=" * 60)
 
-    # Select video
-    print("\n[1/3] Select video file...")
-    video_path = select_video()
-    if not video_path:
-        print("No video selected. Exiting.")
-        return
-    print(f"Video: {video_path}")
-
-    # Select masks folder
-    print("\n[2/3] Select masks folder...")
+    # Select masks folder FIRST (to check for source video)
+    print("\n[1/3] Select masks folder...")
     masks_folder = select_masks_folder()
     if not masks_folder:
         print("No masks folder selected. Exiting.")
         return
     print(f"Masks: {masks_folder}")
+
+    # Check for H.265 source video in masks folder (for perfect alignment)
+    source_video = find_source_video(masks_folder)
+    if source_video:
+        print(f"\n[AUTO-DETECT] Found tracking source: {os.path.basename(source_video)}")
+        print("Using this video ensures perfect mask alignment (VFR-safe).")
+        use_source = input("Use this video? [Y/n]: ").strip().lower()
+        if use_source != 'n':
+            video_path = source_video
+            print(f"Video: {video_path}")
+        else:
+            print("\n[2/3] Select video file manually...")
+            video_path = select_video()
+            if not video_path:
+                print("No video selected. Exiting.")
+                return
+            print(f"Video: {video_path}")
+    else:
+        # No source video found, ask user to select
+        print("\n[2/3] Select video file...")
+        video_path = select_video()
+        if not video_path:
+            print("No video selected. Exiting.")
+            return
+        print(f"Video: {video_path}")
 
     # Select output file
     print("\n[3/3] Select output file location...")
