@@ -287,6 +287,266 @@ class DALIVideoLoader(DALIFrameStreamer):
     pass
 
 
+class DALIChunkedStreamer:
+    """
+    Async chunked GPU streaming with queue-based prefetching:
+    - DALI loads raw uint8 frames (simple, reliable)
+    - Background thread continuously prefetches chunks into queue
+    - PyTorch does resize+normalize when accessing frames
+    - Zero lag at chunk boundaries
+    """
+
+    def __init__(self, video_path, chunk_size=500, device_id=0, image_size=1024, max_height=720):
+        import queue
+        import threading
+
+        if not HAS_DALI:
+            raise RuntimeError("DALI not installed! pip install nvidia-dali-cuda120")
+
+        self.chunk_size = chunk_size
+        self.device_id = device_id
+        self.image_size = image_size
+        self.max_height = max_height
+
+        # SAM2 normalization constants
+        self.img_mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).cuda(device_id)
+        self.img_std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).cuda(device_id)
+
+        # Convert to H.265 for GPU decoding
+        self.h265_path = self._convert_to_h265(video_path)
+
+        # Build simple DALI pipeline (raw uint8 only)
+        self._build_pipeline()
+
+        # Chunk state
+        self.current_chunk = None
+        self.current_chunk_start = -1
+
+        # Chunk cache for backward pass support (SAM2 does backward first!)
+        # Dict: chunk_start -> tensor
+        self.chunk_cache = {}
+        self.max_cached_chunks = 3  # Keep last 3 chunks in VRAM (~4GB)
+
+        # Async loading queue
+        self.load_queue = queue.Queue(maxsize=2)
+        self.stop_event = threading.Event()
+        self.loading_complete = threading.Event()
+
+        # Start background loader
+        self._start_background_loader()
+
+        chunk_mb = chunk_size * self.video_height * self.video_width * 3 / 1024**2
+        print(f"[DALI-ASYNC] {self._length} frames, {chunk_size}-frame chunks, ~{chunk_mb:.0f}MB raw per chunk")
+        print(f"[DALI-ASYNC] Background prefetcher started")
+
+    def _convert_to_h265(self, input_path):
+        """Convert video to DALI-friendly H.265 stream. Returns (path, orig_frame_count)"""
+        import tempfile
+
+        cap = cv2.VideoCapture(input_path)
+        orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        orig_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # ORIGINAL frame count (not converted!)
+        cap.release()
+
+        if orig_height > self.max_height:
+            scale = self.max_height / orig_height
+            new_width = int(orig_width * scale) // 2 * 2
+            new_height = self.max_height // 2 * 2
+        else:
+            new_width, new_height = orig_width, orig_height
+
+        self.video_height = new_height
+        self.video_width = new_width
+
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        temp_path = temp_file.name
+        temp_file.close()
+
+        cmd = [
+            'ffmpeg', '-y', '-i', input_path,
+            '-c:v', 'libx265', '-crf', '18', '-preset', 'ultrafast',
+            '-vf', f'scale={new_width}:{new_height}',
+            '-pix_fmt', 'yuv420p',
+            '-an',
+            temp_path
+        ]
+
+        print(f"[DALI-ASYNC] Converting to H.265: {orig_width}x{orig_height} -> {new_width}x{new_height}")
+        subprocess.run(cmd, capture_output=True, check=True)
+
+        size_mb = os.path.getsize(temp_path) / (1024**2)
+        print(f"[DALI-ASYNC] H.265 video: {size_mb:.1f}MB")
+
+        return temp_path
+
+    def _build_pipeline(self):
+        """Build simple DALI pipeline - raw uint8 only"""
+        cap = cv2.VideoCapture(self.h265_path)
+        self._length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+
+        @pipeline_def
+        def video_pipe():
+            video = fn.readers.video(
+                device="gpu",
+                filenames=[self.h265_path],
+                sequence_length=self.chunk_size,
+                random_shuffle=False,
+                image_type=types.RGB,
+                dtype=types.UINT8,
+                name="video_reader"
+            )
+            return video
+
+        self.pipe = video_pipe(
+            batch_size=1,
+            num_threads=4,
+            device_id=self.device_id,
+            prefetch_queue_depth=2
+        )
+        self.pipe.build()
+
+    def _start_background_loader(self):
+        """Spawn daemon thread that continuously prefetches chunks SEQUENTIALLY"""
+        import threading
+
+        def loader_worker():
+            chunk_num = 0
+            num_chunks = (self._length + self.chunk_size - 1) // self.chunk_size
+
+            # DALI reads sequentially - no reset/skip needed!
+            while not self.stop_event.is_set() and chunk_num < num_chunks:
+                chunk_start = chunk_num * self.chunk_size
+                chunk_end = min(chunk_start + self.chunk_size, self._length)
+
+                try:
+                    # Get next sequential chunk from DALI
+                    output = self.pipe.run()
+                    raw_tensor = torch.from_dlpack(output[0].as_tensor())
+                    raw_tensor = raw_tensor.squeeze(0)  # [seq, H, W, C]
+
+                    # Trim last chunk if video doesn't divide evenly
+                    actual_frames = chunk_end - chunk_start
+                    if raw_tensor.shape[0] > actual_frames:
+                        raw_tensor = raw_tensor[:actual_frames]
+
+                    # Store RAW uint8 - NO processing! (per-frame processing in __getitem__)
+                    # This makes chunk loading ~20x faster (0.3s vs 7s)
+                    self.load_queue.put((chunk_start, raw_tensor))
+                    print(f"[DALI-PREFETCH] Queued chunk {chunk_num}: frames {chunk_start}-{chunk_end-1}")
+                    chunk_num += 1
+
+                except StopIteration:
+                    print(f"[DALI-PREFETCH] DALI exhausted after {chunk_num} chunks")
+                    break
+                except Exception as e:
+                    print(f"[DALI-PREFETCH] Error at chunk {chunk_num}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    break
+
+            print(f"[DALI-PREFETCH] Loader finished ({chunk_num} chunks total)")
+
+        self._loader_thread = threading.Thread(target=loader_worker, daemon=True)
+        self._loader_thread.start()
+
+    def _get_chunk(self, chunk_start):
+        """Pull chunk from prefetch queue or cache"""
+        if chunk_start == self.current_chunk_start:
+            return
+
+        # Check cache first (for backward pass)
+        if chunk_start in self.chunk_cache:
+            self.current_chunk = self.chunk_cache[chunk_start]
+            self.current_chunk_start = chunk_start
+            actual_end = min(chunk_start + self.chunk_size - 1, self._length - 1)
+            print(f"[DALI-CACHE] Retrieved chunk {chunk_start}-{actual_end} from cache")
+            return
+
+        # Pull from prefetch queue
+        try:
+            while True:
+                queued_start, chunk = self.load_queue.get(timeout=30)
+
+                # Cache this chunk for potential backward pass
+                self.chunk_cache[queued_start] = chunk
+
+                # Evict old chunks if cache is too large
+                if len(self.chunk_cache) > self.max_cached_chunks:
+                    oldest = min(self.chunk_cache.keys())
+                    if oldest != queued_start and oldest != chunk_start:
+                        del self.chunk_cache[oldest]
+
+                if queued_start == chunk_start:
+                    break
+                elif queued_start > chunk_start:
+                    # We're behind - this shouldn't happen, but handle gracefully
+                    print(f"[DALI-ASYNC] Warning: got chunk {queued_start}, wanted {chunk_start}")
+                    # Check if wanted chunk is in cache now
+                    if chunk_start in self.chunk_cache:
+                        chunk = self.chunk_cache[chunk_start]
+                        queued_start = chunk_start
+                    break
+                # If queued_start < chunk_start, continue pulling (skip stale)
+
+            self.current_chunk = chunk
+            self.current_chunk_start = queued_start
+            actual_end = min(queued_start + self.chunk_size - 1, self._length - 1)
+            print(f"[DALI-ASYNC] Activated chunk {queued_start}-{actual_end}")
+
+        except Exception as e:
+            print(f"[DALI-ASYNC] Queue timeout for chunk {chunk_start}: {e}")
+            raise
+
+    def __getitem__(self, idx):
+        """O(1) access - chunks are prefetched as raw uint8, processed per-frame"""
+        if idx < 0 or idx >= self._length:
+            raise IndexError(f"Frame {idx} out of bounds (0-{self._length-1})")
+
+        chunk_start = (idx // self.chunk_size) * self.chunk_size
+
+        if self.current_chunk is None or chunk_start != self.current_chunk_start:
+            self._get_chunk(chunk_start)
+
+        chunk_idx = idx - self.current_chunk_start
+        frame = self.current_chunk[chunk_idx]  # [H, W, C] uint8
+
+        # Process SINGLE frame on-demand (instant on GPU - ~0.1ms)
+        frame = frame.float() / 255.0
+        frame = frame.permute(2, 0, 1).unsqueeze(0)  # [1, C, H, W]
+        frame = torch.nn.functional.interpolate(
+            frame,
+            size=(self.image_size, self.image_size),
+            mode='bilinear',
+            align_corners=False
+        )
+        frame = (frame - self.img_mean) / self.img_std
+        return frame.squeeze(0)  # [C, H, W]
+
+    def __len__(self):
+        return self._length
+
+    def cleanup(self):
+        """Stop background loader and cleanup"""
+        self.stop_event.set()
+        if hasattr(self, '_loader_thread'):
+            self._loader_thread.join(timeout=2)
+
+        # Clear chunk cache
+        if hasattr(self, 'chunk_cache'):
+            self.chunk_cache.clear()
+        self.current_chunk = None
+
+        # Clean temp H.265 file
+        if hasattr(self, 'h265_path') and os.path.exists(self.h265_path):
+            try:
+                os.unlink(self.h265_path)
+                print(f"[DALI-ASYNC] Cleaned up temp file")
+            except:
+                pass
+
+
 class RevolutionMaskCompressor:
     """
     Ultra-efficient mask compression: Delta + RLE + zlib.
@@ -606,19 +866,23 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
     return inference_state
 
 
-def init_state_dali(predictor, video_path, device="cuda", max_height=720):
+def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_size=500):
     """
-    Initialize SAM2 inference state with DALI GPU-direct streaming.
-    ZERO CPU RAM - frames load directly from disk to GPU!
+    Initialize SAM2 inference state with DALI chunked GPU streaming.
+    ZERO CPU RAM - frames load directly from disk to GPU in chunks!
+
+    Args:
+        chunk_size: Frames per chunk (500 = ~1.3GB VRAM per chunk)
     """
     from collections import OrderedDict
 
     if not HAS_DALI:
         raise RuntimeError("DALI not available! pip install nvidia-dali-cuda120")
 
-    # Create DALI streamer - converts to H.265 and streams to GPU
-    dali_streamer = DALIFrameStreamer(
+    # Create DALI CHUNKED streamer - O(1) within-chunk access, no OOM
+    dali_streamer = DALIChunkedStreamer(
         video_path,
+        chunk_size=chunk_size,
         device_id=0,
         image_size=predictor.image_size,
         max_height=max_height
