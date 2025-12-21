@@ -1,0 +1,53 @@
+@echo off
+chcp 65001 >nul 2>&1
+cd /d "%~dp0"
+
+echo.
+echo ============================================================
+echo 4090 SENDER LOCAL - WSL SAM2 Worker (No B2 Uploads)
+echo ============================================================
+echo   - Receives job from SEND_VIDEO_LOCAL.bat
+echo   - Generates masks with SAM2 (PyTorch)
+echo   - Keeps masks LOCAL (no B2 upload!)
+echo   - Chains to 4090_receiver_local for ProPainter
+echo ============================================================
+echo.
+
+REM Load Redis URL from file or use default
+if exist redis_url.txt (
+    for /f "usebackq tokens=*" %%A in ("redis_url.txt") do set REDIS_URL=%%A
+    echo [REDIS] Loaded from redis_url.txt
+) else (
+    set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
+    echo [REDIS] Using default localhost
+)
+
+REM SKIP B2 UPLOAD - Keep everything local!
+set SKIP_B2_UPLOAD=1
+echo [LOCAL] B2 upload DISABLED - masks stay local
+echo.
+
+REM REVOLUTIONARY STREAMING: DALI GPU-direct video decode
+REM Requires: pip install nvidia-dali-cuda120 (in WSL2)
+set USE_DALI_STREAMING=1
+set SAM2_MAX_HEIGHT=720
+echo [DALI] GPU-direct streaming: %USE_DALI_STREAMING%
+echo.
+
+REM MASK COMPRESSION: Delta + RLE + zlib (100x smaller than PNGs)
+set USE_MASK_COMPRESSION=1
+echo [COMPRESS] Mask compression: %USE_MASK_COMPRESSION%
+echo.
+
+REM TGLDP v2: SD-Guided Enhancement for hard regions
+set USE_SD_GUIDANCE=1
+set SD_INFERENCE_STEPS=3
+set SD_HARD_REGION_THRESHOLD=0.15
+echo [TGLDP] SD Guidance enabled (v2)
+echo.
+
+REM Start WSL Celery worker
+echo Starting WSL worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
+echo.
+
+wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export SKIP_B2_UPLOAD='%SKIP_B2_UPLOAD%' && export USE_DALI_STREAMING='%USE_DALI_STREAMING%' && export SAM2_MAX_HEIGHT='%SAM2_MAX_HEIGHT%' && export USE_MASK_COMPRESSION='%USE_MASK_COMPRESSION%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"

@@ -130,14 +130,16 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
         print(f"[WSL-SAM2] Using {len(pts)} scaled point(s): {pts}")
         masks_saved = sam2w.track_video_pytorch_only(
             temp_frames_dir, total_frames, masks_dir_wsl,
-            points=pts, labels=lbls, bbox=None, frame_idx_start=int(frame_idx)
+            points=pts, labels=lbls, bbox=None, frame_idx_start=int(frame_idx),
+            video_path=video_path_wsl  # For DALI GPU-direct streaming
         )
     elif prompt_mode == 'bbox' and bbox is not None:
         bb = [int(x * scale) for x in bbox[:4]]
         print(f"[WSL-SAM2] Using scaled bbox: {bb}")
         masks_saved = sam2w.track_video_pytorch_only(
             temp_frames_dir, total_frames, masks_dir_wsl,
-            points=None, labels=None, bbox=bb, frame_idx_start=int(frame_idx)
+            points=None, labels=None, bbox=bb, frame_idx_start=int(frame_idx),
+            video_path=video_path_wsl  # For DALI GPU-direct streaming
         )
     else:
         raise ValueError('Invalid prompt: provide points or bbox')
@@ -153,9 +155,20 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     except ImportError:
         pass
 
-    # Upload masks to B2 CDN
-    self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
-    masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
+    # Check if we should skip B2 upload (local mode)
+    SKIP_B2_UPLOAD = os.getenv('SKIP_B2_UPLOAD', '0').lower() in ('1', 'true', 'yes', 'on')
+
+    if SKIP_B2_UPLOAD:
+        # LOCAL MODE: Keep masks on disk, return local path
+        print(f"[LOCAL] Skipping B2 upload - masks stay at: {masks_dir_wsl}")
+        self.update_state(state='PROCESSING', meta={'status': 'Masks saved locally', 'progress': 90})
+        masks_url = None
+        masks_dir_result = masks_dir_wsl  # Return local path
+    else:
+        # Upload masks to B2 CDN
+        self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
+        masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
+        masks_dir_result = None  # Masks uploaded, no local path
 
     # Cleanup temporary files
     if os.path.exists(temp_frames_dir):
@@ -173,7 +186,7 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     return {
         'status': 'success',
         'masks_url': masks_url,
-        'masks_dir': None,  # No local path - use B2 URL
+        'masks_dir': masks_dir_result,  # Local path when SKIP_B2_UPLOAD=1
         'masks_saved': int(masks_saved),
         'total_frames': int(total_frames),
         'fps': float(fps),  # tracking fps (10 or full), used for expansion on Windows

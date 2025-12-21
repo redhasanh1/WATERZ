@@ -1,14 +1,15 @@
 """
-Static Mask GUI - Local Testing Tool for Watermark Removal
+Static Mask GUI LOCAL - Fully Local Pipeline (No B2 Uploads)
 
 Draw shapes on video frames to create static masks, then process with ProPainter.
-Bypasses web UI and SAM2 - sends directly to local Celery queue.
+All files stay local - no B2/CDN uploads.
 
 Usage:
-    python static_mask_gui.py
+    python static_mask_gui_local.py
 
 Requirements:
-    - 4090_receiver.bat running (ProPainter worker)
+    - 4090_sender_local.bat running (SAM2 worker with SKIP_B2_UPLOAD=1)
+    - 4090_receiver_local.bat running (ProPainter worker with B2_UPLOAD_ENABLED=0)
     - Redis running locally
 """
 
@@ -738,7 +739,7 @@ class StaticMaskGUI:
             self._process_tracked_mode(masks_dir)
 
     def _process_static_mode(self, masks_dir: str):
-        """Static mode: Generate mask locally, upload video+masks to B2, send to ProPainter"""
+        """Static mode: Generate mask locally, send directly to ProPainter (NO B2 uploads)"""
         self._set_status("Generating static mask...")
 
         # Use bitmap if available (supports erasing), otherwise generate from shapes
@@ -753,54 +754,39 @@ class StaticMaskGUI:
         if dilation > 0:
             mask = dilate_mask(mask, dilation)
 
-        # Replicate mask for ALL frames (Docker expects 1 mask per frame)
+        # Replicate mask for ALL frames
         self._set_status(f"Replicating mask for {self.total_frames} frames...")
         for i in range(self.total_frames):
             mask_path = os.path.join(masks_dir, f"{i:05d}.png")
             cv2.imwrite(mask_path, mask)
-        print(f"[STATIC] Wrote {self.total_frames} mask files (same mask replicated)")
-        self._set_status(f"Mask saved, uploading to B2...")
+        print(f"[STATIC LOCAL] Wrote {self.total_frames} mask files (same mask replicated)")
+        self._set_status(f"Masks saved locally, sending task...")
 
         def send_task():
             try:
-                import zipfile
-                import time
-                import shutil
                 from celery import Celery
 
-                # Upload video to B2 first
-                self.root.after(0, lambda: self._set_status(f"Uploading video to B2..."))
-                video_url = self._upload_video_to_b2()
-                if not video_url:
-                    raise RuntimeError("Failed to upload video to B2")
-
-                # Upload masks to B2
-                self.root.after(0, lambda: self._set_status(f"Uploading masks to B2..."))
-                masks_url = self._upload_masks_to_b2(masks_dir)
-                if not masks_url:
-                    raise RuntimeError("Failed to upload masks to B2")
-
-                self.root.after(0, lambda: self._set_status(f"Uploaded to B2, sending task..."))
+                self.root.after(0, lambda: self._set_status(f"Sending LOCAL task..."))
 
                 redis_url = self._get_redis_url()
                 celery = Celery('watermark', broker=redis_url)
 
-                # Create sam2_result with B2 URL (Docker can download it)
+                # LOCAL MODE: Use local paths directly (no B2 upload!)
                 sam2_result = {
-                    'masks_url': masks_url,
+                    'masks_dir': masks_dir,  # Local path instead of B2 URL
                     'mode': 'static'
                 }
 
-                # Send task with video URL (not local path!)
+                # Send task with LOCAL video path (not B2 URL!)
                 celery.send_task(
                     'watermark._continue_after_masks',
-                    args=[sam2_result, video_url, self.task_id, [], self.video_width, self.video_height, 0, None],
+                    args=[sam2_result, self.video_path, self.task_id, [], self.video_width, self.video_height, 0, None],
                     queue='propainter_local'
                 )
 
-                self.root.after(0, lambda: self._set_status(f"Static task submitted: {self.task_id}"))
+                self.root.after(0, lambda: self._set_status(f"Static LOCAL task submitted: {self.task_id}"))
                 self.root.after(0, lambda: messagebox.showinfo("Success",
-                    f"STATIC mode task submitted!\n\nTask ID: {self.task_id}\nVideo URL: {video_url}\nMasks URL: {masks_url}\n\nCheck Docker worker for progress."))
+                    f"STATIC LOCAL mode task submitted!\n\nTask ID: {self.task_id}\nVideo: {self.video_path}\nMasks: {masks_dir}\n\nNo B2 uploads - fully local!"))
 
             except Exception as e:
                 self.root.after(0, lambda: self._set_status(f"Error: {str(e)}"))
@@ -904,34 +890,29 @@ class StaticMaskGUI:
         return video_url
 
     def _process_tracked_mode(self, masks_dir: str):
-        """Tracked mode: Upload video to B2, send to SAM2 → ProPainter chain"""
+        """Tracked mode LOCAL: Send local video to SAM2 → ProPainter chain (NO B2 uploads)"""
         bbox = self._shapes_to_bbox()
         if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
             messagebox.showerror("Error", "Invalid bounding box from shapes")
             return
 
-        self._set_status(f"Uploading video to B2 for tracking... bbox={bbox}")
+        self._set_status(f"Sending LOCAL video for tracking... bbox={bbox}")
 
         def send_task():
             try:
                 from celery import Celery, chain, signature
 
-                # Upload video to B2 first (Docker can't access local Windows paths!)
-                self.root.after(0, lambda: self._set_status(f"Uploading video to B2..."))
-                video_url = self._upload_video_to_b2()
-                if not video_url:
-                    raise RuntimeError("Failed to upload video to B2")
-
-                self.root.after(0, lambda: self._set_status(f"Sending to SAM2 for tracking..."))
+                self.root.after(0, lambda: self._set_status(f"Sending to SAM2 LOCAL (no upload)..."))
 
                 redis_url = self._get_redis_url()
                 celery = Celery('watermark', broker=redis_url)
 
-                # SAM2 generates masks -> chain to ProPainter (both on _local queues)
-                docker_masks_dir = f"/tmp/{self.task_id}_sam2_masks"
+                # LOCAL MODE: Use local paths directly
+                # WSL can access Windows paths via /mnt/d/...
+                # masks_dir is already a Windows path like D:\watermarkz\temp\xxx_masks
                 s1 = signature(
                     'sam2.generate_masks_fullfps',
-                    args=[video_url, docker_masks_dir],
+                    args=[self.video_path, masks_dir],  # Local paths!
                     kwargs={
                         'prompt_mode': 'bbox',
                         'bbox': list(bbox),
@@ -942,14 +923,14 @@ class StaticMaskGUI:
                 )
                 s2 = signature(
                     'watermark._continue_after_masks',
-                    args=[video_url, self.task_id, [], self.video_width, self.video_height, self.current_frame_idx, None],
+                    args=[self.video_path, self.task_id, [], self.video_width, self.video_height, self.current_frame_idx, None],
                     queue='propainter_local'
                 )
                 chain(s1, s2).apply_async(task_id=self.task_id)
 
-                self.root.after(0, lambda: self._set_status(f"Tracked task submitted: {self.task_id}"))
+                self.root.after(0, lambda: self._set_status(f"Tracked LOCAL task submitted: {self.task_id}"))
                 self.root.after(0, lambda: messagebox.showinfo("Success",
-                    f"TRACKED mode task submitted!\n\nTask ID: {self.task_id}\nVideo URL: {video_url}\nBBox: {bbox}\nFrame: {self.current_frame_idx}\n\nSAM2 will track object and upload masks to B2."))
+                    f"TRACKED LOCAL mode task submitted!\n\nTask ID: {self.task_id}\nVideo: {self.video_path}\nMasks: {masks_dir}\nBBox: {bbox}\nFrame: {self.current_frame_idx}\n\nNo B2 uploads - fully local!"))
 
             except Exception as e:
                 self.root.after(0, lambda: self._set_status(f"Error: {str(e)}"))
