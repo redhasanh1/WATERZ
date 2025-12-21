@@ -32,72 +32,6 @@ def _decompress_int8(compressed, device):
     return data * scale
 
 
-# ============================================================================
-# EFFICIENT FRAME PRUNING (EFP) - Select diverse frames for memory attention
-# ============================================================================
-USE_EFP = True  # Toggle Efficient Frame Pruning
-
-def _select_diverse_frames(output_dict, current_features, num_frames, device):
-    """
-    Select most diverse frames for memory attention (EFP from SurgSAM2).
-
-    Instead of using last N frames (which may be redundant),
-    select N most diverse frames based on cosine similarity.
-
-    Returns: List of (t_pos, frame_output) tuples sorted by diversity
-    """
-    non_cond_outputs = output_dict.get("non_cond_frame_outputs", {})
-    if not non_cond_outputs:
-        return []
-
-    # Get current frame features for comparison
-    if _is_int8_compressed(current_features):
-        current_flat = _decompress_int8(current_features, device).flatten().float()
-    else:
-        current_flat = current_features.flatten().float()
-
-    # Score each frame by diversity (1 - similarity to current)
-    scored_frames = []
-    for frame_idx, out in non_cond_outputs.items():
-        if out is None:
-            continue
-        maskmem = out.get("maskmem_features")
-        if maskmem is None:
-            continue
-
-        # Get features
-        if _is_int8_compressed(maskmem):
-            frame_flat = _decompress_int8(maskmem, device).flatten().float()
-        else:
-            frame_flat = maskmem.to(device).flatten().float()
-
-        # Cosine similarity
-        sim = F.cosine_similarity(
-            current_flat.unsqueeze(0),
-            frame_flat.unsqueeze(0),
-            dim=1
-        ).item()
-
-        # Diversity = 1 - similarity (higher = more diverse = better)
-        diversity = 1.0 - sim
-        scored_frames.append((frame_idx, out, diversity))
-
-    # Sort by diversity (highest first)
-    scored_frames.sort(key=lambda x: x[2], reverse=True)
-
-    # Take top (num_frames - 1) most diverse frames
-    # (num_frames includes cond frames, so we take num_frames - 1 non-cond)
-    selected = scored_frames[:num_frames - 1]
-
-    # Convert to (t_pos, out) format - t_pos is just index for temporal encoding
-    result = []
-    for i, (frame_idx, out, diversity) in enumerate(selected):
-        t_pos = i + 1  # t_pos 0 is reserved for cond frames
-        result.append((t_pos, out))
-
-    return result
-
-
 class SAM2Base(torch.nn.Module):
     def __init__(
         self,
@@ -610,62 +544,41 @@ class SAM2Base(torch.nn.Module):
                 frame_idx, cond_outputs, self.max_cond_frames_in_attn
             )
             t_pos_and_prevs = [(0, out) for out in selected_cond_outputs.values()]
-
-            # EFP: Select diverse frames instead of just recent frames
-            # Result: +2.2% IoU, 3x FPS (SurgSAM2)
-            use_efp_this_step = USE_EFP and not self.training
-            efp_success = False
-
-            if use_efp_this_step:
-                # Get first cond frame features for diversity comparison
-                first_cond_out = next(iter(selected_cond_outputs.values()), None)
-                if first_cond_out is not None and first_cond_out.get("maskmem_features") is not None:
-                    diverse_frames = _select_diverse_frames(
-                        output_dict,
-                        first_cond_out["maskmem_features"],
-                        self.num_maskmem,
-                        device
-                    )
-                    if diverse_frames:
-                        t_pos_and_prevs.extend(diverse_frames)
-                        efp_success = True
-
-            # Standard selection: Add last (self.num_maskmem - 1) frames before current frame
-            if not efp_success:
-                # the earliest one has t_pos=1 and the latest one has t_pos=self.num_maskmem-1
-                # We also allow taking the memory frame non-consecutively (with stride>1), in which case
-                # we take (self.num_maskmem - 2) frames among every stride-th frames plus the last frame.
-                stride = 1 if self.training else self.memory_temporal_stride_for_eval
-                for t_pos in range(1, self.num_maskmem):
-                    t_rel = self.num_maskmem - t_pos  # how many frames before current frame
-                    if t_rel == 1:
-                        # for t_rel == 1, we take the last frame (regardless of r)
-                        if not track_in_reverse:
-                            # the frame immediately before this frame (i.e. frame_idx - 1)
-                            prev_frame_idx = frame_idx - t_rel
-                        else:
-                            # the frame immediately after this frame (i.e. frame_idx + 1)
-                            prev_frame_idx = frame_idx + t_rel
+            # Add last (self.num_maskmem - 1) frames before current frame
+            # the earliest one has t_pos=1 and the latest one has t_pos=self.num_maskmem-1
+            # We also allow taking the memory frame non-consecutively (with stride>1), in which case
+            # we take (self.num_maskmem - 2) frames among every stride-th frames plus the last frame.
+            stride = 1 if self.training else self.memory_temporal_stride_for_eval
+            for t_pos in range(1, self.num_maskmem):
+                t_rel = self.num_maskmem - t_pos  # how many frames before current frame
+                if t_rel == 1:
+                    # for t_rel == 1, we take the last frame (regardless of r)
+                    if not track_in_reverse:
+                        # the frame immediately before this frame (i.e. frame_idx - 1)
+                        prev_frame_idx = frame_idx - t_rel
                     else:
-                        # for t_rel >= 2, we take the memory frame from every r-th frames
-                        if not track_in_reverse:
-                            # first find the nearest frame among every r-th frames before this frame
-                            # for r=1, this would be (frame_idx - 2)
-                            prev_frame_idx = ((frame_idx - 2) // stride) * stride
-                            # then seek further among every r-th frames
-                            prev_frame_idx = prev_frame_idx - (t_rel - 2) * stride
-                        else:
-                            # first find the nearest frame among every r-th frames after this frame
-                            # for r=1, this would be (frame_idx + 2)
-                            prev_frame_idx = -(-(frame_idx + 2) // stride) * stride
-                            # then seek further among every r-th frames
-                            prev_frame_idx = prev_frame_idx + (t_rel - 2) * stride
-                    out = output_dict["non_cond_frame_outputs"].get(prev_frame_idx, None)
-                    if out is None:
-                        # If an unselected conditioning frame is among the last (self.num_maskmem - 1)
-                        # frames, we still attend to it as if it's a non-conditioning frame.
-                        out = unselected_cond_outputs.get(prev_frame_idx, None)
-                    t_pos_and_prevs.append((t_pos, out))
+                        # the frame immediately after this frame (i.e. frame_idx + 1)
+                        prev_frame_idx = frame_idx + t_rel
+                else:
+                    # for t_rel >= 2, we take the memory frame from every r-th frames
+                    if not track_in_reverse:
+                        # first find the nearest frame among every r-th frames before this frame
+                        # for r=1, this would be (frame_idx - 2)
+                        prev_frame_idx = ((frame_idx - 2) // stride) * stride
+                        # then seek further among every r-th frames
+                        prev_frame_idx = prev_frame_idx - (t_rel - 2) * stride
+                    else:
+                        # first find the nearest frame among every r-th frames after this frame
+                        # for r=1, this would be (frame_idx + 2)
+                        prev_frame_idx = -(-(frame_idx + 2) // stride) * stride
+                        # then seek further among every r-th frames
+                        prev_frame_idx = prev_frame_idx + (t_rel - 2) * stride
+                out = output_dict["non_cond_frame_outputs"].get(prev_frame_idx, None)
+                if out is None:
+                    # If an unselected conditioning frame is among the last (self.num_maskmem - 1)
+                    # frames, we still attend to it as if it's a non-conditioning frame.
+                    out = unselected_cond_outputs.get(prev_frame_idx, None)
+                t_pos_and_prevs.append((t_pos, out))
 
             for t_pos, prev in t_pos_and_prevs:
                 if prev is None:

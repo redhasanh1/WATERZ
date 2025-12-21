@@ -55,114 +55,6 @@ def _is_int8_compressed(data):
     return isinstance(data, dict) and data.get("quant") == "int8"
 
 
-# ============================================================================
-# EFFICIENT FRAME PRUNING (EFP) - From SurgSAM2
-# Keep diverse frames instead of just recent ones = 3x speed + better quality
-# ============================================================================
-USE_EFP = True  # Toggle Efficient Frame Pruning
-EFP_MAX_FRAMES = 7  # Max frames to keep in memory
-
-class EfficientFrameMemory:
-    """
-    Efficient Frame Pruning from SurgSAM2.
-
-    Instead of keeping last N frames (which may be redundant),
-    keep the N most diverse/informative frames based on cosine similarity.
-
-    Result: +2.2% IoU, 3x FPS, 67% less memory (SurgSAM2 Table 1)
-    """
-
-    def __init__(self, max_frames=EFP_MAX_FRAMES):
-        self.max_frames = max_frames
-        self.memory_bank = []  # List of frame entries
-
-    def add_frame(self, frame_idx, features, is_cond_frame=False):
-        """
-        Add frame to memory bank with diversity scoring.
-
-        Args:
-            frame_idx: Frame index in video
-            features: maskmem_features tensor (may be INT8 compressed)
-            is_cond_frame: If True, always keep (user clicked frame)
-
-        Returns:
-            List of frame indices to keep
-        """
-        # Get features for similarity calculation
-        if _is_int8_compressed(features):
-            feat_tensor = _decompress_int8(features, features["data"].device)
-        else:
-            feat_tensor = features
-
-        # Compute diversity score (1 - max similarity to existing frames)
-        if len(self.memory_bank) > 0:
-            flat_new = feat_tensor.flatten().float()
-
-            max_sim = 0.0
-            for entry in self.memory_bank:
-                entry_feat = entry['features']
-                if _is_int8_compressed(entry_feat):
-                    entry_tensor = _decompress_int8(entry_feat, entry_feat["data"].device)
-                else:
-                    entry_tensor = entry_feat
-
-                flat_entry = entry_tensor.flatten().float()
-
-                # Cosine similarity
-                sim = F.cosine_similarity(
-                    flat_new.unsqueeze(0),
-                    flat_entry.unsqueeze(0),
-                    dim=1
-                ).item()
-                max_sim = max(max_sim, sim)
-
-            # Diversity = 1 - max similarity (0=identical, 1=unique)
-            diversity_score = 1.0 - max_sim
-        else:
-            diversity_score = 1.0  # First frame is maximally diverse
-
-        # Add new frame
-        self.memory_bank.append({
-            'frame_idx': frame_idx,
-            'features': features,  # Keep original (possibly INT8)
-            'diversity_score': diversity_score,
-            'is_cond_frame': is_cond_frame
-        })
-
-        # Prune if over capacity
-        if len(self.memory_bank) > self.max_frames:
-            self._prune_redundant()
-
-        # Return kept frame indices
-        return [entry['frame_idx'] for entry in self.memory_bank]
-
-    def _prune_redundant(self):
-        """Remove most redundant frame (lowest diversity, not cond frame)."""
-        # Never remove conditioning frames (user clicks)
-        cond_frames = [e for e in self.memory_bank if e['is_cond_frame']]
-        other_frames = [e for e in self.memory_bank if not e['is_cond_frame']]
-
-        if len(other_frames) == 0:
-            return  # Only cond frames, can't prune
-
-        # Sort by diversity (ascending = most redundant first)
-        other_frames.sort(key=lambda x: x['diversity_score'])
-
-        # Remove the most redundant frame
-        other_frames.pop(0)
-
-        # Rebuild memory bank
-        self.memory_bank = cond_frames + other_frames
-
-    def get_kept_indices(self):
-        """Get list of frame indices currently in memory."""
-        return [entry['frame_idx'] for entry in self.memory_bank]
-
-    def clear(self):
-        """Clear memory bank."""
-        self.memory_bank = []
-
-
 class SAM2VideoPredictor(SAM2Base):
     """The predictor class to handle user interactions and manage inference states."""
 
@@ -184,9 +76,6 @@ class SAM2VideoPredictor(SAM2Base):
         self.non_overlap_masks = non_overlap_masks
         self.clear_non_cond_mem_around_input = clear_non_cond_mem_around_input
         self.add_all_frames_to_correct_as_cond = add_all_frames_to_correct_as_cond
-        # EFP: Efficient Frame Pruning for 3x speed + better quality
-        if USE_EFP:
-            self.ef_memory = EfficientFrameMemory(max_frames=EFP_MAX_FRAMES)
 
     @torch.inference_mode()
     def init_state(
