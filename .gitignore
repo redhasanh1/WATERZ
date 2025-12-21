@@ -198,7 +198,6 @@ faster-propainter-main/weights/
 faster-propainter-main/models/
 weights/*.lock
 weights/*.ts
-segment-anything-2/
 pure_trt_masks/
 *.png
 *.mp4
