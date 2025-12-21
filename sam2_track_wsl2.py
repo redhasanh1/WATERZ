@@ -1279,16 +1279,18 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                     else:
                         print(f"\n[SAM2-Forward] Propagating frames 0 -> {actual_frames - 1} ({forward_frames} frames)")
 
-                    for frame_idx, obj_ids, mask_logits in tqdm(
-                        predictor.propagate_in_video(
-                            inference_state,
-                            start_frame_idx=frame_idx_start,
-                            max_frame_num_to_track=forward_frames,
-                            reverse=False
-                        ),
-                        total=forward_frames,
-                        desc="Forward"
-                    ):
+                    # SAM2Long returns (obj_ids, mask_list) instead of yielding per-frame
+                    obj_ids, mask_list = predictor.propagate_in_video(
+                        inference_state,
+                        start_frame_idx=frame_idx_start,
+                        max_frame_num_to_track=forward_frames,
+                        reverse=False
+                    )
+
+                    # Save masks - mask_list[i] corresponds to frame (start_frame_idx + i)
+                    for i, mask_logits in enumerate(tqdm(mask_list, desc="Forward")):
+                        frame_idx = frame_idx_start + i
+
                         # Skip click frame if already saved by backward
                         if frame_idx_start > 0 and frame_idx == frame_idx_start:
                             continue
