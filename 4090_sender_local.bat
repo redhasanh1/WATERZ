@@ -46,6 +46,12 @@ set SD_HARD_REGION_THRESHOLD=0.15
 echo [TGLDP] SD Guidance enabled (v2)
 echo.
 
+REM PURGE OLD JOBS - Start fresh!
+echo [PURGE] Clearing old jobs from queues...
+wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && celery -A wsl_sam2_worker purge -Q wsl_sam2_local,wsl_yolo_local -f"
+echo [PURGE] Done - queues cleared!
+echo.
+
 REM Start WSL Celery worker
 echo Starting WSL worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
 echo.
