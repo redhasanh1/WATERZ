@@ -1307,7 +1307,10 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                                         tqdm.write(f"[ReID] DRIFT at frame {frame_idx} (sim={similarity:.3f})")
 
                                         # AUTO-CORRECTION: Find object and re-prompt SAM2
-                                        new_point, search_sim = reid_verifier.find_object_in_frame(frame_bgr)
+                                        # Pass current mask as hint to search around it first
+                                        new_point, search_sim = reid_verifier.find_object_in_frame(
+                                            frame_bgr, mask_hint=mask_uint8
+                                        )
 
                                         if new_point is not None:
                                             tqdm.write(f"[ReID] RE-DETECTING at {new_point} (search_sim={search_sim:.3f})")

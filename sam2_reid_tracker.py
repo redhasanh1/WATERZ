@@ -276,16 +276,18 @@ class ReIDVerifier:
         self.reference_embedding = None
         self.similarity_history = []
 
-    def find_object_in_frame(self, frame, grid_size=8, min_similarity=0.25):
+    def find_object_in_frame(self, frame, mask_hint=None, grid_size=8, min_similarity=0.25):
         """
         Find where reference object is in frame using DINOv2 visual search.
 
-        When drift is detected, use this to locate the original object
-        and get coordinates for re-prompting SAM2.
+        Uses two-phase search:
+        1. If mask_hint provided, search around mask centroid at multiple scales
+        2. Fall back to global grid search if local search fails
 
         Args:
             frame: BGR image
-            grid_size: Grid density for patch sampling (8 = 64 patches)
+            mask_hint: Current (possibly drifted) mask to guide search
+            grid_size: Grid density for global fallback (8 = 64 patches)
             min_similarity: Minimum similarity to consider a match
 
         Returns:
@@ -295,20 +297,58 @@ class ReIDVerifier:
             return None, 0.0
 
         H, W = frame.shape[:2]
-        patch_size = min(H, W) // grid_size  # Adaptive patch size
+        base_patch_size = min(H, W) // grid_size
 
         best_sim = -1.0
         best_point = None
 
         with torch.no_grad():
+            # PHASE 1: Search around mask hint (if provided)
+            if mask_hint is not None and np.sum(mask_hint) > 100:
+                coords = np.argwhere(mask_hint > 127)
+                if len(coords) > 0:
+                    cy, cx = coords.mean(axis=0).astype(int)
+
+                    # Search 3x3 grid around centroid at multiple scales
+                    for scale in [0.5, 1.0, 1.5, 2.0]:
+                        patch_size = int(base_patch_size * scale)
+                        half = patch_size // 2
+
+                        for dy in [-1, 0, 1]:
+                            for dx in [-1, 0, 1]:
+                                py = int(cy + dy * patch_size // 2)
+                                px = int(cx + dx * patch_size // 2)
+
+                                # Extract patch
+                                x1 = max(0, px - half)
+                                y1 = max(0, py - half)
+                                x2 = min(W, px + half)
+                                y2 = min(H, py + half)
+
+                                patch = frame[y1:y2, x1:x2]
+                                if patch.shape[0] < MIN_CROP_SIZE or patch.shape[1] < MIN_CROP_SIZE:
+                                    continue
+
+                                embedding = self._get_embedding(patch)
+                                if embedding is None:
+                                    continue
+
+                                sim = torch.dot(self.reference_embedding, embedding).item()
+                                if sim > best_sim:
+                                    best_sim = sim
+                                    best_point = (px, py)
+
+                    # If local search found good match, return early
+                    if best_sim >= min_similarity:
+                        return best_point, best_sim
+
+            # PHASE 2: Global grid search (fallback)
             for i in range(grid_size):
                 for j in range(grid_size):
-                    # Center of each grid cell
                     cx = int((j + 0.5) * W / grid_size)
                     cy = int((i + 0.5) * H / grid_size)
 
-                    # Extract patch centered at (cx, cy)
-                    half = patch_size // 2
+                    half = base_patch_size // 2
                     x1 = max(0, cx - half)
                     y1 = max(0, cy - half)
                     x2 = min(W, cx + half)
