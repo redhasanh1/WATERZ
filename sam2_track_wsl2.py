@@ -1293,6 +1293,47 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                             mask_uint8[:] = 0
 
                         # ============================================================
+                        # VELOCITY CHECK - Simple: find closest to predicted
+                        # ============================================================
+                        if reid_verifier is not None:
+                            new_centroid = None
+                            if np.sum(mask_uint8 > 127) >= 100:
+                                new_centroid = reid_verifier.get_mask_centroid(mask_uint8)
+
+                            predicted = reid_verifier.predict_next_position()
+
+                            # Initialize expanding radius
+                            if not hasattr(reid_verifier, 'search_radius'):
+                                reid_verifier.search_radius = 80
+
+                            if new_centroid is not None:
+                                if predicted is not None:
+                                    # Check distance from predicted
+                                    dist = np.sqrt((new_centroid[0] - predicted[0])**2 +
+                                                  (new_centroid[1] - predicted[1])**2)
+
+                                    if dist <= reid_verifier.search_radius:
+                                        # ACCEPT - within radius
+                                        tqdm.write(f"[VELOCITY] Frame {frame_idx}: OK dist={dist:.0f}px (radius={reid_verifier.search_radius:.0f})")
+                                        reid_verifier.update_velocity(new_centroid)
+                                        reid_verifier.search_radius = 80  # reset
+                                    else:
+                                        # TOO FAR - expand radius for next frame, zero THIS mask
+                                        tqdm.write(f"[VELOCITY] Frame {frame_idx}: {dist:.0f}px > radius {reid_verifier.search_radius:.0f}, expanding to {reid_verifier.search_radius + 20:.0f}")
+                                        reid_verifier.search_radius += 20  # expand more aggressively
+                                        mask_uint8[:] = 0  # zero this frame
+                                        # DON'T update velocity - keep last known good
+                                else:
+                                    # No prediction yet (first frames) - just accept and build velocity
+                                    reid_verifier.update_velocity(new_centroid)
+                                    reid_verifier.search_radius = 80
+                            else:
+                                # No detection at all - expand radius for next frame
+                                if predicted is not None:
+                                    tqdm.write(f"[VELOCITY] Frame {frame_idx}: no detection, radius -> {reid_verifier.search_radius + 20:.0f}")
+                                    reid_verifier.search_radius += 20
+
+                        # ============================================================
                         # ReID VERIFICATION - Detect and AUTO-CORRECT drift
                         # ============================================================
                         if reid_verifier is not None and reid_cap is not None:
