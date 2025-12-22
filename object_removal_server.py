@@ -42,7 +42,7 @@ for d in [UPLOAD_DIR, MASKS_DIR, OUTPUT_DIR, RESULTS_DIR]:
 jobs = {}  # job_id -> {status, progress, message, result_path, ...}
 
 # Allowed video extensions
-ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm'}
+ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv', 'mpeg', 'mpg', '3gp', 'm4v', 'ts', 'ogv', 'mts', 'm2ts'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -168,11 +168,20 @@ def select_object():
 
 
 # ============================================================
-# Track full video
+# Track full video (via Celery queue)
 # ============================================================
+def get_celery():
+    """Get Celery app instance"""
+    from celery import Celery
+    redis_url = 'redis://:watermarkz_secure_2024@localhost:6379/0'
+    if os.path.exists('redis_url.txt'):
+        with open('redis_url.txt', 'r') as f:
+            redis_url = f.read().strip()
+    return Celery('watermark', broker=redis_url, backend=redis_url)
+
 @app.route('/api/object-removal/track', methods=['POST'])
 def track_video():
-    """Start full video tracking with SAM2"""
+    """Start full video tracking with SAM2 via Celery queue"""
     data = request.json
     job_id = data.get('job_id')
 
@@ -187,95 +196,112 @@ def track_video():
     # Update status
     job['status'] = 'tracking'
     job['progress'] = 0
-    job['message'] = 'Starting tracking...'
+    job['message'] = 'Submitting to SAM2 worker...'
 
     # Create masks directory
     masks_dir = MASKS_DIR / f"tracked_{job_id}"
     masks_dir.mkdir(exist_ok=True)
     job['masks_dir'] = str(masks_dir)
 
-    # Start tracking in background thread
-    def run_tracking():
-        try:
-            video_path = job['video_path']
-            points = job['points']
-            frame_idx = job.get('frame_index', 0)
+    try:
+        from celery import signature
 
-            # Convert to WSL path
-            wsl_video = video_path.replace('D:\\', '/mnt/d/').replace('\\', '/')
-            wsl_masks = str(masks_dir).replace('D:\\', '/mnt/d/').replace('\\', '/')
+        video_path = job['video_path']
+        points = job['points']
+        frame_idx = job.get('frame_index', 0)
 
-            # Build points argument
-            points_str = ' '.join([f"--point {p['x']},{p['y']}" for p in points])
+        # Convert points to list of (x, y) tuples
+        point_coords = [(p['x'], p['y']) for p in points]
+        labels = [p.get('label', 1) for p in points]
 
-            # Run SAM2 tracking via WSL
-            cmd = f'wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && python sam2_track_wsl2.py \\"{wsl_video}\\" {points_str} \\"{wsl_masks}\\" --frame {frame_idx}"'
+        celery = get_celery()
 
-            print(f"[TRACK] Running: {cmd}")
-            job['message'] = 'Tracking object...'
+        # Submit to wsl_sam2_local queue (same as static_mask_gui_local.py)
+        s1 = signature(
+            'sam2.generate_masks_fullfps',
+            args=[video_path, str(masks_dir)],
+            kwargs={
+                'prompt_mode': 'point',
+                'points': point_coords,
+                'labels': labels,
+                'frame_idx': frame_idx,
+                'api_base': None
+            },
+            queue='wsl_sam2_local'
+        )
 
-            process = subprocess.Popen(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',
-                errors='replace'  # Replace undecodable chars instead of crashing
-            )
+        # Generate a unique task ID
+        task_id = f"objrem_{job_id}"
+        result = s1.apply_async(task_id=task_id)
 
-            # Monitor progress
-            for line in process.stdout:
-                print(f"[SAM2] {line.strip()}")
-                # Parse progress from output
-                if 'Forward' in line and '%' in line:
-                    try:
-                        pct = int(line.split('%')[0].split()[-1])
-                        job['progress'] = pct
-                    except:
-                        pass
+        job['celery_task_id'] = task_id
+        job['message'] = 'Tracking in progress...'
 
-            process.wait()
+        print(f"[TRACK] Submitted Celery task {task_id} for job {job_id}")
+        print(f"[TRACK] Points: {point_coords}, Frame: {frame_idx}")
 
-            if process.returncode == 0:
-                job['status'] = 'completed'  # Frontend expects 'completed'
-                job['progress'] = 100
-                job['message'] = 'Tracking complete!'
-                print(f"[TRACK] Job {job_id} complete")
-            else:
-                job['status'] = 'error'
-                job['message'] = 'Tracking failed'
+        return jsonify({
+            'status': 'success',
+            'message': 'Tracking started via Celery',
+            'job_id': job_id,
+            'task_id': task_id
+        })
 
-        except Exception as e:
-            print(f"[TRACK] Error: {e}")
-            import traceback
-            traceback.print_exc()
-            job['status'] = 'error'
-            job['message'] = str(e)
-
-    thread = threading.Thread(target=run_tracking, daemon=True)
-    thread.start()
-
-    return jsonify({
-        'status': 'success',
-        'message': 'Tracking started',
-        'job_id': job_id
-    })
+    except Exception as e:
+        print(f"[TRACK] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        job['status'] = 'error'
+        job['message'] = str(e)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 # ============================================================
-# Check job status
+# Check job status (polls Celery AsyncResult)
 # ============================================================
 @app.route('/api/object-removal/status/<job_id>')
 def get_status(job_id):
-    """Get job status and progress"""
+    """Get job status and progress from Celery task"""
     if job_id not in jobs:
         return jsonify({'status': 'error', 'message': 'Job not found'}), 404
 
     job = jobs[job_id]
+    total_frames = job.get('frame_count', 0)
+
+    # If we have a Celery task, poll its status
+    celery_task_id = job.get('celery_task_id')
+    if celery_task_id and job.get('status') == 'tracking':
+        try:
+            from celery.result import AsyncResult
+            celery = get_celery()
+            result = AsyncResult(celery_task_id, app=celery)
+
+            if result.ready():
+                # Task completed
+                if result.successful():
+                    job['status'] = 'completed'
+                    job['progress'] = 100
+                    job['message'] = 'Tracking complete!'
+                    print(f"[STATUS] Task {celery_task_id} completed successfully")
+                else:
+                    job['status'] = 'error'
+                    job['message'] = str(result.result) if result.result else 'Task failed'
+                    print(f"[STATUS] Task {celery_task_id} failed: {result.result}")
+            elif result.state == 'PROCESSING':
+                # Task in progress - get meta info
+                meta = result.info or {}
+                job['progress'] = meta.get('progress', 0)
+                job['message'] = meta.get('status', 'Processing...')
+            elif result.state == 'PENDING':
+                job['message'] = 'Waiting for worker...'
+            elif result.state == 'FAILURE':
+                job['status'] = 'error'
+                job['message'] = str(result.result) if result.result else 'Task failed'
+
+        except Exception as e:
+            print(f"[STATUS] Celery poll error: {e}")
 
     # Calculate current frame from progress
-    total_frames = job.get('frame_count', 0)
     progress = job.get('progress', 0)
     current_frame = int(total_frames * progress / 100) if total_frames > 0 else 0
 

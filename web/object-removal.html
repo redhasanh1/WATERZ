@@ -1032,9 +1032,9 @@
         });
 
         async function handleFile(file) {
-            const validTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
-            if (!validTypes.includes(file.type)) {
-                alert('Please upload a video file (MP4, MOV, or WebM)');
+            // Accept any video type - browsers report MIME types differently
+            if (!file.type.startsWith('video/')) {
+                alert('Please upload a video file (MP4, MOV, WebM, MKV, WMV, etc.)');
                 return;
             }
 
@@ -1083,7 +1083,9 @@
 
             } catch (error) {
                 console.error('Upload error:', error);
-                alert('Upload failed: ' + error.message);
+                // More descriptive error for debugging
+                const errorMsg = error.message || 'Unknown error';
+                alert('Upload failed: ' + errorMsg + '\n\nPlease check that the server is running and try again.');
                 // Reset upload area
                 uploadArea.innerHTML = `
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
