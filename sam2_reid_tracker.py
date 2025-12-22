@@ -446,8 +446,8 @@ def get_user_click_for_recovery(frame_bgr, frame_idx, previous_mask=None):
     try:
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     except cv2.error as e:
-        print(f"[ReID] GUI unavailable ({e}), skipping user input")
-        return None
+        print(f"[ReID] Native GUI unavailable, trying Windows helper...")
+        return get_user_click_via_windows_helper(frame_bgr, frame_idx)
 
     cv2.setMouseCallback(window_name, mouse_callback)
     cv2.imshow(window_name, display)
@@ -466,6 +466,88 @@ def get_user_click_for_recovery(frame_bgr, frame_idx, previous_mask=None):
     cv2.destroyWindow(window_name)
     cv2.waitKey(1)  # Flush events
     return click_point
+
+
+def get_user_click_via_windows_helper(frame_bgr, frame_idx, timeout=120):
+    """
+    Fallback for WSL2/headless: Save frame and signal, wait for Windows helper.
+
+    The Windows helper script (recovery_gui_windows.py) watches for the signal
+    file, shows the frame in a Windows GUI, and writes the click response.
+
+    Args:
+        frame_bgr: Frame to save for display
+        frame_idx: Frame number for logging
+        timeout: Max seconds to wait for user click (default 120)
+
+    Returns:
+        (x, y) tuple if user clicked, None if timeout/skipped
+    """
+    import json
+    import time
+    import os
+
+    # File paths for communication (must match recovery_gui_windows.py)
+    SIGNAL_FILE = "/mnt/d/watermarkz/recovery_signal.json"
+    RESPONSE_FILE = "/mnt/d/watermarkz/recovery_response.json"
+    FRAME_FILE = "/mnt/d/watermarkz/recovery_frame.jpg"
+
+    # Cleanup any stale files
+    for f in [SIGNAL_FILE, RESPONSE_FILE]:
+        if os.path.exists(f):
+            try:
+                os.remove(f)
+            except:
+                pass
+
+    # Save frame for Windows helper to display
+    cv2.imwrite(FRAME_FILE, frame_bgr)
+
+    # Write signal to trigger Windows helper
+    with open(SIGNAL_FILE, 'w') as f:
+        json.dump({"status": "waiting", "frame_idx": frame_idx}, f)
+
+    print(f"[ReID] Waiting for Windows GUI click (timeout={timeout}s)...")
+    print(f"[ReID] Run 'python recovery_gui_windows.py' on Windows if not running")
+
+    # Wait for response
+    start = time.time()
+    while time.time() - start < timeout:
+        if os.path.exists(RESPONSE_FILE):
+            try:
+                with open(RESPONSE_FILE, 'r') as f:
+                    response = json.load(f)
+
+                # Cleanup
+                os.remove(RESPONSE_FILE)
+                if os.path.exists(SIGNAL_FILE):
+                    os.remove(SIGNAL_FILE)
+                if os.path.exists(FRAME_FILE):
+                    os.remove(FRAME_FILE)
+
+                click = response.get("click")
+                if click:
+                    print(f"[ReID] Got click from Windows: {click}")
+                    return tuple(click)
+                else:
+                    print("[ReID] User skipped via Windows GUI")
+                    return None
+
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"[ReID] Error reading response: {e}")
+                return None
+
+        time.sleep(0.2)
+
+    print("[ReID] Timeout waiting for Windows GUI click")
+    # Cleanup
+    for f in [SIGNAL_FILE, RESPONSE_FILE, FRAME_FILE]:
+        if os.path.exists(f):
+            try:
+                os.remove(f)
+            except:
+                pass
+    return None
 
 
 def integrate_reid_verification(
