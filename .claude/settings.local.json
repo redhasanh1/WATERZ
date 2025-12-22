@@ -158,7 +158,13 @@
       "Bash(docker run:*)",
       "Bash(git reset:*)",
       "Bash(powershell -Command \"Get-Item ''web\\\\js\\\\mask_drawer.js'',''static_mask_generator.py'',''GENERATE_STATIC_MASK.bat'' | Select-Object Name,Length\")",
-      "Bash(ffmpeg:*)"
+      "Bash(ffmpeg:*)",
+      "Bash(cmd.exe /c \"D:\\\\watermarkz\\\\propainter_env\\\\Scripts\\\\python.exe D:\\\\watermarkz\\\\sam2_track_wsl2.py D:\\\\watermarkz\\\\test_3sec_16fps.mp4 --point 400,300 D:\\\\watermarkz\\\\test_8x_compression\")",
+      "Bash(powershell.exe -Command \"D:\\\\watermarkz\\\\propainter_env\\\\Scripts\\\\python.exe D:\\\\watermarkz\\\\sam2_track_wsl2.py D:\\\\watermarkz\\\\test_3sec_16fps.mp4 --point 400,300 D:\\\\watermarkz\\\\test_8x_compression\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem -Path D:\\\\watermarkz -Filter ''python.exe'' -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName\")",
+      "WebFetch(domain:runwayml.com)",
+      "Bash(ffprobe:*)",
+      "Bash(powershell -Command \"Get-ChildItem ''D:\\\\watermarkz\\\\temp_masks\\\\tracked_ce4733ca\\\\*.png'' | Select-Object -Last 20 Name\")"
     ],
     "deny": [],
     "ask": []
