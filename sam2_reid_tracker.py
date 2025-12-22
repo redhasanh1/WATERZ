@@ -422,9 +422,17 @@ def get_user_click_for_recovery(frame_bgr, frame_idx, previous_mask=None):
     # Create display frame with overlay
     display = frame_bgr.copy()
     if previous_mask is not None and np.sum(previous_mask) > 0:
+        # Resize mask to match frame if needed (mask may be SAM2's 720p, frame may be 1080p)
+        mask_for_display = previous_mask
+        if previous_mask.shape[:2] != frame_bgr.shape[:2]:
+            mask_for_display = cv2.resize(
+                previous_mask,
+                (frame_bgr.shape[1], frame_bgr.shape[0]),  # (width, height)
+                interpolation=cv2.INTER_NEAREST
+            )
         # Show faded red overlay where mask WAS
         overlay = display.copy()
-        overlay[previous_mask > 127] = [0, 0, 255]  # Red
+        overlay[mask_for_display > 127] = [0, 0, 255]  # Red
         display = cv2.addWeighted(overlay, 0.3, display, 0.7, 0)
 
     # Add text
