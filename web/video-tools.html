@@ -674,6 +674,133 @@
         .tool-card:nth-child(10) { animation-delay: 0.5s; }
         .tool-card:nth-child(11) { animation-delay: 0.55s; }
         .tool-card:nth-child(12) { animation-delay: 0.6s; }
+
+        /* Tracking Use Cases Section */
+        .tracking-section {
+            padding: 6rem 1.5rem;
+            background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, var(--bg-primary) 100%);
+        }
+
+        .tracking-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 1rem;
+        }
+
+        @media (max-width: 1200px) {
+            .tracking-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        @media (max-width: 900px) {
+            .tracking-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 700px) {
+            .tracking-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .tracking-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .tracking-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.25rem;
+            transition: all 0.3s ease;
+            cursor: default;
+        }
+
+        .tracking-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(139, 92, 246, 0.15);
+        }
+
+        .tracking-card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .tracking-icon {
+            width: 36px;
+            height: 36px;
+            background: rgba(139, 92, 246, 0.1);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+
+        .tracking-card h4 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            line-height: 1.3;
+        }
+
+        .tracking-card ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .tracking-card li {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            padding: 0.2rem 0;
+            padding-left: 0.75rem;
+            position: relative;
+        }
+
+        .tracking-card li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4px;
+            height: 4px;
+            background: var(--accent);
+            border-radius: 50%;
+            opacity: 0.6;
+        }
+
+        .tracking-card:nth-child(1) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.02s; }
+        .tracking-card:nth-child(2) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.04s; }
+        .tracking-card:nth-child(3) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.06s; }
+        .tracking-card:nth-child(4) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.08s; }
+        .tracking-card:nth-child(5) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.10s; }
+        .tracking-card:nth-child(6) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.12s; }
+        .tracking-card:nth-child(7) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.14s; }
+        .tracking-card:nth-child(8) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.16s; }
+        .tracking-card:nth-child(9) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.18s; }
+        .tracking-card:nth-child(10) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.20s; }
+        .tracking-card:nth-child(11) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.22s; }
+        .tracking-card:nth-child(12) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.24s; }
+        .tracking-card:nth-child(13) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.26s; }
+        .tracking-card:nth-child(14) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.28s; }
+        .tracking-card:nth-child(15) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.30s; }
+        .tracking-card:nth-child(16) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.32s; }
+        .tracking-card:nth-child(17) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.34s; }
+        .tracking-card:nth-child(18) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.36s; }
+        .tracking-card:nth-child(19) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.38s; }
+        .tracking-card:nth-child(20) { animation: fadeInUp 0.4s ease forwards; animation-delay: 0.40s; }
     </style>
 </head>
 <body>
@@ -1013,6 +1140,283 @@
                 <div class="use-case-icon">&#128640;</div>
                 <h3>Marketing</h3>
                 <p>Product highlights, demos</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tracking Use Cases -->
+    <section class="tracking-section">
+        <div class="section-header">
+            <h2 class="section-title">20 Ways to Use Video Tracking</h2>
+            <p class="section-subtitle">Discover the endless possibilities of AI-powered object tracking in video editing</p>
+        </div>
+        <div class="tracking-grid">
+            <!-- 1. Tracking Faces -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128100;</div>
+                    <h4>Tracking Faces</h4>
+                </div>
+                <ul>
+                    <li>Blurring faces for privacy</li>
+                    <li>Censoring identities</li>
+                    <li>Adding beauty effects</li>
+                    <li>Swapping faces between subjects</li>
+                </ul>
+            </div>
+
+            <!-- 2. Tracking Eyes -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128065;</div>
+                    <h4>Tracking Eyes</h4>
+                </div>
+                <ul>
+                    <li>Changing eye color</li>
+                    <li>Adding visual effects to irises</li>
+                    <li>Stabilizing for close-up shots</li>
+                </ul>
+            </div>
+
+            <!-- 3. Tracking Bodies/People -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128694;</div>
+                    <h4>Tracking Bodies</h4>
+                </div>
+                <ul>
+                    <li>Following dancers, athletes</li>
+                    <li>Rotoscoping for compositing</li>
+                    <li>Motion capture data extraction</li>
+                </ul>
+            </div>
+
+            <!-- 4. Tracking Cars -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128663;</div>
+                    <h4>Tracking Cars</h4>
+                </div>
+                <ul>
+                    <li>Following vehicles in chase scenes</li>
+                    <li>Adding sponsor logos on cars</li>
+                    <li>Speed/path analysis</li>
+                </ul>
+            </div>
+
+            <!-- 5. Tracking License Plates -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#127383;</div>
+                    <h4>License Plates</h4>
+                </div>
+                <ul>
+                    <li>Blurring for privacy</li>
+                    <li>Replacing plates in TV/film</li>
+                    <li>Law enforcement analysis</li>
+                </ul>
+            </div>
+
+            <!-- 6. Tracking Objects -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128230;</div>
+                    <h4>Tracking Objects</h4>
+                </div>
+                <ul>
+                    <li>Replacing brand logos</li>
+                    <li>Adding callouts to products</li>
+                    <li>Removing unwanted items</li>
+                    <li>Following props through scenes</li>
+                </ul>
+            </div>
+
+            <!-- 7. Tracking Screens -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128187;</div>
+                    <h4>Tracking Screens</h4>
+                </div>
+                <ul>
+                    <li>Replacing phone/computer screens</li>
+                    <li>Adding content to billboards/TVs</li>
+                    <li>Virtual product placement</li>
+                </ul>
+            </div>
+
+            <!-- 8. Tracking Flat Surfaces -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128444;</div>
+                    <h4>Planar Tracking</h4>
+                </div>
+                <ul>
+                    <li>Replacing posters</li>
+                    <li>Adding text to signs</li>
+                    <li>Virtual set extension</li>
+                    <li>Floor/wall graphics</li>
+                </ul>
+            </div>
+
+            <!-- 9. Tracking Text/Logos -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128288;</div>
+                    <h4>Text & Logos</h4>
+                </div>
+                <ul>
+                    <li>Removing/replacing brand names</li>
+                    <li>Subtitles that follow movement</li>
+                    <li>Logo animation</li>
+                </ul>
+            </div>
+
+            <!-- 10. Tracking Camera Movement -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#127909;</div>
+                    <h4>Camera Movement</h4>
+                </div>
+                <ul>
+                    <li>Stabilizing handheld footage</li>
+                    <li>Adding virtual camera moves</li>
+                    <li>Match-moving for 3D elements</li>
+                </ul>
+            </div>
+
+            <!-- 11. Video Stabilization -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128247;</div>
+                    <h4>Video Stabilization</h4>
+                </div>
+                <ul>
+                    <li>Removing shake from action footage</li>
+                    <li>Smoothing drone shots</li>
+                    <li>Fixing security camera footage</li>
+                </ul>
+            </div>
+
+            <!-- 12. Motion Graphics -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#10024;</div>
+                    <h4>Motion Graphics</h4>
+                </div>
+                <ul>
+                    <li>Titles following subjects</li>
+                    <li>Lower thirds attached to people</li>
+                    <li>Animated infographics</li>
+                </ul>
+            </div>
+
+            <!-- 13. Color Tracking -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#127912;</div>
+                    <h4>Color Tracking</h4>
+                </div>
+                <ul>
+                    <li>Isolating colors for grading</li>
+                    <li>Changing specific colors</li>
+                    <li>Creating masks from color ranges</li>
+                </ul>
+            </div>
+
+            <!-- 14. Background Tracking -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#127749;</div>
+                    <h4>Background Tracking</h4>
+                </div>
+                <ul>
+                    <li>Replacing backgrounds entirely</li>
+                    <li>Adding effects behind subjects</li>
+                    <li>Virtual sets</li>
+                </ul>
+            </div>
+
+            <!-- 15. Privacy & Censorship -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128274;</div>
+                    <h4>Privacy & Censorship</h4>
+                </div>
+                <ul>
+                    <li>GDPR compliance</li>
+                    <li>Witness protection</li>
+                    <li>Protecting minors</li>
+                    <li>Blurring sensitive information</li>
+                </ul>
+            </div>
+
+            <!-- 16. Sports Analysis -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#9917;</div>
+                    <h4>Sports Analysis</h4>
+                </div>
+                <ul>
+                    <li>Player tracking for tactics</li>
+                    <li>Ball trajectory analysis</li>
+                    <li>Heat maps</li>
+                    <li>Performance metrics</li>
+                </ul>
+            </div>
+
+            <!-- 17. Advertising & Marketing -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128184;</div>
+                    <h4>Advertising</h4>
+                </div>
+                <ul>
+                    <li>Virtual product placement</li>
+                    <li>Dynamic ad insertion</li>
+                    <li>A/B testing video content</li>
+                </ul>
+            </div>
+
+            <!-- 18. Film & VFX -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#127916;</div>
+                    <h4>Film & VFX</h4>
+                </div>
+                <ul>
+                    <li>Rotoscoping</li>
+                    <li>Wire removal</li>
+                    <li>Clean plates</li>
+                    <li>CGI integration</li>
+                </ul>
+            </div>
+
+            <!-- 19. Social Media Content -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#128241;</div>
+                    <h4>Social Media</h4>
+                </div>
+                <ul>
+                    <li>Filters & effects</li>
+                    <li>AR overlays</li>
+                    <li>Face effects (Snapchat-style)</li>
+                    <li>Trending transformations</li>
+                </ul>
+            </div>
+
+            <!-- 20. Educational Videos -->
+            <div class="tracking-card">
+                <div class="tracking-card-header">
+                    <div class="tracking-icon">&#127891;</div>
+                    <h4>Educational Videos</h4>
+                </div>
+                <ul>
+                    <li>Highlighting key objects</li>
+                    <li>Following demonstrations</li>
+                    <li>Visual explanations</li>
+                    <li>Interactive tutorials</li>
+                </ul>
             </div>
         </div>
     </section>
