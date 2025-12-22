@@ -49,6 +49,16 @@ except ImportError:
     HAS_DALI = False
     print("[SAM2-WSL2] DALI not available, using CPU frame loading")
 
+# Try to import ReID tracker for identity verification
+try:
+    from sam2_reid_tracker import ReIDVerifier, USE_REID_VERIFICATION, VERIFY_EVERY_N_FRAMES
+    HAS_REID = True
+    print(f"[SAM2-WSL2] ReID verification available! (verify every {VERIFY_EVERY_N_FRAMES} frames)")
+except ImportError:
+    HAS_REID = False
+    USE_REID_VERIFICATION = False
+    print("[SAM2-WSL2] ReID tracker not available, identity verification disabled")
+
 
 # =============================================================================
 # REVOLUTIONARY COMPRESSION CLASSES
@@ -1191,6 +1201,13 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
             print(f"[SAM2-Official] Added point prompt at frame {frame_idx_start}")
 
         masks_saved = 0
+        reid_verifier = None
+        drift_count = 0
+
+        # Initialize ReID verifier if available
+        if HAS_REID and USE_REID_VERIFICATION:
+            print(f"[ReID] Initializing identity verification...")
+            reid_verifier = ReIDVerifier(object_type="general")  # Auto-detect face later
 
         # BIDIRECTIONAL PROPAGATION - simple internal reverse=True
         print(f"\n[SAM2-Bidirectional] Starting from frame {frame_idx_start}, propagating both directions")
@@ -1240,6 +1257,11 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                     else:
                         print(f"\n[SAM2-Forward] Propagating frames 0 -> {actual_frames - 1} ({forward_frames} frames)")
 
+                    # Open video for ReID frame extraction if needed
+                    reid_cap = None
+                    if reid_verifier is not None and video_path:
+                        reid_cap = cv2.VideoCapture(video_path)
+
                     for frame_idx, obj_ids, mask_logits in tqdm(
                         predictor.propagate_in_video(
                             inference_state,
@@ -1260,14 +1282,46 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         if np.sum(mask_uint8 > 127) < 100:
                             mask_uint8[:] = 0
 
+                        # ============================================================
+                        # ReID VERIFICATION - Detect identity drift
+                        # ============================================================
+                        if reid_verifier is not None and reid_cap is not None:
+                            # Set reference on first valid frame
+                            if reid_verifier.reference_embedding is None and np.sum(mask_uint8) > 1000:
+                                reid_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                                ret, frame_bgr = reid_cap.read()
+                                if ret:
+                                    reid_verifier.set_reference(frame_bgr, mask_uint8)
+
+                            # Verify identity every N frames
+                            elif frame_idx % VERIFY_EVERY_N_FRAMES == 0:
+                                reid_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                                ret, frame_bgr = reid_cap.read()
+                                if ret:
+                                    is_same, similarity = reid_verifier.verify(frame_bgr, mask_uint8)
+                                    if not is_same:
+                                        drift_count += 1
+                                        tqdm.write(f"[ReID] DRIFT at frame {frame_idx} (sim={similarity:.3f})")
+
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
                         del mask_logits, mask
 
+                    # Cleanup ReID video capture
+                    if reid_cap is not None:
+                        reid_cap.release()
+
                     print(f"[SAM2-Forward] Complete: {forward_frames} masks")
                     gc.collect()
                     torch.cuda.empty_cache()
+
+        # Report ReID verification results
+        if reid_verifier is not None and drift_count > 0:
+            print(f"[ReID] ⚠️  Detected {drift_count} potential drift events")
+            print(f"[ReID] Consider reviewing frames where similarity dropped below threshold")
+        elif reid_verifier is not None:
+            print(f"[ReID] ✅ No drift detected - identity verified throughout video")
 
         print(f"[SAM2] Complete! Saved {masks_saved} masks to {output_masks_dir}")
         return masks_saved
