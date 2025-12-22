@@ -1,0 +1,1627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Tracking Editor - Frame-by-Frame Refinement | MarkRemoverAI</title>
+    <meta name="description" content="Refine AI object tracking frame-by-frame. Add points, adjust masks, re-propagate. Professional-grade tracking correction.">
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #09090b;
+            --bg-secondary: #0f0f12;
+            --bg-card: #18181b;
+            --bg-card-hover: #1f1f23;
+            --border-color: #27272a;
+            --text-primary: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent: #22c55e;
+            --accent-hover: #16a34a;
+            --accent-glow: rgba(34, 197, 94, 0.3);
+            --red: #ef4444;
+            --blue: #3b82f6;
+            --yellow: #eab308;
+            --purple: #8b5cf6;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            height: 56px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1rem;
+        }
+
+        .top-bar-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .back-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .back-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .back-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .file-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .file-status {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.25rem 0.75rem;
+            background: rgba(34, 197, 94, 0.15);
+            border-radius: 100px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .file-status-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+        }
+
+        .top-bar-right {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .export-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1.25rem;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .export-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        .export-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* Main Layout */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr 280px;
+            height: calc(100vh - 56px);
+        }
+
+        @media (max-width: 1200px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+            .left-panel, .right-panel {
+                display: none;
+            }
+        }
+
+        /* Panels */
+        .left-panel, .right-panel {
+            background: var(--bg-card);
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+        }
+
+        .right-panel {
+            border-right: none;
+            border-left: 1px solid var(--border-color);
+        }
+
+        .panel-section {
+            padding: 1.25rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .panel-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 1rem;
+        }
+
+        /* Tools Section */
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+
+        .tool-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tool-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .tool-btn.active {
+            border-color: var(--accent);
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--accent);
+        }
+
+        .tool-btn svg {
+            width: 22px;
+            height: 22px;
+        }
+
+        .tool-btn.add-point svg { color: var(--accent); }
+        .tool-btn.remove-point svg { color: var(--red); }
+        .tool-btn.box-select svg { color: var(--blue); }
+        .tool-btn.brush svg { color: var(--purple); }
+
+        /* Object List */
+        .object-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .object-item:hover {
+            border-color: var(--text-muted);
+        }
+
+        .object-item.selected {
+            border-color: var(--accent);
+            background: rgba(34, 197, 94, 0.05);
+        }
+
+        .object-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        .object-info {
+            flex: 1;
+        }
+
+        .object-name {
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+
+        .object-frames {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .object-actions {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .object-action-btn {
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .object-action-btn:hover {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        .object-action-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .add-object-btn {
+            width: 100%;
+            padding: 0.75rem;
+            background: transparent;
+            border: 2px dashed var(--border-color);
+            border-radius: 10px;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .add-object-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .add-object-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Center Panel - Video Editor */
+        .center-panel {
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-primary);
+            overflow: hidden;
+        }
+
+        /* Video Container */
+        .video-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            background: #000;
+            overflow: hidden;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        #videoCanvas {
+            display: block;
+            max-width: 100%;
+            max-height: calc(100vh - 56px - 160px);
+            background: #111;
+        }
+
+        #maskCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            opacity: 0.5;
+        }
+
+        #interactionCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+        }
+
+        /* Points Overlay */
+        .point-marker {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: auto;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .point-marker.positive {
+            background: var(--accent);
+        }
+
+        .point-marker.negative {
+            background: var(--red);
+        }
+
+        .point-marker::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            background: white;
+            border-radius: 50%;
+        }
+
+        /* Upload State */
+        .upload-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 2rem;
+            text-align: center;
+        }
+
+        .upload-zone {
+            width: 100%;
+            max-width: 500px;
+            padding: 4rem 2rem;
+            border: 2px dashed var(--border-color);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--accent);
+            background: rgba(34, 197, 94, 0.05);
+        }
+
+        .upload-zone svg {
+            width: 64px;
+            height: 64px;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+
+        .upload-zone h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-zone p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Timeline */
+        .timeline-section {
+            height: 160px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .timeline-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .playback-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .playback-btn {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .playback-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .playback-btn.play-pause {
+            width: 44px;
+            height: 44px;
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .playback-btn.play-pause:hover {
+            background: var(--accent-hover);
+        }
+
+        .playback-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .frame-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .frame-display {
+            font-family: monospace;
+            font-size: 0.9rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-primary);
+            border-radius: 6px;
+        }
+
+        .frame-display span {
+            color: var(--text-muted);
+        }
+
+        .time-display {
+            font-family: monospace;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .propagate-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .propagate-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .propagate-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .propagate-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Timeline Track */
+        .timeline-track-container {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            overflow: hidden;
+        }
+
+        .timeline-track {
+            height: 60px;
+            background: var(--bg-primary);
+            border-radius: 8px;
+            position: relative;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .timeline-thumbnails {
+            display: flex;
+            height: 100%;
+        }
+
+        .timeline-thumbnail {
+            flex: 1;
+            min-width: 2px;
+            background-size: cover;
+            background-position: center;
+            border-right: 1px solid var(--bg-card);
+        }
+
+        .timeline-playhead {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--accent);
+            left: 0%;
+            pointer-events: none;
+        }
+
+        .timeline-playhead::before {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 8px solid var(--accent);
+        }
+
+        .keyframe-markers {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+        }
+
+        .keyframe-marker {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 10px;
+            height: 10px;
+            background: var(--yellow);
+            border: 2px solid white;
+            border-radius: 2px;
+            transform: translate(-50%, -50%) rotate(45deg);
+        }
+
+        .confidence-track {
+            height: 20px;
+            margin-top: 0.5rem;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+        }
+
+        .confidence-segment {
+            height: 100%;
+            min-width: 1px;
+        }
+
+        .confidence-segment.high { background: var(--accent); }
+        .confidence-segment.medium { background: var(--yellow); }
+        .confidence-segment.low { background: var(--red); }
+
+        /* Settings Panel */
+        .settings-group {
+            margin-bottom: 1rem;
+        }
+
+        .settings-label {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        .settings-slider {
+            width: 100%;
+            height: 4px;
+            background: var(--bg-primary);
+            border-radius: 2px;
+            appearance: none;
+            cursor: pointer;
+        }
+
+        .settings-slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--accent);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .settings-value {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-align: right;
+            margin-top: 0.25rem;
+        }
+
+        .settings-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+        }
+
+        .toggle-switch {
+            width: 40px;
+            height: 22px;
+            background: var(--bg-primary);
+            border-radius: 11px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .toggle-switch.active {
+            background: var(--accent);
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+
+        .toggle-switch.active::after {
+            transform: translateX(18px);
+        }
+
+        /* Keyboard Shortcuts Panel */
+        .shortcuts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .shortcut-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+        }
+
+        .shortcut-key {
+            padding: 0.25rem 0.5rem;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Hidden elements */
+        .hidden { display: none !important; }
+
+        /* Processing Overlay */
+        .processing-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .processing-overlay.hidden {
+            display: none;
+        }
+
+        .processing-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+            text-align: center;
+            max-width: 400px;
+        }
+
+        .processing-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .processing-text {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Bar -->
+    <div class="top-bar">
+        <div class="top-bar-left">
+            <a href="/video-tools" class="back-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                </svg>
+                Back
+            </a>
+            <span class="file-name" id="fileName">No video loaded</span>
+            <div class="file-status hidden" id="fileStatus">
+                <span class="file-status-dot"></span>
+                Tracking Active
+            </div>
+        </div>
+        <div class="top-bar-right">
+            <button class="export-btn hidden" id="exportBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                </svg>
+                Export Masks
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div class="main-layout">
+        <!-- Left Panel - Tools & Objects -->
+        <div class="left-panel">
+            <!-- Tools -->
+            <div class="panel-section">
+                <div class="panel-title">Tools</div>
+                <div class="tools-grid">
+                    <button class="tool-btn add-point active" data-tool="add-point">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 8v8M8 12h8"/>
+                        </svg>
+                        Add Point
+                    </button>
+                    <button class="tool-btn remove-point" data-tool="remove-point">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M8 12h8"/>
+                        </svg>
+                        Remove Point
+                    </button>
+                    <button class="tool-btn box-select" data-tool="box-select">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 2"/>
+                        </svg>
+                        Box Select
+                    </button>
+                    <button class="tool-btn brush" data-tool="brush">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+                            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+                        </svg>
+                        Brush
+                    </button>
+                </div>
+            </div>
+
+            <!-- Objects -->
+            <div class="panel-section">
+                <div class="panel-title">Tracked Objects</div>
+                <div id="objectsList">
+                    <!-- Objects will be added here dynamically -->
+                </div>
+                <button class="add-object-btn" id="addObjectBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                    Add Object
+                </button>
+            </div>
+
+            <!-- Shortcuts -->
+            <div class="panel-section">
+                <div class="panel-title">Keyboard Shortcuts</div>
+                <div class="shortcuts-list">
+                    <div class="shortcut-item">
+                        <span>Play/Pause</span>
+                        <span class="shortcut-key">Space</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span>Previous Frame</span>
+                        <span class="shortcut-key">&larr;</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span>Next Frame</span>
+                        <span class="shortcut-key">&rarr;</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span>Add Point</span>
+                        <span class="shortcut-key">1</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span>Remove Point</span>
+                        <span class="shortcut-key">2</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span>Undo</span>
+                        <span class="shortcut-key">Ctrl+Z</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Panel - Video Editor -->
+        <div class="center-panel">
+            <div class="video-container" id="videoContainer">
+                <!-- Upload State -->
+                <div class="upload-state" id="uploadState">
+                    <div class="upload-zone" id="uploadZone">
+                        <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm" style="display:none">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        <h3>Drop your video here</h3>
+                        <p>or click to upload (MP4, MOV, WebM)</p>
+                    </div>
+                </div>
+
+                <!-- Video Canvas (hidden until video loads) -->
+                <div class="canvas-wrapper hidden" id="canvasWrapper">
+                    <canvas id="videoCanvas"></canvas>
+                    <canvas id="maskCanvas"></canvas>
+                    <canvas id="interactionCanvas"></canvas>
+                    <div id="pointsOverlay"></div>
+                </div>
+            </div>
+
+            <!-- Timeline -->
+            <div class="timeline-section">
+                <div class="timeline-controls">
+                    <div class="playback-controls">
+                        <button class="playback-btn" id="skipBackBtn" title="Skip to start">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 20L9 12l10-8v16z"/>
+                                <line x1="5" y1="19" x2="5" y2="5"/>
+                            </svg>
+                        </button>
+                        <button class="playback-btn" id="prevFrameBtn" title="Previous frame">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M15 18l-6-6 6-6"/>
+                            </svg>
+                        </button>
+                        <button class="playback-btn play-pause" id="playPauseBtn" title="Play/Pause">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="playIcon">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="pauseIcon" class="hidden">
+                                <rect x="6" y="4" width="4" height="16"/>
+                                <rect x="14" y="4" width="4" height="16"/>
+                            </svg>
+                        </button>
+                        <button class="playback-btn" id="nextFrameBtn" title="Next frame">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 18l6-6-6-6"/>
+                            </svg>
+                        </button>
+                        <button class="playback-btn" id="skipEndBtn" title="Skip to end">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M5 4l10 8-10 8V4z"/>
+                                <line x1="19" y1="5" x2="19" y2="19"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="frame-info">
+                        <div class="frame-display">
+                            Frame <span id="currentFrame">0</span> / <span id="totalFrames">0</span>
+                        </div>
+                        <div class="time-display" id="timeDisplay">00:00.00 / 00:00.00</div>
+                    </div>
+
+                    <div class="propagate-controls">
+                        <button class="propagate-btn" id="propagateBackBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 12H5M12 19l-7-7 7-7"/>
+                            </svg>
+                            Re-track Backward
+                        </button>
+                        <button class="propagate-btn" id="propagateForwardBtn">
+                            Re-track Forward
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M5 12h14M12 5l7 7-7 7"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="timeline-track-container">
+                    <div class="timeline-track" id="timelineTrack">
+                        <div class="timeline-thumbnails" id="timelineThumbnails"></div>
+                        <div class="keyframe-markers" id="keyframeMarkers"></div>
+                        <div class="timeline-playhead" id="timelinePlayhead"></div>
+                    </div>
+                    <div class="confidence-track" id="confidenceTrack"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel - Settings -->
+        <div class="right-panel">
+            <div class="panel-section">
+                <div class="panel-title">Mask Settings</div>
+
+                <div class="settings-group">
+                    <label class="settings-label">Mask Opacity</label>
+                    <input type="range" class="settings-slider" id="maskOpacity" min="0" max="100" value="50">
+                    <div class="settings-value" id="maskOpacityValue">50%</div>
+                </div>
+
+                <div class="settings-group">
+                    <label class="settings-label">Brush Size</label>
+                    <input type="range" class="settings-slider" id="brushSize" min="5" max="100" value="30">
+                    <div class="settings-value" id="brushSizeValue">30px</div>
+                </div>
+
+                <div class="settings-group">
+                    <label class="settings-label">Edge Feathering</label>
+                    <input type="range" class="settings-slider" id="edgeFeather" min="0" max="20" value="2">
+                    <div class="settings-value" id="edgeFeatherValue">2px</div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="panel-title">Display Options</div>
+
+                <div class="settings-toggle">
+                    <span class="settings-label" style="margin: 0;">Show Mask Overlay</span>
+                    <div class="toggle-switch active" id="showMaskToggle"></div>
+                </div>
+
+                <div class="settings-toggle">
+                    <span class="settings-label" style="margin: 0;">Show Points</span>
+                    <div class="toggle-switch active" id="showPointsToggle"></div>
+                </div>
+
+                <div class="settings-toggle">
+                    <span class="settings-label" style="margin: 0;">Show Confidence</span>
+                    <div class="toggle-switch active" id="showConfidenceToggle"></div>
+                </div>
+
+                <div class="settings-toggle">
+                    <span class="settings-label" style="margin: 0;">Onion Skinning</span>
+                    <div class="toggle-switch" id="onionSkinToggle"></div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="panel-title">Export Settings</div>
+
+                <div class="settings-group">
+                    <label class="settings-label">Mask Color</label>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <div style="width: 24px; height: 24px; background: #22c55e; border-radius: 4px; cursor: pointer; border: 2px solid var(--accent);" data-color="#22c55e"></div>
+                        <div style="width: 24px; height: 24px; background: #ffffff; border-radius: 4px; cursor: pointer; border: 2px solid transparent;" data-color="#ffffff"></div>
+                        <div style="width: 24px; height: 24px; background: #000000; border-radius: 4px; cursor: pointer; border: 2px solid transparent;" data-color="#000000"></div>
+                        <div style="width: 24px; height: 24px; background: #ff0000; border-radius: 4px; cursor: pointer; border: 2px solid transparent;" data-color="#ff0000"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Processing Overlay -->
+    <div class="processing-overlay hidden" id="processingOverlay">
+        <div class="processing-card">
+            <div class="processing-spinner"></div>
+            <h3>Processing...</h3>
+            <p class="processing-text" id="processingText">Initializing tracking...</p>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // State
+        const state = {
+            video: null,
+            videoFile: null,
+            isPlaying: false,
+            currentFrame: 0,
+            totalFrames: 0,
+            fps: 30,
+            duration: 0,
+            currentTool: 'add-point',
+            objects: [],
+            selectedObjectId: null,
+            points: [],
+            masks: {},
+            confidence: [],
+            brushSize: 30,
+            maskOpacity: 0.5,
+            showMask: true,
+            showPoints: true,
+            showConfidence: true,
+            onionSkin: false,
+            maskColor: '#22c55e',
+            isDragging: false,
+            isDrawing: false
+        };
+
+        // Elements
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadState = document.getElementById('uploadState');
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        const videoCanvas = document.getElementById('videoCanvas');
+        const maskCanvas = document.getElementById('maskCanvas');
+        const interactionCanvas = document.getElementById('interactionCanvas');
+        const videoCtx = videoCanvas.getContext('2d');
+        const maskCtx = maskCanvas.getContext('2d');
+        const interactionCtx = interactionCanvas.getContext('2d');
+
+        // Hidden video element for playback
+        const video = document.createElement('video');
+        video.muted = true;
+        state.video = video;
+
+        // Upload handling
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.style.borderColor = 'var(--accent)';
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.style.borderColor = 'var(--border-color)';
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.style.borderColor = 'var(--border-color)';
+            if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            const validTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
+            if (!validTypes.includes(file.type)) {
+                alert('Please upload a video file (MP4, MOV, or WebM)');
+                return;
+            }
+
+            state.videoFile = file;
+            const url = URL.createObjectURL(file);
+            video.src = url;
+
+            video.addEventListener('loadedmetadata', () => {
+                state.duration = video.duration;
+                state.fps = 30; // Assume 30fps, could detect from video
+                state.totalFrames = Math.floor(video.duration * state.fps);
+
+                // Setup canvases
+                const width = video.videoWidth;
+                const height = video.videoHeight;
+
+                videoCanvas.width = width;
+                videoCanvas.height = height;
+                maskCanvas.width = width;
+                maskCanvas.height = height;
+                interactionCanvas.width = width;
+                interactionCanvas.height = height;
+
+                // Scale canvases for display
+                const maxHeight = window.innerHeight - 56 - 160 - 40;
+                const scale = Math.min(1, maxHeight / height);
+
+                [videoCanvas, maskCanvas, interactionCanvas].forEach(c => {
+                    c.style.width = (width * scale) + 'px';
+                    c.style.height = (height * scale) + 'px';
+                });
+
+                // Update UI
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileStatus').classList.remove('hidden');
+                document.getElementById('exportBtn').classList.remove('hidden');
+                document.getElementById('totalFrames').textContent = state.totalFrames;
+                updateTimeDisplay();
+
+                // Show canvas, hide upload
+                uploadState.classList.add('hidden');
+                canvasWrapper.classList.remove('hidden');
+
+                // Draw first frame
+                video.currentTime = 0;
+                video.addEventListener('seeked', () => {
+                    drawFrame();
+                }, { once: true });
+
+                // Generate thumbnails
+                generateThumbnails();
+
+                // Add first object
+                addObject('Object 1', '#22c55e');
+            });
+        }
+
+        function drawFrame() {
+            videoCtx.drawImage(video, 0, 0);
+
+            if (state.showMask && state.masks[state.currentFrame]) {
+                drawMask();
+            }
+
+            if (state.showPoints) {
+                drawPoints();
+            }
+        }
+
+        function drawMask() {
+            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+            // For demo, draw a simple mask
+            // In real implementation, this would use actual mask data from SAM2
+            if (state.masks[state.currentFrame]) {
+                maskCtx.fillStyle = state.maskColor;
+                maskCtx.globalAlpha = state.maskOpacity;
+                // Draw mask from data
+                maskCtx.globalAlpha = 1;
+            }
+        }
+
+        function drawPoints() {
+            const overlay = document.getElementById('pointsOverlay');
+            overlay.innerHTML = '';
+
+            const scale = videoCanvas.clientWidth / videoCanvas.width;
+
+            state.points.filter(p => p.frame === state.currentFrame).forEach(point => {
+                const marker = document.createElement('div');
+                marker.className = `point-marker ${point.type}`;
+                marker.style.left = (point.x * scale) + 'px';
+                marker.style.top = (point.y * scale) + 'px';
+                overlay.appendChild(marker);
+            });
+        }
+
+        function generateThumbnails() {
+            const container = document.getElementById('timelineThumbnails');
+            container.innerHTML = '';
+
+            // Generate ~50 thumbnails
+            const thumbCount = Math.min(50, state.totalFrames);
+            const interval = state.duration / thumbCount;
+
+            for (let i = 0; i < thumbCount; i++) {
+                const thumb = document.createElement('div');
+                thumb.className = 'timeline-thumbnail';
+                thumb.style.background = `linear-gradient(${90 + i * 3}deg, #1a1a24, #252530)`;
+                container.appendChild(thumb);
+            }
+        }
+
+        // Playback controls
+        document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
+        document.getElementById('prevFrameBtn').addEventListener('click', prevFrame);
+        document.getElementById('nextFrameBtn').addEventListener('click', nextFrame);
+        document.getElementById('skipBackBtn').addEventListener('click', () => seekToFrame(0));
+        document.getElementById('skipEndBtn').addEventListener('click', () => seekToFrame(state.totalFrames - 1));
+
+        function togglePlayPause() {
+            state.isPlaying = !state.isPlaying;
+            document.getElementById('playIcon').classList.toggle('hidden', state.isPlaying);
+            document.getElementById('pauseIcon').classList.toggle('hidden', !state.isPlaying);
+
+            if (state.isPlaying) {
+                video.play();
+                requestAnimationFrame(updatePlayback);
+            } else {
+                video.pause();
+            }
+        }
+
+        function updatePlayback() {
+            if (!state.isPlaying) return;
+
+            state.currentFrame = Math.floor(video.currentTime * state.fps);
+            document.getElementById('currentFrame').textContent = state.currentFrame;
+            updateTimeDisplay();
+            updatePlayhead();
+            drawFrame();
+
+            if (video.ended) {
+                state.isPlaying = false;
+                document.getElementById('playIcon').classList.remove('hidden');
+                document.getElementById('pauseIcon').classList.add('hidden');
+            } else {
+                requestAnimationFrame(updatePlayback);
+            }
+        }
+
+        function prevFrame() {
+            if (state.currentFrame > 0) {
+                seekToFrame(state.currentFrame - 1);
+            }
+        }
+
+        function nextFrame() {
+            if (state.currentFrame < state.totalFrames - 1) {
+                seekToFrame(state.currentFrame + 1);
+            }
+        }
+
+        function seekToFrame(frame) {
+            state.currentFrame = Math.max(0, Math.min(frame, state.totalFrames - 1));
+            video.currentTime = state.currentFrame / state.fps;
+
+            video.addEventListener('seeked', () => {
+                drawFrame();
+            }, { once: true });
+
+            document.getElementById('currentFrame').textContent = state.currentFrame;
+            updateTimeDisplay();
+            updatePlayhead();
+        }
+
+        function updateTimeDisplay() {
+            const current = formatTime(state.currentFrame / state.fps);
+            const total = formatTime(state.duration);
+            document.getElementById('timeDisplay').textContent = `${current} / ${total}`;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            const ms = Math.floor((seconds % 1) * 100);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+        }
+
+        function updatePlayhead() {
+            const percent = (state.currentFrame / state.totalFrames) * 100;
+            document.getElementById('timelinePlayhead').style.left = percent + '%';
+        }
+
+        // Timeline click
+        document.getElementById('timelineTrack').addEventListener('click', (e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            const frame = Math.floor(percent * state.totalFrames);
+            seekToFrame(frame);
+        });
+
+        // Tool selection
+        document.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.currentTool = btn.dataset.tool;
+
+                // Update cursor
+                if (state.currentTool === 'brush') {
+                    interactionCanvas.style.cursor = 'crosshair';
+                } else {
+                    interactionCanvas.style.cursor = 'crosshair';
+                }
+            });
+        });
+
+        // Canvas interaction
+        interactionCanvas.addEventListener('click', (e) => {
+            if (state.currentTool === 'add-point' || state.currentTool === 'remove-point') {
+                const rect = interactionCanvas.getBoundingClientRect();
+                const scale = interactionCanvas.width / rect.width;
+                const x = (e.clientX - rect.left) * scale;
+                const y = (e.clientY - rect.top) * scale;
+
+                state.points.push({
+                    id: Date.now(),
+                    x: x,
+                    y: y,
+                    frame: state.currentFrame,
+                    type: state.currentTool === 'add-point' ? 'positive' : 'negative',
+                    objectId: state.selectedObjectId
+                });
+
+                drawPoints();
+
+                // In real implementation, send to SAM2 backend
+                simulateTracking();
+            }
+        });
+
+        // Brush drawing
+        interactionCanvas.addEventListener('mousedown', (e) => {
+            if (state.currentTool === 'brush') {
+                state.isDrawing = true;
+            }
+        });
+
+        interactionCanvas.addEventListener('mousemove', (e) => {
+            if (state.isDrawing && state.currentTool === 'brush') {
+                const rect = interactionCanvas.getBoundingClientRect();
+                const scale = interactionCanvas.width / rect.width;
+                const x = (e.clientX - rect.left) * scale;
+                const y = (e.clientY - rect.top) * scale;
+
+                // Draw on mask
+                maskCtx.fillStyle = state.maskColor;
+                maskCtx.globalAlpha = state.maskOpacity;
+                maskCtx.beginPath();
+                maskCtx.arc(x, y, state.brushSize, 0, Math.PI * 2);
+                maskCtx.fill();
+                maskCtx.globalAlpha = 1;
+            }
+        });
+
+        interactionCanvas.addEventListener('mouseup', () => {
+            state.isDrawing = false;
+        });
+
+        // Object management
+        function addObject(name, color) {
+            const id = Date.now();
+            state.objects.push({ id, name, color, visible: true });
+            state.selectedObjectId = id;
+            renderObjects();
+        }
+
+        function renderObjects() {
+            const container = document.getElementById('objectsList');
+            container.innerHTML = '';
+
+            state.objects.forEach(obj => {
+                const item = document.createElement('div');
+                item.className = `object-item ${obj.id === state.selectedObjectId ? 'selected' : ''}`;
+                item.innerHTML = `
+                    <div class="object-color" style="background: ${obj.color};"></div>
+                    <div class="object-info">
+                        <div class="object-name">${obj.name}</div>
+                        <div class="object-frames">${state.points.filter(p => p.objectId === obj.id).length} points</div>
+                    </div>
+                    <div class="object-actions">
+                        <button class="object-action-btn" title="Toggle visibility">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                        <button class="object-action-btn" title="Delete">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                            </svg>
+                        </button>
+                    </div>
+                `;
+                item.addEventListener('click', (e) => {
+                    if (!e.target.closest('.object-action-btn')) {
+                        state.selectedObjectId = obj.id;
+                        renderObjects();
+                    }
+                });
+                container.appendChild(item);
+            });
+        }
+
+        document.getElementById('addObjectBtn').addEventListener('click', () => {
+            const colors = ['#22c55e', '#3b82f6', '#eab308', '#ef4444', '#8b5cf6', '#06b6d4'];
+            const color = colors[state.objects.length % colors.length];
+            addObject(`Object ${state.objects.length + 1}`, color);
+        });
+
+        // Settings
+        document.getElementById('maskOpacity').addEventListener('input', (e) => {
+            state.maskOpacity = e.target.value / 100;
+            document.getElementById('maskOpacityValue').textContent = e.target.value + '%';
+            drawFrame();
+        });
+
+        document.getElementById('brushSize').addEventListener('input', (e) => {
+            state.brushSize = parseInt(e.target.value);
+            document.getElementById('brushSizeValue').textContent = e.target.value + 'px';
+        });
+
+        document.getElementById('edgeFeather').addEventListener('input', (e) => {
+            document.getElementById('edgeFeatherValue').textContent = e.target.value + 'px';
+        });
+
+        // Toggles
+        document.querySelectorAll('.toggle-switch').forEach(toggle => {
+            toggle.addEventListener('click', () => {
+                toggle.classList.toggle('active');
+
+                if (toggle.id === 'showMaskToggle') {
+                    state.showMask = toggle.classList.contains('active');
+                    maskCanvas.style.display = state.showMask ? 'block' : 'none';
+                } else if (toggle.id === 'showPointsToggle') {
+                    state.showPoints = toggle.classList.contains('active');
+                    document.getElementById('pointsOverlay').style.display = state.showPoints ? 'block' : 'none';
+                } else if (toggle.id === 'showConfidenceToggle') {
+                    state.showConfidence = toggle.classList.contains('active');
+                    document.getElementById('confidenceTrack').style.display = state.showConfidence ? 'flex' : 'none';
+                } else if (toggle.id === 'onionSkinToggle') {
+                    state.onionSkin = toggle.classList.contains('active');
+                }
+            });
+        });
+
+        // Propagate buttons
+        document.getElementById('propagateBackBtn').addEventListener('click', () => {
+            showProcessing('Re-tracking backward from frame ' + state.currentFrame + '...');
+            setTimeout(() => hideProcessing(), 2000);
+        });
+
+        document.getElementById('propagateForwardBtn').addEventListener('click', () => {
+            showProcessing('Re-tracking forward from frame ' + state.currentFrame + '...');
+            setTimeout(() => hideProcessing(), 2000);
+        });
+
+        // Export
+        document.getElementById('exportBtn').addEventListener('click', () => {
+            showProcessing('Exporting masks...');
+            setTimeout(() => {
+                hideProcessing();
+                alert('Masks exported successfully!');
+            }, 2000);
+        });
+
+        // Processing overlay
+        function showProcessing(text) {
+            document.getElementById('processingText').textContent = text;
+            document.getElementById('processingOverlay').classList.remove('hidden');
+        }
+
+        function hideProcessing() {
+            document.getElementById('processingOverlay').classList.add('hidden');
+        }
+
+        // Simulate tracking (placeholder for SAM2 integration)
+        function simulateTracking() {
+            showProcessing('Running SAM2 tracking...');
+
+            // Simulate mask generation
+            setTimeout(() => {
+                state.masks[state.currentFrame] = true;
+
+                // Generate fake confidence data
+                if (state.confidence.length === 0) {
+                    for (let i = 0; i < state.totalFrames; i++) {
+                        state.confidence.push(Math.random() > 0.3 ? 'high' : Math.random() > 0.5 ? 'medium' : 'low');
+                    }
+                    renderConfidence();
+                }
+
+                hideProcessing();
+                drawMask();
+                addKeyframeMarker(state.currentFrame);
+            }, 1500);
+        }
+
+        function renderConfidence() {
+            const container = document.getElementById('confidenceTrack');
+            container.innerHTML = '';
+
+            state.confidence.forEach(level => {
+                const seg = document.createElement('div');
+                seg.className = `confidence-segment ${level}`;
+                container.appendChild(seg);
+            });
+        }
+
+        function addKeyframeMarker(frame) {
+            const container = document.getElementById('keyframeMarkers');
+            const percent = (frame / state.totalFrames) * 100;
+
+            const marker = document.createElement('div');
+            marker.className = 'keyframe-marker';
+            marker.style.left = percent + '%';
+            container.appendChild(marker);
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+
+            switch (e.code) {
+                case 'Space':
+                    e.preventDefault();
+                    togglePlayPause();
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    prevFrame();
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    nextFrame();
+                    break;
+                case 'Digit1':
+                    document.querySelector('[data-tool="add-point"]').click();
+                    break;
+                case 'Digit2':
+                    document.querySelector('[data-tool="remove-point"]').click();
+                    break;
+                case 'Digit3':
+                    document.querySelector('[data-tool="box-select"]').click();
+                    break;
+                case 'Digit4':
+                    document.querySelector('[data-tool="brush"]').click();
+                    break;
+                case 'KeyZ':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        // Undo last point
+                        if (state.points.length > 0) {
+                            state.points.pop();
+                            drawPoints();
+                        }
+                    }
+                    break;
+            }
+        });
+
+    })();
+    </script>
+</body>
+</html>

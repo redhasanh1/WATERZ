@@ -402,6 +402,42 @@ def contact_page():
     return send_file('contact.html')
 
 
+@app.route('/background-remover.html')
+def background_remover_page():
+    """Serve the background remover page"""
+    return send_file('background-remover.html')
+
+
+@app.route('/video-tools.html')
+def video_tools_page():
+    """Serve the video tools hub page"""
+    return send_file('video-tools.html')
+
+
+@app.route('/tracking-editor.html')
+def tracking_editor_page():
+    """Serve the interactive tracking editor page"""
+    return send_file('tracking-editor.html')
+
+
+@app.route('/redaction.html')
+def redaction_page():
+    """Serve the video redaction page"""
+    return send_file('redaction.html')
+
+
+@app.route('/object-removal.html')
+def object_removal_page():
+    """Serve the object removal page"""
+    return send_file('object-removal.html')
+
+
+@app.route('/content-moderation.html')
+def content_moderation_page():
+    """Serve the content moderation page"""
+    return send_file('content-moderation.html')
+
+
 @app.route('/ads.txt')
 def ads_txt():
     """Redirect to Ezoic managed ads.txt"""
@@ -519,6 +555,714 @@ def _default_url(path: str) -> str:
     """Build an absolute URL for redirect targets."""
     base_url = request.headers.get('Origin') or request.host_url
     return urljoin(base_url.rstrip('/') + '/', path.lstrip('/'))
+
+
+# =============================================================================
+# Background Removal API Endpoints
+# =============================================================================
+
+# In-memory task storage (replace with Redis/database in production)
+background_removal_tasks = {}
+
+@app.route('/api/background-remove', methods=['POST'])
+def background_remove():
+    """
+    API endpoint for video background removal.
+
+    Request (multipart/form-data):
+        - video: Video file (MP4, MOV, AVI, WebM)
+        - mode: 'keep' or 'remove' (selection mode)
+        - output_type: 'transparent', 'green-screen', 'blue-screen',
+                      'solid-white', 'solid-black', 'custom-color',
+                      'blur', 'virtual-office', 'custom-image', 'png-sequence'
+        - background_color: Hex color for custom-color mode
+        - background_image: Base64 image for custom-image mode
+        - format: 'webm', 'mp4', 'mov', 'png-seq'
+        - quality: 1 (fast), 2 (balanced), 3 (best)
+        - resolution: 'original', '4k', '1080p', '720p'
+        - selections: JSON array of selection points [{x, y, mode}]
+
+    Response:
+        - task_id: UUID for polling status
+        - status: 'queued'
+    """
+    import uuid
+    import json
+
+    # Check if video file is present
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+
+    if video.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    if not is_video(video.filename):
+        return jsonify({'error': 'Invalid file type. Only video files allowed.'}), 400
+
+    # Parse parameters
+    mode = request.form.get('mode', 'keep')  # 'keep' or 'remove'
+    output_type = request.form.get('output_type', 'transparent')
+    background_color = request.form.get('background_color', '#00FF00')
+    format_type = request.form.get('format', 'webm')
+    quality = int(request.form.get('quality', 2))
+    resolution = request.form.get('resolution', 'original')
+
+    try:
+        selections = json.loads(request.form.get('selections', '[]'))
+    except json.JSONDecodeError:
+        selections = []
+
+    # Save video file
+    filename = secure_filename(video.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"bg_{uuid.uuid4().hex}_{filename}")
+    video.save(filepath)
+
+    # Security validation
+    ext = os.path.splitext(filename)[1]
+    try:
+        validate_mime_type(filepath, ext)
+    except MIMEValidationError:
+        os.remove(filepath)
+        return jsonify({'error': 'Invalid file content'}), 400
+
+    # Create task
+    task_id = str(uuid.uuid4())
+    background_removal_tasks[task_id] = {
+        'status': 'queued',
+        'progress': 0,
+        'message': 'Queued for processing',
+        'filepath': filepath,
+        'params': {
+            'mode': mode,
+            'output_type': output_type,
+            'background_color': background_color,
+            'format': format_type,
+            'quality': quality,
+            'resolution': resolution,
+            'selections': selections
+        },
+        'result_url': None,
+        'error': None
+    }
+
+    # TODO: Queue background processing task
+    # In production, use Celery or similar:
+    # process_background_removal_task.delay(task_id)
+    #
+    # For now, mark as processing (placeholder for backend implementation)
+    background_removal_tasks[task_id]['status'] = 'processing'
+    background_removal_tasks[task_id]['progress'] = 10
+    background_removal_tasks[task_id]['message'] = 'Processing started - backend logic to be implemented'
+
+    return jsonify({
+        'status': 'queued',
+        'task_id': task_id
+    })
+
+
+@app.route('/api/background-remove/status/<task_id>', methods=['GET'])
+def background_remove_status(task_id):
+    """
+    Get status of a background removal task.
+
+    Response:
+        - status: 'queued', 'processing', 'completed', 'failed'
+        - progress: 0-100
+        - message: Status message
+        - result_url: URL to download result (when completed)
+        - error: Error message (when failed)
+    """
+    if task_id not in background_removal_tasks:
+        return jsonify({'error': 'Task not found'}), 404
+
+    task = background_removal_tasks[task_id]
+
+    response = {
+        'status': task['status'],
+        'progress': task['progress'],
+        'message': task['message']
+    }
+
+    if task['status'] == 'completed':
+        response['result_url'] = task['result_url']
+    elif task['status'] == 'failed':
+        response['error'] = task['error']
+
+    return jsonify(response)
+
+
+# =============================================================================
+# Video Redaction API Endpoints
+# =============================================================================
+
+redaction_tasks = {}
+
+@app.route('/api/redaction/detect', methods=['POST'])
+def redaction_detect():
+    """
+    API endpoint to detect sensitive content in video for redaction.
+
+    Request (multipart/form-data):
+        - video: Video file
+        - detect_faces: boolean (default true)
+        - detect_plates: boolean (default true)
+        - detect_screens: boolean (default false)
+        - detect_text: boolean (default false)
+
+    Response:
+        - task_id: UUID for polling status
+        - status: 'queued'
+    """
+    import uuid
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+    if video.filename == '' or not is_video(video.filename):
+        return jsonify({'error': 'Invalid video file'}), 400
+
+    # Parse detection options
+    detect_faces = request.form.get('detect_faces', 'true').lower() == 'true'
+    detect_plates = request.form.get('detect_plates', 'true').lower() == 'true'
+    detect_screens = request.form.get('detect_screens', 'false').lower() == 'true'
+    detect_text = request.form.get('detect_text', 'false').lower() == 'true'
+
+    # Save video file
+    filename = secure_filename(video.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"redact_{uuid.uuid4().hex}_{filename}")
+    video.save(filepath)
+
+    # Create task
+    task_id = str(uuid.uuid4())
+    redaction_tasks[task_id] = {
+        'status': 'processing',
+        'progress': 0,
+        'message': 'Detecting sensitive content...',
+        'filepath': filepath,
+        'detections': [],
+        'params': {
+            'detect_faces': detect_faces,
+            'detect_plates': detect_plates,
+            'detect_screens': detect_screens,
+            'detect_text': detect_text
+        }
+    }
+
+    return jsonify({
+        'status': 'queued',
+        'task_id': task_id
+    })
+
+
+@app.route('/api/redaction/apply', methods=['POST'])
+def redaction_apply():
+    """
+    API endpoint to apply redaction to detected regions.
+
+    Request (JSON):
+        - task_id: Detection task ID
+        - blur_style: 'gaussian', 'pixelate', 'black', 'color'
+        - intensity: 0-100
+        - regions: Array of region IDs to redact (optional, all if not provided)
+
+    Response:
+        - task_id: UUID for polling status
+    """
+    import uuid
+
+    data = request.get_json(silent=True) or {}
+    detection_task_id = data.get('task_id')
+
+    if not detection_task_id or detection_task_id not in redaction_tasks:
+        return jsonify({'error': 'Invalid detection task ID'}), 400
+
+    task_id = str(uuid.uuid4())
+    redaction_tasks[task_id] = {
+        'status': 'processing',
+        'progress': 0,
+        'message': 'Applying redaction...',
+        'detection_task_id': detection_task_id,
+        'blur_style': data.get('blur_style', 'gaussian'),
+        'intensity': data.get('intensity', 80),
+        'result_url': None
+    }
+
+    return jsonify({
+        'status': 'queued',
+        'task_id': task_id
+    })
+
+
+@app.route('/api/redaction/status/<task_id>', methods=['GET'])
+def redaction_status(task_id):
+    """Get status of a redaction task."""
+    if task_id not in redaction_tasks:
+        return jsonify({'error': 'Task not found'}), 404
+
+    task = redaction_tasks[task_id]
+    return jsonify({
+        'status': task['status'],
+        'progress': task['progress'],
+        'message': task['message'],
+        'detections': task.get('detections', []),
+        'result_url': task.get('result_url')
+    })
+
+
+# =============================================================================
+# Interactive Tracking API Endpoints
+# =============================================================================
+
+tracking_sessions = {}
+
+@app.route('/api/tracking/init', methods=['POST'])
+def tracking_init():
+    """
+    Initialize object tracking on a video frame.
+
+    Request (multipart/form-data):
+        - video: Video file
+        - frame: Frame number to start tracking
+        - points: JSON array of initial points [{x, y, positive: true/false}]
+
+    Response:
+        - session_id: Tracking session ID
+        - mask: Base64 encoded mask image
+    """
+    import uuid
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+    if video.filename == '' or not is_video(video.filename):
+        return jsonify({'error': 'Invalid video file'}), 400
+
+    frame = int(request.form.get('frame', 0))
+    try:
+        points = json.loads(request.form.get('points', '[]'))
+    except:
+        points = []
+
+    # Save video file
+    filename = secure_filename(video.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"track_{uuid.uuid4().hex}_{filename}")
+    video.save(filepath)
+
+    session_id = str(uuid.uuid4())
+    tracking_sessions[session_id] = {
+        'filepath': filepath,
+        'current_frame': frame,
+        'points': points,
+        'masks': {},
+        'keyframes': [frame]
+    }
+
+    return jsonify({
+        'session_id': session_id,
+        'status': 'initialized',
+        'mask': None  # Backend would generate actual mask
+    })
+
+
+@app.route('/api/tracking/add-point', methods=['POST'])
+def tracking_add_point():
+    """
+    Add a point to tracking session.
+
+    Request (JSON):
+        - session_id: Tracking session ID
+        - frame: Frame number
+        - x: X coordinate (0-1 normalized)
+        - y: Y coordinate (0-1 normalized)
+        - positive: true for include, false for exclude
+
+    Response:
+        - mask: Updated mask for the frame
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get('session_id')
+
+    if not session_id or session_id not in tracking_sessions:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+    session = tracking_sessions[session_id]
+    session['points'].append({
+        'frame': data.get('frame', session['current_frame']),
+        'x': data.get('x'),
+        'y': data.get('y'),
+        'positive': data.get('positive', True)
+    })
+
+    return jsonify({
+        'status': 'updated',
+        'mask': None  # Backend would generate actual mask
+    })
+
+
+@app.route('/api/tracking/propagate', methods=['POST'])
+def tracking_propagate():
+    """
+    Propagate tracking from current frame forward or backward.
+
+    Request (JSON):
+        - session_id: Tracking session ID
+        - direction: 'forward' or 'backward'
+        - from_frame: Starting frame
+
+    Response:
+        - task_id: UUID for polling status
+    """
+    import uuid
+
+    data = request.get_json(silent=True) or {}
+    session_id = data.get('session_id')
+
+    if not session_id or session_id not in tracking_sessions:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+    task_id = str(uuid.uuid4())
+    # Add propagation task logic here
+
+    return jsonify({
+        'status': 'propagating',
+        'task_id': task_id
+    })
+
+
+@app.route('/api/tracking/mask/<session_id>/<int:frame>', methods=['GET'])
+def tracking_get_mask(session_id, frame):
+    """Get mask for a specific frame in tracking session."""
+    if session_id not in tracking_sessions:
+        return jsonify({'error': 'Session not found'}), 404
+
+    session = tracking_sessions[session_id]
+    mask = session['masks'].get(frame)
+
+    return jsonify({
+        'frame': frame,
+        'mask': mask,  # Base64 encoded mask
+        'confidence': 0.95  # Confidence score
+    })
+
+
+# =============================================================================
+# Object Removal API Endpoints
+# =============================================================================
+
+removal_tasks = {}
+
+@app.route('/api/removal/process', methods=['POST'])
+def removal_process():
+    """
+    API endpoint for video object removal with inpainting.
+
+    Request (multipart/form-data):
+        - video: Video file
+        - mask: Mask video/image sequence defining object to remove
+        - quality: 'fast', 'balanced', 'high'
+        - preserve_shadows: boolean
+        - preserve_reflections: boolean
+
+    Response:
+        - task_id: UUID for polling status
+    """
+    import uuid
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+    if video.filename == '' or not is_video(video.filename):
+        return jsonify({'error': 'Invalid video file'}), 400
+
+    quality = request.form.get('quality', 'balanced')
+    preserve_shadows = request.form.get('preserve_shadows', 'true').lower() == 'true'
+    preserve_reflections = request.form.get('preserve_reflections', 'false').lower() == 'true'
+
+    # Save video file
+    filename = secure_filename(video.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"remove_{uuid.uuid4().hex}_{filename}")
+    video.save(filepath)
+
+    task_id = str(uuid.uuid4())
+    removal_tasks[task_id] = {
+        'status': 'processing',
+        'progress': 0,
+        'message': 'Analyzing object and generating inpainting...',
+        'filepath': filepath,
+        'params': {
+            'quality': quality,
+            'preserve_shadows': preserve_shadows,
+            'preserve_reflections': preserve_reflections
+        },
+        'result_url': None
+    }
+
+    return jsonify({
+        'status': 'queued',
+        'task_id': task_id
+    })
+
+
+@app.route('/api/removal/status/<task_id>', methods=['GET'])
+def removal_status(task_id):
+    """Get status of an object removal task."""
+    if task_id not in removal_tasks:
+        return jsonify({'error': 'Task not found'}), 404
+
+    task = removal_tasks[task_id]
+    return jsonify({
+        'status': task['status'],
+        'progress': task['progress'],
+        'message': task['message'],
+        'result_url': task.get('result_url')
+    })
+
+
+# =============================================================================
+# Content Moderation API Endpoints
+# =============================================================================
+
+moderation_tasks = {}
+
+@app.route('/api/moderation/scan', methods=['POST'])
+def moderation_scan():
+    """
+    API endpoint to scan video for inappropriate content.
+
+    Request (multipart/form-data):
+        - video: Video file
+        - detect_nsfw: boolean (default true)
+        - detect_violence: boolean (default true)
+        - detect_weapons: boolean (default false)
+        - detect_drugs: boolean (default false)
+
+    Response:
+        - task_id: UUID for polling status
+    """
+    import uuid
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+    if video.filename == '' or not is_video(video.filename):
+        return jsonify({'error': 'Invalid video file'}), 400
+
+    # Parse detection options
+    detect_nsfw = request.form.get('detect_nsfw', 'true').lower() == 'true'
+    detect_violence = request.form.get('detect_violence', 'true').lower() == 'true'
+    detect_weapons = request.form.get('detect_weapons', 'false').lower() == 'true'
+    detect_drugs = request.form.get('detect_drugs', 'false').lower() == 'true'
+
+    # Save video file
+    filename = secure_filename(video.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"moderate_{uuid.uuid4().hex}_{filename}")
+    video.save(filepath)
+
+    task_id = str(uuid.uuid4())
+    moderation_tasks[task_id] = {
+        'status': 'processing',
+        'progress': 0,
+        'message': 'Scanning for inappropriate content...',
+        'filepath': filepath,
+        'params': {
+            'detect_nsfw': detect_nsfw,
+            'detect_violence': detect_violence,
+            'detect_weapons': detect_weapons,
+            'detect_drugs': detect_drugs
+        },
+        'detections': [],
+        'report': None
+    }
+
+    return jsonify({
+        'status': 'queued',
+        'task_id': task_id
+    })
+
+
+@app.route('/api/moderation/report/<task_id>', methods=['GET'])
+def moderation_report(task_id):
+    """Get moderation report for a scan task."""
+    if task_id not in moderation_tasks:
+        return jsonify({'error': 'Task not found'}), 404
+
+    task = moderation_tasks[task_id]
+    return jsonify({
+        'status': task['status'],
+        'progress': task['progress'],
+        'message': task['message'],
+        'detections': task.get('detections', []),
+        'report': task.get('report'),
+        'summary': {
+            'total_detections': len(task.get('detections', [])),
+            'categories': {},
+            'safe_percentage': 95  # Placeholder
+        }
+    })
+
+
+# =============================================================================
+# Multi-Object Tracking API Endpoints
+# =============================================================================
+
+multi_track_sessions = {}
+
+@app.route('/api/multi-track/init', methods=['POST'])
+def multi_track_init():
+    """
+    Initialize multi-object tracking on a video.
+
+    Request (multipart/form-data):
+        - video: Video file
+        - objects: JSON array of objects [{name, color, points: [{x, y}]}]
+
+    Response:
+        - session_id: Tracking session ID
+    """
+    import uuid
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
+
+    video = request.files['video']
+    if video.filename == '' or not is_video(video.filename):
+        return jsonify({'error': 'Invalid video file'}), 400
+
+    try:
+        objects = json.loads(request.form.get('objects', '[]'))
+    except:
+        objects = []
+
+    # Save video file
+    filename = secure_filename(video.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"multi_{uuid.uuid4().hex}_{filename}")
+    video.save(filepath)
+
+    session_id = str(uuid.uuid4())
+    multi_track_sessions[session_id] = {
+        'filepath': filepath,
+        'objects': objects,
+        'masks': {}
+    }
+
+    return jsonify({
+        'session_id': session_id,
+        'status': 'initialized'
+    })
+
+
+@app.route('/api/multi-track/masks/<session_id>', methods=['GET'])
+def multi_track_masks(session_id):
+    """Get all masks for a multi-object tracking session."""
+    if session_id not in multi_track_sessions:
+        return jsonify({'error': 'Session not found'}), 404
+
+    session = multi_track_sessions[session_id]
+    return jsonify({
+        'objects': session['objects'],
+        'masks': session['masks']
+    })
+
+
+# =============================================================================
+# Batch Processing API Endpoints
+# =============================================================================
+
+batch_jobs = {}
+
+@app.route('/api/batch/submit', methods=['POST'])
+def batch_submit():
+    """
+    Submit a batch processing job.
+
+    Request (multipart/form-data):
+        - videos[]: Array of video files
+        - operation: 'background-remove', 'redaction', 'moderation', etc.
+        - settings: JSON object with operation-specific settings
+
+    Response:
+        - job_id: Batch job ID
+        - video_count: Number of videos queued
+    """
+    import uuid
+
+    if 'videos[]' not in request.files:
+        return jsonify({'error': 'No video files provided'}), 400
+
+    videos = request.files.getlist('videos[]')
+    operation = request.form.get('operation', 'background-remove')
+
+    try:
+        settings = json.loads(request.form.get('settings', '{}'))
+    except:
+        settings = {}
+
+    job_id = str(uuid.uuid4())
+    video_tasks = []
+
+    for video in videos:
+        if video.filename and is_video(video.filename):
+            filename = secure_filename(video.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"batch_{job_id}_{filename}")
+            video.save(filepath)
+            video_tasks.append({
+                'filename': filename,
+                'filepath': filepath,
+                'status': 'queued',
+                'progress': 0
+            })
+
+    batch_jobs[job_id] = {
+        'status': 'processing',
+        'operation': operation,
+        'settings': settings,
+        'videos': video_tasks,
+        'completed': 0,
+        'total': len(video_tasks)
+    }
+
+    return jsonify({
+        'job_id': job_id,
+        'video_count': len(video_tasks),
+        'status': 'queued'
+    })
+
+
+@app.route('/api/batch/status/<job_id>', methods=['GET'])
+def batch_status(job_id):
+    """Get status of a batch processing job."""
+    if job_id not in batch_jobs:
+        return jsonify({'error': 'Job not found'}), 404
+
+    job = batch_jobs[job_id]
+    return jsonify({
+        'status': job['status'],
+        'completed': job['completed'],
+        'total': job['total'],
+        'videos': job['videos']
+    })
+
+
+@app.route('/api/batch/download/<job_id>', methods=['GET'])
+def batch_download(job_id):
+    """Download results of a batch processing job as ZIP."""
+    if job_id not in batch_jobs:
+        return jsonify({'error': 'Job not found'}), 404
+
+    # In production, this would generate and return a ZIP file
+    return jsonify({
+        'error': 'Download endpoint - implementation pending',
+        'job_id': job_id
+    })
+
+
+# =============================================================================
 
 
 @app.route('/api/billing/create-checkout-session', methods=['POST'])

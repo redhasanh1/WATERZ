@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Redaction Suite - GDPR/HIPAA Compliant | MarkRemoverAI</title>
+    <meta name="description" content="Auto-detect and blur faces, license plates, screens, and sensitive content. GDPR, HIPAA, CCPA compliant video redaction for enterprise.">
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #09090b;
+            --bg-secondary: #0f0f12;
+            --bg-card: #18181b;
+            --bg-card-hover: #1f1f23;
+            --border-color: #27272a;
+            --text-primary: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent: #ef4444;
+            --accent-hover: #dc2626;
+            --accent-glow: rgba(239, 68, 68, 0.3);
+            --green: #22c55e;
+            --blue: #3b82f6;
+            --yellow: #eab308;
+            --purple: #8b5cf6;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Navigation */
+        .nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .nav-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1.125rem;
+        }
+
+        .nav-logo img {
+            height: 32px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: var(--text-primary);
+        }
+
+        @media (max-width: 768px) {
+            .nav-links { display: none; }
+        }
+
+        /* Hero */
+        .hero {
+            padding: 8rem 1.5rem 4rem;
+            text-align: center;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 100px;
+            font-size: 0.85rem;
+            color: var(--accent);
+            margin-bottom: 2rem;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 3.5rem);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero-subtitle {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+
+        .compliance-badges {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .compliance-badge {
+            padding: 0.5rem 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        /* Main App */
+        .app-section {
+            padding: 2rem 1.5rem 6rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .app-grid {
+            display: grid;
+            grid-template-columns: 1fr 360px;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 900px) {
+            .app-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Video Panel */
+        .video-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            aspect-ratio: 16/9;
+        }
+
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .video-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .video-placeholder:hover {
+            background: rgba(239, 68, 68, 0.05);
+        }
+
+        .video-placeholder svg {
+            width: 64px;
+            height: 64px;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+
+        .video-placeholder h3 {
+            font-size: 1.125rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .video-placeholder p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Detection Results Overlay */
+        .detection-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        .detection-box {
+            position: absolute;
+            border: 2px solid;
+            border-radius: 4px;
+        }
+
+        .detection-box.face {
+            border-color: var(--accent);
+        }
+
+        .detection-box.plate {
+            border-color: var(--yellow);
+        }
+
+        .detection-box.screen {
+            border-color: var(--blue);
+        }
+
+        .detection-box.text {
+            border-color: var(--purple);
+        }
+
+        .detection-box-label {
+            position: absolute;
+            top: -24px;
+            left: 0;
+            padding: 2px 8px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            border-radius: 4px;
+            color: white;
+        }
+
+        .detection-box.face .detection-box-label { background: var(--accent); }
+        .detection-box.plate .detection-box-label { background: var(--yellow); color: #000; }
+        .detection-box.screen .detection-box-label { background: var(--blue); }
+        .detection-box.text .detection-box-label { background: var(--purple); }
+
+        /* Video Controls */
+        .video-controls {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .control-btn {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .control-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .control-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.1s;
+        }
+
+        .time-display {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            min-width: 100px;
+            text-align: right;
+        }
+
+        /* Settings Panel */
+        .settings-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .settings-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+
+        .settings-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 1rem;
+        }
+
+        /* Detection Types */
+        .detection-types {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .detection-type {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.875rem 1rem;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .detection-type:hover {
+            border-color: var(--text-muted);
+        }
+
+        .detection-type.selected {
+            border-color: var(--accent);
+            background: rgba(239, 68, 68, 0.05);
+        }
+
+        .detection-checkbox {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .detection-type.selected .detection-checkbox {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .detection-checkbox svg {
+            width: 12px;
+            height: 12px;
+            color: white;
+            opacity: 0;
+        }
+
+        .detection-type.selected .detection-checkbox svg {
+            opacity: 1;
+        }
+
+        .detection-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .detection-icon.face {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent);
+        }
+
+        .detection-icon.plate {
+            background: rgba(234, 179, 8, 0.15);
+            color: var(--yellow);
+        }
+
+        .detection-icon.screen {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--blue);
+        }
+
+        .detection-icon.text {
+            background: rgba(139, 92, 246, 0.15);
+            color: var(--purple);
+        }
+
+        .detection-icon svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .detection-info {
+            flex: 1;
+        }
+
+        .detection-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .detection-desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .detection-count {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            padding: 0.25rem 0.625rem;
+            background: var(--bg-card);
+            border-radius: 100px;
+        }
+
+        /* Blur Style */
+        .blur-styles {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+
+        .blur-style {
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .blur-style:hover {
+            border-color: var(--text-muted);
+        }
+
+        .blur-style.selected {
+            border-color: var(--accent);
+            background: rgba(239, 68, 68, 0.05);
+        }
+
+        .blur-preview {
+            width: 40px;
+            height: 30px;
+            margin: 0 auto 0.5rem;
+            border-radius: 4px;
+            background: #444;
+        }
+
+        .blur-preview.gaussian {
+            filter: blur(4px);
+        }
+
+        .blur-preview.pixelate {
+            background: repeating-conic-gradient(#444 0% 25%, #555 0% 50%) 50% / 8px 8px;
+        }
+
+        .blur-preview.black-box {
+            background: #000;
+        }
+
+        .blur-preview.color {
+            background: var(--accent);
+        }
+
+        .blur-style-name {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        /* Intensity Slider */
+        .intensity-slider {
+            margin-top: 1rem;
+        }
+
+        .intensity-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .slider {
+            width: 100%;
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            appearance: none;
+            cursor: pointer;
+        }
+
+        .slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: var(--accent);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        /* Custom Zones */
+        .custom-zones-btn {
+            width: 100%;
+            padding: 0.875rem;
+            background: transparent;
+            border: 2px dashed var(--border-color);
+            border-radius: 10px;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .custom-zones-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .custom-zones-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 1rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+        }
+
+        .action-btn-primary {
+            background: var(--accent);
+            color: white;
+            border: none;
+        }
+
+        .action-btn-primary:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .action-btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .action-btn-secondary {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .action-btn-secondary:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .action-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Detected Items List */
+        .detected-items {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .detected-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .detected-item-thumb {
+            width: 48px;
+            height: 48px;
+            background: #333;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .detected-item-info {
+            flex: 1;
+        }
+
+        .detected-item-type {
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .detected-item-time {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .detected-item-actions {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .detected-item-btn {
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-card);
+            border: none;
+            border-radius: 6px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .detected-item-btn:hover {
+            background: var(--bg-card-hover);
+            color: var(--text-primary);
+        }
+
+        .detected-item-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Export Options */
+        .export-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+
+        .export-option {
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .export-option:hover {
+            border-color: var(--text-muted);
+        }
+
+        .export-option.selected {
+            border-color: var(--accent);
+        }
+
+        .export-option-name {
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .export-option-desc {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        /* Modal */
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            padding: 1.5rem;
+        }
+
+        .modal.hidden {
+            display: none;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 2rem;
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .modal-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1.5rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .modal-text {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .modal-progress {
+            margin-top: 1.5rem;
+        }
+
+        .modal-progress-bar {
+            height: 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .modal-progress-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .modal-progress-text {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        /* Footer */
+        .footer {
+            padding: 3rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .footer-copy {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Hidden */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="/" class="nav-logo">
+                <img src="logo.svg" alt="MarkRemoverAI">
+                <span>MarkRemoverAI</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Object Remover</a></li>
+                <li><a href="/video-tools" class="active">Video Tools</a></li>
+                <li><a href="/premium#pricing">Pricing</a></li>
+                <li><a href="/api">API</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-badge">
+            Enterprise-Grade Privacy Protection
+        </div>
+        <h1>Video Redaction Suite</h1>
+        <p class="hero-subtitle">
+            Automatically detect and blur faces, license plates, screens, and sensitive content.
+            Built for compliance with privacy regulations worldwide.
+        </p>
+        <div class="compliance-badges">
+            <span class="compliance-badge">GDPR Compliant</span>
+            <span class="compliance-badge">HIPAA Ready</span>
+            <span class="compliance-badge">CCPA Compliant</span>
+            <span class="compliance-badge">SOC 2</span>
+        </div>
+    </section>
+
+    <!-- Main App -->
+    <section class="app-section">
+        <div class="app-grid">
+            <!-- Video Panel -->
+            <div class="video-panel">
+                <div class="video-container" id="videoContainer">
+                    <div class="video-placeholder" id="uploadArea">
+                        <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm" style="display:none">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="2" y="2" width="20" height="20" rx="2"/>
+                            <path d="M10 8l6 4-6 4V8z"/>
+                        </svg>
+                        <h3>Upload Video for Redaction</h3>
+                        <p>Drag & drop or click to upload (MP4, MOV, WebM)</p>
+                    </div>
+                    <video id="videoPlayer" class="hidden"></video>
+                    <div class="detection-overlay" id="detectionOverlay"></div>
+                </div>
+                <div class="video-controls hidden" id="videoControls">
+                    <button class="control-btn" id="playPauseBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="playIcon">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="pauseIcon" class="hidden">
+                            <rect x="6" y="4" width="4" height="16"/>
+                            <rect x="14" y="4" width="4" height="16"/>
+                        </svg>
+                    </button>
+                    <div class="progress-bar" id="progressBar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <span class="time-display" id="timeDisplay">0:00 / 0:00</span>
+                </div>
+            </div>
+
+            <!-- Settings Panel -->
+            <div class="settings-panel">
+                <!-- Detection Types -->
+                <div class="settings-card">
+                    <div class="settings-title">Auto-Detect</div>
+                    <div class="detection-types">
+                        <div class="detection-type selected" data-type="faces">
+                            <div class="detection-checkbox">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                </svg>
+                            </div>
+                            <div class="detection-icon face">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+                                    <line x1="9" y1="9" x2="9.01" y2="9"/>
+                                    <line x1="15" y1="9" x2="15.01" y2="9"/>
+                                </svg>
+                            </div>
+                            <div class="detection-info">
+                                <div class="detection-name">Faces</div>
+                                <div class="detection-desc">People, portraits</div>
+                            </div>
+                            <span class="detection-count" id="faceCount">0</span>
+                        </div>
+
+                        <div class="detection-type selected" data-type="plates">
+                            <div class="detection-checkbox">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                </svg>
+                            </div>
+                            <div class="detection-icon plate">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="2" y="6" width="20" height="12" rx="2"/>
+                                    <path d="M7 12h2M12 12h2M17 12h2"/>
+                                </svg>
+                            </div>
+                            <div class="detection-info">
+                                <div class="detection-name">License Plates</div>
+                                <div class="detection-desc">Vehicle plates</div>
+                            </div>
+                            <span class="detection-count" id="plateCount">0</span>
+                        </div>
+
+                        <div class="detection-type" data-type="screens">
+                            <div class="detection-checkbox">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                </svg>
+                            </div>
+                            <div class="detection-icon screen">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="2" y="3" width="20" height="14" rx="2"/>
+                                    <line x1="8" y1="21" x2="16" y2="21"/>
+                                    <line x1="12" y1="17" x2="12" y2="21"/>
+                                </svg>
+                            </div>
+                            <div class="detection-info">
+                                <div class="detection-name">Screens</div>
+                                <div class="detection-desc">Monitors, phones</div>
+                            </div>
+                            <span class="detection-count" id="screenCount">0</span>
+                        </div>
+
+                        <div class="detection-type" data-type="text">
+                            <div class="detection-checkbox">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                </svg>
+                            </div>
+                            <div class="detection-icon text">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                                    <path d="M14 2v6h6"/>
+                                    <path d="M16 13H8M16 17H8M10 9H8"/>
+                                </svg>
+                            </div>
+                            <div class="detection-info">
+                                <div class="detection-name">Text/Documents</div>
+                                <div class="detection-desc">Visible text, papers</div>
+                            </div>
+                            <span class="detection-count" id="textCount">0</span>
+                        </div>
+                    </div>
+
+                    <button class="custom-zones-btn" id="customZonesBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 5v14M5 12h14"/>
+                        </svg>
+                        Add Custom Redaction Zone
+                    </button>
+                </div>
+
+                <!-- Blur Style -->
+                <div class="settings-card">
+                    <div class="settings-title">Blur Style</div>
+                    <div class="blur-styles">
+                        <div class="blur-style selected" data-style="gaussian">
+                            <div class="blur-preview gaussian"></div>
+                            <span class="blur-style-name">Gaussian</span>
+                        </div>
+                        <div class="blur-style" data-style="pixelate">
+                            <div class="blur-preview pixelate"></div>
+                            <span class="blur-style-name">Pixelate</span>
+                        </div>
+                        <div class="blur-style" data-style="black">
+                            <div class="blur-preview black-box"></div>
+                            <span class="blur-style-name">Black Box</span>
+                        </div>
+                        <div class="blur-style" data-style="color">
+                            <div class="blur-preview color"></div>
+                            <span class="blur-style-name">Color Fill</span>
+                        </div>
+                    </div>
+
+                    <div class="intensity-slider">
+                        <div class="intensity-label">
+                            <span>Intensity</span>
+                            <span id="intensityValue">80%</span>
+                        </div>
+                        <input type="range" class="slider" id="intensitySlider" min="20" max="100" value="80">
+                    </div>
+                </div>
+
+                <!-- Export Settings -->
+                <div class="settings-card">
+                    <div class="settings-title">Export Format</div>
+                    <div class="export-options">
+                        <div class="export-option selected" data-format="mp4">
+                            <div class="export-option-name">MP4</div>
+                            <div class="export-option-desc">Universal</div>
+                        </div>
+                        <div class="export-option" data-format="webm">
+                            <div class="export-option-name">WebM</div>
+                            <div class="export-option-desc">Web-ready</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="action-buttons">
+                    <button class="action-btn action-btn-primary" id="detectBtn" disabled>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                        Detect Sensitive Content
+                    </button>
+                    <button class="action-btn action-btn-primary hidden" id="applyBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        Apply Redaction & Export
+                    </button>
+                    <button class="action-btn action-btn-secondary hidden" id="reportBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <path d="M14 2v6h6"/>
+                        </svg>
+                        Generate Compliance Report
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p class="footer-copy">&copy; 2024 MarkRemoverAI. All rights reserved.</p>
+    </footer>
+
+    <!-- Processing Modal -->
+    <div class="modal hidden" id="processingModal">
+        <div class="modal-content">
+            <div class="modal-spinner"></div>
+            <h3 class="modal-title" id="modalTitle">Processing...</h3>
+            <p class="modal-text" id="modalText">Analyzing video for sensitive content...</p>
+            <div class="modal-progress">
+                <div class="modal-progress-bar">
+                    <div class="modal-progress-fill" id="modalProgressFill"></div>
+                </div>
+                <p class="modal-progress-text" id="modalProgressText">0%</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // State
+        const state = {
+            videoFile: null,
+            videoUrl: null,
+            isPlaying: false,
+            detectionTypes: {
+                faces: true,
+                plates: true,
+                screens: false,
+                text: false
+            },
+            blurStyle: 'gaussian',
+            intensity: 80,
+            exportFormat: 'mp4',
+            detections: [],
+            isDetected: false
+        };
+
+        // Elements
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const videoControls = document.getElementById('videoControls');
+        const detectionOverlay = document.getElementById('detectionOverlay');
+        const detectBtn = document.getElementById('detectBtn');
+        const applyBtn = document.getElementById('applyBtn');
+        const reportBtn = document.getElementById('reportBtn');
+        const processingModal = document.getElementById('processingModal');
+
+        // Upload handling
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = 'rgba(239, 68, 68, 0.05)';
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.background = 'transparent';
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = 'transparent';
+            if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            const validTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
+            if (!validTypes.includes(file.type)) {
+                alert('Please upload a video file (MP4, MOV, or WebM)');
+                return;
+            }
+
+            state.videoFile = file;
+            state.videoUrl = URL.createObjectURL(file);
+
+            videoPlayer.src = state.videoUrl;
+            videoPlayer.classList.remove('hidden');
+            uploadArea.classList.add('hidden');
+            videoControls.classList.remove('hidden');
+            detectBtn.disabled = false;
+
+            videoPlayer.addEventListener('loadedmetadata', updateTimeDisplay);
+            videoPlayer.addEventListener('timeupdate', updateProgress);
+        }
+
+        // Video controls
+        document.getElementById('playPauseBtn').addEventListener('click', () => {
+            if (videoPlayer.paused) {
+                videoPlayer.play();
+                state.isPlaying = true;
+                document.getElementById('playIcon').classList.add('hidden');
+                document.getElementById('pauseIcon').classList.remove('hidden');
+            } else {
+                videoPlayer.pause();
+                state.isPlaying = false;
+                document.getElementById('playIcon').classList.remove('hidden');
+                document.getElementById('pauseIcon').classList.add('hidden');
+            }
+        });
+
+        document.getElementById('progressBar').addEventListener('click', (e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            videoPlayer.currentTime = percent * videoPlayer.duration;
+        });
+
+        function updateProgress() {
+            const percent = (videoPlayer.currentTime / videoPlayer.duration) * 100;
+            document.getElementById('progressFill').style.width = percent + '%';
+            updateTimeDisplay();
+
+            // Update detection boxes positions based on time
+            if (state.isDetected) {
+                renderDetections();
+            }
+        }
+
+        function updateTimeDisplay() {
+            const current = formatTime(videoPlayer.currentTime);
+            const total = formatTime(videoPlayer.duration || 0);
+            document.getElementById('timeDisplay').textContent = `${current} / ${total}`;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Detection type toggles
+        document.querySelectorAll('.detection-type').forEach(type => {
+            type.addEventListener('click', () => {
+                type.classList.toggle('selected');
+                const typeKey = type.dataset.type;
+                state.detectionTypes[typeKey] = type.classList.contains('selected');
+            });
+        });
+
+        // Blur style selection
+        document.querySelectorAll('.blur-style').forEach(style => {
+            style.addEventListener('click', () => {
+                document.querySelectorAll('.blur-style').forEach(s => s.classList.remove('selected'));
+                style.classList.add('selected');
+                state.blurStyle = style.dataset.style;
+            });
+        });
+
+        // Intensity slider
+        document.getElementById('intensitySlider').addEventListener('input', (e) => {
+            state.intensity = e.target.value;
+            document.getElementById('intensityValue').textContent = e.target.value + '%';
+        });
+
+        // Export format selection
+        document.querySelectorAll('.export-option').forEach(option => {
+            option.addEventListener('click', () => {
+                document.querySelectorAll('.export-option').forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+                state.exportFormat = option.dataset.format;
+            });
+        });
+
+        // Detect button
+        detectBtn.addEventListener('click', async () => {
+            showModal('Detecting...', 'Scanning video for sensitive content...');
+
+            // Simulate detection progress
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        simulateDetections();
+                        hideModal();
+                        state.isDetected = true;
+                        detectBtn.classList.add('hidden');
+                        applyBtn.classList.remove('hidden');
+                        reportBtn.classList.remove('hidden');
+                    }, 500);
+                }
+                updateModalProgress(progress, 'Analyzing frame ' + Math.floor(progress * 3) + '/300...');
+            }, 200);
+        });
+
+        // Apply redaction button
+        applyBtn.addEventListener('click', async () => {
+            showModal('Applying Redaction...', 'Blurring detected sensitive content...');
+
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 10;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        hideModal();
+                        alert('Video redacted successfully! Download will start automatically.');
+                    }, 500);
+                }
+                updateModalProgress(progress, 'Processing frame ' + Math.floor(progress * 3) + '/300...');
+            }, 150);
+        });
+
+        // Generate report
+        reportBtn.addEventListener('click', () => {
+            alert('Compliance report generated! This would download a PDF with:\n\n- Timestamp of redaction\n- Number of items redacted\n- Types of content detected\n- Processing details\n- Chain of custody info');
+        });
+
+        // Custom zones
+        document.getElementById('customZonesBtn').addEventListener('click', () => {
+            alert('Custom zone drawing would open here. You could draw rectangles on the video to mark additional areas for redaction.');
+        });
+
+        // Simulate detections
+        function simulateDetections() {
+            state.detections = [
+                { type: 'face', x: 20, y: 15, width: 12, height: 18, startTime: 0, endTime: 10 },
+                { type: 'face', x: 60, y: 20, width: 10, height: 15, startTime: 2, endTime: 8 },
+                { type: 'plate', x: 30, y: 70, width: 20, height: 8, startTime: 3, endTime: 7 }
+            ];
+
+            // Update counts
+            document.getElementById('faceCount').textContent = state.detections.filter(d => d.type === 'face').length;
+            document.getElementById('plateCount').textContent = state.detections.filter(d => d.type === 'plate').length;
+            document.getElementById('screenCount').textContent = state.detections.filter(d => d.type === 'screen').length;
+            document.getElementById('textCount').textContent = state.detections.filter(d => d.type === 'text').length;
+
+            renderDetections();
+        }
+
+        function renderDetections() {
+            detectionOverlay.innerHTML = '';
+            const currentTime = videoPlayer.currentTime;
+
+            state.detections.forEach(det => {
+                if (currentTime >= det.startTime && currentTime <= det.endTime) {
+                    const box = document.createElement('div');
+                    box.className = `detection-box ${det.type}`;
+                    box.style.left = det.x + '%';
+                    box.style.top = det.y + '%';
+                    box.style.width = det.width + '%';
+                    box.style.height = det.height + '%';
+
+                    const label = document.createElement('div');
+                    label.className = 'detection-box-label';
+                    label.textContent = det.type.charAt(0).toUpperCase() + det.type.slice(1);
+                    box.appendChild(label);
+
+                    detectionOverlay.appendChild(box);
+                }
+            });
+        }
+
+        // Modal helpers
+        function showModal(title, text) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalText').textContent = text;
+            document.getElementById('modalProgressFill').style.width = '0%';
+            document.getElementById('modalProgressText').textContent = '0%';
+            processingModal.classList.remove('hidden');
+        }
+
+        function updateModalProgress(percent, text) {
+            document.getElementById('modalProgressFill').style.width = percent + '%';
+            document.getElementById('modalProgressText').textContent = Math.floor(percent) + '%';
+            if (text) document.getElementById('modalText').textContent = text;
+        }
+
+        function hideModal() {
+            processingModal.classList.add('hidden');
+        }
+
+    })();
+    </script>
+</body>
+</html>

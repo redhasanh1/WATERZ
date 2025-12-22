@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Object Removal - Remove Anything from Videos | MarkRemoverAI</title>
+    <meta name="description" content="Click to remove any object from your video. AI fills the gap seamlessly with surrounding context. Perfect for real estate, e-commerce, and content creators.">
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #09090b;
+            --bg-secondary: #0f0f12;
+            --bg-card: #18181b;
+            --bg-card-hover: #1f1f23;
+            --border-color: #27272a;
+            --text-primary: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent: #f97316;
+            --accent-hover: #ea580c;
+            --accent-glow: rgba(249, 115, 22, 0.3);
+            --green: #22c55e;
+            --blue: #3b82f6;
+            --red: #ef4444;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Navigation */
+        .nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .nav-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1.125rem;
+        }
+
+        .nav-logo img {
+            height: 32px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: var(--text-primary);
+        }
+
+        @media (max-width: 768px) {
+            .nav-links { display: none; }
+        }
+
+        /* Hero */
+        .hero {
+            padding: 8rem 1.5rem 3rem;
+            text-align: center;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: rgba(249, 115, 22, 0.15);
+            border: 1px solid rgba(249, 115, 22, 0.3);
+            border-radius: 100px;
+            font-size: 0.85rem;
+            color: var(--accent);
+            margin-bottom: 2rem;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 3.5rem);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero-subtitle {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+        }
+
+        /* Main App */
+        .app-section {
+            padding: 2rem 1.5rem 6rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .app-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            overflow: hidden;
+        }
+
+        /* Video Container */
+        .video-container {
+            position: relative;
+            background: #000;
+            aspect-ratio: 16/9;
+        }
+
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .video-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .video-placeholder:hover {
+            background: rgba(249, 115, 22, 0.05);
+        }
+
+        .video-placeholder svg {
+            width: 72px;
+            height: 72px;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+
+        .video-placeholder h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .video-placeholder p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Interaction Canvas */
+        .interaction-layer {
+            position: absolute;
+            inset: 0;
+            cursor: crosshair;
+        }
+
+        .click-marker {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--accent);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            animation: clickPulse 0.5s ease-out;
+        }
+
+        @keyframes clickPulse {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+
+        .object-outline {
+            position: absolute;
+            border: 2px dashed var(--accent);
+            background: rgba(249, 115, 22, 0.1);
+            pointer-events: none;
+        }
+
+        /* Instructions Overlay */
+        .instructions-overlay {
+            position: absolute;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 0.75rem 1.5rem;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+            border-radius: 100px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .instructions-overlay svg {
+            width: 18px;
+            height: 18px;
+            color: var(--accent);
+        }
+
+        /* Controls Panel */
+        .controls-panel {
+            padding: 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .controls-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .controls-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .controls-right {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .playback-btn {
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .playback-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .playback-btn.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .playback-btn.primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .playback-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .timeline-bar {
+            flex: 1;
+            min-width: 200px;
+            height: 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .timeline-progress {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+        }
+
+        .time-display {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .action-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-btn-primary {
+            background: var(--accent);
+            color: white;
+            border: none;
+        }
+
+        .action-btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .action-btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .action-btn-secondary {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .action-btn-secondary:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .action-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Objects Panel */
+        .objects-panel {
+            padding: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+
+        .objects-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .objects-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .objects-count {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .objects-list {
+            display: flex;
+            gap: 0.75rem;
+            overflow-x: auto;
+            padding-bottom: 0.5rem;
+        }
+
+        .object-item {
+            flex-shrink: 0;
+            width: 120px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .object-item:hover {
+            border-color: var(--text-muted);
+        }
+
+        .object-item.selected {
+            border-color: var(--accent);
+        }
+
+        .object-thumb {
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: #222;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .object-thumb svg {
+            width: 32px;
+            height: 32px;
+            color: var(--text-muted);
+        }
+
+        .object-info {
+            padding: 0.75rem;
+        }
+
+        .object-name {
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .object-frames {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .object-delete {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            width: 24px;
+            height: 24px;
+            background: rgba(0, 0, 0, 0.6);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .object-item:hover .object-delete {
+            opacity: 1;
+        }
+
+        .object-delete svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .add-object-card {
+            flex-shrink: 0;
+            width: 120px;
+            aspect-ratio: 4/3;
+            background: transparent;
+            border: 2px dashed var(--border-color);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--text-muted);
+        }
+
+        .add-object-card:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .add-object-card svg {
+            width: 24px;
+            height: 24px;
+            margin-bottom: 0.5rem;
+        }
+
+        .add-object-card span {
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        /* Settings Dropdown */
+        .settings-section {
+            padding: 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .settings-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .setting-group {
+            padding: 1rem;
+            background: var(--bg-primary);
+            border-radius: 12px;
+        }
+
+        .setting-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.75rem;
+            display: block;
+        }
+
+        .setting-options {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .setting-option {
+            flex: 1;
+            padding: 0.625rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .setting-option:hover {
+            border-color: var(--text-muted);
+        }
+
+        .setting-option.selected {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(249, 115, 22, 0.1);
+        }
+
+        .checkbox-option {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.625rem 0;
+            cursor: pointer;
+        }
+
+        .checkbox-box {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .checkbox-option.checked .checkbox-box {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .checkbox-box svg {
+            width: 12px;
+            height: 12px;
+            color: white;
+            opacity: 0;
+        }
+
+        .checkbox-option.checked .checkbox-box svg {
+            opacity: 1;
+        }
+
+        .checkbox-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        /* Modal */
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            padding: 1.5rem;
+        }
+
+        .modal.hidden {
+            display: none;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 2.5rem;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .modal-icon {
+            width: 64px;
+            height: 64px;
+            background: rgba(249, 115, 22, 0.15);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.5rem;
+        }
+
+        .modal-icon svg {
+            width: 32px;
+            height: 32px;
+            color: var(--accent);
+        }
+
+        .modal-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1.5rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+        }
+
+        .modal-text {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-progress {
+            height: 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 0.75rem;
+        }
+
+        .modal-progress-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .modal-progress-text {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .modal-btn {
+            flex: 1;
+            padding: 0.875rem;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .modal-btn-primary {
+            background: var(--accent);
+            color: white;
+            border: none;
+        }
+
+        .modal-btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .modal-btn-secondary {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .modal-btn-secondary:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        /* Footer */
+        .footer {
+            padding: 3rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .footer-copy {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Hidden */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="/" class="nav-logo">
+                <img src="logo.svg" alt="MarkRemoverAI">
+                <span>MarkRemoverAI</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Object Remover</a></li>
+                <li><a href="/video-tools" class="active">Video Tools</a></li>
+                <li><a href="/premium#pricing">Pricing</a></li>
+                <li><a href="/api">API</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-badge">
+            AI-Powered Inpainting
+        </div>
+        <h1>Remove Any Object from Video</h1>
+        <p class="hero-subtitle">
+            Click on any object to remove it. AI seamlessly fills the gap with surrounding context.
+        </p>
+    </section>
+
+    <!-- Main App -->
+    <section class="app-section">
+        <div class="app-card">
+            <!-- Video Container -->
+            <div class="video-container" id="videoContainer">
+                <div class="video-placeholder" id="uploadArea">
+                    <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <h3>Upload Your Video</h3>
+                    <p>Drag & drop or click to upload (MP4, MOV, WebM)</p>
+                </div>
+                <video id="videoPlayer" class="hidden"></video>
+                <div class="interaction-layer hidden" id="interactionLayer"></div>
+                <div class="instructions-overlay hidden" id="instructions">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="16" x2="12" y2="12"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                    Click on the object you want to remove
+                </div>
+            </div>
+
+            <!-- Controls Panel -->
+            <div class="controls-panel hidden" id="controlsPanel">
+                <div class="controls-row">
+                    <div class="controls-left">
+                        <button class="playback-btn" id="skipBackBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="19 20 9 12 19 4 19 20"/>
+                                <line x1="5" y1="19" x2="5" y2="5"/>
+                            </svg>
+                        </button>
+                        <button class="playback-btn primary" id="playPauseBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="playIcon">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="pauseIcon" class="hidden">
+                                <rect x="6" y="4" width="4" height="16"/>
+                                <rect x="14" y="4" width="4" height="16"/>
+                            </svg>
+                        </button>
+                        <button class="playback-btn" id="skipEndBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 4 15 12 5 20 5 4"/>
+                                <line x1="19" y1="5" x2="19" y2="19"/>
+                            </svg>
+                        </button>
+                        <div class="timeline-bar" id="timelineBar">
+                            <div class="timeline-progress" id="timelineProgress"></div>
+                        </div>
+                        <span class="time-display" id="timeDisplay">0:00 / 0:00</span>
+                    </div>
+                    <div class="controls-right">
+                        <button class="action-btn action-btn-primary" id="removeBtn" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                            </svg>
+                            Remove Selected
+                        </button>
+                        <button class="action-btn action-btn-secondary hidden" id="exportBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Export
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Objects Panel -->
+            <div class="objects-panel hidden" id="objectsPanel">
+                <div class="objects-header">
+                    <span class="objects-title">Objects to Remove</span>
+                    <span class="objects-count" id="objectsCount">0 objects</span>
+                </div>
+                <div class="objects-list" id="objectsList">
+                    <div class="add-object-card" id="addObjectCard">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                        <span>Add Object</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Section -->
+            <div class="settings-section hidden" id="settingsSection">
+                <div class="settings-grid">
+                    <div class="setting-group">
+                        <span class="setting-label">Inpainting Quality</span>
+                        <div class="setting-options">
+                            <div class="setting-option" data-quality="fast">Fast</div>
+                            <div class="setting-option selected" data-quality="balanced">Balanced</div>
+                            <div class="setting-option" data-quality="high">High</div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <span class="setting-label">Output Format</span>
+                        <div class="setting-options">
+                            <div class="setting-option selected" data-format="mp4">MP4</div>
+                            <div class="setting-option" data-format="webm">WebM</div>
+                            <div class="setting-option" data-format="mov">MOV</div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <span class="setting-label">Options</span>
+                        <div class="checkbox-option checked" data-option="shadows">
+                            <div class="checkbox-box">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            </div>
+                            <span class="checkbox-label">Preserve shadows</span>
+                        </div>
+                        <div class="checkbox-option" data-option="reflections">
+                            <div class="checkbox-box">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            </div>
+                            <span class="checkbox-label">Preserve reflections</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p class="footer-copy">&copy; 2024 MarkRemoverAI. All rights reserved.</p>
+    </footer>
+
+    <!-- Processing Modal -->
+    <div class="modal hidden" id="processingModal">
+        <div class="modal-content">
+            <div class="modal-spinner"></div>
+            <h3 class="modal-title" id="modalTitle">Processing...</h3>
+            <p class="modal-text" id="modalText">Removing object and filling with AI...</p>
+            <div class="modal-progress">
+                <div class="modal-progress-fill" id="modalProgressFill"></div>
+            </div>
+            <p class="modal-progress-text" id="modalProgressText">0%</p>
+        </div>
+    </div>
+
+    <!-- Success Modal -->
+    <div class="modal hidden" id="successModal">
+        <div class="modal-content">
+            <div class="modal-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+            </div>
+            <h3 class="modal-title">Object Removed!</h3>
+            <p class="modal-text">The object has been successfully removed from your video.</p>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-secondary" id="continueEditingBtn">Continue Editing</button>
+                <button class="modal-btn modal-btn-primary" id="downloadBtn">Download Video</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // State
+        const state = {
+            videoFile: null,
+            videoUrl: null,
+            isPlaying: false,
+            objects: [],
+            selectedObjectId: null,
+            quality: 'balanced',
+            format: 'mp4',
+            preserveShadows: true,
+            preserveReflections: false,
+            isSelectingObject: false
+        };
+
+        // Elements
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const interactionLayer = document.getElementById('interactionLayer');
+        const instructions = document.getElementById('instructions');
+        const controlsPanel = document.getElementById('controlsPanel');
+        const objectsPanel = document.getElementById('objectsPanel');
+        const settingsSection = document.getElementById('settingsSection');
+        const removeBtn = document.getElementById('removeBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const processingModal = document.getElementById('processingModal');
+        const successModal = document.getElementById('successModal');
+
+        // Upload handling
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = 'rgba(249, 115, 22, 0.05)';
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.background = 'transparent';
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = 'transparent';
+            if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            const validTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
+            if (!validTypes.includes(file.type)) {
+                alert('Please upload a video file (MP4, MOV, or WebM)');
+                return;
+            }
+
+            state.videoFile = file;
+            state.videoUrl = URL.createObjectURL(file);
+
+            videoPlayer.src = state.videoUrl;
+            videoPlayer.classList.remove('hidden');
+            uploadArea.classList.add('hidden');
+            interactionLayer.classList.remove('hidden');
+            instructions.classList.remove('hidden');
+            controlsPanel.classList.remove('hidden');
+            objectsPanel.classList.remove('hidden');
+            settingsSection.classList.remove('hidden');
+
+            videoPlayer.addEventListener('loadedmetadata', updateTimeDisplay);
+            videoPlayer.addEventListener('timeupdate', updateProgress);
+
+            state.isSelectingObject = true;
+        }
+
+        // Interaction layer - click to select object
+        interactionLayer.addEventListener('click', (e) => {
+            if (!state.isSelectingObject) return;
+
+            const rect = interactionLayer.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+            // Add click marker
+            const marker = document.createElement('div');
+            marker.className = 'click-marker';
+            marker.style.left = x + '%';
+            marker.style.top = y + '%';
+            interactionLayer.appendChild(marker);
+
+            // Simulate object detection
+            setTimeout(() => {
+                marker.remove();
+                addObject(x, y);
+            }, 500);
+        });
+
+        function addObject(x, y) {
+            const id = Date.now();
+            const objectNum = state.objects.length + 1;
+
+            state.objects.push({
+                id,
+                name: 'Object ' + objectNum,
+                x: x,
+                y: y,
+                width: 15 + Math.random() * 10,
+                height: 20 + Math.random() * 10
+            });
+
+            renderObjects();
+            updateRemoveButton();
+
+            // Show outline on video
+            const outline = document.createElement('div');
+            outline.className = 'object-outline';
+            outline.dataset.objectId = id;
+            outline.style.left = (x - 7.5) + '%';
+            outline.style.top = (y - 10) + '%';
+            outline.style.width = '15%';
+            outline.style.height = '20%';
+            interactionLayer.appendChild(outline);
+        }
+
+        function renderObjects() {
+            const list = document.getElementById('objectsList');
+            list.innerHTML = '';
+
+            state.objects.forEach(obj => {
+                const item = document.createElement('div');
+                item.className = `object-item ${obj.id === state.selectedObjectId ? 'selected' : ''}`;
+                item.innerHTML = `
+                    <div class="object-thumb">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        </svg>
+                    </div>
+                    <div class="object-info">
+                        <div class="object-name">${obj.name}</div>
+                        <div class="object-frames">All frames</div>
+                    </div>
+                `;
+                item.addEventListener('click', () => {
+                    state.selectedObjectId = obj.id;
+                    renderObjects();
+                });
+                list.appendChild(item);
+            });
+
+            // Add "Add Object" card
+            const addCard = document.createElement('div');
+            addCard.className = 'add-object-card';
+            addCard.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span>Add Object</span>
+            `;
+            addCard.addEventListener('click', () => {
+                state.isSelectingObject = true;
+                instructions.classList.remove('hidden');
+            });
+            list.appendChild(addCard);
+
+            document.getElementById('objectsCount').textContent = state.objects.length + ' object' + (state.objects.length !== 1 ? 's' : '');
+        }
+
+        function updateRemoveButton() {
+            removeBtn.disabled = state.objects.length === 0;
+        }
+
+        // Video controls
+        document.getElementById('playPauseBtn').addEventListener('click', () => {
+            if (videoPlayer.paused) {
+                videoPlayer.play();
+                state.isPlaying = true;
+                document.getElementById('playIcon').classList.add('hidden');
+                document.getElementById('pauseIcon').classList.remove('hidden');
+            } else {
+                videoPlayer.pause();
+                state.isPlaying = false;
+                document.getElementById('playIcon').classList.remove('hidden');
+                document.getElementById('pauseIcon').classList.add('hidden');
+            }
+        });
+
+        document.getElementById('skipBackBtn').addEventListener('click', () => {
+            videoPlayer.currentTime = 0;
+        });
+
+        document.getElementById('skipEndBtn').addEventListener('click', () => {
+            videoPlayer.currentTime = videoPlayer.duration;
+        });
+
+        document.getElementById('timelineBar').addEventListener('click', (e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            videoPlayer.currentTime = percent * videoPlayer.duration;
+        });
+
+        function updateProgress() {
+            const percent = (videoPlayer.currentTime / videoPlayer.duration) * 100;
+            document.getElementById('timelineProgress').style.width = percent + '%';
+            updateTimeDisplay();
+        }
+
+        function updateTimeDisplay() {
+            const current = formatTime(videoPlayer.currentTime);
+            const total = formatTime(videoPlayer.duration || 0);
+            document.getElementById('timeDisplay').textContent = `${current} / ${total}`;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Settings
+        document.querySelectorAll('.setting-option').forEach(option => {
+            option.addEventListener('click', () => {
+                const parent = option.parentElement;
+                parent.querySelectorAll('.setting-option').forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+
+                if (option.dataset.quality) state.quality = option.dataset.quality;
+                if (option.dataset.format) state.format = option.dataset.format;
+            });
+        });
+
+        document.querySelectorAll('.checkbox-option').forEach(option => {
+            option.addEventListener('click', () => {
+                option.classList.toggle('checked');
+                if (option.dataset.option === 'shadows') state.preserveShadows = option.classList.contains('checked');
+                if (option.dataset.option === 'reflections') state.preserveReflections = option.classList.contains('checked');
+            });
+        });
+
+        // Remove button
+        removeBtn.addEventListener('click', () => {
+            if (state.objects.length === 0) return;
+
+            showProcessingModal('Removing Objects...', 'AI is analyzing and filling the removed areas...');
+
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 8;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        hideProcessingModal();
+                        showSuccessModal();
+                        exportBtn.classList.remove('hidden');
+                    }, 500);
+                }
+                updateProcessingProgress(progress);
+            }, 200);
+        });
+
+        // Export button
+        exportBtn.addEventListener('click', () => {
+            showProcessingModal('Exporting...', 'Generating final video file...');
+
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 12;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        hideProcessingModal();
+                        alert('Video exported successfully!');
+                    }, 500);
+                }
+                updateProcessingProgress(progress);
+            }, 150);
+        });
+
+        // Modal helpers
+        function showProcessingModal(title, text) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalText').textContent = text;
+            document.getElementById('modalProgressFill').style.width = '0%';
+            document.getElementById('modalProgressText').textContent = '0%';
+            processingModal.classList.remove('hidden');
+        }
+
+        function updateProcessingProgress(percent) {
+            document.getElementById('modalProgressFill').style.width = percent + '%';
+            document.getElementById('modalProgressText').textContent = Math.floor(percent) + '%';
+        }
+
+        function hideProcessingModal() {
+            processingModal.classList.add('hidden');
+        }
+
+        function showSuccessModal() {
+            successModal.classList.remove('hidden');
+        }
+
+        function hideSuccessModal() {
+            successModal.classList.add('hidden');
+        }
+
+        document.getElementById('continueEditingBtn').addEventListener('click', () => {
+            hideSuccessModal();
+        });
+
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            hideSuccessModal();
+            alert('Download started!');
+        });
+
+    })();
+    </script>
+</body>
+</html>

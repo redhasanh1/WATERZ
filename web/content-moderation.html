@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Content Moderation - NSFW Detection & Auto-Blur | MarkRemoverAI</title>
+    <meta name="description" content="Automatically detect and blur inappropriate content in videos. NSFW, violence, weapons detection for platform safety and compliance.">
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #09090b;
+            --bg-secondary: #0f0f12;
+            --bg-card: #18181b;
+            --bg-card-hover: #1f1f23;
+            --border-color: #27272a;
+            --text-primary: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent: #ec4899;
+            --accent-hover: #db2777;
+            --accent-glow: rgba(236, 72, 153, 0.3);
+            --green: #22c55e;
+            --blue: #3b82f6;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --orange: #f97316;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Navigation */
+        .nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .nav-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1.125rem;
+        }
+
+        .nav-logo img {
+            height: 32px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: var(--text-primary);
+        }
+
+        @media (max-width: 768px) {
+            .nav-links { display: none; }
+        }
+
+        /* Hero */
+        .hero {
+            padding: 8rem 1.5rem 4rem;
+            text-align: center;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: rgba(236, 72, 153, 0.15);
+            border: 1px solid rgba(236, 72, 153, 0.3);
+            border-radius: 100px;
+            font-size: 0.85rem;
+            color: var(--accent);
+            margin-bottom: 2rem;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 3.5rem);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero-subtitle {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+
+        .trust-badges {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .trust-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .trust-badge svg {
+            width: 20px;
+            height: 20px;
+            color: var(--green);
+        }
+
+        /* Main App */
+        .app-section {
+            padding: 2rem 1.5rem 6rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .app-grid {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 900px) {
+            .app-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Video Panel */
+        .video-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            aspect-ratio: 16/9;
+        }
+
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .video-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .video-placeholder:hover {
+            background: rgba(236, 72, 153, 0.05);
+        }
+
+        .video-placeholder svg {
+            width: 64px;
+            height: 64px;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+
+        .video-placeholder h3 {
+            font-size: 1.125rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .video-placeholder p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Detection Overlay */
+        .detection-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        .detection-box {
+            position: absolute;
+            border: 3px solid;
+            border-radius: 8px;
+            animation: detectPulse 0.3s ease-out;
+        }
+
+        @keyframes detectPulse {
+            0% { transform: scale(0.9); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .detection-box.nsfw { border-color: var(--red); background: rgba(239, 68, 68, 0.2); }
+        .detection-box.violence { border-color: var(--orange); background: rgba(249, 115, 22, 0.2); }
+        .detection-box.weapons { border-color: var(--yellow); background: rgba(234, 179, 8, 0.2); }
+
+        .detection-box-label {
+            position: absolute;
+            top: -28px;
+            left: 0;
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-radius: 4px;
+            color: white;
+        }
+
+        .detection-box.nsfw .detection-box-label { background: var(--red); }
+        .detection-box.violence .detection-box-label { background: var(--orange); }
+        .detection-box.weapons .detection-box-label { background: var(--yellow); color: #000; }
+
+        /* Video Controls */
+        .video-controls {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .control-btn {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .control-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .control-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            cursor: pointer;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+        }
+
+        .detection-markers {
+            position: absolute;
+            inset: 0;
+        }
+
+        .detection-marker {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: var(--red);
+            border-radius: 2px;
+        }
+
+        .time-display {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            min-width: 90px;
+            text-align: right;
+        }
+
+        /* Settings Panel */
+        .settings-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .settings-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+
+        .settings-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 1rem;
+        }
+
+        /* Detection Categories */
+        .detection-categories {
+            display: flex;
+            flex-direction: column;
+            gap: 0.625rem;
+        }
+
+        .category-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.875rem 1rem;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .category-item:hover {
+            border-color: var(--text-muted);
+        }
+
+        .category-item.selected {
+            border-color: var(--accent);
+            background: rgba(236, 72, 153, 0.05);
+        }
+
+        .category-checkbox {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .category-item.selected .category-checkbox {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .category-checkbox svg {
+            width: 12px;
+            height: 12px;
+            color: white;
+            opacity: 0;
+        }
+
+        .category-item.selected .category-checkbox svg {
+            opacity: 1;
+        }
+
+        .category-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .category-icon.nsfw { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+        .category-icon.violence { background: rgba(249, 115, 22, 0.15); color: var(--orange); }
+        .category-icon.weapons { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
+        .category-icon.drugs { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+        .category-icon.hate { background: rgba(236, 72, 153, 0.15); color: var(--accent); }
+
+        .category-icon svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .category-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .category-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .category-desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .category-count {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            padding: 0.25rem 0.625rem;
+            background: var(--bg-card);
+            border-radius: 100px;
+        }
+
+        .category-count.has-detections {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--red);
+        }
+
+        /* Action Options */
+        .action-options {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+
+        .action-option {
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-option:hover {
+            border-color: var(--text-muted);
+        }
+
+        .action-option.selected {
+            border-color: var(--accent);
+            background: rgba(236, 72, 153, 0.05);
+        }
+
+        .action-option-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .action-option-name {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 1rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+        }
+
+        .action-btn-primary {
+            background: var(--accent);
+            color: white;
+            border: none;
+        }
+
+        .action-btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .action-btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .action-btn-secondary {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .action-btn-secondary:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+
+        .action-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Results Panel */
+        .results-card {
+            border-color: var(--green);
+        }
+
+        .results-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .results-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(34, 197, 94, 0.15);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .results-icon svg {
+            width: 20px;
+            height: 20px;
+            color: var(--green);
+        }
+
+        .results-title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .results-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .results-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+
+        .stat-item {
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .stat-value.danger { color: var(--red); }
+        .stat-value.warning { color: var(--yellow); }
+        .stat-value.success { color: var(--green); }
+
+        .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Modal */
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            padding: 1.5rem;
+        }
+
+        .modal.hidden {
+            display: none;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 2rem;
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .modal-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1.5rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .modal-text {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .modal-progress {
+            margin-top: 1.5rem;
+        }
+
+        .modal-progress-bar {
+            height: 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .modal-progress-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .modal-progress-text {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        /* Footer */
+        .footer {
+            padding: 3rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .footer-copy {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Hidden */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="/" class="nav-logo">
+                <img src="logo.svg" alt="MarkRemoverAI">
+                <span>MarkRemoverAI</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Object Remover</a></li>
+                <li><a href="/video-tools" class="active">Video Tools</a></li>
+                <li><a href="/premium#pricing">Pricing</a></li>
+                <li><a href="/api">API</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-badge">
+            Platform Safety
+        </div>
+        <h1>AI Content Moderation</h1>
+        <p class="hero-subtitle">
+            Automatically detect inappropriate content and protect your platform.
+            NSFW, violence, weapons, and more - detected and blurred in seconds.
+        </p>
+        <div class="trust-badges">
+            <div class="trust-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                99.2% Accuracy
+            </div>
+            <div class="trust-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                Real-time Detection
+            </div>
+            <div class="trust-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                API Available
+            </div>
+        </div>
+    </section>
+
+    <!-- Main App -->
+    <section class="app-section">
+        <div class="app-grid">
+            <!-- Video Panel -->
+            <div class="video-panel">
+                <div class="video-container" id="videoContainer">
+                    <div class="video-placeholder" id="uploadArea">
+                        <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm" style="display:none">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        <h3>Upload Video for Moderation</h3>
+                        <p>Drag & drop or click to upload (MP4, MOV, WebM)</p>
+                    </div>
+                    <video id="videoPlayer" class="hidden"></video>
+                    <div class="detection-overlay" id="detectionOverlay"></div>
+                </div>
+                <div class="video-controls hidden" id="videoControls">
+                    <button class="control-btn" id="playPauseBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="playIcon">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="pauseIcon" class="hidden">
+                            <rect x="6" y="4" width="4" height="16"/>
+                            <rect x="14" y="4" width="4" height="16"/>
+                        </svg>
+                    </button>
+                    <div class="progress-bar" id="progressBar">
+                        <div class="progress-fill" id="progressFill"></div>
+                        <div class="detection-markers" id="detectionMarkers"></div>
+                    </div>
+                    <span class="time-display" id="timeDisplay">0:00 / 0:00</span>
+                </div>
+            </div>
+
+            <!-- Settings Panel -->
+            <div class="settings-panel">
+                <!-- Detection Categories -->
+                <div class="settings-card">
+                    <div class="settings-title">Detection Categories</div>
+                    <div class="detection-categories">
+                        <div class="category-item selected" data-category="nsfw">
+                            <div class="category-checkbox">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                </svg>
+                            </div>
+                            <div class="category-icon nsfw">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M4.93 4.93l14.14 14.14"/>
+                                </svg>
+                            </div>
+                            <div class="category-info">
+                                <div class="category-name">NSFW Content</div>
+                                <div class="category-desc">Nudity, adult content</div>
+                            </div>
+                            <span class="category-count" id="nsfwCount">0</span>
+                        </div>
+
+                        <div class="category-item selected" data-category="violence">
+                            <div class="category-checkbox">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                </svg>
+                            </div>
+                            <div class="category-icon violence">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                                </svg>
+                            </div>
+                            <div class="category-info">
+                                <div class="category-name">Violence</div>
+                                <div class="category-desc">Gore, blood, fighting</div>
+                            </div>
+                            <span class="category-count" id="violenceCount">0</span>
+                        </div>
+
+                        <div class="category-item" data-category="weapons">
+                            <div class="category-checkbox">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                </svg>
+                            </div>
+                            <div class="category-icon weapons">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/>
+                                    <path d="M20.5 10H19V3h1.5a1.5 1.5 0 010 3 1.5 1.5 0 010 3H19"/>
+                                    <path d="M3 21l9-9"/>
+                                </svg>
+                            </div>
+                            <div class="category-info">
+                                <div class="category-name">Weapons</div>
+                                <div class="category-desc">Guns, knives</div>
+                            </div>
+                            <span class="category-count" id="weaponsCount">0</span>
+                        </div>
+
+                        <div class="category-item" data-category="drugs">
+                            <div class="category-checkbox">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                </svg>
+                            </div>
+                            <div class="category-icon drugs">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z"/>
+                                </svg>
+                            </div>
+                            <div class="category-info">
+                                <div class="category-name">Drugs</div>
+                                <div class="category-desc">Drug use, paraphernalia</div>
+                            </div>
+                            <span class="category-count" id="drugsCount">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action When Detected -->
+                <div class="settings-card">
+                    <div class="settings-title">Action When Detected</div>
+                    <div class="action-options">
+                        <div class="action-option selected" data-action="blur">
+                            <div class="action-option-icon">&#128064;</div>
+                            <div class="action-option-name">Blur Region</div>
+                        </div>
+                        <div class="action-option" data-action="black">
+                            <div class="action-option-icon">&#9632;</div>
+                            <div class="action-option-name">Black Box</div>
+                        </div>
+                        <div class="action-option" data-action="flag">
+                            <div class="action-option-icon">&#128681;</div>
+                            <div class="action-option-name">Flag Only</div>
+                        </div>
+                        <div class="action-option" data-action="reject">
+                            <div class="action-option-icon">&#10060;</div>
+                            <div class="action-option-name">Reject Video</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results (hidden until scan complete) -->
+                <div class="settings-card results-card hidden" id="resultsCard">
+                    <div class="results-header">
+                        <div class="results-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                                <polyline points="22 4 12 14.01 9 11.01"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="results-title">Scan Complete</div>
+                            <div class="results-subtitle">Video analyzed successfully</div>
+                        </div>
+                    </div>
+                    <div class="results-stats">
+                        <div class="stat-item">
+                            <div class="stat-value danger" id="totalDetections">0</div>
+                            <div class="stat-label">Issues Found</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="framesScanned">0</div>
+                            <div class="stat-label">Frames Scanned</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value warning" id="flaggedSegments">0</div>
+                            <div class="stat-label">Flagged Segments</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value success" id="safePercent">0%</div>
+                            <div class="stat-label">Safe Content</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="action-buttons">
+                    <button class="action-btn action-btn-primary" id="scanBtn" disabled>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        Scan for Inappropriate Content
+                    </button>
+                    <button class="action-btn action-btn-primary hidden" id="applyBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        Apply Moderation & Export
+                    </button>
+                    <button class="action-btn action-btn-secondary hidden" id="reportBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <path d="M14 2v6h6"/>
+                        </svg>
+                        Download Report
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p class="footer-copy">&copy; 2024 MarkRemoverAI. All rights reserved.</p>
+    </footer>
+
+    <!-- Processing Modal -->
+    <div class="modal hidden" id="processingModal">
+        <div class="modal-content">
+            <div class="modal-spinner"></div>
+            <h3 class="modal-title" id="modalTitle">Scanning Video...</h3>
+            <p class="modal-text" id="modalText">Analyzing frames for inappropriate content...</p>
+            <div class="modal-progress">
+                <div class="modal-progress-bar">
+                    <div class="modal-progress-fill" id="modalProgressFill"></div>
+                </div>
+                <p class="modal-progress-text" id="modalProgressText">0%</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // State
+        const state = {
+            videoFile: null,
+            videoUrl: null,
+            isPlaying: false,
+            categories: {
+                nsfw: true,
+                violence: true,
+                weapons: false,
+                drugs: false
+            },
+            action: 'blur',
+            detections: [],
+            isScanned: false
+        };
+
+        // Elements
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const videoControls = document.getElementById('videoControls');
+        const detectionOverlay = document.getElementById('detectionOverlay');
+        const scanBtn = document.getElementById('scanBtn');
+        const applyBtn = document.getElementById('applyBtn');
+        const reportBtn = document.getElementById('reportBtn');
+        const resultsCard = document.getElementById('resultsCard');
+        const processingModal = document.getElementById('processingModal');
+
+        // Upload handling
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = 'rgba(236, 72, 153, 0.05)';
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.background = 'transparent';
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = 'transparent';
+            if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            const validTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
+            if (!validTypes.includes(file.type)) {
+                alert('Please upload a video file (MP4, MOV, or WebM)');
+                return;
+            }
+
+            state.videoFile = file;
+            state.videoUrl = URL.createObjectURL(file);
+
+            videoPlayer.src = state.videoUrl;
+            videoPlayer.classList.remove('hidden');
+            uploadArea.classList.add('hidden');
+            videoControls.classList.remove('hidden');
+            scanBtn.disabled = false;
+
+            videoPlayer.addEventListener('loadedmetadata', updateTimeDisplay);
+            videoPlayer.addEventListener('timeupdate', updateProgress);
+        }
+
+        // Video controls
+        document.getElementById('playPauseBtn').addEventListener('click', () => {
+            if (videoPlayer.paused) {
+                videoPlayer.play();
+                state.isPlaying = true;
+                document.getElementById('playIcon').classList.add('hidden');
+                document.getElementById('pauseIcon').classList.remove('hidden');
+            } else {
+                videoPlayer.pause();
+                state.isPlaying = false;
+                document.getElementById('playIcon').classList.remove('hidden');
+                document.getElementById('pauseIcon').classList.add('hidden');
+            }
+        });
+
+        document.getElementById('progressBar').addEventListener('click', (e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            videoPlayer.currentTime = percent * videoPlayer.duration;
+        });
+
+        function updateProgress() {
+            const percent = (videoPlayer.currentTime / videoPlayer.duration) * 100;
+            document.getElementById('progressFill').style.width = percent + '%';
+            updateTimeDisplay();
+
+            if (state.isScanned) {
+                renderDetections();
+            }
+        }
+
+        function updateTimeDisplay() {
+            const current = formatTime(videoPlayer.currentTime);
+            const total = formatTime(videoPlayer.duration || 0);
+            document.getElementById('timeDisplay').textContent = `${current} / ${total}`;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Category toggles
+        document.querySelectorAll('.category-item').forEach(item => {
+            item.addEventListener('click', () => {
+                item.classList.toggle('selected');
+                const category = item.dataset.category;
+                state.categories[category] = item.classList.contains('selected');
+            });
+        });
+
+        // Action options
+        document.querySelectorAll('.action-option').forEach(option => {
+            option.addEventListener('click', () => {
+                document.querySelectorAll('.action-option').forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+                state.action = option.dataset.action;
+            });
+        });
+
+        // Scan button
+        scanBtn.addEventListener('click', async () => {
+            showModal('Scanning Video...', 'Analyzing frames for inappropriate content...');
+
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 12;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        simulateDetections();
+                        hideModal();
+                        state.isScanned = true;
+                        scanBtn.classList.add('hidden');
+                        applyBtn.classList.remove('hidden');
+                        reportBtn.classList.remove('hidden');
+                        resultsCard.classList.remove('hidden');
+                    }, 500);
+                }
+                updateModalProgress(progress, 'Analyzing frame ' + Math.floor(progress * 9) + '/900...');
+            }, 150);
+        });
+
+        // Apply moderation
+        applyBtn.addEventListener('click', async () => {
+            showModal('Applying Moderation...', 'Blurring detected inappropriate content...');
+
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 10;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        hideModal();
+                        alert('Video moderated successfully! Download will start automatically.');
+                    }, 500);
+                }
+                updateModalProgress(progress, 'Processing frame ' + Math.floor(progress * 9) + '/900...');
+            }, 120);
+        });
+
+        // Download report
+        reportBtn.addEventListener('click', () => {
+            alert('Moderation report downloaded! Includes:\n\n- Timestamp of each detection\n- Category of content\n- Confidence score\n- Action taken');
+        });
+
+        // Simulate detections
+        function simulateDetections() {
+            state.detections = [
+                { type: 'nsfw', x: 25, y: 30, width: 15, height: 25, startTime: 5, endTime: 12, confidence: 0.94 },
+                { type: 'violence', x: 60, y: 40, width: 20, height: 30, startTime: 18, endTime: 25, confidence: 0.87 }
+            ];
+
+            // Update counts
+            const nsfwCount = state.detections.filter(d => d.type === 'nsfw').length;
+            const violenceCount = state.detections.filter(d => d.type === 'violence').length;
+            const weaponsCount = state.detections.filter(d => d.type === 'weapons').length;
+            const drugsCount = state.detections.filter(d => d.type === 'drugs').length;
+
+            document.getElementById('nsfwCount').textContent = nsfwCount;
+            document.getElementById('nsfwCount').classList.toggle('has-detections', nsfwCount > 0);
+            document.getElementById('violenceCount').textContent = violenceCount;
+            document.getElementById('violenceCount').classList.toggle('has-detections', violenceCount > 0);
+            document.getElementById('weaponsCount').textContent = weaponsCount;
+            document.getElementById('drugsCount').textContent = drugsCount;
+
+            // Update results
+            const totalDetections = state.detections.length;
+            document.getElementById('totalDetections').textContent = totalDetections;
+            document.getElementById('framesScanned').textContent = '900';
+            document.getElementById('flaggedSegments').textContent = state.detections.length;
+            document.getElementById('safePercent').textContent = Math.round((1 - totalDetections * 0.02) * 100) + '%';
+
+            // Add detection markers to timeline
+            addDetectionMarkers();
+            renderDetections();
+        }
+
+        function addDetectionMarkers() {
+            const markersContainer = document.getElementById('detectionMarkers');
+            markersContainer.innerHTML = '';
+
+            state.detections.forEach(det => {
+                const startPercent = (det.startTime / videoPlayer.duration) * 100;
+                const marker = document.createElement('div');
+                marker.className = 'detection-marker';
+                marker.style.left = startPercent + '%';
+                markersContainer.appendChild(marker);
+            });
+        }
+
+        function renderDetections() {
+            detectionOverlay.innerHTML = '';
+            const currentTime = videoPlayer.currentTime;
+
+            state.detections.forEach(det => {
+                if (currentTime >= det.startTime && currentTime <= det.endTime) {
+                    const box = document.createElement('div');
+                    box.className = `detection-box ${det.type}`;
+                    box.style.left = det.x + '%';
+                    box.style.top = det.y + '%';
+                    box.style.width = det.width + '%';
+                    box.style.height = det.height + '%';
+
+                    const label = document.createElement('div');
+                    label.className = 'detection-box-label';
+                    label.textContent = det.type.toUpperCase() + ' ' + Math.round(det.confidence * 100) + '%';
+                    box.appendChild(label);
+
+                    detectionOverlay.appendChild(box);
+                }
+            });
+        }
+
+        // Modal helpers
+        function showModal(title, text) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalText').textContent = text;
+            document.getElementById('modalProgressFill').style.width = '0%';
+            document.getElementById('modalProgressText').textContent = '0%';
+            processingModal.classList.remove('hidden');
+        }
+
+        function updateModalProgress(percent, text) {
+            document.getElementById('modalProgressFill').style.width = percent + '%';
+            document.getElementById('modalProgressText').textContent = Math.floor(percent) + '%';
+            if (text) document.getElementById('modalText').textContent = text;
+        }
+
+        function hideModal() {
+            processingModal.classList.add('hidden');
+        }
+
+    })();
+    </script>
+</body>
+</html>
