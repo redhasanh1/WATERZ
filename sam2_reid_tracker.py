@@ -56,6 +56,12 @@ class ReIDVerifier:
         self.reference_bank = {}  # Multiple viewpoints for robust matching
         self.similarity_history = []
 
+        # VELOCITY TRACKING - for identical objects like juggling balls
+        self.last_centroid = None  # (x, y) of last good detection
+        self.velocity = (0, 0)  # (vx, vy) pixels per frame
+        self.velocity_history = []  # Last 5 velocities for smoothing
+        self.max_velocity_deviation = 100  # If actual differs by more than this, wrong ball
+
         # Set threshold based on object type
         if object_type == "face":
             self.threshold = SIMILARITY_THRESHOLD_FACE
@@ -329,6 +335,58 @@ class ReIDVerifier:
         self.reference_embedding = None
         self.reference_bank = {}
         self.similarity_history = []
+        self.last_centroid = None
+        self.velocity = (0, 0)
+        self.velocity_history = []
+
+    # =========================================================================
+    # VELOCITY TRACKING - for identical objects (juggling balls, etc.)
+    # =========================================================================
+
+    def get_mask_centroid(self, mask):
+        """Get centroid of mask."""
+        coords = np.argwhere(mask > 127)
+        if len(coords) == 0:
+            return None
+        cy, cx = coords.mean(axis=0)
+        return (cx, cy)
+
+    def update_velocity(self, new_centroid):
+        """Update velocity based on centroid movement."""
+        if self.last_centroid is not None and new_centroid is not None:
+            vx = new_centroid[0] - self.last_centroid[0]
+            vy = new_centroid[1] - self.last_centroid[1]
+            self.velocity_history.append((vx, vy))
+            if len(self.velocity_history) > 5:
+                self.velocity_history.pop(0)
+            # Smooth velocity (average of last 5)
+            self.velocity = (
+                np.mean([v[0] for v in self.velocity_history]),
+                np.mean([v[1] for v in self.velocity_history])
+            )
+        self.last_centroid = new_centroid
+
+    def predict_next_position(self):
+        """Predict where ball should be in next frame based on velocity."""
+        if self.last_centroid is None:
+            return None
+        return (
+            self.last_centroid[0] + self.velocity[0],
+            self.last_centroid[1] + self.velocity[1]
+        )
+
+    def check_velocity_consistency(self, new_centroid):
+        """
+        Check if new position is consistent with predicted velocity.
+        Returns (is_consistent, deviation_distance)
+        """
+        predicted = self.predict_next_position()
+        if predicted is None or new_centroid is None:
+            return True, 0  # Can't check, assume OK
+
+        # Distance from predicted position
+        dist = np.sqrt((new_centroid[0] - predicted[0])**2 + (new_centroid[1] - predicted[1])**2)
+        return dist <= self.max_velocity_deviation, dist
 
     def find_object_in_frame(self, frame, mask_hint=None, grid_size=8, min_similarity=0.25):
         """
