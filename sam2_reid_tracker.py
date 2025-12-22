@@ -28,8 +28,8 @@ from pathlib import Path
 # =============================================================================
 USE_REID_VERIFICATION = True
 VERIFY_EVERY_N_FRAMES = 10  # Check identity every N frames
-SIMILARITY_THRESHOLD_FACE = 0.45  # ArcFace threshold
-SIMILARITY_THRESHOLD_GENERAL = 0.35  # DINOv2 threshold
+SIMILARITY_THRESHOLD_FACE = 0.70  # ArcFace threshold (strict - same face only)
+SIMILARITY_THRESHOLD_GENERAL = 0.60  # DINOv2 threshold (strict)
 MIN_CROP_SIZE = 32  # Minimum crop size in pixels
 
 
@@ -53,6 +53,7 @@ class ReIDVerifier:
         self.object_type = object_type
         self.device = device
         self.reference_embedding = None
+        self.reference_bank = {}  # Multiple viewpoints for robust matching
         self.similarity_history = []
 
         # Set threshold based on object type
@@ -220,9 +221,35 @@ class ReIDVerifier:
         print(f"[ReID] Reference embedding set ({self.embed_dim}-D)")
         return True
 
+    def add_reference_viewpoint(self, frame, mask, viewpoint_name):
+        """
+        Add reference embedding from a different viewpoint/angle.
+        Building multiple references makes matching more robust.
+
+        Args:
+            frame: BGR image
+            mask: Binary mask of target object
+            viewpoint_name: Name like "frontal", "left", "right", "three_quarter"
+
+        Returns:
+            True if embedding was added successfully
+        """
+        crop = self._crop_by_mask(frame, mask)
+        if crop is None:
+            return False
+
+        emb = self._get_embedding(crop)
+        if emb is None:
+            return False
+
+        self.reference_bank[viewpoint_name] = emb
+        print(f"[ReID] Added {viewpoint_name} reference ({len(self.reference_bank)} total)")
+        return True
+
     def verify(self, frame, mask):
         """
         Verify if current mask contains same object as reference.
+        Uses MULTIPLE reference embeddings if available for robust matching.
 
         Args:
             frame: BGR image of current frame
@@ -231,7 +258,11 @@ class ReIDVerifier:
         Returns:
             (is_same_object: bool, similarity: float)
         """
-        if self.reference_embedding is None:
+        # Check if we have any references
+        has_bank = len(self.reference_bank) > 0
+        has_single = self.reference_embedding is not None
+
+        if not has_bank and not has_single:
             return True, 1.0  # No reference, assume OK
 
         if self.model is None:
@@ -248,7 +279,29 @@ class ReIDVerifier:
             # Return uncertain instead of triggering false drift alarm
             return True, -1.0
 
-        # Cosine similarity (embeddings are already L2 normalized)
+        # MULTI-REFERENCE VERIFICATION (if bank available)
+        if has_bank:
+            similarities = []
+            for name, ref_emb in self.reference_bank.items():
+                sim = torch.dot(ref_emb, current_embedding).item()
+                similarities.append(sim)
+
+            # Require MAJORITY to match (at least half above threshold)
+            matches = sum(1 for s in similarities if s >= self.threshold)
+            required = max(1, len(self.reference_bank) // 2)
+
+            best_sim = max(similarities)
+            avg_match_sim = np.mean([s for s in similarities if s >= self.threshold]) if matches > 0 else best_sim
+
+            # Track history
+            self.similarity_history.append(avg_match_sim)
+            if len(self.similarity_history) > 30:
+                self.similarity_history.pop(0)
+
+            is_same = matches >= required
+            return is_same, avg_match_sim
+
+        # SINGLE REFERENCE FALLBACK
         similarity = torch.dot(self.reference_embedding, current_embedding).item()
 
         # Track history for EMA-based confidence
@@ -274,6 +327,7 @@ class ReIDVerifier:
     def reset(self):
         """Reset verifier state."""
         self.reference_embedding = None
+        self.reference_bank = {}
         self.similarity_history = []
 
     def find_object_in_frame(self, frame, mask_hint=None, grid_size=8, min_similarity=0.25):
@@ -387,11 +441,12 @@ def classify_tracking_state(mask, drift_sim, search_sim):
     """
     mask_area = np.sum(mask > 127)
 
-    if drift_sim >= 0.35:
+    # Use stricter thresholds matching the new 0.70/0.60 settings
+    if drift_sim >= 0.60:
         return "OK"
-    elif search_sim >= 0.35 and mask_area > 5000:
+    elif search_sim >= 0.50 and mask_area > 5000:
         return "DRIFT"  # Found something, probably drifted to similar object
-    elif search_sim < 0.25 or mask_area < 1000:
+    elif search_sim < 0.40 or mask_area < 1000:
         return "LOST"   # Can't find object anywhere
     else:
         return "OCCLUDED"  # Keep tracking through partial occlusion

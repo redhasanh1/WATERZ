@@ -1290,15 +1290,23 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         # ReID VERIFICATION - Detect and AUTO-CORRECT drift
                         # ============================================================
                         if reid_verifier is not None and reid_cap is not None:
-                            # Set reference on first valid frame
-                            if reid_verifier.reference_embedding is None and np.sum(mask_uint8) > 1000:
-                                reid_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                                ret, frame_bgr = reid_cap.read()
-                                if ret:
-                                    reid_verifier.set_reference(frame_bgr, mask_uint8)
+                            # BUILD REFERENCE BANK from first 60 frames (4 viewpoints)
+                            # Collect at frames relative to start: 0, 15, 30, 45
+                            relative_frame = frame_idx - frame_idx_start
+                            if len(reid_verifier.reference_bank) < 4 and np.sum(mask_uint8) > 1000:
+                                viewpoint_frames = {0: "frontal", 15: "view_15", 30: "view_30", 45: "view_45"}
+                                if relative_frame in viewpoint_frames:
+                                    reid_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                                    ret, frame_bgr = reid_cap.read()
+                                    if ret:
+                                        viewpoint = viewpoint_frames[relative_frame]
+                                        reid_verifier.add_reference_viewpoint(frame_bgr, mask_uint8, viewpoint)
+                                        # Also set single reference on frame 0 for backward compat
+                                        if relative_frame == 0:
+                                            reid_verifier.set_reference(frame_bgr, mask_uint8)
 
-                            # Verify identity every N frames
-                            elif frame_idx % VERIFY_EVERY_N_FRAMES == 0:
+                            # Verify identity every N frames (only after reference bank is built)
+                            elif len(reid_verifier.reference_bank) >= 2 and frame_idx % VERIFY_EVERY_N_FRAMES == 0:
                                 reid_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                                 ret, frame_bgr = reid_cap.read()
                                 if ret:
