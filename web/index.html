@@ -2143,10 +2143,10 @@
                             const height = videoElem.videoHeight || 720;
                             const duration = videoElem.duration || 10;
 
-                            // Enforce 1 min 30 sec maximum duration
-                            const MAX_DURATION_SECONDS = 90;
+                            // Enforce 10 minute maximum duration
+                            const MAX_DURATION_SECONDS = 600;
                             if (duration > MAX_DURATION_SECONDS) {
-                                alert(`Video too long! Maximum duration is ${MAX_DURATION_SECONDS} seconds.\n\nYour video: ${Math.round(duration)} seconds\n\nPlease upload a shorter video.`);
+                                alert(`Video too long! Maximum duration is 10 minutes.\n\nYour video: ${Math.round(duration)} seconds\n\nPlease upload a shorter video.`);
                                 // Reset the upload
                                 previewContainer.classList.remove('active');
                                 videoElem.src = '';
