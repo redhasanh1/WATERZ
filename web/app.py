@@ -47,7 +47,7 @@ WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(WEB_DIR, 'temp', 'uploads')
 RESULTS_FOLDER = os.path.join(WEB_DIR, 'results')
 QUARANTINE_FOLDER = os.path.join(WEB_DIR, 'quarantine')
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'mp4', 'mov', 'avi'}
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'mp4', 'mov', 'avi', 'webm', 'mkv', 'wmv', 'flv', 'mpeg', 'mpg', '3gp', 'm4v', 'ts', 'ogv', 'mts', 'm2ts'}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 # Ensure directories exist
@@ -119,7 +119,7 @@ def allowed_file(filename):
 def is_video(filename):
     """Check if file is a video"""
     ext = filename.rsplit('.', 1)[1].lower()
-    return ext in {'mp4', 'mov', 'avi'}
+    return ext in {'mp4', 'mov', 'avi', 'webm', 'mkv', 'wmv', 'flv', 'mpeg', 'mpg', '3gp', 'm4v', 'ts', 'ogv', 'mts', 'm2ts'}
 
 
 def process_image(image_path):

@@ -36,6 +36,14 @@ MAGIC_SIGNATURES = {
     'video/quicktime': [(8, 4, b'moov'), (8, 4, b'ftyp')],
     'video/x-msvideo': [(4, 0, b'RIFF'), (4, 8, b'AVI ')],  # RIFF + AVI
     'video/x-matroska': [(4, 0, b'\x1a\x45\xdf\xa3')],  # WebM/MKV
+    'video/webm': [(4, 0, b'\x1a\x45\xdf\xa3')],  # Same as Matroska
+    'video/x-ms-wmv': [(16, 0, b'\x30\x26\xb2\x75\x8e\x66\xcf\x11')],  # ASF header
+    'video/x-flv': [(3, 0, b'FLV')],  # Flash video
+    'video/mpeg': [(4, 0, b'\x00\x00\x01\xba'), (4, 0, b'\x00\x00\x01\xb3')],  # MPEG PS/ES
+    'video/3gpp': [(8, 4, b'ftyp'), (8, 4, b'3gp4'), (8, 4, b'3gp5'), (8, 4, b'3gp6')],  # 3GP
+    'video/x-m4v': [(8, 4, b'ftyp'), (8, 4, b'M4V '), (8, 4, b'm4v ')],  # M4V
+    'video/mp2t': [(1, 0, b'\x47')],  # MPEG-TS sync byte
+    'video/ogg': [(4, 0, b'OggS')],  # Ogg container
 }
 
 # Extension to expected MIME types mapping
@@ -52,7 +60,17 @@ EXTENSION_MIME_MAP = {
     '.mov': ['video/quicktime', 'video/mp4'],
     '.avi': ['video/x-msvideo'],
     '.mkv': ['video/x-matroska'],
-    '.webm': ['video/x-matroska'],
+    '.webm': ['video/webm', 'video/x-matroska'],
+    '.wmv': ['video/x-ms-wmv'],
+    '.flv': ['video/x-flv'],
+    '.mpeg': ['video/mpeg'],
+    '.mpg': ['video/mpeg'],
+    '.3gp': ['video/3gpp'],
+    '.m4v': ['video/x-m4v', 'video/mp4'],
+    '.ts': ['video/mp2t'],
+    '.mts': ['video/mp2t'],
+    '.m2ts': ['video/mp2t'],
+    '.ogv': ['video/ogg'],
 }
 
 
@@ -155,9 +173,15 @@ def validate_mime_type(filepath: str, declared_extension: str) -> bool:
 
     # Check if detected type matches expected
     if detected_mime not in expected_mimes:
-        # Be lenient with video containers (MP4/MOV are often interchangeable)
-        video_types = {'video/mp4', 'video/quicktime'}
-        if ext in ['.mp4', '.mov'] and detected_mime in video_types:
+        # Be lenient with video containers (many formats are interchangeable)
+        video_types = {'video/mp4', 'video/quicktime', 'video/x-m4v', 'video/3gpp'}
+        matroska_types = {'video/x-matroska', 'video/webm'}
+        video_exts = ['.mp4', '.mov', '.m4v', '.3gp']
+        matroska_exts = ['.mkv', '.webm']
+
+        if ext in video_exts and detected_mime in video_types:
+            return True
+        if ext in matroska_exts and detected_mime in matroska_types:
             return True
 
         raise MIMEValidationError(

@@ -83,10 +83,15 @@ class ObjectRemover {
 
         // Validate file type
         const validImageTypes = ['image/jpeg', 'image/png', 'image/jpg'];
-        const validVideoTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo'];
+        const validVideoTypes = [
+            'video/mp4', 'video/quicktime', 'video/x-msvideo',
+            'video/webm', 'video/x-matroska', 'video/x-ms-wmv',
+            'video/x-flv', 'video/mpeg', 'video/3gpp', 'video/x-m4v',
+            'video/mp2t', 'video/ogg'
+        ];
 
         if (!validImageTypes.includes(file.type) && !validVideoTypes.includes(file.type)) {
-            alert('Please upload a valid image (JPG, PNG) or video (MP4, MOV) file.');
+            alert('Please upload a valid image (JPG, PNG) or video (MP4, MOV, WebM, MKV, WMV, etc.) file.');
             return;
         }
 

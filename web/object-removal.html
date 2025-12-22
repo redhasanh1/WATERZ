@@ -791,14 +791,14 @@
             <!-- Video Container -->
             <div class="video-container" id="videoContainer">
                 <div class="video-placeholder" id="uploadArea">
-                    <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm" style="display:none">
+                    <input type="file" id="fileInput" accept="video/*" style="display:none">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                         <polyline points="17 8 12 3 7 8"/>
                         <line x1="12" y1="3" x2="12" y2="15"/>
                     </svg>
                     <h3>Upload Your Video</h3>
-                    <p>Drag & drop or click to upload (MP4, MOV, WebM)</p>
+                    <p>Drag & drop or click to upload (MP4, MOV, WebM, MKV, WMV, and more)</p>
                 </div>
                 <video id="videoPlayer" class="hidden"></video>
                 <div class="interaction-layer hidden" id="interactionLayer"></div>
@@ -882,11 +882,19 @@
             <div class="settings-section hidden" id="settingsSection">
                 <div class="settings-grid">
                     <div class="setting-group">
-                        <span class="setting-label">Inpainting Quality</span>
+                        <span class="setting-label">Background</span>
                         <div class="setting-options">
-                            <div class="setting-option" data-quality="fast">Fast</div>
-                            <div class="setting-option selected" data-quality="balanced">Balanced</div>
-                            <div class="setting-option" data-quality="high">High</div>
+                            <div class="setting-option selected" data-background="transparent">Transparent</div>
+                            <div class="setting-option" data-background="color">Solid Color</div>
+                            <div class="setting-option" data-background="blur">Blur BG</div>
+                        </div>
+                        <div id="colorPickerRow" class="hidden" style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="color" id="bgColorPicker" value="#00FF00" style="width: 40px; height: 30px; border: none; border-radius: 4px; cursor: pointer;">
+                            <span style="font-size: 0.8rem; color: var(--text-muted);" id="bgColorLabel">#00FF00</span>
+                        </div>
+                        <div id="blurSliderRow" class="hidden" style="margin-top: 0.75rem;">
+                            <input type="range" id="blurSlider" min="5" max="50" value="20" style="width: 100%;">
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">Blur: <span id="blurValueLabel">20</span>px</span>
                         </div>
                     </div>
                     <div class="setting-group">
@@ -894,8 +902,10 @@
                         <div class="setting-options">
                             <div class="setting-option selected" data-format="mp4">MP4</div>
                             <div class="setting-option" data-format="webm">WebM</div>
-                            <div class="setting-option" data-format="mov">MOV</div>
                         </div>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
+                            WebM supports transparency (alpha channel)
+                        </p>
                     </div>
                     <div class="setting-group">
                         <span class="setting-label">Options</span>
@@ -961,18 +971,28 @@
     (function() {
         'use strict';
 
+        // API Base (same origin for local server)
+        const API_BASE = '';
+
         // State
         const state = {
+            jobId: null,
             videoFile: null,
             videoUrl: null,
+            videoWidth: 0,
+            videoHeight: 0,
             isPlaying: false,
             objects: [],
             selectedObjectId: null,
             quality: 'balanced',
             format: 'mp4',
+            background: 'transparent', // transparent, color, blur
+            bgColor: '#00FF00',
+            blurAmount: 20,
             preserveShadows: true,
             preserveReflections: false,
-            isSelectingObject: false
+            isSelectingObject: false,
+            isTracked: false
         };
 
         // Elements
@@ -1011,54 +1031,129 @@
             if (e.target.files[0]) handleFile(e.target.files[0]);
         });
 
-        function handleFile(file) {
+        async function handleFile(file) {
             const validTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
             if (!validTypes.includes(file.type)) {
                 alert('Please upload a video file (MP4, MOV, or WebM)');
                 return;
             }
 
-            state.videoFile = file;
-            state.videoUrl = URL.createObjectURL(file);
+            // Show uploading state
+            uploadArea.innerHTML = '<div class="modal-spinner"></div><p style="color: var(--text-secondary); margin-top: 1rem;">Uploading...</p>';
 
-            videoPlayer.src = state.videoUrl;
-            videoPlayer.classList.remove('hidden');
-            uploadArea.classList.add('hidden');
-            interactionLayer.classList.remove('hidden');
-            instructions.classList.remove('hidden');
-            controlsPanel.classList.remove('hidden');
-            objectsPanel.classList.remove('hidden');
-            settingsSection.classList.remove('hidden');
+            try {
+                // Upload to server
+                const formData = new FormData();
+                formData.append('video', file);
 
-            videoPlayer.addEventListener('loadedmetadata', updateTimeDisplay);
-            videoPlayer.addEventListener('timeupdate', updateProgress);
+                const response = await fetch(`${API_BASE}/api/object-removal/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
 
-            state.isSelectingObject = true;
+                const data = await response.json();
+
+                if (data.status !== 'success') {
+                    throw new Error(data.message || 'Upload failed');
+                }
+
+                // Store job info
+                state.jobId = data.job_id;
+                state.videoFile = file;
+                state.videoUrl = `${API_BASE}${data.video_url}`;
+                state.videoWidth = data.width;
+                state.videoHeight = data.height;
+
+                // Setup video player
+                videoPlayer.src = state.videoUrl;
+                videoPlayer.classList.remove('hidden');
+                uploadArea.classList.add('hidden');
+                interactionLayer.classList.remove('hidden');
+                instructions.classList.remove('hidden');
+                controlsPanel.classList.remove('hidden');
+                objectsPanel.classList.remove('hidden');
+                settingsSection.classList.remove('hidden');
+
+                videoPlayer.addEventListener('loadedmetadata', updateTimeDisplay);
+                videoPlayer.addEventListener('timeupdate', updateProgress);
+
+                state.isSelectingObject = true;
+
+                console.log(`[UPLOAD] Job ${state.jobId}: ${data.width}x${data.height}`);
+
+            } catch (error) {
+                console.error('Upload error:', error);
+                alert('Upload failed: ' + error.message);
+                // Reset upload area
+                uploadArea.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <h3>Upload Your Video</h3>
+                    <p>Drag & drop or click to upload (MP4, MOV, WebM, MKV, WMV, and more)</p>
+                `;
+            }
         }
 
         // Interaction layer - click to select object
-        interactionLayer.addEventListener('click', (e) => {
+        interactionLayer.addEventListener('click', async (e) => {
             if (!state.isSelectingObject) return;
+            if (!state.jobId) return;
 
             const rect = interactionLayer.getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * 100;
-            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            const percentX = (e.clientX - rect.left) / rect.width;
+            const percentY = (e.clientY - rect.top) / rect.height;
+
+            // Convert to video coordinates
+            const videoX = Math.floor(percentX * state.videoWidth);
+            const videoY = Math.floor(percentY * state.videoHeight);
 
             // Add click marker
             const marker = document.createElement('div');
             marker.className = 'click-marker';
-            marker.style.left = x + '%';
-            marker.style.top = y + '%';
+            marker.style.left = (percentX * 100) + '%';
+            marker.style.top = (percentY * 100) + '%';
             interactionLayer.appendChild(marker);
 
-            // Simulate object detection
-            setTimeout(() => {
+            // Get current frame index
+            const frameIndex = Math.floor(videoPlayer.currentTime * 30); // Assume 30fps
+
+            try {
+                // Call SAM2 selection API
+                const response = await fetch(`${API_BASE}/api/object-removal/select`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        job_id: state.jobId,
+                        points: [{ x: videoX, y: videoY, label: 1 }],
+                        frame_index: frameIndex
+                    })
+                });
+
+                const data = await response.json();
+
                 marker.remove();
-                addObject(x, y);
-            }, 500);
+
+                if (data.status === 'success') {
+                    // Mask preview not available (SAM2 runs in WSL2 during tracking)
+                    // Just add object marker - real mask generated during tracking
+                    addObject(percentX * 100, percentY * 100, null);
+                    console.log('[SELECT] Point stored:', data.points);
+                } else {
+                    console.error('Selection failed:', data.message);
+                    alert('Failed to select object: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Selection error:', error);
+                marker.remove();
+                // Still add object visually for demo
+                addObject(percentX * 100, percentY * 100, null);
+            }
         });
 
-        function addObject(x, y) {
+        function addObject(x, y, maskData) {
             const id = Date.now();
             const objectNum = state.objects.length + 1;
 
@@ -1067,6 +1162,7 @@
                 name: 'Object ' + objectNum,
                 x: x,
                 y: y,
+                mask: maskData,
                 width: 15 + Math.random() * 10,
                 height: 20 + Math.random() * 10
             });
@@ -1083,6 +1179,24 @@
             outline.style.width = '15%';
             outline.style.height = '20%';
             interactionLayer.appendChild(outline);
+
+            // If we have mask data, show it as overlay
+            if (maskData) {
+                showMaskOverlay(maskData);
+            }
+        }
+
+        function showMaskOverlay(maskBase64) {
+            // Remove existing mask overlay
+            const existing = document.querySelector('.mask-overlay');
+            if (existing) existing.remove();
+
+            // Create mask overlay
+            const overlay = document.createElement('img');
+            overlay.className = 'mask-overlay';
+            overlay.src = 'data:image/png;base64,' + maskBase64;
+            overlay.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0.5;pointer-events:none;mix-blend-mode:screen;';
+            interactionLayer.appendChild(overlay);
         }
 
         function renderObjects() {
@@ -1189,8 +1303,44 @@
 
                 if (option.dataset.quality) state.quality = option.dataset.quality;
                 if (option.dataset.format) state.format = option.dataset.format;
+
+                // Handle background options
+                if (option.dataset.background) {
+                    state.background = option.dataset.background;
+                    const colorPickerRow = document.getElementById('colorPickerRow');
+                    const blurSliderRow = document.getElementById('blurSliderRow');
+
+                    // Hide both first
+                    colorPickerRow.classList.add('hidden');
+                    blurSliderRow.classList.add('hidden');
+
+                    // Show relevant one
+                    if (state.background === 'color') {
+                        colorPickerRow.classList.remove('hidden');
+                    } else if (state.background === 'blur') {
+                        blurSliderRow.classList.remove('hidden');
+                    }
+                }
             });
         });
+
+        // Color picker
+        const bgColorPicker = document.getElementById('bgColorPicker');
+        if (bgColorPicker) {
+            bgColorPicker.addEventListener('input', (e) => {
+                state.bgColor = e.target.value;
+                document.getElementById('bgColorLabel').textContent = e.target.value.toUpperCase();
+            });
+        }
+
+        // Blur slider
+        const blurSlider = document.getElementById('blurSlider');
+        if (blurSlider) {
+            blurSlider.addEventListener('input', (e) => {
+                state.blurAmount = parseInt(e.target.value);
+                document.getElementById('blurValueLabel').textContent = e.target.value;
+            });
+        }
 
         document.querySelectorAll('.checkbox-option').forEach(option => {
             option.addEventListener('click', () => {
@@ -1200,45 +1350,138 @@
             });
         });
 
-        // Remove button
-        removeBtn.addEventListener('click', () => {
+        // Remove button - starts tracking through full video
+        removeBtn.addEventListener('click', async () => {
             if (state.objects.length === 0) return;
+            if (!state.jobId) {
+                alert('No video uploaded');
+                return;
+            }
 
-            showProcessingModal('Removing Objects...', 'AI is analyzing and filling the removed areas...');
+            showProcessingModal('Tracking Object...', 'SAM2 is tracking the object through all frames...');
 
-            let progress = 0;
-            const interval = setInterval(() => {
-                progress += Math.random() * 8;
-                if (progress >= 100) {
-                    progress = 100;
-                    clearInterval(interval);
-                    setTimeout(() => {
-                        hideProcessingModal();
-                        showSuccessModal();
-                        exportBtn.classList.remove('hidden');
-                    }, 500);
+            try {
+                // Start tracking
+                const response = await fetch(`${API_BASE}/api/object-removal/track`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id: state.jobId })
+                });
+
+                const data = await response.json();
+                if (data.status !== 'success' && data.status !== 'processing') {
+                    throw new Error(data.message || 'Failed to start tracking');
                 }
-                updateProcessingProgress(progress);
-            }, 200);
+
+                // Poll for progress
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusResp = await fetch(`${API_BASE}/api/object-removal/status/${state.jobId}`);
+                        const statusData = await statusResp.json();
+
+                        console.log('[TRACK STATUS]', statusData);
+
+                        if (statusData.status === 'completed') {
+                            clearInterval(pollInterval);
+                            updateProcessingProgress(100);
+                            state.isTracked = true;
+                            setTimeout(() => {
+                                hideProcessingModal();
+                                showSuccessModal();
+                                exportBtn.classList.remove('hidden');
+                            }, 500);
+                        } else if (statusData.status === 'error') {
+                            clearInterval(pollInterval);
+                            hideProcessingModal();
+                            alert('Tracking failed: ' + (statusData.message || 'Unknown error'));
+                        } else {
+                            // Update progress
+                            const progress = statusData.progress || 0;
+                            updateProcessingProgress(progress);
+                            document.getElementById('modalText').textContent =
+                                `Tracking frame ${statusData.current_frame || 0} of ${statusData.total_frames || '?'}...`;
+                        }
+                    } catch (err) {
+                        console.error('Status poll error:', err);
+                    }
+                }, 1000);
+
+            } catch (error) {
+                console.error('Tracking error:', error);
+                hideProcessingModal();
+                alert('Tracking failed: ' + error.message);
+            }
         });
 
-        // Export button
-        exportBtn.addEventListener('click', () => {
-            showProcessingModal('Exporting...', 'Generating final video file...');
+        // Export button - export with background/format options
+        exportBtn.addEventListener('click', async () => {
+            if (!state.jobId || !state.isTracked) {
+                alert('Please track the object first');
+                return;
+            }
 
-            let progress = 0;
-            const interval = setInterval(() => {
-                progress += Math.random() * 12;
-                if (progress >= 100) {
-                    progress = 100;
-                    clearInterval(interval);
-                    setTimeout(() => {
-                        hideProcessingModal();
-                        alert('Video exported successfully!');
-                    }, 500);
+            showProcessingModal('Exporting...', 'Applying background and encoding video...');
+
+            try {
+                // Start export with options
+                const response = await fetch(`${API_BASE}/api/object-removal/export`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        job_id: state.jobId,
+                        background: state.background,
+                        bg_color: state.bgColor,
+                        blur_amount: state.blurAmount,
+                        format: state.format
+                    })
+                });
+
+                const data = await response.json();
+                if (data.status !== 'success' && data.status !== 'processing') {
+                    throw new Error(data.message || 'Failed to start export');
                 }
-                updateProcessingProgress(progress);
-            }, 150);
+
+                // Poll for export progress
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusResp = await fetch(`${API_BASE}/api/object-removal/status/${state.jobId}`);
+                        const statusData = await statusResp.json();
+
+                        console.log('[EXPORT STATUS]', statusData);
+
+                        if (statusData.status === 'export_complete') {
+                            clearInterval(pollInterval);
+                            updateProcessingProgress(100);
+                            setTimeout(() => {
+                                hideProcessingModal();
+                                // Trigger download
+                                const downloadUrl = `${API_BASE}/api/object-removal/download/${state.jobId}`;
+                                const a = document.createElement('a');
+                                a.href = downloadUrl;
+                                a.download = `object_removed_${state.jobId}.${state.format}`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                            }, 500);
+                        } else if (statusData.status === 'error') {
+                            clearInterval(pollInterval);
+                            hideProcessingModal();
+                            alert('Export failed: ' + (statusData.message || 'Unknown error'));
+                        } else {
+                            // Update progress
+                            const progress = statusData.export_progress || statusData.progress || 0;
+                            updateProcessingProgress(progress);
+                        }
+                    } catch (err) {
+                        console.error('Export status poll error:', err);
+                    }
+                }, 1000);
+
+            } catch (error) {
+                console.error('Export error:', error);
+                hideProcessingModal();
+                alert('Export failed: ' + error.message);
+            }
         });
 
         // Modal helpers
