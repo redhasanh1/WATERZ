@@ -373,6 +373,87 @@ class ReIDVerifier:
         return best_point, best_sim
 
 
+def classify_tracking_state(mask, drift_sim, search_sim):
+    """
+    Classify tracking state to decide what action to take.
+
+    Args:
+        mask: Current mask (uint8)
+        drift_sim: Similarity when drift was detected
+        search_sim: Best similarity from visual search
+
+    Returns:
+        One of: "OK", "DRIFT", "LOST", "OCCLUDED"
+    """
+    mask_area = np.sum(mask > 127)
+
+    if drift_sim >= 0.35:
+        return "OK"
+    elif search_sim >= 0.35 and mask_area > 5000:
+        return "DRIFT"  # Found something, probably drifted to similar object
+    elif search_sim < 0.25 or mask_area < 1000:
+        return "LOST"   # Can't find object anywhere
+    else:
+        return "OCCLUDED"  # Keep tracking through partial occlusion
+
+
+def get_user_click_for_recovery(frame_bgr, frame_idx, previous_mask=None):
+    """
+    Show frame to user and wait for click to re-identify object.
+
+    Opens a cv2 window showing the frame with previous mask overlay.
+    User clicks on the object's new location, or presses ESC to skip.
+
+    Args:
+        frame_bgr: BGR image of current frame
+        frame_idx: Frame number (for display)
+        previous_mask: Previous mask to show as faded overlay
+
+    Returns:
+        (x, y) tuple if user clicked, None if ESC/closed window
+    """
+    click_point = None
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal click_point
+        if event == cv2.EVENT_LBUTTONDOWN:
+            click_point = (x, y)
+
+    # Create display frame with overlay
+    display = frame_bgr.copy()
+    if previous_mask is not None and np.sum(previous_mask) > 0:
+        # Show faded red overlay where mask WAS
+        overlay = display.copy()
+        overlay[previous_mask > 127] = [0, 0, 255]  # Red
+        display = cv2.addWeighted(overlay, 0.3, display, 0.7, 0)
+
+    # Add text
+    cv2.putText(display, f"Frame {frame_idx}: OBJECT LOST", (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    cv2.putText(display, "Click on object to re-identify, ESC to skip", (20, 80),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+    window_name = "Recovery - Click on Object"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback(window_name, mouse_callback)
+    cv2.imshow(window_name, display)
+
+    while click_point is None:
+        key = cv2.waitKey(100)
+        if key == 27:  # ESC
+            break
+        # Check if window was closed
+        try:
+            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                break
+        except cv2.error:
+            break
+
+    cv2.destroyWindow(window_name)
+    cv2.waitKey(1)  # Flush events
+    return click_point
+
+
 def integrate_reid_verification(
     frame_generator,
     output_masks_dir,

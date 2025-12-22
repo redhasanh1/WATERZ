@@ -51,7 +51,10 @@ except ImportError:
 
 # Try to import ReID tracker for identity verification
 try:
-    from sam2_reid_tracker import ReIDVerifier, USE_REID_VERIFICATION, VERIFY_EVERY_N_FRAMES
+    from sam2_reid_tracker import (
+        ReIDVerifier, USE_REID_VERIFICATION, VERIFY_EVERY_N_FRAMES,
+        classify_tracking_state, get_user_click_for_recovery
+    )
     HAS_REID = True
     print(f"[SAM2-WSL2] ReID verification available! (verify every {VERIFY_EVERY_N_FRAMES} frames)")
 except ImportError:
@@ -1306,31 +1309,61 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                                         drift_count += 1
                                         tqdm.write(f"[ReID] DRIFT at frame {frame_idx} (sim={similarity:.3f})")
 
-                                        # AUTO-CORRECTION: Find object and re-prompt SAM2
-                                        # Pass current mask as hint to search around it first
+                                        # Search for object
                                         new_point, search_sim = reid_verifier.find_object_in_frame(
                                             frame_bgr, mask_hint=mask_uint8
                                         )
 
-                                        if new_point is not None:
-                                            tqdm.write(f"[ReID] RE-DETECTING at {new_point} (search_sim={search_sim:.3f})")
+                                        # Classify tracking state
+                                        state = classify_tracking_state(mask_uint8, similarity, search_sim)
+                                        tqdm.write(f"[ReID] State: {state} (search_sim={search_sim:.3f})")
 
-                                            # Re-prompt SAM2 at this frame
-                                            predictor.add_new_points_or_box(
-                                                inference_state=inference_state,
-                                                frame_idx=frame_idx,
-                                                obj_id=1,
-                                                points=np.array([new_point], dtype=np.float32),
-                                                labels=np.array([1], dtype=np.int32),
-                                                clear_old_points=True
+                                        if state == "LOST":
+                                            # Object not found - ask user to click
+                                            tqdm.write(f"[ReID] OBJECT LOST - requesting user input...")
+                                            click_point = get_user_click_for_recovery(
+                                                frame_bgr, frame_idx, mask_uint8
                                             )
 
-                                            # Update reference embedding with corrected location
-                                            # (next verify will use new embedding)
-                                            reid_verifier.set_reference(frame_bgr, mask_uint8)
-                                            corrections_made += 1
-                                        else:
-                                            tqdm.write(f"[ReID] Could not find object (best_sim={search_sim:.3f})")
+                                            if click_point is not None:
+                                                tqdm.write(f"[ReID] User clicked at {click_point} - re-prompting SAM2")
+                                                predictor.add_new_points_or_box(
+                                                    inference_state=inference_state,
+                                                    frame_idx=frame_idx,
+                                                    obj_id=1,
+                                                    points=np.array([click_point], dtype=np.float32),
+                                                    labels=np.array([1], dtype=np.int32),
+                                                    clear_old_points=True
+                                                )
+                                                corrections_made += 1
+                                            else:
+                                                tqdm.write(f"[ReID] User skipped frame {frame_idx}")
+
+                                        elif state == "DRIFT" and new_point is not None:
+                                            # Check if detection is close to current mask
+                                            coords = np.argwhere(mask_uint8 > 127)
+                                            if len(coords) > 0:
+                                                mask_cy, mask_cx = coords.mean(axis=0)
+                                                dist = np.sqrt((new_point[0] - mask_cx)**2 + (new_point[1] - mask_cy)**2)
+
+                                                if dist <= 150:
+                                                    # Close enough - auto-correct
+                                                    tqdm.write(f"[ReID] RE-DETECTING at {new_point} ({dist:.0f}px away)")
+                                                    predictor.add_new_points_or_box(
+                                                        inference_state=inference_state,
+                                                        frame_idx=frame_idx,
+                                                        obj_id=1,
+                                                        points=np.array([new_point], dtype=np.float32),
+                                                        labels=np.array([1], dtype=np.int32),
+                                                        clear_old_points=True
+                                                    )
+                                                    reid_verifier.set_reference(frame_bgr, mask_uint8)
+                                                    corrections_made += 1
+                                                else:
+                                                    # Too far - probably wrong object, skip
+                                                    tqdm.write(f"[ReID] Skipping - {dist:.0f}px away (probably wrong object)")
+
+                                        # OCCLUDED state: keep tracking, don't intervene
 
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
