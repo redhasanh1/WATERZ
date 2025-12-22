@@ -1299,7 +1299,9 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                                 ret, frame_bgr = reid_cap.read()
                                 if ret:
                                     is_same, similarity = reid_verifier.verify(frame_bgr, mask_uint8)
-                                    if not is_same:
+                                    # similarity = -1.0 means uncertain (decode error), skip
+                                    # Only count real verified drift (sim >= 0 and is_same=False)
+                                    if not is_same and similarity >= 0:
                                         drift_count += 1
                                         tqdm.write(f"[ReID] DRIFT at frame {frame_idx} (sim={similarity:.3f})")
 

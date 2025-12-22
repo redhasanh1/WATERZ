@@ -239,15 +239,14 @@ class ReIDVerifier:
 
         crop = self._crop_by_mask(frame, mask)
         if crop is None:
-            # Can't verify, assume drift (conservative)
-            return False, 0.0
+            # Can't verify (empty mask or decode error) - return uncertain, not drift
+            return True, -1.0  # -1.0 = uncertain (impossible cosine sim value)
 
         current_embedding = self._get_embedding(crop)
         if current_embedding is None:
-            # For faces: no face detected might mean occlusion, not drift
-            if self.object_type == "face":
-                return True, 0.5  # Uncertain, don't trigger re-detect
-            return False, 0.0
+            # Embedding extraction failed (decode error, empty crop, etc.)
+            # Return uncertain instead of triggering false drift alarm
+            return True, -1.0
 
         # Cosine similarity (embeddings are already L2 normalized)
         similarity = torch.dot(self.reference_embedding, current_embedding).item()
