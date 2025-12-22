@@ -1203,6 +1203,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
         masks_saved = 0
         reid_verifier = None
         drift_count = 0
+        corrections_made = 0
 
         # Initialize ReID verifier if available
         if HAS_REID and USE_REID_VERIFICATION:
@@ -1283,7 +1284,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                             mask_uint8[:] = 0
 
                         # ============================================================
-                        # ReID VERIFICATION - Detect identity drift
+                        # ReID VERIFICATION - Detect and AUTO-CORRECT drift
                         # ============================================================
                         if reid_verifier is not None and reid_cap is not None:
                             # Set reference on first valid frame
@@ -1305,6 +1306,29 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                                         drift_count += 1
                                         tqdm.write(f"[ReID] DRIFT at frame {frame_idx} (sim={similarity:.3f})")
 
+                                        # AUTO-CORRECTION: Find object and re-prompt SAM2
+                                        new_point, search_sim = reid_verifier.find_object_in_frame(frame_bgr)
+
+                                        if new_point is not None:
+                                            tqdm.write(f"[ReID] RE-DETECTING at {new_point} (search_sim={search_sim:.3f})")
+
+                                            # Re-prompt SAM2 at this frame
+                                            predictor.add_new_points_or_box(
+                                                inference_state=inference_state,
+                                                frame_idx=frame_idx,
+                                                obj_id=1,
+                                                points=np.array([new_point], dtype=np.float32),
+                                                labels=np.array([1], dtype=np.int32),
+                                                clear_old_points=True
+                                            )
+
+                                            # Update reference embedding with corrected location
+                                            # (next verify will use new embedding)
+                                            reid_verifier.set_reference(frame_bgr, mask_uint8)
+                                            corrections_made += 1
+                                        else:
+                                            tqdm.write(f"[ReID] Could not find object (best_sim={search_sim:.3f})")
+
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
@@ -1319,11 +1343,13 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                     torch.cuda.empty_cache()
 
         # Report ReID verification results
-        if reid_verifier is not None and drift_count > 0:
-            print(f"[ReID] ⚠️  Detected {drift_count} potential drift events")
-            print(f"[ReID] Consider reviewing frames where similarity dropped below threshold")
-        elif reid_verifier is not None:
-            print(f"[ReID] ✅ No drift detected - identity verified throughout video")
+        if reid_verifier is not None:
+            if corrections_made > 0:
+                print(f"[ReID] 🔧 Made {corrections_made} auto-corrections (detected {drift_count} drift events)")
+            elif drift_count > 0:
+                print(f"[ReID] ⚠️  Detected {drift_count} drift events but could not auto-correct")
+            else:
+                print(f"[ReID] ✅ No drift detected - identity verified throughout video")
 
         print(f"[SAM2] Complete! Saved {masks_saved} masks to {output_masks_dir}")
         return masks_saved

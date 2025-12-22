@@ -276,6 +276,62 @@ class ReIDVerifier:
         self.reference_embedding = None
         self.similarity_history = []
 
+    def find_object_in_frame(self, frame, grid_size=8, min_similarity=0.25):
+        """
+        Find where reference object is in frame using DINOv2 visual search.
+
+        When drift is detected, use this to locate the original object
+        and get coordinates for re-prompting SAM2.
+
+        Args:
+            frame: BGR image
+            grid_size: Grid density for patch sampling (8 = 64 patches)
+            min_similarity: Minimum similarity to consider a match
+
+        Returns:
+            (best_point, best_similarity) or (None, best_similarity) if not found
+        """
+        if self.reference_embedding is None or self.model is None:
+            return None, 0.0
+
+        H, W = frame.shape[:2]
+        patch_size = min(H, W) // grid_size  # Adaptive patch size
+
+        best_sim = -1.0
+        best_point = None
+
+        with torch.no_grad():
+            for i in range(grid_size):
+                for j in range(grid_size):
+                    # Center of each grid cell
+                    cx = int((j + 0.5) * W / grid_size)
+                    cy = int((i + 0.5) * H / grid_size)
+
+                    # Extract patch centered at (cx, cy)
+                    half = patch_size // 2
+                    x1 = max(0, cx - half)
+                    y1 = max(0, cy - half)
+                    x2 = min(W, cx + half)
+                    y2 = min(H, cy + half)
+
+                    patch = frame[y1:y2, x1:x2]
+                    if patch.shape[0] < MIN_CROP_SIZE or patch.shape[1] < MIN_CROP_SIZE:
+                        continue
+
+                    embedding = self._get_embedding(patch)
+                    if embedding is None:
+                        continue
+
+                    sim = torch.dot(self.reference_embedding, embedding).item()
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_point = (cx, cy)
+
+        if best_sim < min_similarity:
+            return None, best_sim
+
+        return best_point, best_sim
+
 
 def integrate_reid_verification(
     frame_generator,
