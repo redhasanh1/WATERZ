@@ -410,7 +410,7 @@ def get_user_click_for_recovery(frame_bgr, frame_idx, previous_mask=None):
         previous_mask: Previous mask to show as faded overlay
 
     Returns:
-        (x, y) tuple if user clicked, None if ESC/closed window
+        (x, y) tuple if user clicked, None if ESC/closed window or GUI unavailable
     """
     click_point = None
 
@@ -441,8 +441,14 @@ def get_user_click_for_recovery(frame_bgr, frame_idx, previous_mask=None):
     cv2.putText(display, "Click on object to re-identify, ESC to skip", (20, 80),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
+    # Try to create window - may fail in headless environments (WSL2, Docker, SSH)
     window_name = "Recovery - Click on Object"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    try:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    except cv2.error as e:
+        print(f"[ReID] GUI unavailable ({e}), skipping user input")
+        return None
+
     cv2.setMouseCallback(window_name, mouse_callback)
     cv2.imshow(window_name, display)
 
