@@ -16,43 +16,45 @@ from sam2.modeling.sam2_base import NO_OBJ_SCORE, SAM2Base
 from sam2.utils.misc import concat_points, fill_holes_in_mask_scores, load_video_frames
 
 # ============================================================================
-# INT8 QUANTIZATION FOR MASKMEM_FEATURES (4x compression, 256 levels)
-# Key difference from 4-bit: 256 levels vs 16 = 16x more precision
+# INT8 + SPATIAL COMPRESSION FOR MASKMEM_FEATURES (16x total compression)
+# - Spatial: 128x128 → 64x64 (4x compression) - matches RoPE grid size!
+# - INT8: 256 quantization levels (4x compression)
+# - Total: 16x compression
 # ============================================================================
-USE_INT8_MASKMEM = True  # Toggle INT8 compression
+USE_INT8_SPATIAL = True  # Toggle 16x compression (INT8 + spatial downsampling)
+SPATIAL_SIZE = 64  # Must be 64 to match RoPE frequencies (64x64 = 4096 tokens)
 
-def _compress_int8(tensor, storage_device):
-    """Compress float tensor to INT8 with per-tensor scale.
+def _compress_int8_spatial(tensor, storage_device):
+    """Compress tensor with spatial downsampling + INT8 quantization (16x total).
 
-    INT8 has 256 levels (-128 to 127) vs 4-bit's 16 levels.
-    This preserves much more precision for cross-attention matching.
+    Pipeline:
+    1. Spatial: 128x128 → 64x64 (bilinear, 4x compression)
+    2. INT8: float32 → int8 (4x compression)
+    Total: 16x compression
     """
-    # Compute per-tensor scale (symmetric quantization)
-    abs_max = tensor.abs().max()
+    # Step 1: Spatial downsample
+    small = F.interpolate(tensor, size=(SPATIAL_SIZE, SPATIAL_SIZE),
+                          mode='bilinear', align_corners=False)
+
+    # Step 2: INT8 quantize
+    abs_max = small.abs().max()
     if abs_max == 0:
         scale = torch.tensor(1.0, dtype=torch.float32, device=tensor.device)
     else:
         scale = abs_max / 127.0
 
-    # Quantize to INT8
-    quantized = (tensor / scale).round().clamp(-128, 127).to(torch.int8)
+    quantized = (small / scale).round().clamp(-128, 127).to(torch.int8)
 
     return {
         "data": quantized.to(storage_device, non_blocking=True),
         "scale": scale.to(storage_device, non_blocking=True),
-        "shape": tensor.shape,
-        "quant": "int8"
+        "orig_shape": tensor.shape,  # Store original shape for upsampling
+        "quant": "int8_spatial"
     }
 
-def _decompress_int8(compressed, device):
-    """Decompress INT8 back to float for inference."""
-    data = compressed["data"].to(device, non_blocking=True).float()
-    scale = compressed["scale"].to(device, non_blocking=True)
-    return data * scale
-
-def _is_int8_compressed(data):
-    """Check if data is INT8 compressed dict."""
-    return isinstance(data, dict) and data.get("quant") == "int8"
+def _is_compressed(data):
+    """Check if data is compressed (any format)."""
+    return isinstance(data, dict) and data.get("quant") in ("int8_spatial", "int8")
 
 
 class SAM2VideoPredictor(SAM2Base):
@@ -817,9 +819,9 @@ class SAM2VideoPredictor(SAM2Base):
         storage_device = inference_state["storage_device"]
         maskmem_features = current_out["maskmem_features"]
         if maskmem_features is not None:
-            if USE_INT8_MASKMEM:
-                # INT8: 4x compression, 256 levels (vs 16 for INT4)
-                maskmem_features = _compress_int8(maskmem_features, storage_device)
+            if USE_INT8_SPATIAL:
+                # INT8 + spatial: 8x compression (90x90 + int8)
+                maskmem_features = _compress_int8_spatial(maskmem_features, storage_device)
             else:
                 maskmem_features = maskmem_features.to(torch.bfloat16)
                 maskmem_features = maskmem_features.to(storage_device, non_blocking=True)
@@ -873,8 +875,9 @@ class SAM2VideoPredictor(SAM2Base):
 
         # optionally offload the output to CPU memory to save GPU space
         storage_device = inference_state["storage_device"]
-        if USE_INT8_MASKMEM:
-            maskmem_features = _compress_int8(maskmem_features, storage_device)
+        if USE_INT8_SPATIAL:
+            # INT8 + spatial: 8x compression (90x90 + int8)
+            maskmem_features = _compress_int8_spatial(maskmem_features, storage_device)
         else:
             maskmem_features = maskmem_features.to(torch.bfloat16)
             maskmem_features = maskmem_features.to(storage_device, non_blocking=True)

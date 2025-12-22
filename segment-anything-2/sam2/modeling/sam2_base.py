@@ -19,17 +19,25 @@ from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_fr
 NO_OBJ_SCORE = -1024.0
 
 # ============================================================================
-# INT8 DECOMPRESSION HELPERS (for compressed maskmem_features)
+# INT8 + SPATIAL DECOMPRESSION HELPERS (for compressed maskmem_features)
+# Supports both int8_spatial (8x) and legacy int8 (4x) formats
 # ============================================================================
-def _is_int8_compressed(data):
-    """Check if data is INT8 compressed dict."""
-    return isinstance(data, dict) and data.get("quant") == "int8"
+def _is_compressed(data):
+    """Check if data is compressed (any format)."""
+    return isinstance(data, dict) and data.get("quant") in ("int8_spatial", "int8")
 
-def _decompress_int8(compressed, device):
-    """Decompress INT8 back to float for inference."""
+def _decompress(compressed, device):
+    """Decompress INT8 to float (NO upsampling - keep at 90x90 for VRAM savings)."""
+    # INT8 decompress only - spatial stays at compressed size
     data = compressed["data"].to(device, non_blocking=True).float()
     scale = compressed["scale"].to(device, non_blocking=True)
     return data * scale
+
+def _get_compressed_spatial_size(compressed):
+    """Get the spatial size of compressed data (90 for int8_spatial, None for int8)."""
+    if compressed.get("quant") == "int8_spatial":
+        return compressed["data"].shape[2]  # 90
+    return None
 
 
 class SAM2Base(torch.nn.Module):
@@ -585,15 +593,22 @@ class SAM2Base(torch.nn.Module):
                     continue  # skip padding frames
                 # "maskmem_features" might have been offloaded to CPU in demo use cases,
                 # so we load it back to GPU (it's a no-op if it's already on GPU).
-                # Also handle INT8 compressed format for VRAM savings.
+                # Also handle compressed format (INT8 + spatial) for VRAM savings.
                 maskmem_data = prev["maskmem_features"]
-                if _is_int8_compressed(maskmem_data):
-                    feats = _decompress_int8(maskmem_data, device)
+                if _is_compressed(maskmem_data):
+                    feats = _decompress(maskmem_data, device)
+                    spatial_size = _get_compressed_spatial_size(maskmem_data)
                 else:
                     feats = maskmem_data.to(device, non_blocking=True)
+                    spatial_size = None
                 to_cat_memory.append(feats.flatten(2).permute(2, 0, 1))
+                del feats  # Free GPU memory immediately
                 # Spatial positional encoding (it might have been offloaded to CPU in eval)
                 maskmem_enc = prev["maskmem_pos_enc"][-1].to(device)
+                # Downsample pos_enc to match compressed features (90x90)
+                if spatial_size is not None:
+                    maskmem_enc = F.interpolate(maskmem_enc, size=(spatial_size, spatial_size),
+                                                mode='bilinear', align_corners=False)
                 maskmem_enc = maskmem_enc.flatten(2).permute(2, 0, 1)
                 # Temporal positional encoding
                 maskmem_enc = (
