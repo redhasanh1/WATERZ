@@ -407,76 +407,104 @@ class DALIChunkedStreamer:
 
         @pipeline_def
         def video_pipe():
-            # Use experimental reader with pad_mode='none' to prevent frame duplication
-            # at end of video (DALI Issue #4797)
-            video = fn.experimental.readers.video(
+            # DEBUG: Log what DALI returns, find the real issue
+            video, frame_num = fn.experimental.readers.video(
                 device="gpu",
                 filenames=[self.h265_path],
                 sequence_length=self.chunk_size,
+                step=self.chunk_size,  # Explicit step
+                stride=1,
+                pad_mode='none',
+                read_ahead=False,
+                enable_frame_num=True,
                 random_shuffle=False,
                 image_type=types.RGB,
-                pad_mode='none',  # Returns shorter last sequence instead of duplicating frames
-                name="video_reader"
+                shard_id=0,
+                num_shards=1,
+                name="video_reader",
             )
-            return video
+            return video, frame_num
 
         self.pipe = video_pipe(
             batch_size=1,
-            num_threads=4,
+            num_threads=1,  # Single thread to prevent race conditions
             device_id=self.device_id,
-            prefetch_queue_depth=2
+            prefetch_queue_depth=1,  # Minimal prefetch to prevent wraparound
         )
         self.pipe.build()
 
     def _start_background_loader(self):
-        """Spawn daemon thread that continuously prefetches chunks SEQUENTIALLY"""
+        """Spawn daemon thread that continuously prefetches chunks using DALI"""
         import threading
 
         def loader_worker():
             chunk_num = 0
-            total_frames_read = 0  # Track total to detect DALI wrap-around
+            total_frames_read = 0
             num_chunks = (self._length + self.chunk_size - 1) // self.chunk_size
 
-            # DALI reads sequentially - no reset/skip needed!
-            while not self.stop_event.is_set() and chunk_num < num_chunks:
+            # DALI breaks on last 2 chunks - use OpenCV for those
+            dali_chunk_limit = max(0, num_chunks - 2)
+            print(f"[DALI-PREFETCH] {num_chunks} chunks total, DALI for 0-{dali_chunk_limit-1}, OpenCV for last 2")
+
+            # === PHASE 1: DALI for chunks 0 to (num_chunks - 3) ===
+            while not self.stop_event.is_set() and chunk_num < dali_chunk_limit:
                 chunk_start = chunk_num * self.chunk_size
                 chunk_end = min(chunk_start + self.chunk_size, self._length)
                 frames_needed = chunk_end - chunk_start
 
                 try:
-                    # Get next sequential chunk from DALI
                     output = self.pipe.run()
                     raw_tensor = torch.from_dlpack(output[0].as_tensor())
                     raw_tensor = raw_tensor.squeeze(0)  # [seq, H, W, C]
+                    actual_frames = raw_tensor.shape[0]
 
-                    # Only take frames we need (trim last chunk)
-                    if raw_tensor.shape[0] > frames_needed:
+                    if actual_frames > frames_needed:
                         raw_tensor = raw_tensor[:frames_needed]
+                        actual_frames = frames_needed
 
-                    total_frames_read += raw_tensor.shape[0]
-
-                    # STOP if we've read all frames (prevents DALI wrap-around)
-                    if total_frames_read >= self._length:
-                        self.load_queue.put((chunk_start, raw_tensor))
-                        print(f"[DALI-PREFETCH] All {total_frames_read}/{self._length} frames read, stopping")
-                        break
-
-                    # Store RAW uint8 - NO processing! (per-frame processing in __getitem__)
-                    # This makes chunk loading ~20x faster (0.3s vs 7s)
+                    total_frames_read += actual_frames
                     self.load_queue.put((chunk_start, raw_tensor))
-                    print(f"[DALI-PREFETCH] Queued chunk {chunk_num}: frames {chunk_start}-{chunk_end-1} (total: {total_frames_read})")
+                    print(f"[DALI] Chunk {chunk_num}: frames {chunk_start}-{chunk_start+actual_frames-1}")
                     chunk_num += 1
 
-                except StopIteration:
-                    print(f"[DALI-PREFETCH] DALI exhausted after {chunk_num} chunks")
-                    break
                 except Exception as e:
-                    print(f"[DALI-PREFETCH] Error at chunk {chunk_num}: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    print(f"[DALI] Error at chunk {chunk_num}: {e}")
                     break
 
-            print(f"[DALI-PREFETCH] Loader finished ({chunk_num} chunks, {total_frames_read} frames)")
+            # === PHASE 2: OpenCV for last 2 chunks ===
+            if chunk_num < num_chunks:
+                print(f"[OPENCV] Taking over for chunks {chunk_num} to {num_chunks-1}")
+                cap = cv2.VideoCapture(self.h265_path)
+                cv_start_frame = chunk_num * self.chunk_size
+                cap.set(cv2.CAP_PROP_POS_FRAMES, cv_start_frame)
+
+                while chunk_num < num_chunks and not self.stop_event.is_set():
+                    chunk_start = chunk_num * self.chunk_size
+                    chunk_end = min(chunk_start + self.chunk_size, self._length)
+                    frames_needed = chunk_end - chunk_start
+
+                    frames_list = []
+                    for _ in range(frames_needed):
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        frames_list.append(frame_rgb)
+
+                    if len(frames_list) == 0:
+                        break
+
+                    frames_np = np.stack(frames_list, axis=0)
+                    frames_tensor = torch.from_numpy(frames_np).to(f'cuda:{self.device_id}')
+
+                    total_frames_read += len(frames_list)
+                    self.load_queue.put((chunk_start, frames_tensor))
+                    print(f"[OPENCV] Chunk {chunk_num}: frames {chunk_start}-{chunk_start+len(frames_list)-1}")
+                    chunk_num += 1
+
+                cap.release()
+
+            print(f"[LOADER] Finished: {chunk_num} chunks, {total_frames_read} frames")
 
         self._loader_thread = threading.Thread(target=loader_worker, daemon=True)
         self._loader_thread.start()
@@ -540,6 +568,12 @@ class DALIChunkedStreamer:
             self._get_chunk(chunk_start)
 
         chunk_idx = idx - self.current_chunk_start
+
+        # Bounds check - DALI with pad_mode='none' may return shorter chunks
+        if chunk_idx >= self.current_chunk.shape[0]:
+            print(f"[DALI] WARNING: Frame {idx} beyond chunk bounds (chunk has {self.current_chunk.shape[0]} frames, wanted idx {chunk_idx})")
+            chunk_idx = self.current_chunk.shape[0] - 1  # Clamp to last valid frame
+
         frame = self.current_chunk[chunk_idx]  # [H, W, C] uint8
 
         # Process SINGLE frame on-demand (instant on GPU - ~0.1ms)
