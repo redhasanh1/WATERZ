@@ -309,7 +309,7 @@ class DALIChunkedStreamer:
     - Zero lag at chunk boundaries
     """
 
-    def __init__(self, video_path, chunk_size=2000, device_id=0, image_size=1024, max_height=720):
+    def __init__(self, video_path, chunk_size=500, device_id=0, image_size=1024, max_height=720):
         import queue
         import threading
 
@@ -398,12 +398,6 @@ class DALIChunkedStreamer:
         cap = cv2.VideoCapture(self.h265_path)
         self._length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
-
-        # Clamp chunk_size to video length (DALI requires sequence_length <= video frames)
-        actual_chunk_size = min(self.chunk_size, self._length)
-        if actual_chunk_size < self.chunk_size:
-            print(f"[DALI] Video has {self._length} frames, reducing chunk size to {actual_chunk_size}")
-            self.chunk_size = actual_chunk_size
 
         @pipeline_def
         def video_pipe():
@@ -885,7 +879,7 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
     return inference_state
 
 
-def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_size=2000):
+def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_size=500):
     """
     Initialize SAM2 inference state with DALI chunked GPU streaming.
     ZERO CPU RAM - frames load directly from disk to GPU in chunks!
