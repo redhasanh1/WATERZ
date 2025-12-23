@@ -53,8 +53,7 @@ except ImportError:
 try:
     from sam2_reid_tracker import (
         ReIDVerifier, USE_REID_VERIFICATION, VERIFY_EVERY_N_FRAMES,
-        classify_tracking_state, get_user_click_for_recovery,
-        create_verifier_for_object
+        classify_tracking_state, get_user_click_for_recovery
     )
     HAS_REID = True
     print(f"[SAM2-WSL2] ReID verification available! (verify every {VERIFY_EVERY_N_FRAMES} frames)")
@@ -1209,9 +1208,10 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
         drift_count = 0
         corrections_made = 0
 
-        # ReID verifier will be created on first frame with auto face detection
+        # Initialize ReID verifier if available
         if HAS_REID and USE_REID_VERIFICATION:
-            print(f"[ReID] Identity verification enabled (will auto-detect face on first frame)")
+            print(f"[ReID] Initializing identity verification...")
+            reid_verifier = ReIDVerifier(object_type="general")  # Auto-detect face later
 
         # BIDIRECTIONAL PROPAGATION - simple internal reverse=True
         print(f"\n[SAM2-Bidirectional] Starting from frame {frame_idx_start}, propagating both directions")
@@ -1289,28 +1289,24 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         # ============================================================
                         # ReID VERIFICATION - Detect and AUTO-CORRECT drift
                         # ============================================================
-                        if HAS_REID and USE_REID_VERIFICATION and reid_cap is not None:
+                        if reid_verifier is not None and reid_cap is not None:
                             # BUILD REFERENCE BANK from first 60 frames (4 viewpoints)
                             # Collect at frames relative to start: 0, 15, 30, 45
                             relative_frame = frame_idx - frame_idx_start
-                            ref_bank_size = len(reid_verifier.reference_bank) if reid_verifier else 0
-                            if ref_bank_size < 4 and np.sum(mask_uint8) > 1000:
+                            if len(reid_verifier.reference_bank) < 4 and np.sum(mask_uint8) > 1000:
                                 viewpoint_frames = {0: "frontal", 15: "view_15", 30: "view_30", 45: "view_45"}
                                 if relative_frame in viewpoint_frames:
                                     reid_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                                     ret, frame_bgr = reid_cap.read()
                                     if ret:
                                         viewpoint = viewpoint_frames[relative_frame]
-                                        # CREATE VERIFIER on first frame with AUTO FACE DETECTION
-                                        if relative_frame == 0 and reid_verifier is None:
-                                            print(f"[ReID] Creating verifier with auto face detection...")
-                                            reid_verifier = create_verifier_for_object(frame_bgr, mask_uint8, auto_detect_face=True)
-                                            reid_verifier.add_reference_viewpoint(frame_bgr, mask_uint8, "frontal")
-                                        elif reid_verifier is not None:
-                                            reid_verifier.add_reference_viewpoint(frame_bgr, mask_uint8, viewpoint)
+                                        reid_verifier.add_reference_viewpoint(frame_bgr, mask_uint8, viewpoint)
+                                        # Also set single reference on frame 0 for backward compat
+                                        if relative_frame == 0:
+                                            reid_verifier.set_reference(frame_bgr, mask_uint8)
 
                             # Verify identity every N frames (only after reference bank is built)
-                            elif reid_verifier is not None and len(reid_verifier.reference_bank) >= 2 and frame_idx % VERIFY_EVERY_N_FRAMES == 0:
+                            elif len(reid_verifier.reference_bank) >= 2 and frame_idx % VERIFY_EVERY_N_FRAMES == 0:
                                 reid_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                                 ret, frame_bgr = reid_cap.read()
                                 if ret:
