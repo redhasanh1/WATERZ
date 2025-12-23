@@ -26,7 +26,7 @@ from pathlib import Path
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-USE_REID_VERIFICATION = True
+USE_REID_VERIFICATION = False
 VERIFY_EVERY_N_FRAMES = 10  # Check identity every N frames
 SIMILARITY_THRESHOLD_FACE = 0.70  # ArcFace threshold (strict - same face only)
 SIMILARITY_THRESHOLD_GENERAL = 0.60  # DINOv2 threshold (strict)

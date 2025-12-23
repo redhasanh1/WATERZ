@@ -309,7 +309,7 @@ class DALIChunkedStreamer:
     - Zero lag at chunk boundaries
     """
 
-    def __init__(self, video_path, chunk_size=1000, device_id=0, image_size=1024, max_height=720):
+    def __init__(self, video_path, chunk_size=500, device_id=0, image_size=1024, max_height=720):
         import queue
         import threading
 
@@ -399,15 +399,23 @@ class DALIChunkedStreamer:
         self._length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
 
+        # Clamp chunk_size to video length (DALI requires sequence_length <= video frames)
+        actual_chunk_size = min(self.chunk_size, self._length)
+        if actual_chunk_size < self.chunk_size:
+            print(f"[DALI] Video has {self._length} frames, reducing chunk size to {actual_chunk_size}")
+            self.chunk_size = actual_chunk_size
+
         @pipeline_def
         def video_pipe():
-            video = fn.readers.video(
+            # Use experimental reader with pad_mode='none' to prevent frame duplication
+            # at end of video (DALI Issue #4797)
+            video = fn.experimental.readers.video(
                 device="gpu",
                 filenames=[self.h265_path],
                 sequence_length=self.chunk_size,
                 random_shuffle=False,
                 image_type=types.RGB,
-                dtype=types.UINT8,
+                pad_mode='none',  # Returns shorter last sequence instead of duplicating frames
                 name="video_reader"
             )
             return video
@@ -426,12 +434,14 @@ class DALIChunkedStreamer:
 
         def loader_worker():
             chunk_num = 0
+            total_frames_read = 0  # Track total to detect DALI wrap-around
             num_chunks = (self._length + self.chunk_size - 1) // self.chunk_size
 
             # DALI reads sequentially - no reset/skip needed!
             while not self.stop_event.is_set() and chunk_num < num_chunks:
                 chunk_start = chunk_num * self.chunk_size
                 chunk_end = min(chunk_start + self.chunk_size, self._length)
+                frames_needed = chunk_end - chunk_start
 
                 try:
                     # Get next sequential chunk from DALI
@@ -439,15 +449,22 @@ class DALIChunkedStreamer:
                     raw_tensor = torch.from_dlpack(output[0].as_tensor())
                     raw_tensor = raw_tensor.squeeze(0)  # [seq, H, W, C]
 
-                    # Trim last chunk if video doesn't divide evenly
-                    actual_frames = chunk_end - chunk_start
-                    if raw_tensor.shape[0] > actual_frames:
-                        raw_tensor = raw_tensor[:actual_frames]
+                    # Only take frames we need (trim last chunk)
+                    if raw_tensor.shape[0] > frames_needed:
+                        raw_tensor = raw_tensor[:frames_needed]
+
+                    total_frames_read += raw_tensor.shape[0]
+
+                    # STOP if we've read all frames (prevents DALI wrap-around)
+                    if total_frames_read >= self._length:
+                        self.load_queue.put((chunk_start, raw_tensor))
+                        print(f"[DALI-PREFETCH] All {total_frames_read}/{self._length} frames read, stopping")
+                        break
 
                     # Store RAW uint8 - NO processing! (per-frame processing in __getitem__)
                     # This makes chunk loading ~20x faster (0.3s vs 7s)
                     self.load_queue.put((chunk_start, raw_tensor))
-                    print(f"[DALI-PREFETCH] Queued chunk {chunk_num}: frames {chunk_start}-{chunk_end-1}")
+                    print(f"[DALI-PREFETCH] Queued chunk {chunk_num}: frames {chunk_start}-{chunk_end-1} (total: {total_frames_read})")
                     chunk_num += 1
 
                 except StopIteration:
@@ -459,7 +476,7 @@ class DALIChunkedStreamer:
                     traceback.print_exc()
                     break
 
-            print(f"[DALI-PREFETCH] Loader finished ({chunk_num} chunks total)")
+            print(f"[DALI-PREFETCH] Loader finished ({chunk_num} chunks, {total_frames_read} frames)")
 
         self._loader_thread = threading.Thread(target=loader_worker, daemon=True)
         self._loader_thread.start()
@@ -879,7 +896,7 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
     return inference_state
 
 
-def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_size=1000):
+def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_size=500):
     """
     Initialize SAM2 inference state with DALI chunked GPU streaming.
     ZERO CPU RAM - frames load directly from disk to GPU in chunks!
