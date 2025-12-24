@@ -1230,13 +1230,14 @@
 
                 // Try to get instant mask preview from SAM2 TensorRT worker
                 try {
-                    // Capture current frame as base64
+                    // Capture current frame as base64 PNG (lossless like index.html)
                     const canvas = document.createElement('canvas');
                     canvas.width = videoPlayer.videoWidth;
                     canvas.height = videoPlayer.videoHeight;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(videoPlayer, 0, 0);
-                    const frameData = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+                    const frameData = canvas.toDataURL('image/png').split(',')[1];
+                    console.log('[SAM2] Sending frame:', canvas.width, 'x', canvas.height, 'point:', videoX, videoY);
 
                     const sam2Response = await fetch(`${API_BASE}/api/sam2/select-object`, {
                         method: 'POST',
@@ -1250,15 +1251,18 @@
                     });
 
                     const sam2Data = await sam2Response.json();
+                    console.log('[SAM2] Response:', sam2Data.status, sam2Data.message || '', 'mask:', !!sam2Data.mask);
 
                     if (sam2Data.status === 'success' && sam2Data.mask) {
-                        console.log('[SAM2] Got mask preview!');
+                        console.log('[SAM2] Got mask preview! Length:', sam2Data.mask.length);
                         // Display mask overlay
                         displayMaskOverlay(sam2Data.mask, percentX, percentY);
+                    } else {
+                        console.warn('[SAM2] No mask in response:', sam2Data);
                     }
                 } catch (sam2Error) {
                     // SAM2 TensorRT worker not running - that's OK, mask will be generated during tracking
-                    console.log('[SAM2] TensorRT worker not available, skipping preview');
+                    console.error('[SAM2] TensorRT worker error:', sam2Error);
                 }
 
                 marker.remove();
@@ -1273,26 +1277,51 @@
             }
         });
 
-        // Display SAM2 mask overlay on the video
+        // Display SAM2 mask overlay on the video (canvas rendering - reliable cross-browser)
         function displayMaskOverlay(maskBase64, centerX, centerY) {
-            // Add green tint mask overlay (stays visible until reset)
-            const tint = document.createElement('div');
-            tint.className = 'mask-tint';
-            tint.style.cssText = `
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                pointer-events: none;
-                background: rgba(0, 255, 0, 0.3);
-                mask-image: url(data:image/png;base64,${maskBase64});
-                mask-size: 100% 100%;
-                -webkit-mask-image: url(data:image/png;base64,${maskBase64});
-                -webkit-mask-size: 100% 100%;
-            `;
+            const img = new Image();
+            img.onload = () => {
+                // Create canvas overlay for the mask
+                const canvas = document.createElement('canvas');
+                canvas.className = 'mask-tint';
+                canvas.style.cssText = `
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    pointer-events: none;
+                `;
+                canvas.width = img.width;
+                canvas.height = img.height;
 
-            interactionLayer.appendChild(tint);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+
+                // Get image data and colorize the mask green
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    // If pixel is white/bright (mask area)
+                    if (data[i] > 127) {
+                        data[i] = 0;       // R = 0
+                        data[i + 1] = 255; // G = 255
+                        data[i + 2] = 0;   // B = 0
+                        data[i + 3] = 128; // Alpha = 50%
+                    } else {
+                        data[i + 3] = 0;   // Transparent where no mask
+                    }
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+                interactionLayer.appendChild(canvas);
+                console.log('[SAM2] Mask overlay displayed:', img.width, 'x', img.height);
+            };
+            img.onerror = (e) => {
+                console.error('[SAM2] Failed to load mask image:', e);
+            };
+            img.src = 'data:image/png;base64,' + maskBase64;
         }
 
         function addObject(x, y, maskData) {
