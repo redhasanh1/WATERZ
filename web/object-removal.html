@@ -221,12 +221,9 @@
         }
 
 
-        /* Instructions Overlay */
+        /* Instructions - BELOW video, not on top */
         .instructions-overlay {
-            position: absolute;
-            bottom: 1rem;
-            left: 50%;
-            transform: translateX(-50%);
+            margin: 1rem auto 0;
             padding: 0.75rem 1.5rem;
             background: rgba(0, 0, 0, 0.8);
             backdrop-filter: blur(8px);
@@ -235,7 +232,9 @@
             color: var(--text-secondary);
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 0.5rem;
+            width: fit-content;
         }
 
         .instructions-overlay svg {
@@ -551,9 +550,17 @@
                 padding: 1rem 0.75rem 4rem;
             }
 
-            /* Instructions overlay */
+            /* Video full width on mobile - escape card padding */
+            .video-container {
+                margin: 0 -1.5rem;
+                width: calc(100% + 3rem);
+                border-radius: 0;
+            }
+
+            /* Instructions below video */
             .instructions-overlay {
-                padding: 1rem;
+                padding: 0.75rem 1rem;
+                font-size: 0.85rem;
             }
             .instructions-text {
                 font-size: 0.9rem;
@@ -852,14 +859,16 @@
                 </div>
                 <video id="videoPlayer" class="hidden"></video>
                 <div class="interaction-layer hidden" id="interactionLayer"></div>
-                <div class="instructions-overlay hidden" id="instructions">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="12" y1="16" x2="12" y2="12"/>
-                        <line x1="12" y1="8" x2="12.01" y2="8"/>
-                    </svg>
-                    Click on the object you want to remove
-                </div>
+            </div>
+
+            <!-- Instructions - BELOW video -->
+            <div class="instructions-overlay hidden" id="instructions">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="16" x2="12" y2="12"/>
+                    <line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+                Click on the object you want to remove
             </div>
 
             <!-- Controls Panel -->

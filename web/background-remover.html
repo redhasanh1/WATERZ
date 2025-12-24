@@ -133,6 +133,17 @@
         @media (max-width: 768px) {
             .nav-links { display: none; }
 
+            /* Nav mobile */
+            .nav-inner {
+                padding: 0.75rem 1rem;
+            }
+            .nav-logo span {
+                display: none;
+            }
+            .nav-logo img {
+                height: 28px;
+            }
+
             /* Mobile app section */
             .app-section {
                 padding: 3rem 1rem;
@@ -166,9 +177,50 @@
             .result-video {
                 border-radius: 8px;
             }
+
+            /* Video info - compact on mobile */
+            .video-info {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+            .video-info-item {
+                flex: 1;
+                min-width: 80px;
+            }
+
+            /* Result actions stack */
+            .result-actions {
+                flex-direction: column;
+            }
+            .download-btn, .restart-btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            /* Modal less padding */
+            .modal-content {
+                padding: 1.5rem;
+            }
+
+            /* Footer stack */
+            .footer-inner {
+                flex-direction: column;
+                text-align: center;
+                gap: 1.5rem;
+            }
+            .footer-links {
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 1rem;
+            }
         }
 
         @media (max-width: 500px) {
+            /* Even smaller nav */
+            .nav-inner {
+                padding: 0.5rem 0.75rem;
+            }
+
             .app-section {
                 padding: 2rem 0.75rem;
             }
@@ -199,6 +251,65 @@
             .result-video {
                 width: calc(100% + 1rem);
                 border-radius: 6px;
+            }
+
+            /* Background options - single column horizontal */
+            .bg-options {
+                grid-template-columns: 1fr;
+            }
+            .bg-option {
+                flex-direction: row;
+                justify-content: flex-start;
+                padding: 0.75rem 1rem;
+                gap: 1rem;
+            }
+            .bg-option-preview {
+                width: 32px;
+                height: 32px;
+            }
+            .bg-option-name {
+                font-size: 0.9rem;
+            }
+
+            /* Video info compact */
+            .video-info-value {
+                font-size: 0.9rem;
+            }
+            .video-info-label {
+                font-size: 0.65rem;
+            }
+
+            /* FAQ smaller text */
+            .faq-question {
+                font-size: 0.95rem;
+                padding: 1rem 0;
+            }
+        }
+
+        @media (max-width: 400px) {
+            /* Tiny screens */
+            .hero-cta {
+                padding: 0.875rem 1.5rem;
+                font-size: 1rem;
+            }
+
+            /* Modal even smaller */
+            .modal-content {
+                padding: 1.25rem;
+                border-radius: 16px;
+            }
+            .modal-spinner {
+                width: 40px;
+                height: 40px;
+            }
+            .modal h3 {
+                font-size: 1.1rem;
+            }
+
+            /* Showcase label smaller */
+            .showcase-label {
+                font-size: 0.75rem;
+                padding: 0.4rem 0.75rem;
             }
         }
 
