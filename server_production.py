@@ -5650,7 +5650,9 @@ def objrem_export():
         from celery import signature
         task_id = f"simplefx_{job_id}"
 
+        video_path_local = job.get('video_path')
         print(f"[OBJREM-EXPORT] masks_dir from Redis: {masks_dir_local}")
+        print(f"[OBJREM-EXPORT] video_path from Redis: {video_path_local}")
 
         s2 = signature(
             'sam2.apply_simple_effects',
@@ -5662,7 +5664,8 @@ def objrem_export():
                 'blur_amount': blur_amount,
                 'dilation': dilation,
                 'output_format': output_format,
-                'masks_dir_local': masks_dir_local
+                'masks_dir_local': masks_dir_local,
+                'video_path_local': video_path_local
             },
             queue='wsl_sam2_local'
         )

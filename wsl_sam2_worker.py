@@ -194,9 +194,10 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
             redis_client.hset(f"objrem:{job_id}", mapping={
                 'masks_dir': masks_dir_result,
                 'masks_url': masks_url or '',
+                'video_path': video_path_wsl,  # Store local video path
                 'status': 'completed'
             })
-            print(f"[REDIS] Updated objrem:{job_id} with masks_dir={masks_dir_result}")
+            print(f"[REDIS] Updated objrem:{job_id} with masks_dir={masks_dir_result}, video_path={video_path_wsl}")
         except Exception as e:
             print(f"[REDIS] Failed to update job: {e}")
 
@@ -439,7 +440,7 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
 
 
 @celery.task(name='sam2.apply_simple_effects', bind=True)
-def apply_simple_effects(self, video_url, masks_url, operation='keep_object', background='color', bg_color='#00FF00', blur_amount=25, dilation=4, output_format='mp4', masks_dir_local=None):
+def apply_simple_effects(self, video_url, masks_url, operation='keep_object', background='color', bg_color='#00FF00', blur_amount=25, dilation=4, output_format='mp4', masks_dir_local=None, video_path_local=None):
     """
     REVOLUTIONARY GPU-ACCELERATED video effects pipeline.
     ALL processing on GPU - decode, blend, blur, encode. BLAZING FAST!
@@ -463,16 +464,21 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             masks_dir_local = derived_masks_dir
             print(f"[GPU-FX] Using local masks: {masks_dir_local}")
 
-    self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Downloading video...'})
+    self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Loading video...'})
 
-    # Download video
-    video_path = "/tmp/simple_fx_video.mp4"
-    print(f"[GPU-FX] Downloading video...")
-    r = requests.get(video_url, timeout=300)
-    r.raise_for_status()
-    with open(video_path, 'wb') as f:
-        f.write(r.content)
-    print(f"[GPU-FX] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
+    # Check for local video first (avoids re-downloading)
+    if video_path_local and os.path.exists(video_path_local):
+        video_path = video_path_local
+        print(f"[GPU-FX] Using LOCAL video: {video_path}")
+    else:
+        # Download video
+        video_path = "/tmp/simple_fx_video.mp4"
+        print(f"[GPU-FX] Downloading video...")
+        r = requests.get(video_url, timeout=300)
+        r.raise_for_status()
+        with open(video_path, 'wb') as f:
+            f.write(r.content)
+        print(f"[GPU-FX] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
 
     # Get video info
     cap = cv2.VideoCapture(video_path)
