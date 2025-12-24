@@ -74,7 +74,7 @@ def add_security_headers(response):
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: https:; "
-        "media-src 'self' data: https://markz.humblewoslayer.workers.dev; "
+        "media-src 'self' data: blob: https://markz.humblewoslayer.workers.dev; "
         "connect-src 'self' https:; "
         "frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net;"
     )
