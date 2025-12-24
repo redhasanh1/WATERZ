@@ -24,7 +24,10 @@ if exist redis_url.txt (
 
 REM ENABLE B2 UPLOAD - Masks go to B2 for production server access
 set SKIP_B2_UPLOAD=0
-echo [B2] Mask upload ENABLED - production server can access masks
+set B2_KEY_ID=00539db5c1104b50000000003
+set B2_APP_KEY=K005384b8lPoBT11wScxkZ2Gx0fszus
+set B2_BUCKET=watermarkz
+echo [B2] Mask upload ENABLED to %B2_BUCKET%
 echo.
 
 REM REVOLUTIONARY STREAMING: DALI GPU-direct video decode
@@ -68,4 +71,4 @@ REM Start WSL Celery worker
 echo [WSL] Starting SAM2 worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
 echo.
 
-wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export SKIP_B2_UPLOAD='%SKIP_B2_UPLOAD%' && export USE_DALI_STREAMING='%USE_DALI_STREAMING%' && export SAM2_MAX_HEIGHT='%SAM2_MAX_HEIGHT%' && export USE_MASK_COMPRESSION='%USE_MASK_COMPRESSION%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"
+wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export SKIP_B2_UPLOAD='%SKIP_B2_UPLOAD%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export USE_DALI_STREAMING='%USE_DALI_STREAMING%' && export SAM2_MAX_HEIGHT='%SAM2_MAX_HEIGHT%' && export USE_MASK_COMPRESSION='%USE_MASK_COMPRESSION%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"
