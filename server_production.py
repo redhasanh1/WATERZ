@@ -5215,73 +5215,86 @@ def backgroundremover_page():
 # - ProPainter inpainting via propainter_local queue
 # ============================================================
 
-@app.route('/api/object-removal/upload', methods=['POST', 'OPTIONS'])
-def objrem_upload():
-    """Upload video for object removal - saves to B2"""
+@app.route('/api/object-removal/get-upload-url', methods=['POST', 'OPTIONS'])
+def objrem_get_upload_url():
+    """Get presigned B2 upload URL for direct client upload (no Railway ingress)"""
     if request.method == 'OPTIONS':
         return ('', 204)
 
-    if 'video' not in request.files:
-        return jsonify({'status': 'error', 'message': 'No video file'}), 400
-
-    file = request.files['video']
-    if file.filename == '':
-        return jsonify({'status': 'error', 'message': 'No selected file'}), 400
-
-    # Validate extension
-    ext = os.path.splitext(file.filename)[1].lower()
-    allowed_exts = {'.mp4', '.mov', '.avi', '.webm', '.mkv'}
-    if ext not in allowed_exts:
-        return jsonify({'status': 'error', 'message': f'File type {ext} not allowed'}), 400
+    if not B2_ENABLED:
+        return jsonify({'status': 'error', 'message': 'B2 not configured'}), 500
 
     try:
-        import subprocess
+        data = request.get_json() or {}
+        filename = data.get('filename', 'video.mp4')
+
+        # Validate extension
+        ext = os.path.splitext(filename)[1].lower()
+        allowed_exts = {'.mp4', '.mov', '.avi', '.webm', '.mkv'}
+        if ext not in allowed_exts:
+            return jsonify({'status': 'error', 'message': f'File type {ext} not allowed'}), 400
 
         # Generate unique job ID
         job_id = uuid.uuid4().hex[:12]
-
-        # Save temporarily to get video info
-        temp_path = os.path.join(TEMP_DIR, f"objrem_{job_id}{ext}")
-        file.save(temp_path)
-
-        # Get video info using ffprobe (cv2 not available on Railway)
-        ffprobe = FFPROBE_EXE or 'ffprobe'  # Fallback to system ffprobe
-        probe_cmd = [
-            ffprobe, '-v', 'error',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=width,height,r_frame_rate,nb_frames,duration',
-            '-of', 'json',
-            temp_path
-        ]
-        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
-        probe_data = json.loads(probe_result.stdout)
-        stream = probe_data['streams'][0]
-        width = int(stream.get('width', 0))
-        height = int(stream.get('height', 0))
-        fps_str = stream.get('r_frame_rate', '30/1')
-        fps_num, fps_den = map(int, fps_str.split('/'))
-        fps = fps_num / fps_den if fps_den else 30
-        duration = float(stream.get('duration', 0))
-        frame_count = int(stream.get('nb_frames', 0)) or int(duration * fps)
-
-        # Upload to B2
         remote_path = f"objrem/{job_id}{ext}"
-        cdn_url = upload_to_b2(temp_path, remote_path)
 
-        if not cdn_url:
-            # B2 disabled - keep local file
-            cdn_url = f"/api/object-removal/video/{job_id}"
-            print(f"[OBJREM] B2 disabled, using local: {temp_path}")
-        else:
-            # B2 success - can remove temp file (optional, keep for now)
-            print(f"[OBJREM] Uploaded to B2: {cdn_url}")
+        # Get B2 upload URL (same pattern as /api/get-upload-url)
+        from b2sdk.v2 import B2Api, InMemoryAccountInfo
+        info = InMemoryAccountInfo()
+        b2_api = B2Api(info)
+        b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+        bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+
+        upload_url, upload_auth_token = b2_api.account_info.take_bucket_upload_url(bucket.id_)
+
+        if upload_url is None:
+            api_url = b2_api.account_info.get_api_url()
+            auth_token = b2_api.account_info.get_account_auth_token()
+            response = b2_api.raw_api.get_upload_url(api_url, auth_token, bucket.id_)
+            upload_url = response['uploadUrl']
+            upload_auth_token = response['authorizationToken']
+
+        print(f"[OBJREM] Generated upload URL for {remote_path}")
+
+        return jsonify({
+            'status': 'success',
+            'job_id': job_id,
+            'upload_url': upload_url,
+            'auth_token': upload_auth_token,
+            'remote_path': remote_path,
+            'cdn_url': f"{B2_CDN_URL}/{remote_path}"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/object-removal/upload-complete', methods=['POST', 'OPTIONS'])
+def objrem_upload_complete():
+    """Client notifies B2 upload complete, provides video dimensions"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        data = request.get_json() or {}
+        job_id = data.get('job_id')
+        cdn_url = data.get('cdn_url')
+        width = data.get('width', 0)
+        height = data.get('height', 0)
+        fps = data.get('fps', 30)
+        duration = data.get('duration', 0)
+        frame_count = data.get('frame_count', 0) or int(duration * fps)
+
+        if not job_id or not cdn_url:
+            return jsonify({'status': 'error', 'message': 'Missing job_id or cdn_url'}), 400
 
         # Store metadata in Redis
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
         redis_client.hset(f"objrem:{job_id}", mapping={
             'status': 'uploaded',
             'cdn_url': cdn_url,
-            'local_path': temp_path,
             'width': str(width),
             'height': str(height),
             'fps': str(fps),
@@ -5292,12 +5305,12 @@ def objrem_upload():
         })
         redis_client.expire(f"objrem:{job_id}", 86400 * 7)  # 7 days
 
-        print(f"[OBJREM] Upload job {job_id}: {width}x{height} @ {fps:.1f}fps, {frame_count} frames")
+        print(f"[OBJREM] Upload complete job {job_id}: {width}x{height} @ {fps}fps, {frame_count} frames")
 
         return jsonify({
             'status': 'success',
             'job_id': job_id,
-            'video_url': f'/api/object-removal/video/{job_id}',
+            'video_url': cdn_url,
             'width': width,
             'height': height,
             'fps': fps,

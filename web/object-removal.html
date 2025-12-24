@@ -1081,28 +1081,80 @@
             }
 
             // Show uploading state
-            uploadArea.innerHTML = '<div class="modal-spinner"></div><p style="color: var(--text-secondary); margin-top: 1rem;">Uploading...</p>';
+            uploadArea.innerHTML = '<div class="modal-spinner"></div><p style="color: var(--text-secondary); margin-top: 1rem;">Uploading to cloud...</p>';
 
             try {
-                // Upload to server
-                const formData = new FormData();
-                formData.append('video', file);
-
-                const response = await fetch(`${API_BASE}/api/object-removal/upload`, {
+                // Step 1: Get presigned B2 upload URL from server
+                const urlResponse = await fetch(`${API_BASE}/api/object-removal/get-upload-url`, {
                     method: 'POST',
-                    body: formData
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: file.name })
+                });
+                const urlData = await urlResponse.json();
+
+                if (urlData.status !== 'success') {
+                    throw new Error(urlData.message || 'Failed to get upload URL');
+                }
+
+                const { job_id, upload_url, auth_token, remote_path, cdn_url } = urlData;
+                console.log(`[UPLOAD] Got B2 URL for job ${job_id}`);
+
+                // Step 2: Upload directly to B2 (bypasses Railway)
+                uploadArea.innerHTML = '<div class="modal-spinner"></div><p style="color: var(--text-secondary); margin-top: 1rem;">Uploading video...</p>';
+
+                const b2Response = await fetch(upload_url, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': auth_token,
+                        'Content-Type': file.type || 'video/mp4',
+                        'X-Bz-File-Name': encodeURIComponent(remote_path),
+                        'X-Bz-Content-Sha1': 'do_not_verify'
+                    },
+                    body: file
                 });
 
-                const data = await response.json();
+                if (!b2Response.ok) {
+                    const errText = await b2Response.text();
+                    throw new Error(`B2 upload failed: ${b2Response.status} ${errText}`);
+                }
+                console.log(`[UPLOAD] B2 upload complete`);
+
+                // Step 3: Get video dimensions from browser
+                uploadArea.innerHTML = '<div class="modal-spinner"></div><p style="color: var(--text-secondary); margin-top: 1rem;">Processing...</p>';
+
+                const tempVideo = document.createElement('video');
+                tempVideo.preload = 'metadata';
+                tempVideo.src = URL.createObjectURL(file);
+
+                await new Promise((resolve, reject) => {
+                    tempVideo.onloadedmetadata = resolve;
+                    tempVideo.onerror = () => reject(new Error('Failed to read video metadata'));
+                    setTimeout(() => reject(new Error('Video metadata timeout')), 10000);
+                });
+
+                const width = tempVideo.videoWidth;
+                const height = tempVideo.videoHeight;
+                const duration = tempVideo.duration || 0;
+                const fps = 30; // Assume 30fps (browser can't reliably detect this)
+                const frame_count = Math.round(duration * fps);
+                URL.revokeObjectURL(tempVideo.src);
+
+                // Step 4: Notify server that upload is complete
+                const completeResponse = await fetch(`${API_BASE}/api/object-removal/upload-complete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id, cdn_url, width, height, fps, duration, frame_count })
+                });
+                const data = await completeResponse.json();
 
                 if (data.status !== 'success') {
-                    throw new Error(data.message || 'Upload failed');
+                    throw new Error(data.message || 'Upload complete notification failed');
                 }
 
                 // Store job info
                 state.jobId = data.job_id;
                 state.videoFile = file;
-                state.videoUrl = `${API_BASE}${data.video_url}`;
+                state.videoUrl = data.video_url;
                 state.videoWidth = data.width;
                 state.videoHeight = data.height;
 
