@@ -5202,6 +5202,12 @@ def index():
     return send_file('web/index.html')
 
 
+@app.route('/backgroundremover')
+def backgroundremover_page():
+    """Secret route for background remover UI"""
+    return send_file('web/object-removal.html')
+
+
 @app.route('/login.html')
 def login_page():
     """Serve login page"""
