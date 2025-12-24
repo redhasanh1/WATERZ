@@ -1157,7 +1157,8 @@
                 state.videoWidth = data.width;
                 state.videoHeight = data.height;
 
-                // Setup video player
+                // Setup video player (crossOrigin needed for canvas export)
+                videoPlayer.crossOrigin = 'anonymous';
                 videoPlayer.src = state.videoUrl;
                 videoPlayer.classList.remove('hidden');
                 uploadArea.classList.add('hidden');
