@@ -55,9 +55,18 @@ def allowed_file(filename):
 def serve_index():
     return send_from_directory('web', 'object-removal.html')
 
+@app.route('/backgroundremover')
+def serve_backgroundremover():
+    """Hidden route for background remover (production)"""
+    return send_from_directory('web', 'object-removal.html')
+
 @app.route('/<path:path>')
 def serve_static(path):
     return send_from_directory('web', path)
+
+@app.route('/temp_output/<path:path>')
+def serve_temp_output(path):
+    return send_from_directory(OUTPUT_DIR, path)
 
 
 # ============================================================
@@ -168,6 +177,152 @@ def select_object():
 
 
 # ============================================================
+# SAM2 TensorRT Interactive Selection (instant mask preview)
+# ============================================================
+@app.route('/api/sam2/select-object', methods=['POST'])
+def sam2_select_object():
+    """Interactive SAM2 object selection - uses TensorRT worker via Redis"""
+    import redis
+
+    try:
+        data = request.json
+        frame_base64 = data.get('frame_data')
+        points = data.get('points', [])
+        video_width = data.get('video_width')
+        video_height = data.get('video_height')
+
+        if not frame_base64 or not points:
+            return jsonify({'status': 'error', 'message': 'Missing frame data or points'}), 400
+
+        # Get Redis URL
+        redis_url = 'redis://:watermarkz_secure_2024@localhost:6379/0'
+        if os.path.exists('redis_url.txt'):
+            with open('redis_url.txt', 'r') as f:
+                redis_url = f.read().strip()
+
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
+        redis_client = redis.from_url(redis_url, decode_responses=False)
+
+        # Subscribe to response channel BEFORE pushing request
+        response_channel = f'sam2:selection:response:{request_id}'
+        pubsub = redis_client.pubsub()
+        pubsub.subscribe(response_channel)
+
+        # Push request to list (worker uses BRPOP)
+        request_data = {
+            'request_id': request_id,
+            'frame_data': frame_base64,
+            'points': points,
+            'video_width': video_width,
+            'video_height': video_height
+        }
+        print(f"[SAM2] Pushing request {request_id} to sam2:selection:request")
+        redis_client.lpush('sam2:selection:request', json.dumps(request_data))
+
+        # Wait for response (5s timeout)
+        timeout = 5.0
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            message = pubsub.get_message(timeout=0.1)
+            if message and message['type'] == 'message':
+                response_data = json.loads(message['data'])
+                pubsub.unsubscribe()
+                pubsub.close()
+                if response_data.get('status') == 'success':
+                    return jsonify({
+                        'status': 'success',
+                        'mask': response_data['mask'],
+                        'score': response_data.get('score')
+                    })
+                else:
+                    return jsonify({
+                        'status': 'error',
+                        'message': response_data.get('error', 'Unknown error')
+                    }), 500
+
+        pubsub.unsubscribe()
+        pubsub.close()
+        return jsonify({
+            'status': 'error',
+            'message': 'SAM2 worker timeout - is start_object_server.py running?'
+        }), 504
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ============================================================
+# Auto-Detect Objects (YOLO)
+# ============================================================
+@app.route('/api/object-removal/auto-detect', methods=['POST'])
+def auto_detect():
+    """Use YOLO to detect objects in first frame"""
+    import cv2
+
+    data = request.json
+    job_id = data.get('job_id')
+
+    if job_id not in jobs:
+        return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+    job = jobs[job_id]
+    video_path = job['video_path']
+
+    try:
+        # Read first frame
+        cap = cv2.VideoCapture(video_path)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret:
+            return jsonify({'status': 'error', 'message': 'Failed to read video frame'}), 500
+
+        # Run YOLO detection
+        from ultralytics import YOLO
+
+        # Try Windows path first, then WSL path
+        model_path = r"D:\watermarkz\runs\detect\sora_watermark_v2\weights\best.pt"
+        if not os.path.exists(model_path):
+            model_path = '/mnt/d/watermarkz/runs/detect/sora_watermark_v2/weights/best.pt'
+
+        model = YOLO(model_path)
+        results = model(frame, conf=0.3, device='cuda', verbose=False)
+
+        detections = []
+        height, width = frame.shape[:2]
+
+        for box in results[0].boxes:
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+
+            detections.append({
+                'x': float(cx),
+                'y': float(cy),
+                'x_percent': float(cx / width * 100),
+                'y_percent': float(cy / height * 100),
+                'bbox': [float(x1), float(y1), float(x2), float(y2)],
+                'conf': float(box.conf[0])
+            })
+
+        print(f"[YOLO] Detected {len(detections)} objects in job {job_id}")
+        return jsonify({
+            'status': 'success',
+            'detections': detections,
+            'width': width,
+            'height': height
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ============================================================
 # Track full video (via Celery queue)
 # ============================================================
 def get_celery():
@@ -198,10 +353,12 @@ def track_video():
     job['progress'] = 0
     job['message'] = 'Submitting to SAM2 worker...'
 
-    # Create masks directory
-    masks_dir = MASKS_DIR / f"tracked_{job_id}"
-    masks_dir.mkdir(exist_ok=True)
-    job['masks_dir'] = str(masks_dir)
+    # Use WSL-native temp path for masks (avoids read-only mount issues)
+    # WSL2 writes to /tmp, Windows reads via \\wsl$\Ubuntu\tmp\...
+    wsl_masks_dir = f"/tmp/sam2_masks/{job_id}"
+    windows_masks_dir = f"\\\\wsl$\\Ubuntu\\tmp\\sam2_masks\\{job_id}"
+    job['masks_dir'] = windows_masks_dir  # Windows UNC path for reading
+    job['wsl_masks_dir'] = wsl_masks_dir  # WSL path for worker
 
     try:
         from celery import signature
@@ -216,10 +373,10 @@ def track_video():
 
         celery = get_celery()
 
-        # Submit to wsl_sam2_local queue (same as static_mask_gui_local.py)
+        # Submit to wsl_sam2 queue - use WSL-native path for masks
         s1 = signature(
             'sam2.generate_masks_fullfps',
-            args=[video_path, str(masks_dir)],
+            args=[video_path, wsl_masks_dir],  # WSL path - always writable
             kwargs={
                 'prompt_mode': 'point',
                 'points': point_coords,
@@ -312,13 +469,80 @@ def get_status(job_id):
         'message': job.get('message', ''),
         'current_frame': current_frame,
         'total_frames': total_frames,
-        'result_url': f'/api/object-removal/download/{job_id}' if job.get('result_path') else None
+        'result_url': f'/api/object-removal/download/{job_id}' if job.get('result_path') else None,
+        'cdn_url': job.get('cdn_url')  # B2 cloud URL (production)
     })
 
 
 # ============================================================
 # Export with options
 # ============================================================
+def apply_operation(frame, mask, operation, options):
+    """Apply operation to frame using mask (from video_tools_gui.py)"""
+    import cv2
+    import numpy as np
+
+    # Ensure mask matches frame size
+    if mask.shape[:2] != frame.shape[:2]:
+        mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]))
+
+    # Apply dilation if set
+    dilation = options.get('dilation', 0)
+    if dilation > 0:
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.dilate(mask, kernel, iterations=dilation)
+
+    mask_f = mask.astype(np.float32) / 255.0
+    mask_3ch = np.stack([mask_f] * 3, axis=-1)
+
+    color_bgr = options.get('color_bgr', (0, 255, 0))
+    blur_amount = options.get('blur_amount', 25)
+    bg_type = options.get('bg_type', 'color')
+
+    # Ensure blur kernel is odd
+    blur_kernel = blur_amount * 2 + 1
+
+    if operation == 'keep_object':
+        # Keep inside mask, replace outside
+        if bg_type == 'transparent':
+            rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+            rgba[:, :, 3] = mask
+            return rgba
+        elif bg_type == 'color':
+            bg = np.full_like(frame, color_bgr, dtype=np.uint8)
+            return (frame * mask_3ch + bg * (1 - mask_3ch)).astype(np.uint8)
+        else:  # blur
+            blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+            return (frame * mask_3ch + blurred * (1 - mask_3ch)).astype(np.uint8)
+
+    elif operation == 'remove_object':
+        # Keep outside mask, fill inside with color/blur
+        inv_mask_3ch = 1 - mask_3ch
+        if bg_type == 'color':
+            fill = np.full_like(frame, color_bgr, dtype=np.uint8)
+        else:  # blur
+            fill = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+        return (frame * inv_mask_3ch + fill * mask_3ch).astype(np.uint8)
+
+    elif operation == 'fill_inside':
+        fill = np.full_like(frame, color_bgr, dtype=np.uint8)
+        return (fill * mask_3ch + frame * (1 - mask_3ch)).astype(np.uint8)
+
+    elif operation == 'fill_outside':
+        fill = np.full_like(frame, color_bgr, dtype=np.uint8)
+        return (frame * mask_3ch + fill * (1 - mask_3ch)).astype(np.uint8)
+
+    elif operation == 'blur_inside':
+        blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+        return (blurred * mask_3ch + frame * (1 - mask_3ch)).astype(np.uint8)
+
+    elif operation == 'blur_outside':
+        blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+        return (frame * mask_3ch + blurred * (1 - mask_3ch)).astype(np.uint8)
+
+    return frame
+
+
 @app.route('/api/object-removal/export', methods=['POST'])
 def export_video():
     """Export video with background/format options"""
@@ -326,10 +550,12 @@ def export_video():
     job_id = data.get('job_id')
 
     # Export options
+    operation = data.get('operation', 'keep_object')  # keep_object, remove_object, fill_inside, fill_outside, blur_inside, blur_outside
     background = data.get('background', 'transparent')  # transparent, color, blur
     bg_color = data.get('bg_color', '#00FF00')  # hex color
     output_format = data.get('format', 'mp4')  # mp4, webm, png
-    blur_amount = data.get('blur', 20)  # blur strength
+    blur_amount = data.get('blur_amount', data.get('blur', 20))  # blur strength
+    dilation = data.get('dilation', 0)  # mask dilation
 
     if job_id not in jobs:
         return jsonify({'status': 'error', 'message': 'Job not found'}), 404
@@ -359,40 +585,69 @@ def export_video():
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            # Output path
-            if output_format == 'webm':
-                output_path = RESULTS_DIR / f"{job_id}_output.webm"
-                fourcc = cv2.VideoWriter_fourcc(*'VP90')
-            else:
-                output_path = RESULTS_DIR / f"{job_id}_output.mp4"
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            # Parse background color
+            hex_color = bg_color.lstrip('#')
+            r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            color_bgr = (b, g, r)
 
-            # For transparent, we need to handle alpha differently
-            if background == 'transparent' and output_format == 'webm':
-                # WebM with alpha - use ffmpeg
-                temp_frames_dir = OUTPUT_DIR / f"{job_id}_frames"
-                temp_frames_dir.mkdir(exist_ok=True)
+            # Options for apply_operation
+            options = {
+                'bg_type': background,
+                'color_bgr': color_bgr,
+                'blur_amount': blur_amount,
+                'dilation': dilation
+            }
+
+            # Determine if we need transparent output
+            needs_alpha = (operation == 'keep_object' and background == 'transparent') or output_format in ('webm', 'png')
+
+            if output_format == 'png':
+                # PNG sequence export
+                output_dir = RESULTS_DIR / f"{job_id}_png"
+                output_dir.mkdir(exist_ok=True)
 
                 for frame_idx in range(frame_count):
                     ret, frame = cap.read()
                     if not ret:
                         break
 
-                    # Load mask
                     mask_path = masks_dir / f"{frame_idx:05d}.png"
                     if mask_path.exists():
                         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
                         if mask is not None:
-                            # Resize mask if needed
-                            if mask.shape[:2] != (height, width):
-                                mask = cv2.resize(mask, (width, height))
+                            result = apply_operation(frame, mask, operation, options)
+                            cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), result)
+                        else:
+                            cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), frame)
+                    else:
+                        cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), frame)
 
-                            # Create RGBA frame (object only with alpha)
-                            rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
-                            rgba[:, :, 3] = mask  # Alpha from mask
+                    job['progress'] = int((frame_idx + 1) / frame_count * 100)
 
-                            # Save as PNG with alpha
-                            cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), rgba)
+                cap.release()
+                output_path = output_dir
+
+            elif needs_alpha and output_format == 'webm':
+                # WebM with alpha - use ffmpeg
+                temp_frames_dir = OUTPUT_DIR / f"{job_id}_frames"
+                temp_frames_dir.mkdir(exist_ok=True)
+                output_path = RESULTS_DIR / f"{job_id}_output.webm"
+
+                for frame_idx in range(frame_count):
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    mask_path = masks_dir / f"{frame_idx:05d}.png"
+                    if mask_path.exists():
+                        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+                        if mask is not None:
+                            result = apply_operation(frame, mask, operation, options)
+                            cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), result)
+                        else:
+                            cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), frame)
+                    else:
+                        cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), frame)
 
                     job['progress'] = int((frame_idx + 1) / frame_count * 50)
 
@@ -406,46 +661,25 @@ def export_video():
                 shutil.rmtree(temp_frames_dir)
 
             else:
-                # Regular export (MP4 or colored background)
+                # Regular MP4 export
+                output_path = RESULTS_DIR / f"{job_id}_output.mp4"
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-
-                # Parse background color
-                if background == 'color':
-                    # Convert hex to BGR
-                    hex_color = bg_color.lstrip('#')
-                    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                    bg_bgr = np.array([b, g, r], dtype=np.uint8)
 
                 for frame_idx in range(frame_count):
                     ret, frame = cap.read()
                     if not ret:
                         break
 
-                    # Load mask
                     mask_path = masks_dir / f"{frame_idx:05d}.png"
                     if mask_path.exists():
                         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
                         if mask is not None:
-                            # Resize mask if needed
-                            if mask.shape[:2] != (height, width):
-                                mask = cv2.resize(mask, (width, height))
-
-                            mask_float = mask.astype(np.float32) / 255.0
-                            mask_3ch = np.stack([mask_float] * 3, axis=-1)
-
-                            if background == 'color':
-                                # Solid color background
-                                bg = np.full_like(frame, bg_bgr)
-                                output_frame = (frame * mask_3ch + bg * (1 - mask_3ch)).astype(np.uint8)
-                            elif background == 'blur':
-                                # Blurred background
-                                blurred = cv2.GaussianBlur(frame, (blur_amount * 2 + 1, blur_amount * 2 + 1), 0)
-                                output_frame = (frame * mask_3ch + blurred * (1 - mask_3ch)).astype(np.uint8)
-                            else:
-                                # Keep object only (black background)
-                                output_frame = (frame * mask_3ch).astype(np.uint8)
-
-                            writer.write(output_frame)
+                            result = apply_operation(frame, mask, operation, options)
+                            # Drop alpha channel if present
+                            if result.shape[2] == 4:
+                                result = result[:, :, :3]
+                            writer.write(result)
                         else:
                             writer.write(frame)
                     else:
@@ -456,12 +690,59 @@ def export_video():
                 cap.release()
                 writer.release()
 
-            job['status'] = 'export_complete'  # Frontend expects 'export_complete'
+            job['status'] = 'export_complete'
             job['progress'] = 100
             job['export_progress'] = 100
             job['message'] = 'Export complete!'
             job['result_path'] = str(output_path)
             print(f"[EXPORT] Job {job_id} complete: {output_path}")
+
+            # Upload to B2 + Cloudflare CDN (production)
+            cdn_url = None
+            try:
+                from b2sdk.v2 import B2Api, InMemoryAccountInfo
+                import time as _upload_time
+
+                B2_KEY_ID = os.getenv('B2_KEY_ID')
+                B2_APP_KEY = os.getenv('B2_APP_KEY')
+                B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+                B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+
+                if B2_KEY_ID and B2_APP_KEY and os.getenv('SKIP_B2_UPLOAD') != '1':
+                    timestamp = int(_upload_time.time())
+                    remote_path = f"results/{timestamp}_{os.path.basename(str(output_path))}"
+
+                    job['message'] = 'Uploading to cloud...'
+                    print(f"[B2] Uploading to {B2_BUCKET}/{remote_path}...")
+                    _b2_start = _upload_time.time()
+                    info = InMemoryAccountInfo()
+                    b2_api = B2Api(info)
+                    b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
+                    bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+
+                    if output_format == 'png':
+                        # ZIP the PNG folder first
+                        import zipfile
+                        zip_path = str(output_path) + '.zip'
+                        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                            for png in Path(output_path).glob('*.png'):
+                                zf.write(png, png.name)
+                        bucket.upload_local_file(local_file=zip_path, file_name=remote_path + '.zip')
+                        cdn_url = f"{B2_CDN_URL}/{remote_path}.zip"
+                    else:
+                        bucket.upload_local_file(local_file=str(output_path), file_name=remote_path)
+                        cdn_url = f"{B2_CDN_URL}/{remote_path}"
+
+                    _b2_time = _upload_time.time() - _b2_start
+                    print(f"[B2] Upload complete in {_b2_time:.1f}s - CDN URL: {cdn_url}")
+                    job['cdn_url'] = cdn_url
+                    job['message'] = 'Export complete! (uploaded to cloud)'
+                else:
+                    print(f"[B2] Skipping upload (SKIP_B2_UPLOAD=1 or no credentials)")
+            except ImportError:
+                print(f"[B2] b2sdk not installed - skipping upload")
+            except Exception as e:
+                print(f"[B2] Upload failed: {e}")
 
         except Exception as e:
             print(f"[EXPORT] Error: {e}")
@@ -478,6 +759,82 @@ def export_video():
         'message': 'Export started',
         'job_id': job_id
     })
+
+
+# ============================================================
+# Preview single frame
+# ============================================================
+@app.route('/api/object-removal/preview', methods=['POST'])
+def preview_frame():
+    """Generate preview of operation on single frame"""
+    import cv2
+    import numpy as np
+
+    data = request.json
+    job_id = data.get('job_id')
+
+    if job_id not in jobs:
+        return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+    job = jobs[job_id]
+
+    if job.get('status') != 'completed':
+        return jsonify({'status': 'error', 'message': 'Video not tracked yet'}), 400
+
+    # Get parameters
+    operation = data.get('operation', 'keep_object')
+    background = data.get('background', 'transparent')
+    bg_color = data.get('bg_color', '#00FF00')
+    blur_amount = data.get('blur_amount', 20)
+    dilation = data.get('dilation', 0)
+    frame_index = data.get('frame_index', 0)
+
+    try:
+        video_path = job['video_path']
+        masks_dir = Path(job['masks_dir'])
+
+        # Parse color
+        hex_color = bg_color.lstrip('#')
+        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        color_bgr = (b, g, r)
+
+        options = {
+            'bg_type': background,
+            'color_bgr': color_bgr,
+            'blur_amount': blur_amount,
+            'dilation': dilation
+        }
+
+        # Read frame
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret:
+            return jsonify({'status': 'error', 'message': 'Could not read frame'}), 400
+
+        # Load mask
+        mask_path = masks_dir / f"{frame_index:05d}.png"
+        if mask_path.exists():
+            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+            if mask is not None:
+                result = apply_operation(frame, mask, operation, options)
+
+                # Save preview
+                preview_path = OUTPUT_DIR / f"{job_id}_preview.png"
+                cv2.imwrite(str(preview_path), result)
+
+                return jsonify({
+                    'status': 'success',
+                    'preview_url': f'/temp_output/{job_id}_preview.png'
+                })
+
+        return jsonify({'status': 'error', 'message': 'No mask for this frame'}), 400
+
+    except Exception as e:
+        print(f"[PREVIEW] Error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 # ============================================================

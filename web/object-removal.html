@@ -215,6 +215,11 @@
             100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
         }
 
+        @keyframes pulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+            50% { transform: translate(-50%, -50%) scale(1.3); opacity: 0.7; }
+        }
+
         .object-outline {
             position: absolute;
             border: 2px dashed var(--accent);
@@ -849,6 +854,13 @@
                             </svg>
                             Remove Selected
                         </button>
+                        <button class="action-btn action-btn-secondary hidden" id="previewBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polygon points="10 8 16 12 10 16 10 8"/>
+                            </svg>
+                            Preview
+                        </button>
                         <button class="action-btn action-btn-secondary hidden" id="exportBtn">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
@@ -875,12 +887,31 @@
                         </svg>
                         <span>Add Object</span>
                     </div>
+                    <div class="add-object-card" id="autoDetectCard" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); border-color: #3b82f6;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                        <span>Auto Detect</span>
+                    </div>
                 </div>
             </div>
 
             <!-- Settings Section -->
             <div class="settings-section hidden" id="settingsSection">
-                <div class="settings-grid">
+                <div class="settings-grid" style="grid-template-columns: repeat(4, 1fr);">
+                    <!-- Operation Selector -->
+                    <div class="setting-group">
+                        <span class="setting-label">Operation</span>
+                        <div class="setting-options" style="flex-wrap: wrap; gap: 0.4rem;">
+                            <div class="setting-option selected" data-operation="keep_object">Keep Object</div>
+                            <div class="setting-option" data-operation="remove_object">Remove Object</div>
+                            <div class="setting-option" data-operation="fill_inside">Fill Inside</div>
+                            <div class="setting-option" data-operation="fill_outside">Fill Outside</div>
+                            <div class="setting-option" data-operation="blur_inside">Blur Inside</div>
+                            <div class="setting-option" data-operation="blur_outside">Blur Outside</div>
+                        </div>
+                    </div>
                     <div class="setting-group">
                         <span class="setting-label">Background</span>
                         <div class="setting-options">
@@ -896,15 +927,21 @@
                             <input type="range" id="blurSlider" min="5" max="50" value="20" style="width: 100%;">
                             <span style="font-size: 0.8rem; color: var(--text-muted);">Blur: <span id="blurValueLabel">20</span>px</span>
                         </div>
+                        <div style="margin-top: 0.75rem;">
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">Dilation: </span>
+                            <input type="range" id="dilationSlider" min="0" max="20" value="0" style="width: 80px; vertical-align: middle;">
+                            <span style="font-size: 0.8rem; color: var(--text-muted);"><span id="dilationValueLabel">0</span>px</span>
+                        </div>
                     </div>
                     <div class="setting-group">
                         <span class="setting-label">Output Format</span>
                         <div class="setting-options">
                             <div class="setting-option selected" data-format="mp4">MP4</div>
                             <div class="setting-option" data-format="webm">WebM</div>
+                            <div class="setting-option" data-format="png">PNG Seq</div>
                         </div>
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            WebM supports transparency (alpha channel)
+                            WebM/PNG support transparency
                         </p>
                     </div>
                     <div class="setting-group">
@@ -967,6 +1004,9 @@
         </div>
     </div>
 
+    <!-- SAM2 Interactive Selector (instant mask preview) -->
+    <script src="/js/sam2_selector.js"></script>
+
     <script>
     (function() {
         'use strict';
@@ -986,9 +1026,11 @@
             selectedObjectId: null,
             quality: 'balanced',
             format: 'mp4',
+            operation: 'keep_object', // keep_object, remove_object, fill_inside, fill_outside, blur_inside, blur_outside
             background: 'transparent', // transparent, color, blur
             bgColor: '#00FF00',
             blurAmount: 20,
+            dilation: 0,
             preserveShadows: true,
             preserveReflections: false,
             isSelectingObject: false,
@@ -1099,7 +1141,7 @@
             }
         }
 
-        // Interaction layer - click to select object
+        // Interaction layer - click to select object (with optional SAM2 TensorRT mask preview)
         interactionLayer.addEventListener('click', async (e) => {
             if (!state.isSelectingObject) return;
             if (!state.jobId) return;
@@ -1112,19 +1154,20 @@
             const videoX = Math.floor(percentX * state.videoWidth);
             const videoY = Math.floor(percentY * state.videoHeight);
 
-            // Add click marker
+            // Add click marker with loading state
             const marker = document.createElement('div');
             marker.className = 'click-marker';
             marker.style.left = (percentX * 100) + '%';
             marker.style.top = (percentY * 100) + '%';
+            marker.style.animation = 'pulse 1s infinite';
             interactionLayer.appendChild(marker);
 
             // Get current frame index
             const frameIndex = Math.floor(videoPlayer.currentTime * 30); // Assume 30fps
 
             try {
-                // Call SAM2 selection API
-                const response = await fetch(`${API_BASE}/api/object-removal/select`, {
+                // Store point for video tracking
+                await fetch(`${API_BASE}/api/object-removal/select`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1134,19 +1177,43 @@
                     })
                 });
 
-                const data = await response.json();
+                // Try to get instant mask preview from SAM2 TensorRT worker
+                try {
+                    // Capture current frame as base64
+                    const canvas = document.createElement('canvas');
+                    canvas.width = videoPlayer.videoWidth;
+                    canvas.height = videoPlayer.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(videoPlayer, 0, 0);
+                    const frameData = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+                    const sam2Response = await fetch(`${API_BASE}/api/sam2/select-object`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            frame_data: frameData,
+                            points: [{ x: videoX, y: videoY, label: 1 }],
+                            video_width: state.videoWidth,
+                            video_height: state.videoHeight
+                        })
+                    });
+
+                    const sam2Data = await sam2Response.json();
+
+                    if (sam2Data.status === 'success' && sam2Data.mask) {
+                        console.log('[SAM2] Got mask preview!');
+                        // Display mask overlay
+                        displayMaskOverlay(sam2Data.mask, percentX, percentY);
+                    }
+                } catch (sam2Error) {
+                    // SAM2 TensorRT worker not running - that's OK, mask will be generated during tracking
+                    console.log('[SAM2] TensorRT worker not available, skipping preview');
+                }
 
                 marker.remove();
+                addObject(percentX * 100, percentY * 100, null);
+                console.log('[SELECT] Point stored at:', videoX, videoY);
 
-                if (data.status === 'success') {
-                    // Mask preview not available (SAM2 runs in WSL2 during tracking)
-                    // Just add object marker - real mask generated during tracking
-                    addObject(percentX * 100, percentY * 100, null);
-                    console.log('[SELECT] Point stored:', data.points);
-                } else {
-                    console.error('Selection failed:', data.message);
-                    alert('Failed to select object: ' + (data.message || 'Unknown error'));
-                }
             } catch (error) {
                 console.error('Selection error:', error);
                 marker.remove();
@@ -1154,6 +1221,45 @@
                 addObject(percentX * 100, percentY * 100, null);
             }
         });
+
+        // Display SAM2 mask overlay on the video
+        function displayMaskOverlay(maskBase64, centerX, centerY) {
+            // Create mask overlay image
+            const overlay = document.createElement('div');
+            overlay.className = 'mask-overlay';
+            overlay.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                opacity: 0.5;
+                background-image: url(data:image/png;base64,${maskBase64});
+                background-size: 100% 100%;
+                mix-blend-mode: screen;
+            `;
+
+            // Add green tint
+            const tint = document.createElement('div');
+            tint.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 255, 0, 0.2);
+                mask-image: url(data:image/png;base64,${maskBase64});
+                mask-size: 100% 100%;
+                -webkit-mask-image: url(data:image/png;base64,${maskBase64});
+                -webkit-mask-size: 100% 100%;
+            `;
+
+            interactionLayer.appendChild(tint);
+
+            // Auto-remove after 3 seconds
+            setTimeout(() => tint.remove(), 3000);
+        }
 
         function addObject(x, y, maskData) {
             const id = Date.now();
@@ -1249,6 +1355,66 @@
             removeBtn.disabled = state.objects.length === 0;
         }
 
+        // Auto-detect objects with YOLO
+        document.getElementById('autoDetectCard').addEventListener('click', async () => {
+            if (!state.jobId) {
+                alert('Please upload a video first');
+                return;
+            }
+
+            const autoDetectCard = document.getElementById('autoDetectCard');
+            autoDetectCard.innerHTML = '<span>Detecting...</span>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/object-removal/auto-detect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id: state.jobId })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success' && data.detections.length > 0) {
+                    console.log('[YOLO] Detected:', data.detections);
+
+                    // Add each detection as an object
+                    for (const det of data.detections) {
+                        addObject(det.x_percent, det.y_percent, null);
+
+                        // Store detection point for SAM2 tracking
+                        const points = [{ x: Math.floor(det.x), y: Math.floor(det.y), label: 1 }];
+
+                        // Call select API to store point
+                        await fetch(`${API_BASE}/api/object-removal/select`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                job_id: state.jobId,
+                                points: points,
+                                frame_index: 0
+                            })
+                        });
+                    }
+
+                    alert(`Detected ${data.detections.length} object(s)!`);
+                } else {
+                    alert('No objects detected. Try clicking manually to select.');
+                }
+            } catch (error) {
+                console.error('Auto-detect error:', error);
+                alert('Auto-detect failed: ' + error.message);
+            }
+
+            // Reset button
+            autoDetectCard.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <span>Auto Detect</span>
+            `;
+        });
+
         // Video controls
         document.getElementById('playPauseBtn').addEventListener('click', () => {
             if (videoPlayer.paused) {
@@ -1305,6 +1471,7 @@
 
                 if (option.dataset.quality) state.quality = option.dataset.quality;
                 if (option.dataset.format) state.format = option.dataset.format;
+                if (option.dataset.operation) state.operation = option.dataset.operation;
 
                 // Handle background options
                 if (option.dataset.background) {
@@ -1341,6 +1508,69 @@
             blurSlider.addEventListener('input', (e) => {
                 state.blurAmount = parseInt(e.target.value);
                 document.getElementById('blurValueLabel').textContent = e.target.value;
+            });
+        }
+
+        // Dilation slider
+        const dilationSlider = document.getElementById('dilationSlider');
+        if (dilationSlider) {
+            dilationSlider.addEventListener('input', (e) => {
+                state.dilation = parseInt(e.target.value);
+                document.getElementById('dilationValueLabel').textContent = e.target.value;
+            });
+        }
+
+        // Preview button - show preview button when tracked
+        const previewBtn = document.getElementById('previewBtn');
+        if (previewBtn) {
+            previewBtn.addEventListener('click', async () => {
+                if (!state.jobId || !state.isTracked) {
+                    alert('Please track the object first');
+                    return;
+                }
+
+                showProcessingModal('Generating Preview...', 'Applying operation to current frame...');
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/object-removal/preview`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            job_id: state.jobId,
+                            operation: state.operation,
+                            background: state.background,
+                            bg_color: state.bgColor,
+                            blur_amount: state.blurAmount,
+                            dilation: state.dilation,
+                            frame_index: Math.floor(videoPlayer.currentTime * 30) // Assume 30fps
+                        })
+                    });
+
+                    const data = await response.json();
+                    hideProcessingModal();
+
+                    if (data.status === 'success' && data.preview_url) {
+                        // Show preview in modal
+                        const previewModal = document.createElement('div');
+                        previewModal.className = 'modal';
+                        previewModal.innerHTML = `
+                            <div class="modal-content" style="max-width: 800px;">
+                                <h3 class="modal-title">Preview</h3>
+                                <img src="${API_BASE}${data.preview_url}" style="max-width: 100%; border-radius: 8px; margin: 1rem 0;">
+                                <div class="modal-actions">
+                                    <button class="modal-btn modal-btn-primary" onclick="this.closest('.modal').remove()">Close</button>
+                                </div>
+                            </div>
+                        `;
+                        document.body.appendChild(previewModal);
+                    } else {
+                        alert('Preview failed: ' + (data.message || 'Unknown error'));
+                    }
+                } catch (error) {
+                    hideProcessingModal();
+                    console.error('Preview error:', error);
+                    alert('Preview failed: ' + error.message);
+                }
             });
         }
 
@@ -1390,6 +1620,7 @@
                             setTimeout(() => {
                                 hideProcessingModal();
                                 showSuccessModal();
+                                document.getElementById('previewBtn').classList.remove('hidden');
                                 exportBtn.classList.remove('hidden');
                             }, 500);
                         } else if (statusData.status === 'error') {
@@ -1431,9 +1662,11 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         job_id: state.jobId,
+                        operation: state.operation,
                         background: state.background,
                         bg_color: state.bgColor,
                         blur_amount: state.blurAmount,
+                        dilation: state.dilation,
                         format: state.format
                     })
                 });
@@ -1456,11 +1689,13 @@
                             updateProcessingProgress(100);
                             setTimeout(() => {
                                 hideProcessingModal();
-                                // Trigger download
-                                const downloadUrl = `${API_BASE}/api/object-removal/download/${state.jobId}`;
+                                // Trigger download - prefer CDN URL if available (production)
+                                const downloadUrl = statusData.cdn_url || `${API_BASE}/api/object-removal/download/${state.jobId}`;
+                                console.log('[DOWNLOAD] URL:', downloadUrl, statusData.cdn_url ? '(CDN)' : '(local)');
                                 const a = document.createElement('a');
                                 a.href = downloadUrl;
                                 a.download = `object_removed_${state.jobId}.${state.format}`;
+                                if (statusData.cdn_url) a.target = '_blank';  // CDN opens in new tab
                                 document.body.appendChild(a);
                                 a.click();
                                 document.body.removeChild(a);

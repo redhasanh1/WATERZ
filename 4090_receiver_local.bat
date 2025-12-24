@@ -24,6 +24,21 @@ set B2_UPLOAD_ENABLED=0
 echo [LOCAL] B2 upload DISABLED - output stays local
 echo.
 
+REM ============================================================
+REM PURGE OLD JOBS - Start fresh!
+REM ============================================================
+echo [PURGE] Clearing old jobs from propainter_local queue...
+"%LOCALAPPDATA%\Programs\Python\Python312\python.exe" -m celery -A server_production2.celery purge -Q propainter_local -f 2>nul
+echo [PURGE] Done - queue cleared!
+echo.
+
+REM ============================================================
+REM CLEAR GPU VRAM - Free up memory before starting
+REM ============================================================
+echo [VRAM] Clearing GPU VRAM cache...
+"%LOCALAPPDATA%\Programs\Python\Python312\python.exe" -c "import torch; torch.cuda.empty_cache(); torch.cuda.synchronize(); print(f'[VRAM] Freed - Available: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB total')" 2>nul || echo [VRAM] GPU clear skipped
+echo.
+
 echo.
 echo ============================================================
 echo 4090 RECEIVER LOCAL - ProPainter Worker (No B2)
@@ -124,15 +139,16 @@ set SEGMENT_MIN_LEN_FULL=3
 set SEGMENT_MERGE_GAP_FULL=10
 
 REM Max frames per segment (prevents OOM on long videos - splits into chunks)
-set MAX_SEGMENT_FRAMES=300
+REM Reduced from 300→150 for VRAM safety with 600k pixel crops
+set MAX_SEGMENT_FRAMES=150
 
 REM Max pixels (width*height) per segment's union bbox - prevents huge crops that slow processing
 REM 400000 = ~630x630, keeps per-frame under 200ms. Lower = more segments = faster per segment
 set MAX_SEGMENT_PIXELS=400000
 
 REM Max pixels AFTER padding - triggers segment splitting AND downsampling if exceeded
-REM 150k = ~387x387 max - very aggressive downsampling for safety
-set MAX_CROP_PIXELS=150000
+REM 600k = ~775x775 max - original quality setting
+set MAX_CROP_PIXELS=600000
 
 REM Background reference image for large watermark blending (leave empty to disable)
 REM The background is warped using optical flow and blended with ProPainter output
