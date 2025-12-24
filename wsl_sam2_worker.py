@@ -651,7 +651,7 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     # Close encoder
     ffmpeg_encode.stdin.close()
     ffmpeg_encode.wait()
-    print(f"[GPU-FX] ✅ Encoded {frames_processed} frames with NVENC")
+    print(f"[GPU-FX] ✅ Encoded {frame_idx} frames with NVENC")
 
     self.update_state(state='PROCESSING', meta={'progress': 92, 'status': 'Uploading to CDN...'})
 
