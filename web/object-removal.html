@@ -523,9 +523,100 @@
             gap: 1rem;
         }
 
+        /* === MOBILE RESPONSIVE STYLES === */
         @media (max-width: 768px) {
             .settings-grid {
                 grid-template-columns: 1fr;
+            }
+
+            /* Stack controls vertically on mobile */
+            .controls-row {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            .controls-left, .controls-right {
+                width: 100%;
+                justify-content: center;
+            }
+            .timeline-bar {
+                min-width: 100%;
+                order: -1; /* Timeline on top */
+            }
+
+            /* Reduce panel padding */
+            .controls-panel, .objects-panel, .settings-section {
+                padding: 1rem;
+            }
+            .app-section {
+                padding: 1rem 0.75rem 4rem;
+            }
+
+            /* Instructions overlay */
+            .instructions-overlay {
+                padding: 1rem;
+            }
+            .instructions-text {
+                font-size: 0.9rem;
+            }
+
+            /* Objects panel grid */
+            .objects-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 600px) {
+            /* Smaller buttons on small screens */
+            .action-btn {
+                padding: 0.5rem 1rem;
+                font-size: 0.85rem;
+            }
+            .playback-btn {
+                width: 36px;
+                height: 36px;
+            }
+            .playback-btn svg {
+                width: 16px;
+                height: 16px;
+            }
+
+            /* Stack action buttons */
+            .controls-right {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            .controls-right .action-btn {
+                width: 100%;
+            }
+
+            /* Objects panel */
+            .objects-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            /* Setting options stack */
+            .setting-options {
+                flex-wrap: wrap;
+            }
+            .setting-option {
+                min-width: calc(50% - 0.25rem);
+            }
+        }
+
+        @media (max-width: 400px) {
+            /* Very small screens */
+            .app-section {
+                padding: 0.5rem 0.5rem 3rem;
+            }
+            .controls-panel, .objects-panel, .settings-section {
+                padding: 0.75rem;
+            }
+            .objects-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 0.5rem;
+            }
+            .playback-controls {
+                gap: 0.25rem;
             }
         }
 
