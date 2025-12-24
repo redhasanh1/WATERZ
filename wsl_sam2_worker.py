@@ -512,15 +512,13 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
         print(f"[GPU-FX] Extracted {len(mask_files)} masks")
 
-    # Parse color to RGB tensor
+    # Parse color to RGB
     bg_color_hex = bg_color.lstrip('#')
     color_rgb = [int(bg_color_hex[i:i+2], 16) for i in (0, 2, 4)]
 
-    # GPU processing config
-    CHUNK_SIZE = 250  # Frames per GPU batch (VRAM efficient)
     output_path = "/tmp/simple_fx_output.mp4"
 
-    # Start ffmpeg encoder process - pipe raw frames directly to NVENC!
+    # Start ffmpeg encoder - pipe raw frames directly to NVENC!
     print(f"[GPU-FX] 🎬 Starting NVENC encoder pipeline...")
     ffmpeg_encode = subprocess.Popen([
         'ffmpeg', '-y',
@@ -542,161 +540,113 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         output_path
     ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Process in GPU chunks
-    num_chunks = (total_frames + CHUNK_SIZE - 1) // CHUNK_SIZE
-    frames_processed = 0
+    # === GPU STREAMING: Process ONE frame at a time (like CPU, but fast!) ===
+    # Pre-allocate reusable GPU buffers (~25MB total, not 12GB!)
+    device = torch.device('cuda')
+    bg_tensor = torch.tensor(color_rgb, dtype=torch.float32, device=device).view(1, 1, 3)
 
-    print(f"[GPU-FX] Processing {total_frames} frames in {num_chunks} GPU batches...")
+    # Pre-compute blur kernel if needed
+    blur_kernel = None
+    if background == 'blur' or operation in ['blur_inside', 'blur_outside']:
+        blur_k = blur_amount * 2 + 1
+        blur_kernel = torch.ones(3, 1, blur_k, blur_k, device=device) / (blur_k * blur_k)
 
-    for chunk_idx in range(num_chunks):
-        chunk_start = chunk_idx * CHUNK_SIZE
-        chunk_end = min(chunk_start + CHUNK_SIZE, total_frames)
-        chunk_frames = chunk_end - chunk_start
+    print(f"[GPU-FX] 🚀 STREAMING: Processing {total_frames} frames one-by-one (25MB VRAM)...")
 
-        # === STEP 1: Decode chunk with ffmpeg CUDA ===
-        start_time = chunk_start / fps
-        decode_cmd = [
-            'ffmpeg', '-y',
-            '-hwaccel', 'cuda',
-            '-ss', str(start_time),
-            '-i', video_path,
-            '-frames:v', str(chunk_frames),
-            '-f', 'rawvideo',
-            '-pix_fmt', 'rgb24',
-            'pipe:1'
-        ]
-        decode_result = subprocess.run(decode_cmd, capture_output=True)
-        if decode_result.returncode != 0:
-            print(f"[GPU-FX] Decode error: {decode_result.stderr.decode()[:200]}")
+    cap = cv2.VideoCapture(video_path)
+    frame_idx = 0
+
+    while True:
+        ret, frame_bgr = cap.read()
+        if not ret:
             break
 
-        # Parse to GPU tensor [N, H, W, 3]
-        raw_data = decode_result.stdout
-        actual_frames = len(raw_data) // (height * width * 3)
-        if actual_frames == 0:
-            break
-        chunk_frames = min(chunk_frames, actual_frames)
-
-        frames_np = np.frombuffer(raw_data[:chunk_frames * height * width * 3], dtype=np.uint8).copy()
-        frames_np = frames_np.reshape(chunk_frames, height, width, 3)
-        del raw_data  # Free immediately after copy
-        frames_gpu = torch.from_numpy(frames_np).cuda().float()  # [N, H, W, 3]
-
-        # === STEP 2: Load masks for this chunk to GPU ===
-        masks_list = []
-        for i in range(chunk_start, chunk_start + chunk_frames):
-            if i < len(mask_files):
-                mask = cv2.imread(mask_files[i], cv2.IMREAD_GRAYSCALE)
-                if mask is None:
-                    mask = np.zeros((height, width), dtype=np.uint8)
-                if mask.shape[:2] != (height, width):
-                    mask = cv2.resize(mask, (width, height))
-            else:
+        # Load mask for this frame
+        if frame_idx < len(mask_files):
+            mask = cv2.imread(mask_files[frame_idx], cv2.IMREAD_GRAYSCALE)
+            if mask is None:
                 mask = np.zeros((height, width), dtype=np.uint8)
-            masks_list.append(mask)
+            if mask.shape[:2] != (height, width):
+                mask = cv2.resize(mask, (width, height))
+        else:
+            mask = np.zeros((height, width), dtype=np.uint8)
 
-        masks_np = np.stack(masks_list, axis=0)  # [N, H, W]
-        masks_gpu = torch.from_numpy(masks_np).cuda().float() / 255.0  # [N, H, W] normalized
+        # Convert BGR to RGB
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-        # === STEP 3: Apply dilation on GPU ===
+        # === GPU: Transfer single frame (~6MB) ===
+        frame_gpu = torch.from_numpy(frame_rgb).to(device).float()  # [H, W, 3]
+        mask_gpu = torch.from_numpy(mask).to(device).float() / 255.0  # [H, W]
+
+        # Apply dilation on GPU
         if dilation > 0:
-            # GPU max pooling for dilation
-            masks_4d = masks_gpu.unsqueeze(1)  # [N, 1, H, W]
+            mask_4d = mask_gpu.unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
             for _ in range(dilation):
-                masks_4d = F.max_pool2d(masks_4d, 3, stride=1, padding=1)
-            masks_gpu = masks_4d.squeeze(1)  # [N, H, W]
+                mask_4d = F.max_pool2d(mask_4d, 3, stride=1, padding=1)
+            mask_gpu = mask_4d.squeeze()  # [H, W]
 
-        # === STEP 4: GPU tensor operations ===
-        mask_3ch = masks_gpu.unsqueeze(-1).expand(-1, -1, -1, 3)  # [N, H, W, 3]
+        # Create 3-channel mask
+        mask_3ch = mask_gpu.unsqueeze(-1).expand(-1, -1, 3)  # [H, W, 3]
         inv_mask = 1.0 - mask_3ch
 
-        # Background color tensor
-        bg_tensor = torch.tensor(color_rgb, dtype=torch.float32, device='cuda').view(1, 1, 1, 3).expand(chunk_frames, height, width, 3)
-
+        # Apply operation
         if operation == 'keep_object':
             if background == 'blur':
-                # GPU blur using conv2d
-                blur_k = blur_amount * 2 + 1
-                frames_4d = frames_gpu.permute(0, 3, 1, 2)  # [N, 3, H, W]
-                kernel = torch.ones(1, 1, blur_k, blur_k, device='cuda') / (blur_k * blur_k)
-                kernel = kernel.expand(3, 1, blur_k, blur_k)
-                blurred = F.conv2d(frames_4d, kernel, padding=blur_k//2, groups=3)
-                blurred = blurred.permute(0, 2, 3, 1)  # [N, H, W, 3]
-                result = frames_gpu * mask_3ch + blurred * inv_mask
-            else:  # color
-                result = frames_gpu * mask_3ch + bg_tensor * inv_mask
+                frame_4d = frame_gpu.permute(2, 0, 1).unsqueeze(0)  # [1, 3, H, W]
+                blurred = F.conv2d(F.pad(frame_4d, [blur_amount]*4, mode='reflect'),
+                                   blur_kernel, padding=0, groups=3)
+                blurred = blurred.squeeze(0).permute(1, 2, 0)  # [H, W, 3]
+                result = frame_gpu * mask_3ch + blurred * inv_mask
+            else:
+                result = frame_gpu * mask_3ch + bg_tensor.expand(height, width, 3) * inv_mask
 
         elif operation == 'remove_object':
             if background == 'blur':
-                blur_k = blur_amount * 2 + 1
-                frames_4d = frames_gpu.permute(0, 3, 1, 2)
-                kernel = torch.ones(1, 1, blur_k, blur_k, device='cuda') / (blur_k * blur_k)
-                kernel = kernel.expand(3, 1, blur_k, blur_k)
-                blurred = F.conv2d(frames_4d, kernel, padding=blur_k//2, groups=3)
-                blurred = blurred.permute(0, 2, 3, 1)
-                result = frames_gpu * inv_mask + blurred * mask_3ch
+                frame_4d = frame_gpu.permute(2, 0, 1).unsqueeze(0)
+                blurred = F.conv2d(F.pad(frame_4d, [blur_amount]*4, mode='reflect'),
+                                   blur_kernel, padding=0, groups=3)
+                blurred = blurred.squeeze(0).permute(1, 2, 0)
+                result = frame_gpu * inv_mask + blurred * mask_3ch
             else:
-                result = frames_gpu * inv_mask + bg_tensor * mask_3ch
+                result = frame_gpu * inv_mask + bg_tensor.expand(height, width, 3) * mask_3ch
 
         elif operation == 'blur_inside':
-            blur_k = blur_amount * 2 + 1
-            frames_4d = frames_gpu.permute(0, 3, 1, 2)
-            kernel = torch.ones(1, 1, blur_k, blur_k, device='cuda') / (blur_k * blur_k)
-            kernel = kernel.expand(3, 1, blur_k, blur_k)
-            blurred = F.conv2d(frames_4d, kernel, padding=blur_k//2, groups=3)
-            blurred = blurred.permute(0, 2, 3, 1)
-            result = blurred * mask_3ch + frames_gpu * inv_mask
+            frame_4d = frame_gpu.permute(2, 0, 1).unsqueeze(0)
+            blurred = F.conv2d(F.pad(frame_4d, [blur_amount]*4, mode='reflect'),
+                               blur_kernel, padding=0, groups=3)
+            blurred = blurred.squeeze(0).permute(1, 2, 0)
+            result = blurred * mask_3ch + frame_gpu * inv_mask
 
         elif operation == 'blur_outside':
-            blur_k = blur_amount * 2 + 1
-            frames_4d = frames_gpu.permute(0, 3, 1, 2)
-            kernel = torch.ones(1, 1, blur_k, blur_k, device='cuda') / (blur_k * blur_k)
-            kernel = kernel.expand(3, 1, blur_k, blur_k)
-            blurred = F.conv2d(frames_4d, kernel, padding=blur_k//2, groups=3)
-            blurred = blurred.permute(0, 2, 3, 1)
-            result = frames_gpu * mask_3ch + blurred * inv_mask
+            frame_4d = frame_gpu.permute(2, 0, 1).unsqueeze(0)
+            blurred = F.conv2d(F.pad(frame_4d, [blur_amount]*4, mode='reflect'),
+                               blur_kernel, padding=0, groups=3)
+            blurred = blurred.squeeze(0).permute(1, 2, 0)
+            result = frame_gpu * mask_3ch + blurred * inv_mask
 
         elif operation == 'fill_inside':
-            result = frames_gpu * inv_mask + bg_tensor * mask_3ch
+            result = frame_gpu * inv_mask + bg_tensor.expand(height, width, 3) * mask_3ch
 
         elif operation == 'fill_outside':
-            result = frames_gpu * mask_3ch + bg_tensor * inv_mask
+            result = frame_gpu * mask_3ch + bg_tensor.expand(height, width, 3) * inv_mask
 
         else:
-            result = frames_gpu
+            result = frame_gpu
 
-        # === STEP 5: Pipe to NVENC encoder ===
-        result_cpu = result.clamp(0, 255).byte().cpu().numpy()  # [N, H, W, 3]
+        # === Pipe to NVENC encoder ===
+        result_cpu = result.clamp(0, 255).byte().cpu().numpy()
         ffmpeg_encode.stdin.write(result_cpu.tobytes())
 
-        frames_processed += chunk_frames
-        progress = 15 + int(75 * frames_processed / total_frames)
-        self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'GPU batch {chunk_idx+1}/{num_chunks}'})
+        frame_idx += 1
 
-        # === CLEANUP: Free ALL memory to prevent leak ===
-        # GPU tensors (always exist)
-        del frames_gpu, masks_gpu, mask_3ch, inv_mask, result, bg_tensor
+        # Progress update every 100 frames
+        if frame_idx % 100 == 0:
+            progress = 15 + int(75 * frame_idx / total_frames)
+            self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Frame {frame_idx}/{total_frames}'})
+            print(f"[GPU-FX] Frame {frame_idx}/{total_frames}")
 
-        # GPU tensors (conditional - may not exist)
-        try: del masks_4d
-        except: pass
-        try: del frames_4d
-        except: pass
-        try: del blurred
-        except: pass
-        try: del kernel
-        except: pass
-
-        # CPU arrays (CRITICAL - these were leaking!)
-        # Note: raw_data already deleted after .copy()
-        del frames_np, masks_list, masks_np, result_cpu
-
-        # Force garbage collection
-        gc.collect()
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-
-        print(f"[GPU-FX] Chunk {chunk_idx+1}/{num_chunks}: {chunk_frames} frames processed")
+    cap.release()
+    print(f"[GPU-FX] ✅ Processed {frame_idx} frames with GPU streaming")
 
     # Close encoder
     ffmpeg_encode.stdin.close()
