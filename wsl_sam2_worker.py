@@ -571,8 +571,9 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             break
         chunk_frames = min(chunk_frames, actual_frames)
 
-        frames_np = np.frombuffer(raw_data[:chunk_frames * height * width * 3], dtype=np.uint8)
+        frames_np = np.frombuffer(raw_data[:chunk_frames * height * width * 3], dtype=np.uint8).copy()
         frames_np = frames_np.reshape(chunk_frames, height, width, 3)
+        del raw_data  # Free immediately after copy
         frames_gpu = torch.from_numpy(frames_np).cuda().float()  # [N, H, W, 3]
 
         # === STEP 2: Load masks for this chunk to GPU ===
@@ -681,7 +682,8 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         except: pass
 
         # CPU arrays (CRITICAL - these were leaking!)
-        del raw_data, frames_np, masks_list, masks_np, result_cpu
+        # Note: raw_data already deleted after .copy()
+        del frames_np, masks_list, masks_np, result_cpu
 
         # Force garbage collection
         gc.collect()
