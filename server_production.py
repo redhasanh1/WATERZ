@@ -5235,8 +5235,7 @@ def objrem_upload():
         return jsonify({'status': 'error', 'message': f'File type {ext} not allowed'}), 400
 
     try:
-        import cv2
-        import tempfile
+        import subprocess
 
         # Generate unique job ID
         job_id = uuid.uuid4().hex[:12]
@@ -5245,14 +5244,24 @@ def objrem_upload():
         temp_path = os.path.join(TEMP_DIR, f"objrem_{job_id}{ext}")
         file.save(temp_path)
 
-        # Get video info
-        cap = cv2.VideoCapture(temp_path)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = frame_count / fps if fps > 0 else 0
-        cap.release()
+        # Get video info using ffprobe (cv2 not available on Railway)
+        probe_cmd = [
+            FFPROBE_EXE, '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height,r_frame_rate,nb_frames,duration',
+            '-of', 'json',
+            temp_path
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        probe_data = json.loads(probe_result.stdout)
+        stream = probe_data['streams'][0]
+        width = int(stream.get('width', 0))
+        height = int(stream.get('height', 0))
+        fps_str = stream.get('r_frame_rate', '30/1')
+        fps_num, fps_den = map(int, fps_str.split('/'))
+        fps = fps_num / fps_den if fps_den else 30
+        duration = float(stream.get('duration', 0))
+        frame_count = int(stream.get('nb_frames', 0)) or int(duration * fps)
 
         # Upload to B2
         remote_path = f"objrem/{job_id}{ext}"
