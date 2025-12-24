@@ -404,45 +404,6 @@ class VRAMCompressor:
         return torch.stack([b, g, r], dim=-1).byte().cpu().numpy()
 
 
-class LazyGPUFrameLoader:
-    """
-    Lazy decompression from YUV420 VRAM - decompress frames on-demand.
-    Prevents OOM by not decompressing all frames at once.
-    """
-    def __init__(self, compressed_frames, crop_region=None, frame_indices=None):
-        """
-        Args:
-            compressed_frames: dict {idx: yuv420_dict} of compressed frames in VRAM
-            crop_region: (x, y, w, h) tuple to crop after decompression, or None
-            frame_indices: list of frame indices to iterate, or None for all
-        """
-        self.compressed = compressed_frames
-        self.crop = crop_region
-        self.indices = frame_indices if frame_indices else sorted(compressed_frames.keys())
-
-    def __len__(self):
-        return len(self.indices)
-
-    def __getitem__(self, idx):
-        """Decompress single frame on-demand"""
-        if isinstance(idx, int):
-            if idx < 0:
-                idx = len(self.indices) + idx
-            frame_idx = self.indices[idx]
-        else:
-            frame_idx = idx
-
-        frame = VRAMCompressor.decompress_frame(self.compressed[frame_idx])
-        if self.crop:
-            x, y, w, h = self.crop
-            frame = frame[y:y+h, x:x+w]
-        return np.ascontiguousarray(frame)
-
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self[i]
-
-
 # Configure paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(BASE_DIR, 'temp')
@@ -1480,15 +1441,15 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
 
         # Process segments (sequentially for GPU, parallel prep could be added)
         if len(segments) <= 1:
-            # Single segment - use LAZY frame loader (prevents OOM on large crops!)
+            # Single segment - use preloaded frames with decompression
             print(f"[SAM2] Processing as single segment...")
-            print(f"[LAZY] Using LazyGPUFrameLoader for {total_frames} frames (decompresses on-demand!)")
-            # Lazy loader: decompresses YUV420→BGR only when accessed, not all at once
-            frame_loader = LazyGPUFrameLoader(
-                preloaded_frames,
-                crop_region=(crop_x, crop_y, crop_w, crop_h),
-                frame_indices=list(range(total_frames))
-            )
+            print(f"[FAST] Using {total_frames} pre-loaded frames (ZERO disk I/O!)")
+            all_frames_contiguous = []
+            for frame_idx in range(total_frames):
+                # Decompress and apply global crop
+                full_frame = VRAMCompressor.decompress_frame(preloaded_frames[frame_idx])
+                frame = full_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                all_frames_contiguous.append(np.ascontiguousarray(frame))
             all_masks_contiguous = [np.ascontiguousarray(m) for m in all_masks_cropped]
 
             # Crop background to global crop region if available
@@ -1512,7 +1473,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 save_frames=False,
                 fp16=use_fp16,
                 use_cached_models=True,
-                frames_array=frame_loader,  # Lazy loader: decompresses per-chunk!
+                frames_array=all_frames_contiguous,
                 masks_array=all_masks_contiguous,
                 return_frames=True,  # ZERO DISK I/O!
                 background_frame=bg_cropped_single,
@@ -2251,14 +2212,6 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         # Check for B2 URL (new flow) or local path (legacy)
         masks_url = sam2_result.get('masks_url')
         masks_dir = sam2_result.get('masks_dir')
-
-        # Convert WSL path to Windows path if needed
-        if masks_dir and masks_dir.startswith('/mnt/'):
-            # /mnt/d/watermarkz/... → D:\watermarkz\...
-            drive = masks_dir[5].upper()  # 'd' → 'D'
-            rest = masks_dir[7:].replace('/', '\\')  # watermarkz/... → watermarkz\...
-            masks_dir = f"{drive}:\\{rest}"
-            print(f"[PATH] Converted WSL→Windows: {masks_dir}")
 
         if masks_url and not masks_dir:
             # Download masks from B2 CDN

@@ -5555,11 +5555,14 @@ def objrem_status(job_id):
                             # Update job with result
                             if task_result.get('masks_dir'):
                                 redis_client.hset(f"objrem:{job_id}", 'masks_dir', task_result['masks_dir'])
-                            # Check for masks_url (from SAM2) OR cdn_url (from ProPainter)
-                            masks_url = task_result.get('masks_url') or task_result.get('cdn_url')
-                            if masks_url:
-                                redis_client.hset(f"objrem:{job_id}", 'masks_url', masks_url)
-                            status = 'completed' if masks_url else 'tracked'
+                            # Check for masks_url (from SAM2 tracking)
+                            if task_result.get('masks_url'):
+                                redis_client.hset(f"objrem:{job_id}", 'masks_url', task_result['masks_url'])
+                                status = 'completed'
+                            # Check for cdn_url (from simple effects export)
+                            if task_result.get('cdn_url'):
+                                redis_client.hset(f"objrem:{job_id}", 'result_cdn_url', task_result['cdn_url'])
+                                status = 'export_complete'
                             redis_client.hset(f"objrem:{job_id}", 'status', status)
                     else:
                         status = 'error'

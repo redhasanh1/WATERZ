@@ -19,30 +19,9 @@ if exist redis_url.txt (
     set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
 )
 
-REM B2 CREDENTIALS - needed to DOWNLOAD masks from B2
-set B2_KEY_ID=00539db5c1104b50000000003
-set B2_APP_KEY=K005384b8lPoBT11wScxkZ2Gx0fszus
-set B2_BUCKET=watermarkz
-echo [B2] Credentials loaded for downloading masks
-
-REM DISABLE B2 UPLOADS - output stays local
+REM DISABLE B2 UPLOADS - Keep everything local!
 set B2_UPLOAD_ENABLED=0
 echo [LOCAL] B2 upload DISABLED - output stays local
-echo.
-
-REM ============================================================
-REM PURGE OLD JOBS - Start fresh!
-REM ============================================================
-echo [PURGE] Clearing old jobs from propainter_local queue...
-"%LOCALAPPDATA%\Programs\Python\Python312\python.exe" -m celery -A server_production2.celery purge -Q propainter_local -f 2>nul
-echo [PURGE] Done - queue cleared!
-echo.
-
-REM ============================================================
-REM CLEAR GPU VRAM - Free up memory before starting
-REM ============================================================
-echo [VRAM] Clearing GPU VRAM cache...
-"%LOCALAPPDATA%\Programs\Python\Python312\python.exe" -c "import torch; torch.cuda.empty_cache(); torch.cuda.synchronize(); print(f'[VRAM] Freed - Available: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB total')" 2>nul || echo [VRAM] GPU clear skipped
 echo.
 
 echo.
@@ -99,18 +78,18 @@ set SAGE_CUDA_ARCH=89
 REM FLASH ATTENTION: DISABLED (manual attention is faster!)
 set ENABLE_FLASH_ATTENTION=0
 
-REM FP8 TRANSFORMER: DISABLED for quality (was 1)
-set ENABLE_FP8_TRANSFORMER=0
+REM FP8 TRANSFORMER: 1.3-1.5x speedup on Linear layers
+set ENABLE_FP8_TRANSFORMER=1
 
 REM TOKEN MERGING: DISABLED (quality takes priority)
 set ENABLE_TOKEN_MERGING=0
 
-REM FP8 ENCODER/DECODER: DISABLED for quality (was 1)
-set ENABLE_FP8_ENCODER=0
-set ENABLE_FP8_DECODER=0
+REM FP8 ENCODER/DECODER: 1.3-1.5x speedup
+set ENABLE_FP8_ENCODER=1
+set ENABLE_FP8_DECODER=1
 
-REM FP8 RFCNET: DISABLED for quality (was 1)
-set ENABLE_FP8_RFCNET=0
+REM FP8 RFCNET: 1.3-1.5x speedup
+set ENABLE_FP8_RFCNET=1
 
 REM DCNv4 RFCNET: ENABLED for best quality
 set ENABLE_DCNV4_RFCNET=1
@@ -145,16 +124,15 @@ set SEGMENT_MIN_LEN_FULL=3
 set SEGMENT_MERGE_GAP_FULL=10
 
 REM Max frames per segment (prevents OOM on long videos - splits into chunks)
-REM Reduced from 300→150 for VRAM safety with 600k pixel crops
-set MAX_SEGMENT_FRAMES=150
+set MAX_SEGMENT_FRAMES=300
 
 REM Max pixels (width*height) per segment's union bbox - prevents huge crops that slow processing
 REM 400000 = ~630x630, keeps per-frame under 200ms. Lower = more segments = faster per segment
 set MAX_SEGMENT_PIXELS=400000
 
 REM Max pixels AFTER padding - triggers segment splitting AND downsampling if exceeded
-REM 600k = ~775x775 max - original quality setting
-set MAX_CROP_PIXELS=600000
+REM 150k = ~387x387 max - very aggressive downsampling for safety
+set MAX_CROP_PIXELS=150000
 
 REM Background reference image for large watermark blending (leave empty to disable)
 REM The background is warped using optical flow and blended with ProPainter output

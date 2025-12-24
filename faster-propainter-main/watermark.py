@@ -582,20 +582,11 @@ def pipeline(
 
     # 🔥 EXTREME SPEED: Use numpy arrays directly if provided (skip disk I/O!)
     if frames_array is not None:
-        # Check if lazy loader (decompresses on-demand) vs pre-loaded list
-        is_lazy = hasattr(frames_array, 'compressed')  # LazyGPUFrameLoader has .compressed attr
-        if is_lazy:
-            print(f"[LAZY] Using LazyGPUFrameLoader - decompressing {len(frames_array)} frames on-demand...")
-
         # Convert numpy arrays (BGR) to PIL Images (RGB)
-        # For lazy loader: each frame[i] decompresses YUV420→BGR just-in-time
         frames = []
-        for i, frame_bgr in enumerate(frames_array):
+        for frame_bgr in frames_array:
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             frames.append(Image.fromarray(frame_rgb))
-            # Free GPU memory after conversion (for lazy loader)
-            if is_lazy and i % 50 == 0:
-                torch.cuda.empty_cache()
 
         # Derive metadata from arrays
         fps = save_fps  # Use provided fps or default
