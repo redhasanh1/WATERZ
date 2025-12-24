@@ -34,7 +34,7 @@ sys.path.insert(0, BASE_DIR)
 
 
 @celery.task(name='sam2.generate_masks_fullfps', bind=True)
-def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, bbox=None, frame_idx=0, api_base=None):
+def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, bbox=None, frame_idx=0, api_base=None, reid_mode=None):
     """
     Generate SAM2 masks at full FPS inside WSL2.
 

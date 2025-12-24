@@ -38,6 +38,11 @@ except ImportError:
     HAS_TRT = False
     print("[SAM2-WSL2] TensorRT predictor not available, using PyTorch for all frames")
 
+# =============================================================================
+# RESOLUTION CONFIGURATION - Single source of truth
+# =============================================================================
+TARGET_RESOLUTION = 480  # Change this ONE value to switch between 480p, 720p, 1080p
+
 # Try to import DALI for GPU-direct video decoding
 try:
     from nvidia.dali import pipeline_def, fn
@@ -67,7 +72,7 @@ except ImportError:
 # REVOLUTIONARY COMPRESSION CLASSES
 # =============================================================================
 
-def extract_to_h265(video_path, output_path, target_fps=None, max_height=720):
+def extract_to_h265(video_path, output_path, target_fps=None, max_height=TARGET_RESOLUTION):
     """
     Extract video to H.265 for GPU-accelerated decoding.
     Way smaller than JPG frames: ~70MB vs 4GB+ for 2000 frames.
@@ -118,7 +123,7 @@ class DALIFrameStreamer:
     Supports __getitem__ for random frame access needed by SAM2.
     """
 
-    def __init__(self, video_path, device_id=0, image_size=1024, max_height=720):
+    def __init__(self, video_path, device_id=0, image_size=1024, max_height=TARGET_RESOLUTION):
         if not HAS_DALI:
             raise RuntimeError("DALI not installed! pip install nvidia-dali-cuda120")
 
@@ -309,7 +314,7 @@ class DALIChunkedStreamer:
     - Zero lag at chunk boundaries
     """
 
-    def __init__(self, video_path, chunk_size=500, device_id=0, image_size=1024, max_height=720):
+    def __init__(self, video_path, chunk_size=500, device_id=0, image_size=1024, max_height=TARGET_RESOLUTION):
         import queue
         import threading
 
@@ -930,7 +935,7 @@ def init_state_yuv420(predictor, frames_dir, device="cuda"):
     return inference_state
 
 
-def init_state_dali(predictor, video_path, device="cuda", max_height=720, chunk_size=500):
+def init_state_dali(predictor, video_path, device="cuda", max_height=TARGET_RESOLUTION, chunk_size=500):
     """
     Initialize SAM2 inference state with DALI chunked GPU streaming.
     ZERO CPU RAM - frames load directly from disk to GPU in chunks!
@@ -1061,8 +1066,8 @@ def enable_optimizations():
         os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
 
 
-def extract_frames(video_path, output_dir, max_height=720):
-    """Extract frames from video, resized to 720p for faster loading"""
+def extract_frames(video_path, output_dir, max_height=TARGET_RESOLUTION):
+    """Extract frames from video, resized to 480p for faster loading"""
     if os.path.exists(output_dir):
         import shutil
         shutil.rmtree(output_dir)
@@ -1073,11 +1078,11 @@ def extract_frames(video_path, output_dir, max_height=720):
     orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    # Calculate resize dimensions (maintain aspect ratio)
+    # Calculate resize dimensions (maintain aspect ratio, ensure even dimensions)
     if orig_height > max_height:
         scale = max_height / orig_height
-        new_width = int(orig_width * scale)
-        new_height = max_height
+        new_width = int(orig_width * scale) // 2 * 2  # Ensure even for video codecs
+        new_height = max_height // 2 * 2              # Ensure even for video codecs
         print(f"[SAM2] Resizing {orig_width}x{orig_height} -> {new_width}x{new_height} (faster loading)")
     else:
         new_width, new_height = orig_width, orig_height
@@ -1188,7 +1193,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
 
     # Check if DALI streaming is enabled
     USE_DALI_STREAMING = os.getenv('USE_DALI_STREAMING', '0').lower() in ('1', 'true', 'yes', 'on')
-    SAM2_MAX_HEIGHT = int(os.getenv('SAM2_MAX_HEIGHT', '720'))
+    SAM2_MAX_HEIGHT = int(os.getenv('SAM2_MAX_HEIGHT', str(TARGET_RESOLUTION)))
 
     # Create output directory
     os.makedirs(output_masks_dir, exist_ok=True)
@@ -1526,7 +1531,7 @@ def main():
 
     # Check if DALI streaming is enabled
     USE_DALI_STREAMING = os.getenv('USE_DALI_STREAMING', '0').lower() in ('1', 'true', 'yes', 'on')
-    SAM2_MAX_HEIGHT = int(os.getenv('SAM2_MAX_HEIGHT', '720'))
+    SAM2_MAX_HEIGHT = int(os.getenv('SAM2_MAX_HEIGHT', str(TARGET_RESOLUTION)))
 
     if USE_DALI_STREAMING and HAS_DALI:
         # DALI MODE: Skip frame extraction - stream directly from video!

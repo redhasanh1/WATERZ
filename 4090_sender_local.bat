@@ -30,7 +30,7 @@ echo.
 REM REVOLUTIONARY STREAMING: DALI GPU-direct video decode
 REM Requires: pip install nvidia-dali-cuda120 (in WSL2)
 set USE_DALI_STREAMING=1
-set SAM2_MAX_HEIGHT=720
+set SAM2_MAX_HEIGHT=480
 echo [DALI] GPU-direct streaming: %USE_DALI_STREAMING%
 echo.
 
