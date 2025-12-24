@@ -5601,15 +5601,19 @@ def objrem_status(job_id):
 
 @app.route('/api/object-removal/export', methods=['POST', 'OPTIONS'])
 def objrem_export():
-    """Start ProPainter inpainting via propainter_local queue"""
+    """Apply simple effects (blur, greenscreen, color) and export video"""
     if request.method == 'OPTIONS':
         return ('', 204)
 
     try:
         data = request.json
         job_id = data.get('job_id')
-        operation = data.get('operation', 'remove')  # remove, blur, pixelate, etc.
+        operation = data.get('operation', 'keep_object')  # keep_object, remove_object, blur_inside, blur_outside
+        background = data.get('background', 'color')  # transparent, color, blur
+        bg_color = data.get('bg_color', '#00FF00')  # hex color
+        blur_amount = data.get('blur_amount', 25)
         dilation = data.get('dilation', 4)
+        output_format = data.get('format', 'mp4')
 
         if not job_id:
             return jsonify({'status': 'error', 'message': 'Missing job_id'}), 400
@@ -5620,60 +5624,49 @@ def objrem_export():
         if not job:
             return jsonify({'status': 'error', 'message': 'Job not found'}), 404
 
-        masks_dir = job.get('masks_dir') or job.get('wsl_masks_dir')
-        if not masks_dir:
+        masks_url = job.get('masks_url')
+        if not masks_url:
             return jsonify({'status': 'error', 'message': 'No masks available - run tracking first'}), 400
 
         # Update status
         redis_client.hset(f"objrem:{job_id}", mapping={
             'status': 'inpainting',
             'progress': '0',
-            'message': 'Starting ProPainter...'
+            'message': 'Applying effects...'
         })
 
         # Get video URL
         video_url = job.get('cdn_url', '')
         if not video_url.startswith('http'):
-            video_url = job.get('local_path', '')
+            video_url = job.get('video_url', '')
 
-        points_str = job.get('points', '[]')
-        points = json.loads(points_str)
-        width = int(job.get('width', 0))
-        height = int(job.get('height', 0))
-        frame_index = int(job.get('frame_index', 0))
-
-        # Submit to propainter_local queue
+        # Submit to WSL SAM2 worker (simple effects, no ProPainter!)
         from celery import signature
-        task_id = f"inpaint_{job_id}"
+        task_id = f"simplefx_{job_id}"
 
         s2 = signature(
-            'watermark._continue_after_masks',
-            args=[
-                {'masks_dir': masks_dir},  # sam2_result
-                video_url,
-                job_id,
-                points,
-                width,
-                height,
-                frame_index,
-                None  # api_base
-            ],
+            'sam2.apply_simple_effects',
+            args=[video_url, masks_url],
             kwargs={
                 'operation': operation,
-                'dilation': dilation
+                'background': background,
+                'bg_color': bg_color,
+                'blur_amount': blur_amount,
+                'dilation': dilation,
+                'output_format': output_format
             },
-            queue='propainter_local'
+            queue='wsl_sam2_local'
         )
         result = s2.apply_async(task_id=task_id)
 
         redis_client.hset(f"objrem:{job_id}", 'celery_task_id', task_id)
 
-        print(f"[OBJREM-EXPORT] Submitted task {task_id} for job {job_id}")
-        print(f"[OBJREM-EXPORT] Operation: {operation}, Dilation: {dilation}")
+        print(f"[OBJREM-EXPORT] Submitted simple effects task {task_id}")
+        print(f"[OBJREM-EXPORT] Operation: {operation}, Background: {background}, Color: {bg_color}")
 
         return jsonify({
             'status': 'success',
-            'message': 'Inpainting started',
+            'message': 'Processing started',
             'job_id': job_id,
             'task_id': task_id
         })

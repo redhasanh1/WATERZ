@@ -420,3 +420,231 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
         'fps': float(fps),
         'mode': 'yolo',  # Tell receiver this was YOLO mode (use 4 workers)
     }
+
+
+@celery.task(name='sam2.apply_simple_effects', bind=True)
+def apply_simple_effects(self, video_url, masks_url, operation='keep_object', background='color', bg_color='#00FF00', blur_amount=25, dilation=4, output_format='mp4'):
+    """
+    Apply simple mask-based effects (blur, greenscreen, color fill) and encode video.
+    No ProPainter needed - just simple OpenCV operations.
+
+    Args:
+        video_url: URL to download video from
+        masks_url: URL to download masks zip from
+        operation: keep_object, remove_object, blur_inside, blur_outside, fill_inside, fill_outside
+        background: transparent, color, blur
+        bg_color: hex color like '#00FF00'
+        blur_amount: blur kernel size
+        dilation: mask dilation iterations
+        output_format: mp4 or webm
+
+    Returns:
+        dict with cdn_url of output video
+    """
+    import cv2
+    import numpy as np
+    import requests
+    import subprocess
+    import tempfile
+
+    print(f"[SIMPLE-FX] Starting: {operation}, bg={background}, color={bg_color}")
+    self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Downloading video...'})
+
+    # Download video
+    video_path = f"/tmp/simple_fx_video.mp4"
+    print(f"[SIMPLE-FX] Downloading video from {video_url}")
+    r = requests.get(video_url, timeout=300)
+    r.raise_for_status()
+    with open(video_path, 'wb') as f:
+        f.write(r.content)
+    print(f"[SIMPLE-FX] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
+
+    self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Downloading masks...'})
+
+    # Download and extract masks
+    masks_dir = "/tmp/simple_fx_masks"
+    if os.path.exists(masks_dir):
+        shutil.rmtree(masks_dir)
+    os.makedirs(masks_dir)
+
+    print(f"[SIMPLE-FX] Downloading masks from {masks_url}")
+    r = requests.get(masks_url, timeout=300)
+    r.raise_for_status()
+    zip_path = "/tmp/simple_fx_masks.zip"
+    with open(zip_path, 'wb') as f:
+        f.write(r.content)
+
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        zf.extractall(masks_dir)
+    os.remove(zip_path)
+    mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
+    print(f"[SIMPLE-FX] Extracted {len(mask_files)} masks")
+
+    self.update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Processing frames...'})
+
+    # Open video
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Failed to open video: {video_path}")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # Parse color
+    bg_color = bg_color.lstrip('#')
+    color_rgb = tuple(int(bg_color[i:i+2], 16) for i in (0, 2, 4))
+    color_bgr = (color_rgb[2], color_rgb[1], color_rgb[0])  # BGR for OpenCV
+
+    # Output to temp frames dir
+    output_frames_dir = "/tmp/simple_fx_output"
+    if os.path.exists(output_frames_dir):
+        shutil.rmtree(output_frames_dir)
+    os.makedirs(output_frames_dir)
+
+    blur_kernel = blur_amount * 2 + 1
+    frame_idx = 0
+
+    print(f"[SIMPLE-FX] Processing {total_frames} frames, operation={operation}")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Get mask for this frame
+        if frame_idx < len(mask_files):
+            mask = cv2.imread(mask_files[frame_idx], cv2.IMREAD_GRAYSCALE)
+            if mask is None:
+                mask = np.zeros((height, width), dtype=np.uint8)
+        else:
+            mask = np.zeros((height, width), dtype=np.uint8)
+
+        # Resize mask if needed
+        if mask.shape[:2] != (height, width):
+            mask = cv2.resize(mask, (width, height))
+
+        # Apply dilation
+        if dilation > 0:
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.dilate(mask, kernel, iterations=dilation)
+
+        # Apply operation
+        mask_f = mask.astype(np.float32) / 255.0
+        mask_3ch = np.stack([mask_f] * 3, axis=-1)
+        inv_mask_3ch = 1 - mask_3ch
+
+        if operation == 'keep_object':
+            if background == 'transparent':
+                # Will handle in encoding
+                result = frame
+            elif background == 'blur':
+                blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+                result = (frame * mask_3ch + blurred * inv_mask_3ch).astype(np.uint8)
+            else:  # color
+                bg = np.full_like(frame, color_bgr, dtype=np.uint8)
+                result = (frame * mask_3ch + bg * inv_mask_3ch).astype(np.uint8)
+
+        elif operation == 'remove_object':
+            if background == 'blur':
+                blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+                result = (frame * inv_mask_3ch + blurred * mask_3ch).astype(np.uint8)
+            else:  # color
+                fill = np.full_like(frame, color_bgr, dtype=np.uint8)
+                result = (frame * inv_mask_3ch + fill * mask_3ch).astype(np.uint8)
+
+        elif operation == 'blur_inside':
+            blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+            result = (blurred * mask_3ch + frame * inv_mask_3ch).astype(np.uint8)
+
+        elif operation == 'blur_outside':
+            blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+            result = (frame * mask_3ch + blurred * inv_mask_3ch).astype(np.uint8)
+
+        else:
+            result = frame
+
+        # Save frame
+        cv2.imwrite(f"{output_frames_dir}/{frame_idx:06d}.png", result)
+        frame_idx += 1
+
+        if frame_idx % 30 == 0:
+            progress = 25 + int(50 * frame_idx / total_frames)
+            self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Processing frame {frame_idx}/{total_frames}'})
+
+    cap.release()
+    print(f"[SIMPLE-FX] Processed {frame_idx} frames")
+
+    self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Encoding video...'})
+
+    # Encode with ffmpeg
+    output_path = f"/tmp/simple_fx_output.{output_format}"
+    ffmpeg_cmd = [
+        'ffmpeg', '-y',
+        '-framerate', str(fps),
+        '-i', f'{output_frames_dir}/%06d.png',
+        '-i', video_path,  # For audio
+        '-map', '0:v',
+        '-map', '1:a?',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '18',
+        '-c:a', 'aac',
+        '-shortest',
+        output_path
+    ]
+
+    print(f"[SIMPLE-FX] Encoding: {' '.join(ffmpeg_cmd)}")
+    subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
+    print(f"[SIMPLE-FX] Encoded to {output_path}")
+
+    self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Uploading to CDN...'})
+
+    # Upload to B2
+    output_url = upload_video_to_b2(output_path)
+
+    # Cleanup
+    shutil.rmtree(masks_dir, ignore_errors=True)
+    shutil.rmtree(output_frames_dir, ignore_errors=True)
+    os.remove(video_path)
+    os.remove(output_path)
+
+    print(f"[SIMPLE-FX] Complete! CDN URL: {output_url}")
+
+    return {
+        'status': 'success',
+        'cdn_url': output_url,
+    }
+
+
+def upload_video_to_b2(video_path):
+    """Upload video to B2 and return CDN URL."""
+    from b2sdk.v2 import B2Api, InMemoryAccountInfo
+
+    B2_KEY_ID = os.getenv('B2_KEY_ID')
+    B2_APP_KEY = os.getenv('B2_APP_KEY')
+    B2_BUCKET = os.getenv('B2_BUCKET', 'watermarkz')
+    B2_CDN_URL = os.getenv('B2_CDN_URL', 'https://markz.humblewoslayer.workers.dev')
+
+    if not B2_KEY_ID or not B2_APP_KEY:
+        print("[B2] Warning: B2 credentials not set")
+        return None
+
+    video_id = os.path.basename(video_path).replace('.mp4', '').replace('.webm', '')
+    timestamp = int(time.time())
+    b2_filename = f"videos/{timestamp}_{video_id}.mp4"
+
+    print(f"[B2] Uploading video to {B2_BUCKET}...")
+    info = InMemoryAccountInfo()
+    b2_api = B2Api(info)
+    b2_api.authorize_account('production', B2_KEY_ID, B2_APP_KEY)
+    bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+
+    with open(video_path, 'rb') as f:
+        bucket.upload_bytes(f.read(), b2_filename)
+
+    video_url = f"{B2_CDN_URL}/{b2_filename}"
+    print(f"[B2] Upload complete: {video_url}")
+
+    return video_url
