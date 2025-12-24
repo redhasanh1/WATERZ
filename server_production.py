@@ -5628,7 +5628,10 @@ def objrem_export():
             return jsonify({'status': 'error', 'message': 'Job not found'}), 404
 
         masks_url = job.get('masks_url')
-        if not masks_url:
+        masks_dir_local = job.get('masks_dir')
+
+        # Accept either masks_url (B2) OR masks_dir (local) - both are valid
+        if not masks_url and not masks_dir_local:
             return jsonify({'status': 'error', 'message': 'No masks available - run tracking first'}), 400
 
         # Update status
@@ -5647,6 +5650,8 @@ def objrem_export():
         from celery import signature
         task_id = f"simplefx_{job_id}"
 
+        print(f"[OBJREM-EXPORT] masks_dir from Redis: {masks_dir_local}")
+
         s2 = signature(
             'sam2.apply_simple_effects',
             args=[video_url, masks_url],
@@ -5656,7 +5661,8 @@ def objrem_export():
                 'bg_color': bg_color,
                 'blur_amount': blur_amount,
                 'dilation': dilation,
-                'output_format': output_format
+                'output_format': output_format,
+                'masks_dir_local': masks_dir_local
             },
             queue='wsl_sam2_local'
         )
