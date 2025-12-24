@@ -165,10 +165,10 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
         masks_url = None
         masks_dir_result = masks_dir_wsl  # Return local path
     else:
-        # Upload masks to B2 CDN
+        # Upload masks to B2 CDN (but keep local copy for simple_effects)
         self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
         masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
-        masks_dir_result = None  # Masks uploaded, no local path
+        masks_dir_result = masks_dir_wsl  # Keep local path for simple_effects to use
 
     # Cleanup temporary files
     if os.path.exists(temp_frames_dir):
@@ -182,6 +182,22 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
             print(f"[CLEANUP] Removed temporary video: {video_path_wsl}")
         except Exception as e:
             print(f"[CLEANUP] Could not remove video: {e}")
+
+    # Update Redis directly (fixes race condition - export may be called before /status is polled)
+    task_id = self.request.id  # e.g., "objrem_e161aafea234"
+    if task_id and task_id.startswith('objrem_'):
+        job_id = task_id.replace('objrem_', '')
+        try:
+            import redis
+            redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+            redis_client.hset(f"objrem:{job_id}", mapping={
+                'masks_dir': masks_dir_result,
+                'masks_url': masks_url or '',
+                'status': 'completed'
+            })
+            print(f"[REDIS] Updated objrem:{job_id} with masks_dir={masks_dir_result}")
+        except Exception as e:
+            print(f"[REDIS] Failed to update job: {e}")
 
     return {
         'status': 'success',
@@ -245,10 +261,9 @@ def upload_masks_to_b2(masks_dir, video_path):
     upload_time = time.time() - upload_start
     print(f"[B2] Upload complete in {upload_time:.1f}s: {masks_url}")
 
-    # Cleanup local files
-    shutil.rmtree(masks_dir, ignore_errors=True)
+    # DON'T delete local masks - simple_effects will use them and clean up
     os.remove(zip_path)
-    print(f"[B2] Local masks cleaned up")
+    print(f"[B2] Keeping local masks at: {masks_dir}")
 
     return masks_url
 
@@ -423,20 +438,21 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
 
 
 @celery.task(name='sam2.apply_simple_effects', bind=True)
-def apply_simple_effects(self, video_url, masks_url, operation='keep_object', background='color', bg_color='#00FF00', blur_amount=25, dilation=4, output_format='mp4'):
+def apply_simple_effects(self, video_url, masks_url, operation='keep_object', background='color', bg_color='#00FF00', blur_amount=25, dilation=4, output_format='mp4', masks_dir_local=None):
     """
     Apply simple mask-based effects (blur, greenscreen, color fill) and encode video.
     No ProPainter needed - just simple OpenCV operations.
 
     Args:
         video_url: URL to download video from
-        masks_url: URL to download masks zip from
+        masks_url: URL to download masks zip from (fallback if local not available)
         operation: keep_object, remove_object, blur_inside, blur_outside, fill_inside, fill_outside
         background: transparent, color, blur
         bg_color: hex color like '#00FF00'
         blur_amount: blur kernel size
         dilation: mask dilation iterations
         output_format: mp4 or webm
+        masks_dir_local: Local path to masks (avoids downloading from B2)
 
     Returns:
         dict with cdn_url of output video
@@ -459,26 +475,32 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         f.write(r.content)
     print(f"[SIMPLE-FX] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
 
-    self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Downloading masks...'})
+    self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Loading masks...'})
 
-    # Download and extract masks
-    masks_dir = "/tmp/simple_fx_masks"
-    if os.path.exists(masks_dir):
-        shutil.rmtree(masks_dir)
-    os.makedirs(masks_dir)
+    # Use local masks if available, otherwise download from B2
+    if masks_dir_local and os.path.exists(masks_dir_local):
+        masks_dir = masks_dir_local
+        mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
+        print(f"[SIMPLE-FX] Using LOCAL masks: {masks_dir} ({len(mask_files)} files)")
+    else:
+        # Download and extract masks from B2
+        masks_dir = "/tmp/simple_fx_masks"
+        if os.path.exists(masks_dir):
+            shutil.rmtree(masks_dir)
+        os.makedirs(masks_dir)
 
-    print(f"[SIMPLE-FX] Downloading masks from {masks_url}")
-    r = requests.get(masks_url, timeout=300)
-    r.raise_for_status()
-    zip_path = "/tmp/simple_fx_masks.zip"
-    with open(zip_path, 'wb') as f:
-        f.write(r.content)
+        print(f"[SIMPLE-FX] Downloading masks from {masks_url}")
+        r = requests.get(masks_url, timeout=300)
+        r.raise_for_status()
+        zip_path = "/tmp/simple_fx_masks.zip"
+        with open(zip_path, 'wb') as f:
+            f.write(r.content)
 
-    with zipfile.ZipFile(zip_path, 'r') as zf:
-        zf.extractall(masks_dir)
-    os.remove(zip_path)
-    mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
-    print(f"[SIMPLE-FX] Extracted {len(mask_files)} masks")
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(masks_dir)
+        os.remove(zip_path)
+        mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
+        print(f"[SIMPLE-FX] Extracted {len(mask_files)} masks")
 
     self.update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Processing frames...'})
 
@@ -562,7 +584,18 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
             result = (frame * mask_3ch + blurred * inv_mask_3ch).astype(np.uint8)
 
+        elif operation == 'fill_inside':
+            # Fill inside mask with color (object gets colored)
+            fill = np.full_like(frame, color_bgr, dtype=np.uint8)
+            result = (frame * inv_mask_3ch + fill * mask_3ch).astype(np.uint8)
+
+        elif operation == 'fill_outside':
+            # Fill outside mask with color (background gets colored, object stays)
+            fill = np.full_like(frame, color_bgr, dtype=np.uint8)
+            result = (frame * mask_3ch + fill * inv_mask_3ch).astype(np.uint8)
+
         else:
+            print(f"[SIMPLE-FX] WARNING: Unknown operation '{operation}', using original frame")
             result = frame
 
         # Save frame
@@ -578,8 +611,8 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
 
     self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Encoding video...'})
 
-    # Encode with ffmpeg
-    output_path = f"/tmp/simple_fx_output.{output_format}"
+    # Encode with ffmpeg - use NVENC GPU encoding
+    output_path = "/tmp/simple_fx_output.mp4"
     ffmpeg_cmd = [
         'ffmpeg', '-y',
         '-framerate', str(fps),
@@ -587,16 +620,20 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         '-i', video_path,  # For audio
         '-map', '0:v',
         '-map', '1:a?',
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '18',
+        '-c:v', 'h264_nvenc',  # GPU encoding
+        '-preset', 'p4',       # NVENC preset (p1=fastest, p7=best quality)
+        '-cq', '18',           # Constant quality (like CRF)
+        '-pix_fmt', 'yuv420p',
         '-c:a', 'aac',
         '-shortest',
         output_path
     ]
 
     print(f"[SIMPLE-FX] Encoding: {' '.join(ffmpeg_cmd)}")
-    subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
+    result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[SIMPLE-FX] FFmpeg error: {result.stderr}")
+        raise RuntimeError(f"FFmpeg encoding failed: {result.stderr}")
     print(f"[SIMPLE-FX] Encoded to {output_path}")
 
     self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Uploading to CDN...'})

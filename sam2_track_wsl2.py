@@ -360,8 +360,22 @@ class DALIChunkedStreamer:
     def _convert_to_h265(self, input_path):
         """Convert video to DALI-friendly H.265 stream. Returns (path, orig_frame_count)"""
         import tempfile
+        import requests
 
-        cap = cv2.VideoCapture(input_path)
+        # If input is URL, download first (ffmpeg has issues streaming from HTTPS)
+        local_input = input_path
+        downloaded_file = None
+        if input_path.startswith('http://') or input_path.startswith('https://'):
+            print(f"[DALI-ASYNC] Downloading video from URL...")
+            downloaded_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+            r = requests.get(input_path, timeout=300)
+            r.raise_for_status()
+            downloaded_file.write(r.content)
+            downloaded_file.close()
+            local_input = downloaded_file.name
+            print(f"[DALI-ASYNC] Downloaded {len(r.content) / 1024 / 1024:.1f}MB to {local_input}")
+
+        cap = cv2.VideoCapture(local_input)
         orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         orig_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # ORIGINAL frame count (not converted!)
@@ -382,7 +396,7 @@ class DALIChunkedStreamer:
         temp_file.close()
 
         cmd = [
-            'ffmpeg', '-y', '-i', input_path,
+            'ffmpeg', '-y', '-i', local_input,
             '-c:v', 'hevc_nvenc', '-cq', '18', '-preset', 'p4',
             '-vf', f'scale={new_width}:{new_height}',
             '-pix_fmt', 'yuv420p',
@@ -391,7 +405,18 @@ class DALIChunkedStreamer:
         ]
 
         print(f"[DALI-ASYNC] Converting to H.265: {orig_width}x{orig_height} -> {new_width}x{new_height}")
-        subprocess.run(cmd, capture_output=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        # Clean up downloaded file
+        if downloaded_file:
+            try:
+                os.remove(downloaded_file.name)
+            except:
+                pass
+
+        if result.returncode != 0:
+            print(f"[DALI-ASYNC] FFmpeg error: {result.stderr}")
+            raise RuntimeError(f"FFmpeg H.265 conversion failed: {result.stderr}")
 
         size_mb = os.path.getsize(temp_path) / (1024**2)
         print(f"[DALI-ASYNC] H.265 video: {size_mb:.1f}MB")
@@ -441,75 +466,114 @@ class DALIChunkedStreamer:
     def _start_background_loader(self):
         """Spawn daemon thread that continuously prefetches chunks using DALI"""
         import threading
+        import traceback
 
         def loader_worker():
-            chunk_num = 0
-            total_frames_read = 0
-            num_chunks = (self._length + self.chunk_size - 1) // self.chunk_size
+            try:
+                chunk_num = 0
+                total_frames_read = 0
+                num_chunks = (self._length + self.chunk_size - 1) // self.chunk_size
 
-            # DALI breaks on last 2 chunks - use OpenCV for those
-            dali_chunk_limit = max(0, num_chunks - 2)
-            print(f"[DALI-PREFETCH] {num_chunks} chunks total, DALI for 0-{dali_chunk_limit-1}, OpenCV for last 2")
+                # DALI breaks on last 2 chunks - use OpenCV for those
+                dali_chunk_limit = max(0, num_chunks - 2)
+                print(f"[DALI-PREFETCH] {num_chunks} chunks total, DALI for 0-{dali_chunk_limit-1}, OpenCV for last 2")
 
-            # === PHASE 1: DALI for chunks 0 to (num_chunks - 3) ===
-            while not self.stop_event.is_set() and chunk_num < dali_chunk_limit:
-                chunk_start = chunk_num * self.chunk_size
-                chunk_end = min(chunk_start + self.chunk_size, self._length)
-                frames_needed = chunk_end - chunk_start
-
-                try:
-                    output = self.pipe.run()
-                    raw_tensor = torch.from_dlpack(output[0].as_tensor())
-                    raw_tensor = raw_tensor.squeeze(0)  # [seq, H, W, C]
-                    actual_frames = raw_tensor.shape[0]
-
-                    if actual_frames > frames_needed:
-                        raw_tensor = raw_tensor[:frames_needed]
-                        actual_frames = frames_needed
-
-                    total_frames_read += actual_frames
-                    self.load_queue.put((chunk_start, raw_tensor))
-                    print(f"[DALI] Chunk {chunk_num}: frames {chunk_start}-{chunk_start+actual_frames-1}")
-                    chunk_num += 1
-
-                except Exception as e:
-                    print(f"[DALI] Error at chunk {chunk_num}: {e}")
-                    break
-
-            # === PHASE 2: OpenCV for last 2 chunks ===
-            if chunk_num < num_chunks:
-                print(f"[OPENCV] Taking over for chunks {chunk_num} to {num_chunks-1}")
-                cap = cv2.VideoCapture(self.h265_path)
-                cv_start_frame = chunk_num * self.chunk_size
-                cap.set(cv2.CAP_PROP_POS_FRAMES, cv_start_frame)
-
-                while chunk_num < num_chunks and not self.stop_event.is_set():
+                # === PHASE 1: DALI for chunks 0 to (num_chunks - 3) ===
+                while not self.stop_event.is_set() and chunk_num < dali_chunk_limit:
                     chunk_start = chunk_num * self.chunk_size
                     chunk_end = min(chunk_start + self.chunk_size, self._length)
                     frames_needed = chunk_end - chunk_start
 
-                    frames_list = []
-                    for _ in range(frames_needed):
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
-                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        frames_list.append(frame_rgb)
+                    try:
+                        print(f"[DALI] Running pipe for chunk {chunk_num}...")
+                        output = self.pipe.run()
+                        raw_tensor = torch.from_dlpack(output[0].as_tensor())
+                        raw_tensor = raw_tensor.squeeze(0)  # [seq, H, W, C]
+                        actual_frames = raw_tensor.shape[0]
 
-                    if len(frames_list) == 0:
+                        if actual_frames > frames_needed:
+                            raw_tensor = raw_tensor[:frames_needed]
+                            actual_frames = frames_needed
+
+                        total_frames_read += actual_frames
+                        # Use timeout on put to avoid deadlock
+                        self.load_queue.put((chunk_start, raw_tensor), timeout=60)
+                        print(f"[DALI] Chunk {chunk_num}: frames {chunk_start}-{chunk_start+actual_frames-1}")
+                        chunk_num += 1
+
+                    except queue.Full:
+                        print(f"[DALI] Queue full at chunk {chunk_num}, waiting...")
+                        # Keep trying until stop is set
+                        while not self.stop_event.is_set():
+                            try:
+                                self.load_queue.put((chunk_start, raw_tensor), timeout=5)
+                                chunk_num += 1
+                                break
+                            except queue.Full:
+                                continue
+                    except Exception as e:
+                        print(f"[DALI] Error at chunk {chunk_num}: {e}")
+                        traceback.print_exc()
                         break
+                # === PHASE 2: OpenCV for last 2 chunks ===
+                if chunk_num < num_chunks:
+                    print(f"[OPENCV] Taking over for chunks {chunk_num} to {num_chunks-1}")
+                    cap = cv2.VideoCapture(self.h265_path)
 
-                    frames_np = np.stack(frames_list, axis=0)
-                    frames_tensor = torch.from_numpy(frames_np).to(f'cuda:{self.device_id}')
+                    if not cap.isOpened():
+                        print(f"[OPENCV] ERROR: Failed to open {self.h265_path}")
+                    else:
+                        cv_total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                        print(f"[OPENCV] Opened video: {cv_total_frames} frames reported")
 
-                    total_frames_read += len(frames_list)
-                    self.load_queue.put((chunk_start, frames_tensor))
-                    print(f"[OPENCV] Chunk {chunk_num}: frames {chunk_start}-{chunk_start+len(frames_list)-1}")
-                    chunk_num += 1
+                    cv_start_frame = chunk_num * self.chunk_size
+                    print(f"[OPENCV] Seeking to frame {cv_start_frame}...")
 
-                cap.release()
+                    # H.265 seeking is unreliable - read sequentially to skip frames
+                    print(f"[OPENCV] Skipping {cv_start_frame} frames sequentially (H.265 seek unreliable)...")
+                    for skip_i in range(cv_start_frame):
+                        ret, _ = cap.read()
+                        if not ret:
+                            print(f"[OPENCV] ERROR: Failed to skip frame {skip_i}/{cv_start_frame}")
+                            break
+                    print(f"[OPENCV] Skipped to frame {cv_start_frame}, now reading chunks...")
 
-            print(f"[LOADER] Finished: {chunk_num} chunks, {total_frames_read} frames")
+                    while chunk_num < num_chunks and not self.stop_event.is_set():
+                        chunk_start = chunk_num * self.chunk_size
+                        chunk_end = min(chunk_start + self.chunk_size, self._length)
+                        frames_needed = chunk_end - chunk_start
+                        print(f"[OPENCV] Reading chunk {chunk_num}: need {frames_needed} frames...")
+
+                        frames_list = []
+                        for frame_i in range(frames_needed):
+                            ret, frame = cap.read()
+                            if not ret:
+                                print(f"[OPENCV] cap.read() returned False at frame {frame_i}/{frames_needed}")
+                                break
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            frames_list.append(frame_rgb)
+
+                        print(f"[OPENCV] Got {len(frames_list)}/{frames_needed} frames for chunk {chunk_num}")
+
+                        if len(frames_list) == 0:
+                            print(f"[OPENCV] ERROR: Zero frames read, breaking")
+                            break
+
+                        frames_np = np.stack(frames_list, axis=0)
+                        frames_tensor = torch.from_numpy(frames_np).to(f'cuda:{self.device_id}')
+
+                        total_frames_read += len(frames_list)
+                        self.load_queue.put((chunk_start, frames_tensor))
+                        print(f"[OPENCV] Chunk {chunk_num}: frames {chunk_start}-{chunk_start+len(frames_list)-1} queued")
+                        chunk_num += 1
+
+                    cap.release()
+
+                print(f"[LOADER] Finished: {chunk_num} chunks, {total_frames_read} frames")
+
+            except Exception as e:
+                print(f"[DALI-LOADER] Fatal error in loader thread: {e}")
+                traceback.print_exc()
 
         self._loader_thread = threading.Thread(target=loader_worker, daemon=True)
         self._loader_thread.start()
@@ -1068,12 +1132,28 @@ def enable_optimizations():
 
 def extract_frames(video_path, output_dir, max_height=TARGET_RESOLUTION):
     """Extract frames from video, resized to 480p for faster loading"""
+    import tempfile
+    import requests
+
     if os.path.exists(output_dir):
         import shutil
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    cap = cv2.VideoCapture(video_path)
+    # Download video first if it's a URL (cv2 has issues with HTTPS streaming)
+    local_path = video_path
+    downloaded_file = None
+    if video_path.startswith('http://') or video_path.startswith('https://'):
+        print(f"[SAM2] Downloading video from URL...")
+        downloaded_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        r = requests.get(video_path, timeout=300)
+        r.raise_for_status()
+        downloaded_file.write(r.content)
+        downloaded_file.close()
+        local_path = downloaded_file.name
+        print(f"[SAM2] Downloaded {len(r.content) / 1024 / 1024:.1f}MB")
+
+    cap = cv2.VideoCapture(local_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -1101,6 +1181,14 @@ def extract_frames(video_path, output_dir, max_height=TARGET_RESOLUTION):
         frame_idx += 1
 
     cap.release()
+
+    # Clean up downloaded file
+    if downloaded_file:
+        try:
+            os.remove(downloaded_file.name)
+        except:
+            pass
+
     print(f"[SAM2] Extracted {frame_idx} frames @ {fps:.1f} fps")
     return frame_idx, fps, orig_width, orig_height, new_width, new_height
 
