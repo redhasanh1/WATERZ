@@ -5245,8 +5245,9 @@ def objrem_upload():
         file.save(temp_path)
 
         # Get video info using ffprobe (cv2 not available on Railway)
+        ffprobe = FFPROBE_EXE or 'ffprobe'  # Fallback to system ffprobe
         probe_cmd = [
-            FFPROBE_EXE, '-v', 'error',
+            ffprobe, '-v', 'error',
             '-select_streams', 'v:0',
             '-show_entries', 'stream=width,height,r_frame_rate,nb_frames,duration',
             '-of', 'json',
