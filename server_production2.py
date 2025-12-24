@@ -2252,6 +2252,14 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         masks_url = sam2_result.get('masks_url')
         masks_dir = sam2_result.get('masks_dir')
 
+        # Convert WSL path to Windows path if needed
+        if masks_dir and masks_dir.startswith('/mnt/'):
+            # /mnt/d/watermarkz/... → D:\watermarkz\...
+            drive = masks_dir[5].upper()  # 'd' → 'D'
+            rest = masks_dir[7:].replace('/', '\\')  # watermarkz/... → watermarkz\...
+            masks_dir = f"{drive}:\\{rest}"
+            print(f"[PATH] Converted WSL→Windows: {masks_dir}")
+
         if masks_url and not masks_dir:
             # Download masks from B2 CDN
             print(f"[B2] Downloading masks from {masks_url}...")

@@ -55,10 +55,11 @@ def allowed_file(filename):
 def serve_index():
     return send_from_directory('web', 'object-removal.html')
 
-@app.route('/backgroundremover')
-def serve_backgroundremover():
-    """Hidden route for background remover (production)"""
-    return send_from_directory('web', 'object-removal.html')
+# Background remover and video tools routes disabled for now
+# @app.route('/backgroundremover')
+# def serve_backgroundremover():
+#     """Hidden route for background remover (production)"""
+#     return send_from_directory('web', 'object-removal.html')
 
 @app.route('/<path:path>')
 def serve_static(path):
