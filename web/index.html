@@ -3995,6 +3995,14 @@ console.log('[INLINE] MaskDrawer class loaded');
                 video.addEventListener('timeupdate', () => {
                     if (sam2Selector) sam2Selector.onVideoTimeUpdate();
                 });
+
+                // AUTO-ENABLE: Select Object mode by default (users can just click)
+                sam2Selector.enabled = true;
+                canvas.style.pointerEvents = 'auto';
+                canvas.style.cursor = 'crosshair';
+                window.currentDrawingTool = 'click';
+                console.log('[SAM2] Auto-enabled Select Object mode');
+
                 video.addEventListener('seeked', () => {
                     if (sam2Selector) {
                         // iOS Safari fix: force frame render by play/pause trick
