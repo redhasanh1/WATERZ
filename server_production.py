@@ -5208,6 +5208,483 @@ def backgroundremover_page():
     return send_file('web/object-removal.html')
 
 
+# ============================================================
+# OBJECT REMOVAL API (Background Remover)
+# - Videos uploaded to B2, metadata in Redis
+# - SAM2 tracking via wsl_sam2_local queue
+# - ProPainter inpainting via propainter_local queue
+# ============================================================
+
+@app.route('/api/object-removal/upload', methods=['POST', 'OPTIONS'])
+def objrem_upload():
+    """Upload video for object removal - saves to B2"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if 'video' not in request.files:
+        return jsonify({'status': 'error', 'message': 'No video file'}), 400
+
+    file = request.files['video']
+    if file.filename == '':
+        return jsonify({'status': 'error', 'message': 'No selected file'}), 400
+
+    # Validate extension
+    ext = os.path.splitext(file.filename)[1].lower()
+    allowed_exts = {'.mp4', '.mov', '.avi', '.webm', '.mkv'}
+    if ext not in allowed_exts:
+        return jsonify({'status': 'error', 'message': f'File type {ext} not allowed'}), 400
+
+    try:
+        import cv2
+        import tempfile
+
+        # Generate unique job ID
+        job_id = uuid.uuid4().hex[:12]
+
+        # Save temporarily to get video info
+        temp_path = os.path.join(TEMP_DIR, f"objrem_{job_id}{ext}")
+        file.save(temp_path)
+
+        # Get video info
+        cap = cv2.VideoCapture(temp_path)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = frame_count / fps if fps > 0 else 0
+        cap.release()
+
+        # Upload to B2
+        remote_path = f"objrem/{job_id}{ext}"
+        cdn_url = upload_to_b2(temp_path, remote_path)
+
+        if not cdn_url:
+            # B2 disabled - keep local file
+            cdn_url = f"/api/object-removal/video/{job_id}"
+            print(f"[OBJREM] B2 disabled, using local: {temp_path}")
+        else:
+            # B2 success - can remove temp file (optional, keep for now)
+            print(f"[OBJREM] Uploaded to B2: {cdn_url}")
+
+        # Store metadata in Redis
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        redis_client.hset(f"objrem:{job_id}", mapping={
+            'status': 'uploaded',
+            'cdn_url': cdn_url,
+            'local_path': temp_path,
+            'width': str(width),
+            'height': str(height),
+            'fps': str(fps),
+            'frame_count': str(frame_count),
+            'duration': str(duration),
+            'points': '[]',
+            'frame_index': '0'
+        })
+        redis_client.expire(f"objrem:{job_id}", 86400 * 7)  # 7 days
+
+        print(f"[OBJREM] Upload job {job_id}: {width}x{height} @ {fps:.1f}fps, {frame_count} frames")
+
+        return jsonify({
+            'status': 'success',
+            'job_id': job_id,
+            'video_url': f'/api/object-removal/video/{job_id}',
+            'width': width,
+            'height': height,
+            'fps': fps,
+            'frame_count': frame_count,
+            'duration': duration
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/object-removal/video/<job_id>')
+def objrem_video(job_id):
+    """Stream video - redirect to B2 CDN or serve local file"""
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        job = redis_client.hgetall(f"objrem:{job_id}")
+
+        if not job:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+        cdn_url = job.get('cdn_url', '')
+
+        # If CDN URL is a full URL (B2), redirect to it
+        if cdn_url.startswith('http'):
+            return redirect(cdn_url)
+
+        # Otherwise serve local file
+        local_path = job.get('local_path', '')
+        if local_path and os.path.exists(local_path):
+            return send_file(local_path, mimetype='video/mp4')
+
+        return jsonify({'status': 'error', 'message': 'Video not found'}), 404
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/object-removal/select', methods=['POST', 'OPTIONS'])
+def objrem_select():
+    """Store clicked point for SAM2 tracking"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        data = request.json
+        job_id = data.get('job_id')
+        points = data.get('points', [])
+        frame_index = data.get('frame_index', 0)
+
+        if not job_id:
+            return jsonify({'status': 'error', 'message': 'Missing job_id'}), 400
+
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        job = redis_client.hgetall(f"objrem:{job_id}")
+
+        if not job:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+        # Store points for tracking
+        redis_client.hset(f"objrem:{job_id}", mapping={
+            'points': json.dumps(points),
+            'frame_index': str(frame_index)
+        })
+
+        print(f"[OBJREM-SELECT] Job {job_id}: {len(points)} points at frame {frame_index}")
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Point selected - click "Remove Selected" to track',
+            'points': points,
+            'frame_index': frame_index,
+            'width': int(job.get('width', 0)),
+            'height': int(job.get('height', 0))
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/object-removal/auto-detect', methods=['POST', 'OPTIONS'])
+def objrem_auto_detect():
+    """Use YOLO to detect objects in first frame - dispatches to wsl_yolo_local"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        data = request.json
+        job_id = data.get('job_id')
+
+        if not job_id:
+            return jsonify({'status': 'error', 'message': 'Missing job_id'}), 400
+
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        job = redis_client.hgetall(f"objrem:{job_id}")
+
+        if not job:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+        # Dispatch YOLO detection task
+        from celery import signature
+        video_url = job.get('cdn_url', '')
+
+        task_id = f"yolo_{job_id}"
+        s1 = signature(
+            'yolo.detect_objects',
+            args=[video_url, 0],  # video_url, frame_index
+            queue='wsl_yolo_local'
+        )
+        result = s1.apply_async(task_id=task_id)
+
+        redis_client.hset(f"objrem:{job_id}", 'yolo_task_id', task_id)
+
+        print(f"[OBJREM-YOLO] Submitted task {task_id} for job {job_id}")
+
+        return jsonify({
+            'status': 'success',
+            'message': 'YOLO detection started',
+            'task_id': task_id
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/object-removal/track', methods=['POST', 'OPTIONS'])
+def objrem_track():
+    """Start full video tracking with SAM2 via wsl_sam2_local queue"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        data = request.json
+        job_id = data.get('job_id')
+
+        if not job_id:
+            return jsonify({'status': 'error', 'message': 'Missing job_id'}), 400
+
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        job = redis_client.hgetall(f"objrem:{job_id}")
+
+        if not job:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+        points_str = job.get('points', '[]')
+        points = json.loads(points_str)
+
+        if not points:
+            return jsonify({'status': 'error', 'message': 'No points selected'}), 400
+
+        # Update status
+        redis_client.hset(f"objrem:{job_id}", mapping={
+            'status': 'tracking',
+            'progress': '0',
+            'message': 'Submitting to SAM2 worker...'
+        })
+
+        # Get video URL (B2 CDN or local path)
+        video_url = job.get('cdn_url', '')
+        if not video_url.startswith('http'):
+            video_url = job.get('local_path', '')
+
+        frame_idx = int(job.get('frame_index', 0))
+
+        # Convert points to format expected by SAM2 worker
+        point_coords = [(p['x'], p['y']) for p in points]
+        labels = [p.get('label', 1) for p in points]
+
+        # WSL-native temp path for masks
+        wsl_masks_dir = f"/tmp/sam2_masks/{job_id}"
+
+        # Submit to wsl_sam2_local queue
+        from celery import signature
+        task_id = f"objrem_{job_id}"
+
+        s1 = signature(
+            'sam2.generate_masks_fullfps',
+            args=[video_url, wsl_masks_dir],
+            kwargs={
+                'prompt_mode': 'point',
+                'points': point_coords,
+                'labels': labels,
+                'frame_idx': frame_idx,
+                'api_base': None
+            },
+            queue='wsl_sam2_local'
+        )
+        result = s1.apply_async(task_id=task_id)
+
+        redis_client.hset(f"objrem:{job_id}", mapping={
+            'celery_task_id': task_id,
+            'wsl_masks_dir': wsl_masks_dir,
+            'message': 'Tracking in progress...'
+        })
+
+        print(f"[OBJREM-TRACK] Submitted task {task_id} for job {job_id}")
+        print(f"[OBJREM-TRACK] Points: {point_coords}, Frame: {frame_idx}")
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Tracking started via Celery',
+            'job_id': job_id,
+            'task_id': task_id
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/object-removal/status/<job_id>', methods=['GET', 'OPTIONS'])
+def objrem_status(job_id):
+    """Get job status from Redis/Celery"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        job = redis_client.hgetall(f"objrem:{job_id}")
+
+        if not job:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+        status = job.get('status', 'unknown')
+        task_id = job.get('celery_task_id')
+
+        # Check Celery task status if we have a task_id
+        if task_id and status in ['tracking', 'inpainting']:
+            try:
+                result = celery.AsyncResult(task_id)
+                if result.ready():
+                    if result.successful():
+                        task_result = result.result
+                        if isinstance(task_result, dict):
+                            # Update job with result
+                            if task_result.get('masks_dir'):
+                                redis_client.hset(f"objrem:{job_id}", 'masks_dir', task_result['masks_dir'])
+                            if task_result.get('cdn_url'):
+                                redis_client.hset(f"objrem:{job_id}", 'result_cdn_url', task_result['cdn_url'])
+                            status = 'completed' if task_result.get('cdn_url') else 'tracked'
+                            redis_client.hset(f"objrem:{job_id}", 'status', status)
+                    else:
+                        status = 'error'
+                        redis_client.hset(f"objrem:{job_id}", mapping={
+                            'status': 'error',
+                            'message': str(result.result)
+                        })
+                else:
+                    # Still running - get progress from task meta
+                    meta = result.info
+                    if isinstance(meta, dict):
+                        progress = meta.get('progress', 0)
+                        message = meta.get('message', '')
+                        if progress:
+                            redis_client.hset(f"objrem:{job_id}", 'progress', str(progress))
+                        if message:
+                            redis_client.hset(f"objrem:{job_id}", 'message', message)
+            except Exception as e:
+                print(f"[OBJREM-STATUS] Celery check error: {e}")
+
+        # Refresh job data
+        job = redis_client.hgetall(f"objrem:{job_id}")
+
+        return jsonify({
+            'status': job.get('status', 'unknown'),
+            'progress': int(job.get('progress', 0)),
+            'message': job.get('message', ''),
+            'masks_dir': job.get('masks_dir', ''),
+            'cdn_url': job.get('result_cdn_url', ''),
+            'width': int(job.get('width', 0)),
+            'height': int(job.get('height', 0))
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/object-removal/export', methods=['POST', 'OPTIONS'])
+def objrem_export():
+    """Start ProPainter inpainting via propainter_local queue"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        data = request.json
+        job_id = data.get('job_id')
+        operation = data.get('operation', 'remove')  # remove, blur, pixelate, etc.
+        dilation = data.get('dilation', 4)
+
+        if not job_id:
+            return jsonify({'status': 'error', 'message': 'Missing job_id'}), 400
+
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        job = redis_client.hgetall(f"objrem:{job_id}")
+
+        if not job:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+        masks_dir = job.get('masks_dir') or job.get('wsl_masks_dir')
+        if not masks_dir:
+            return jsonify({'status': 'error', 'message': 'No masks available - run tracking first'}), 400
+
+        # Update status
+        redis_client.hset(f"objrem:{job_id}", mapping={
+            'status': 'inpainting',
+            'progress': '0',
+            'message': 'Starting ProPainter...'
+        })
+
+        # Get video URL
+        video_url = job.get('cdn_url', '')
+        if not video_url.startswith('http'):
+            video_url = job.get('local_path', '')
+
+        points_str = job.get('points', '[]')
+        points = json.loads(points_str)
+        width = int(job.get('width', 0))
+        height = int(job.get('height', 0))
+        frame_index = int(job.get('frame_index', 0))
+
+        # Submit to propainter_local queue
+        from celery import signature
+        task_id = f"inpaint_{job_id}"
+
+        s2 = signature(
+            'watermark._continue_after_masks',
+            args=[
+                {'masks_dir': masks_dir},  # sam2_result
+                video_url,
+                job_id,
+                points,
+                width,
+                height,
+                frame_index,
+                None  # api_base
+            ],
+            kwargs={
+                'operation': operation,
+                'dilation': dilation
+            },
+            queue='propainter_local'
+        )
+        result = s2.apply_async(task_id=task_id)
+
+        redis_client.hset(f"objrem:{job_id}", 'celery_task_id', task_id)
+
+        print(f"[OBJREM-EXPORT] Submitted task {task_id} for job {job_id}")
+        print(f"[OBJREM-EXPORT] Operation: {operation}, Dilation: {dilation}")
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Inpainting started',
+            'job_id': job_id,
+            'task_id': task_id
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/object-removal/download/<job_id>')
+def objrem_download(job_id):
+    """Download result - redirect to B2 CDN or serve local file"""
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        job = redis_client.hgetall(f"objrem:{job_id}")
+
+        if not job:
+            return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+
+        result_url = job.get('result_cdn_url', '')
+
+        if result_url.startswith('http'):
+            return redirect(result_url)
+
+        # Try to find local result file
+        result_path = job.get('result_path', '')
+        if result_path and os.path.exists(result_path):
+            return send_file(result_path, as_attachment=True, download_name=f"result_{job_id}.mp4")
+
+        return jsonify({'status': 'error', 'message': 'Result not found'}), 404
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/login.html')
 def login_page():
     """Serve login page"""
