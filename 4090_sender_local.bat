@@ -22,12 +22,12 @@ if exist redis_url.txt (
     echo [REDIS] Using default localhost
 )
 
-REM ENABLE B2 UPLOAD - Masks go to B2 for production server access
-set SKIP_B2_UPLOAD=0
+REM SKIP B2 MASK UPLOAD - simple_effects uses LOCAL masks anyway!
+set SKIP_B2_UPLOAD=1
 set B2_KEY_ID=00539db5c1104b50000000003
 set B2_APP_KEY=K005384b8lPoBT11wScxkZ2Gx0fszus
 set B2_BUCKET=watermarkz
-echo [B2] Mask upload ENABLED to %B2_BUCKET%
+echo [B2] Mask upload DISABLED (local masks used)
 echo.
 
 REM REVOLUTIONARY STREAMING: DALI GPU-direct video decode
