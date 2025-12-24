@@ -5680,6 +5680,14 @@ def objrem_export():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/object-removal/preview', methods=['POST', 'OPTIONS'])
+def objrem_preview():
+    """Preview not available in production (would need to download video/masks from B2)"""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    return jsonify({'status': 'error', 'message': 'Preview not available in production mode. Use Export to generate final video.'}), 501
+
+
 @app.route('/api/object-removal/download/<job_id>')
 def objrem_download(job_id):
     """Download result - redirect to B2 CDN or serve local file"""

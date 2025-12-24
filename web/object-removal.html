@@ -1141,6 +1141,15 @@
                     throw new Error(data.message || 'Upload complete notification failed');
                 }
 
+                // RESET state for new video
+                state.objects = [];
+                state.isTracked = false;
+                interactionLayer.querySelectorAll('.mask-overlay, .mask-tint, .click-marker').forEach(el => el.remove());
+                document.getElementById('previewBtn').classList.add('hidden');
+                document.getElementById('resetObjectsBtn').style.display = 'none';
+                renderObjects();
+                updateRemoveButton();
+
                 // Store job info
                 state.jobId = data.job_id;
                 state.videoFile = file;
