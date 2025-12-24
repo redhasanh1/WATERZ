@@ -19,7 +19,13 @@ if exist redis_url.txt (
     set REDIS_URL=redis://:watermarkz_secure_2024@localhost:6379/0
 )
 
-REM DISABLE B2 UPLOADS - Keep everything local!
+REM B2 CREDENTIALS - needed to DOWNLOAD masks from B2
+set B2_KEY_ID=00539db5c1104b50000000003
+set B2_APP_KEY=K005384b8lPoBT11wScxkZ2Gx0fszus
+set B2_BUCKET=watermarkz
+echo [B2] Credentials loaded for downloading masks
+
+REM DISABLE B2 UPLOADS - output stays local
 set B2_UPLOAD_ENABLED=0
 echo [LOCAL] B2 upload DISABLED - output stays local
 echo.
@@ -93,18 +99,18 @@ set SAGE_CUDA_ARCH=89
 REM FLASH ATTENTION: DISABLED (manual attention is faster!)
 set ENABLE_FLASH_ATTENTION=0
 
-REM FP8 TRANSFORMER: 1.3-1.5x speedup on Linear layers
-set ENABLE_FP8_TRANSFORMER=1
+REM FP8 TRANSFORMER: DISABLED for quality (was 1)
+set ENABLE_FP8_TRANSFORMER=0
 
 REM TOKEN MERGING: DISABLED (quality takes priority)
 set ENABLE_TOKEN_MERGING=0
 
-REM FP8 ENCODER/DECODER: 1.3-1.5x speedup
-set ENABLE_FP8_ENCODER=1
-set ENABLE_FP8_DECODER=1
+REM FP8 ENCODER/DECODER: DISABLED for quality (was 1)
+set ENABLE_FP8_ENCODER=0
+set ENABLE_FP8_DECODER=0
 
-REM FP8 RFCNET: 1.3-1.5x speedup
-set ENABLE_FP8_RFCNET=1
+REM FP8 RFCNET: DISABLED for quality (was 1)
+set ENABLE_FP8_RFCNET=0
 
 REM DCNv4 RFCNET: ENABLED for best quality
 set ENABLE_DCNV4_RFCNET=1
