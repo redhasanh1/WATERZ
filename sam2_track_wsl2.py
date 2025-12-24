@@ -41,7 +41,7 @@ except ImportError:
 # =============================================================================
 # RESOLUTION CONFIGURATION - Single source of truth
 # =============================================================================
-TARGET_RESOLUTION = 480  # Change this ONE value to switch between 480p, 720p, 1080p
+TARGET_RESOLUTION = 480  # Change this ONE value to switch between 360p, 480p, 720p, 1080p
 
 # Try to import DALI for GPU-direct video decoding
 try:
@@ -99,7 +99,7 @@ def extract_to_h265(video_path, output_path, target_fps=None, max_height=TARGET_
 
     cmd = [
         'ffmpeg', '-y', '-i', video_path,
-        '-c:v', 'libx265', '-crf', '18', '-preset', 'fast',
+        '-c:v', 'hevc_nvenc', '-cq', '18', '-preset', 'p4',
         '-vf', f'scale={new_width}:{new_height}{fps_filter}',
         '-pix_fmt', 'yuv420p',
         '-an',  # No audio
@@ -173,7 +173,7 @@ class DALIFrameStreamer:
 
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
-            '-c:v', 'libx265', '-crf', '18', '-preset', 'ultrafast',
+            '-c:v', 'hevc_nvenc', '-cq', '18', '-preset', 'p4',
             '-vf', f'scale={new_width}:{new_height}',
             '-pix_fmt', 'yuv420p',
             '-an',
@@ -383,7 +383,7 @@ class DALIChunkedStreamer:
 
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
-            '-c:v', 'libx265', '-crf', '18', '-preset', 'ultrafast',
+            '-c:v', 'hevc_nvenc', '-cq', '18', '-preset', 'p4',
             '-vf', f'scale={new_width}:{new_height}',
             '-pix_fmt', 'yuv420p',
             '-an',

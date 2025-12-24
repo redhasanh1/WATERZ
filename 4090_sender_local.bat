@@ -4,12 +4,12 @@ cd /d "%~dp0"
 
 echo.
 echo ============================================================
-echo 4090 SENDER LOCAL - WSL SAM2 Worker (No B2 Uploads)
+echo   OBJECT REMOVAL + SAM2 WORKER (Local Processing)
 echo ============================================================
-echo   - Receives job from SEND_VIDEO_LOCAL.bat
-echo   - Generates masks with SAM2 (PyTorch)
-echo   - Keeps masks LOCAL (no B2 upload!)
-echo   - Chains to 4090_receiver_local for ProPainter
+echo   - Flask server on http://localhost:5000
+echo   - SAM2 tracking via WSL2 Celery worker
+echo   - All processing LOCAL (no cloud uploads)
+echo   - Web UI: web/object-removal.html
 echo ============================================================
 echo.
 
@@ -58,8 +58,22 @@ wsl -e bash -c "sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null 2>&
 echo [RAM] Cache cleared!
 echo.
 
+REM ============================================================
+REM START FLASK SERVER (Object Removal Web UI)
+REM ============================================================
+echo [FLASK] Starting object_removal_server.py on port 5000...
+start /B python object_removal_server.py
+
+REM Wait for Flask to start
+timeout /t 2 /nobreak >nul
+
+REM Open browser
+echo [BROWSER] Opening http://localhost:5000
+start http://localhost:5000
+echo.
+
 REM Start WSL Celery worker
-echo Starting WSL worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
+echo [WSL] Starting SAM2 worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
 echo.
 
 wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export SKIP_B2_UPLOAD='%SKIP_B2_UPLOAD%' && export USE_DALI_STREAMING='%USE_DALI_STREAMING%' && export SAM2_MAX_HEIGHT='%SAM2_MAX_HEIGHT%' && export USE_MASK_COMPRESSION='%USE_MASK_COMPRESSION%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"

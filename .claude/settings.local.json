@@ -164,7 +164,9 @@
       "Bash(powershell.exe -Command \"Get-ChildItem -Path D:\\\\watermarkz -Filter ''python.exe'' -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName\")",
       "WebFetch(domain:runwayml.com)",
       "Bash(ffprobe:*)",
-      "Bash(powershell -Command \"Get-ChildItem ''D:\\\\watermarkz\\\\temp_masks\\\\tracked_ce4733ca\\\\*.png'' | Select-Object -Last 20 Name\")"
+      "Bash(powershell -Command \"Get-ChildItem ''D:\\\\watermarkz\\\\temp_masks\\\\tracked_ce4733ca\\\\*.png'' | Select-Object -Last 20 Name\")",
+      "Bash(powershell -Command \"Get-ChildItem ''D:\\\\watermarkz\\\\temp_masks\\\\tracked_d77e367e\\\\*.png'' | Where-Object { [int]\\($_BaseName\\) -ge 495 -and [int]\\($_BaseName\\) -le 510 } | Select-Object Name, Length | Format-Table -AutoSize\")",
+      "Bash(cd /d D:watermarkz)"
     ],
     "deny": [],
     "ask": []

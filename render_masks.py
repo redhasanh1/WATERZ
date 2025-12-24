@@ -7,6 +7,7 @@ Usage: Double-click render_masks.bat or run: python render_masks.py
 import cv2
 import numpy as np
 import os
+import subprocess
 import tkinter as tk
 from tkinter import filedialog
 from tqdm import tqdm
@@ -165,11 +166,22 @@ def main():
     mask_files = [f for f in os.listdir(masks_folder) if f.endswith('.png')]
     print(f"Masks: {len(mask_files)} files found")
 
-    # Setup video writer
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    # Setup GPU-accelerated video encoder (FFmpeg with NVENC)
+    ffmpeg_cmd = [
+        'ffmpeg', '-y',
+        '-f', 'rawvideo',
+        '-vcodec', 'rawvideo',
+        '-s', f'{width}x{height}',
+        '-pix_fmt', 'bgr24',
+        '-r', str(fps),
+        '-i', '-',
+        '-c:v', 'hevc_nvenc', '-cq', '18', '-preset', 'p4',
+        '-pix_fmt', 'yuv420p',
+        output_path
+    ]
+    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
-    print(f"\nRendering overlay video...")
+    print(f"\nRendering overlay video (GPU encoding)...")
 
     # Process frames
     frame_idx = 0
@@ -182,11 +194,12 @@ def main():
         mask = load_mask(masks_folder, frame_idx)
         result = overlay_mask(frame, mask, color=(0, 255, 0), alpha=0.4)
 
-        # Write frame
-        out.write(result)
+        # Write frame to FFmpeg
+        ffmpeg_proc.stdin.write(result.tobytes())
 
     cap.release()
-    out.release()
+    ffmpeg_proc.stdin.close()
+    ffmpeg_proc.wait()
 
     print(f"\n{'=' * 60}")
     print(f"Done! Output saved to: {output_path}")
