@@ -4,12 +4,12 @@ cd /d "%~dp0"
 
 echo.
 echo ============================================================
-echo   OBJECT REMOVAL + SAM2 WORKER (Local Processing)
+echo   SAM2 WORKER - Connected to Production
 echo ============================================================
-echo   - Flask server on http://localhost:5000
+echo   - Production UI: https://markremoverai.com/backgroundremover
 echo   - SAM2 tracking via WSL2 Celery worker
-echo   - All processing LOCAL (no cloud uploads)
-echo   - Web UI: web/object-removal.html
+echo   - All GPU processing on LOCAL 4090
+echo   - Redis connects to production server
 echo ============================================================
 echo.
 
@@ -22,9 +22,9 @@ if exist redis_url.txt (
     echo [REDIS] Using default localhost
 )
 
-REM SKIP B2 UPLOAD - Keep everything local!
-set SKIP_B2_UPLOAD=1
-echo [LOCAL] B2 upload DISABLED - masks stay local
+REM ENABLE B2 UPLOAD - Masks go to B2 for production server access
+set SKIP_B2_UPLOAD=0
+echo [B2] Mask upload ENABLED - production server can access masks
 echo.
 
 REM REVOLUTIONARY STREAMING: DALI GPU-direct video decode
@@ -59,17 +59,9 @@ echo [RAM] Cache cleared!
 echo.
 
 REM ============================================================
-REM START FLASK SERVER (Object Removal Web UI)
+REM NO LOCAL SERVER - Railway serves UI now
 REM ============================================================
-echo [FLASK] Starting object_removal_server.py on port 5000...
-start /B python object_removal_server.py
-
-REM Wait for Flask to start
-timeout /t 2 /nobreak >nul
-
-REM Open browser
-echo [BROWSER] Opening http://localhost:5000
-start http://localhost:5000
+echo [PRODUCTION] UI served by Railway - no local Flask needed
 echo.
 
 REM Start WSL Celery worker

@@ -220,12 +220,6 @@
             50% { transform: translate(-50%, -50%) scale(1.3); opacity: 0.7; }
         }
 
-        .object-outline {
-            position: absolute;
-            border: 2px dashed var(--accent);
-            background: rgba(249, 115, 22, 0.1);
-            pointer-events: none;
-        }
 
         /* Instructions Overlay */
         .instructions-overlay {
@@ -876,8 +870,13 @@
             <!-- Objects Panel -->
             <div class="objects-panel hidden" id="objectsPanel">
                 <div class="objects-header">
-                    <span class="objects-title">Objects to Remove</span>
-                    <span class="objects-count" id="objectsCount">0 objects</span>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <span class="objects-title">Objects to Remove</span>
+                        <span class="objects-count" id="objectsCount">0 objects</span>
+                    </div>
+                    <button class="action-btn action-btn-secondary" id="resetObjectsBtn" style="display: none; padding: 0.5rem 1rem; font-size: 0.8rem;">
+                        Reset All
+                    </button>
                 </div>
                 <div class="objects-list" id="objectsList">
                     <div class="add-object-card" id="addObjectCard">
@@ -1276,31 +1275,17 @@
 
         // Display SAM2 mask overlay on the video
         function displayMaskOverlay(maskBase64, centerX, centerY) {
-            // Create mask overlay image
-            const overlay = document.createElement('div');
-            overlay.className = 'mask-overlay';
-            overlay.style.cssText = `
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                pointer-events: none;
-                opacity: 0.5;
-                background-image: url(data:image/png;base64,${maskBase64});
-                background-size: 100% 100%;
-                mix-blend-mode: screen;
-            `;
-
-            // Add green tint
+            // Add green tint mask overlay (stays visible until reset)
             const tint = document.createElement('div');
+            tint.className = 'mask-tint';
             tint.style.cssText = `
                 position: absolute;
                 top: 0;
                 left: 0;
                 width: 100%;
                 height: 100%;
-                background: rgba(0, 255, 0, 0.2);
+                pointer-events: none;
+                background: rgba(0, 255, 0, 0.3);
                 mask-image: url(data:image/png;base64,${maskBase64});
                 mask-size: 100% 100%;
                 -webkit-mask-image: url(data:image/png;base64,${maskBase64});
@@ -1308,9 +1293,6 @@
             `;
 
             interactionLayer.appendChild(tint);
-
-            // Auto-remove after 3 seconds
-            setTimeout(() => tint.remove(), 3000);
         }
 
         function addObject(x, y, maskData) {
@@ -1329,16 +1311,6 @@
 
             renderObjects();
             updateRemoveButton();
-
-            // Show outline on video
-            const outline = document.createElement('div');
-            outline.className = 'object-outline';
-            outline.dataset.objectId = id;
-            outline.style.left = (x - 7.5) + '%';
-            outline.style.top = (y - 10) + '%';
-            outline.style.width = '15%';
-            outline.style.height = '20%';
-            interactionLayer.appendChild(outline);
 
             // If we have mask data, show it as overlay
             if (maskData) {
@@ -1405,7 +1377,25 @@
 
         function updateRemoveButton() {
             removeBtn.disabled = state.objects.length === 0;
+            // Show/hide reset button based on objects count
+            const resetBtn = document.getElementById('resetObjectsBtn');
+            if (resetBtn) {
+                resetBtn.style.display = state.objects.length > 0 ? 'inline-flex' : 'none';
+            }
         }
+
+        // Reset all objects button
+        document.getElementById('resetObjectsBtn').addEventListener('click', () => {
+            state.objects = [];
+            // Remove all mask overlays from interaction layer
+            interactionLayer.querySelectorAll('.mask-overlay, .mask-tint').forEach(el => el.remove());
+            renderObjects();
+            updateRemoveButton();
+            // Reset tracking state
+            state.isTracked = false;
+            document.getElementById('previewBtn').classList.add('hidden');
+            document.getElementById('exportBtn').classList.add('hidden');
+        });
 
         // Auto-detect objects with YOLO
         document.getElementById('autoDetectCard').addEventListener('click', async () => {
