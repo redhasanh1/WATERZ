@@ -1808,7 +1808,7 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
             import torch
             use_fp16 = torch.cuda.is_available()
 
-            print(f"   [RUNNING] Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=10, ref_stride=10, subvideo_length=120, raft_iter=10, FP16={use_fp16}")
+            print(f"   [RUNNING] Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=10, ref_stride=10, subvideo_length=120, raft_iter=20, FP16={use_fp16}")
 
             # Each process gets its own CUDA context for true parallel processing
             faster_propainter_pipeline(
@@ -1820,7 +1820,7 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
                 ref_stride=10,
                 neighbor_length=10,
                 subvideo_length=120,
-                raft_iter=10,
+                raft_iter=20,
                 mode="video_inpainting",
                 save_frames=True,
                 fp16=use_fp16
@@ -1926,8 +1926,8 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
             '-framerate', str(fps),
             '-i', os.path.join(seg_cleaned_dir, '%04d.png'),
             '-c:v', 'h264_nvenc',
-            '-preset', 'p1',  # Fastest NVENC preset (was p4)
-            '-b:v', '8M',  # Increased bitrate for better quality at higher speed
+            '-preset', 'p5',  # Balanced quality/speed (was p1)
+            '-b:v', '15M',  # Higher bitrate for better quality
             '-bufsize', '16M',
             '-pix_fmt', 'yuv420p',
             '-profile:v', 'main',
@@ -1936,8 +1936,8 @@ def _encode_segment(seg_idx, total_segments, seg_cleaned_dir, context, temp_dirs
         result = subprocess.run(encode_cmd, capture_output=True, text=True)
 
         if result.returncode != 0:
-            # Fallback to p4 if p1 fails
-            print(f"   [WARNING]  p1 preset failed, trying p4...")
+            # Fallback to p4 if p5 fails
+            print(f"   [WARNING]  p5 preset failed, trying p4...")
             encode_cmd[encode_cmd.index('-preset') + 1] = 'p4'
             subprocess.run(encode_cmd, capture_output=True, check=True)
 
@@ -2279,8 +2279,8 @@ def trigger_finalization(redis_client, video_id, total_segments):
         '-safe', '0',
         '-i', file_list_path,
         '-c:v', 'h264_nvenc',
-        '-preset', 'p4',
-        '-b:v', '8M',
+        '-preset', 'p5',
+        '-b:v', '15M',
         '-pix_fmt', 'yuv420p',
         '-profile:v', 'main',
         temp_processed
@@ -4005,7 +4005,7 @@ def process_segment_task(self, segment_data):
                     ref_stride=15,
                     neighbor_length=10,
                     subvideo_length=120,
-                    raft_iter=10,
+                    raft_iter=20,
                     mode="video_inpainting",
                     save_frames=True,
                     fp16=use_fp16,
@@ -4549,7 +4549,7 @@ def process_image_task(self, image_path):
                 ref_stride=15,                      # faster-propainter: faster processing
                 neighbor_length=10,                 # faster-propainter: reduced for speed
                 subvideo_length=60,                 # faster-propainter: reduced for speed
-                raft_iter=10,                       # faster-propainter: reduced for speed
+                raft_iter=20,                       # ProPainter default for quality
                 mode="video_inpainting",            # Standard inpainting mode
                 save_frames=True,                   # Save individual frames
                 fp16=use_fp16                       # Enable FP16 if available
@@ -5003,7 +5003,7 @@ def process_video_task(self, video_path):
                 dynamic_subvideo, _ = get_dynamic_subvideo_length(width, height)
                 
                 print(f"[RUNNING] Direct faster-propainter pipeline: resolution={width}x{height}, FP16={use_fp16}")
-                print(f"   faster-propainter: neighbor_length=10 + ref_stride=15 + raft_iter=10 + subvideo_length=60 + flow_backend={PROPAINTER_FLOW_BACKEND}")
+                print(f"   faster-propainter: neighbor_length=10 + ref_stride=15 + raft_iter=20 + subvideo_length=60 + flow_backend={PROPAINTER_FLOW_BACKEND}")
 
                 # Direct pipeline call - OPTIMIZED FOR SPEED
                 faster_propainter_pipeline(
@@ -5015,7 +5015,7 @@ def process_video_task(self, video_path):
                     ref_stride=15,                      # faster-propainter: optimized for speed
                     neighbor_length=10,                 # faster-propainter: reduced for speed
                     subvideo_length=60,                 # faster-propainter: reduced for speed
-                    raft_iter=10,                       # faster-propainter: reduced for speed
+                    raft_iter=20,                       # ProPainter default for quality
                     mode="video_inpainting",            # Standard inpainting
                     save_fps=fps,                       # Preserve original FPS
                     save_frames=False,                  # Only save video, not frames
