@@ -1282,30 +1282,46 @@
         function displayMaskOverlay(maskBase64, centerX, centerY) {
             const img = new Image();
             img.onload = () => {
-                // Get the video display bounds
-                const videoRect = videoPlayer.getBoundingClientRect();
-                const layerRect = interactionLayer.getBoundingClientRect();
+                // Calculate actual video display area (accounting for letterboxing)
+                const containerRect = interactionLayer.getBoundingClientRect();
+                const videoAspect = state.videoWidth / state.videoHeight;
+                const containerAspect = containerRect.width / containerRect.height;
 
-                // Create canvas overlay for the mask - match video display size
+                let displayWidth, displayHeight, offsetX, offsetY;
+
+                if (videoAspect > containerAspect) {
+                    // Video is wider - letterbox top/bottom
+                    displayWidth = containerRect.width;
+                    displayHeight = containerRect.width / videoAspect;
+                    offsetX = 0;
+                    offsetY = (containerRect.height - displayHeight) / 2;
+                } else {
+                    // Video is taller - letterbox left/right
+                    displayHeight = containerRect.height;
+                    displayWidth = containerRect.height * videoAspect;
+                    offsetX = (containerRect.width - displayWidth) / 2;
+                    offsetY = 0;
+                }
+
+                // Create canvas overlay positioned exactly over the video
                 const canvas = document.createElement('canvas');
                 canvas.className = 'mask-tint';
                 canvas.style.cssText = `
                     position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
+                    left: ${offsetX}px;
+                    top: ${offsetY}px;
+                    width: ${displayWidth}px;
+                    height: ${displayHeight}px;
                     pointer-events: none;
-                    object-fit: contain;
                 `;
 
-                // Set canvas internal size to match interaction layer
-                canvas.width = layerRect.width;
-                canvas.height = layerRect.height;
+                // Set canvas internal size to video dimensions for crisp rendering
+                canvas.width = state.videoWidth;
+                canvas.height = state.videoHeight;
 
                 const ctx = canvas.getContext('2d');
 
-                // Draw and scale mask to fit canvas
+                // Draw mask at native resolution
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
                 // Get image data and colorize the mask green
@@ -1326,7 +1342,7 @@
 
                 ctx.putImageData(imageData, 0, 0);
                 interactionLayer.appendChild(canvas);
-                console.log('[SAM2] Mask overlay displayed:', canvas.width, 'x', canvas.height);
+                console.log('[SAM2] Mask overlay:', displayWidth.toFixed(0), 'x', displayHeight.toFixed(0), 'at', offsetX.toFixed(0), offsetY.toFixed(0));
             };
             img.onerror = (e) => {
                 console.error('[SAM2] Failed to load mask image:', e);
