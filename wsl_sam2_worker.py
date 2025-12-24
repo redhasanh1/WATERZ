@@ -13,6 +13,7 @@ import glob
 import time
 import zipfile
 import shutil
+import gc
 from celery import Celery
 
 # Resolve base dir assuming this file resides in repo root
@@ -665,8 +666,26 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         progress = 15 + int(75 * frames_processed / total_frames)
         self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'GPU batch {chunk_idx+1}/{num_chunks}'})
 
-        # Clear GPU memory
-        del frames_gpu, masks_gpu, mask_3ch, inv_mask, result
+        # === CLEANUP: Free ALL memory to prevent leak ===
+        # GPU tensors (always exist)
+        del frames_gpu, masks_gpu, mask_3ch, inv_mask, result, bg_tensor
+
+        # GPU tensors (conditional - may not exist)
+        try: del masks_4d
+        except: pass
+        try: del frames_4d
+        except: pass
+        try: del blurred
+        except: pass
+        try: del kernel
+        except: pass
+
+        # CPU arrays (CRITICAL - these were leaking!)
+        del raw_data, frames_np, masks_list, masks_np, result_cpu
+
+        # Force garbage collection
+        gc.collect()
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
         print(f"[GPU-FX] Chunk {chunk_idx+1}/{num_chunks}: {chunk_frames} frames processed")
