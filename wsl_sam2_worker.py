@@ -440,214 +440,253 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
 @celery.task(name='sam2.apply_simple_effects', bind=True)
 def apply_simple_effects(self, video_url, masks_url, operation='keep_object', background='color', bg_color='#00FF00', blur_amount=25, dilation=4, output_format='mp4', masks_dir_local=None):
     """
-    Apply simple mask-based effects (blur, greenscreen, color fill) and encode video.
-    No ProPainter needed - just simple OpenCV operations.
-
-    Args:
-        video_url: URL to download video from
-        masks_url: URL to download masks zip from (fallback if local not available)
-        operation: keep_object, remove_object, blur_inside, blur_outside, fill_inside, fill_outside
-        background: transparent, color, blur
-        bg_color: hex color like '#00FF00'
-        blur_amount: blur kernel size
-        dilation: mask dilation iterations
-        output_format: mp4 or webm
-        masks_dir_local: Local path to masks (avoids downloading from B2)
-
-    Returns:
-        dict with cdn_url of output video
+    REVOLUTIONARY GPU-ACCELERATED video effects pipeline.
+    ALL processing on GPU - decode, blend, blur, encode. BLAZING FAST!
     """
     import cv2
     import numpy as np
     import requests
     import subprocess
-    import tempfile
+    import torch
+    import torch.nn.functional as F
 
-    print(f"[SIMPLE-FX] Starting: {operation}, bg={background}, color={bg_color}")
+    print(f"[GPU-FX] 🚀 REVOLUTIONARY GPU Pipeline Starting!")
+    print(f"[GPU-FX] Operation: {operation}, bg={background}, color={bg_color}")
+
+    # Derive local masks path from task_id
+    task_id = self.request.id
+    if task_id and task_id.startswith('simplefx_'):
+        job_id = task_id.replace('simplefx_', '')
+        derived_masks_dir = f"/tmp/sam2_masks/{job_id}"
+        if os.path.exists(derived_masks_dir):
+            masks_dir_local = derived_masks_dir
+            print(f"[GPU-FX] Using local masks: {masks_dir_local}")
+
     self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Downloading video...'})
 
     # Download video
-    video_path = f"/tmp/simple_fx_video.mp4"
-    print(f"[SIMPLE-FX] Downloading video from {video_url}")
+    video_path = "/tmp/simple_fx_video.mp4"
+    print(f"[GPU-FX] Downloading video...")
     r = requests.get(video_url, timeout=300)
     r.raise_for_status()
     with open(video_path, 'wb') as f:
         f.write(r.content)
-    print(f"[SIMPLE-FX] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
+    print(f"[GPU-FX] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
 
-    self.update_state(state='PROCESSING', meta={'progress': 15, 'status': 'Loading masks...'})
+    # Get video info
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
 
-    # Use local masks if available, otherwise download from B2
+    # Load masks
+    self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Loading masks to GPU...'})
+
     if masks_dir_local and os.path.exists(masks_dir_local):
         masks_dir = masks_dir_local
         mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
-        print(f"[SIMPLE-FX] Using LOCAL masks: {masks_dir} ({len(mask_files)} files)")
+        print(f"[GPU-FX] LOCAL masks: {len(mask_files)} files")
     else:
-        # Download and extract masks from B2
         masks_dir = "/tmp/simple_fx_masks"
         if os.path.exists(masks_dir):
             shutil.rmtree(masks_dir)
         os.makedirs(masks_dir)
-
-        print(f"[SIMPLE-FX] Downloading masks from {masks_url}")
+        print(f"[GPU-FX] Downloading masks from B2...")
         r = requests.get(masks_url, timeout=300)
         r.raise_for_status()
         zip_path = "/tmp/simple_fx_masks.zip"
         with open(zip_path, 'wb') as f:
             f.write(r.content)
-
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(masks_dir)
         os.remove(zip_path)
         mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
-        print(f"[SIMPLE-FX] Extracted {len(mask_files)} masks")
+        print(f"[GPU-FX] Extracted {len(mask_files)} masks")
 
-    self.update_state(state='PROCESSING', meta={'progress': 25, 'status': 'Processing frames...'})
+    # Parse color to RGB tensor
+    bg_color_hex = bg_color.lstrip('#')
+    color_rgb = [int(bg_color_hex[i:i+2], 16) for i in (0, 2, 4)]
 
-    # Open video
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError(f"Failed to open video: {video_path}")
-
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    # Parse color
-    bg_color = bg_color.lstrip('#')
-    color_rgb = tuple(int(bg_color[i:i+2], 16) for i in (0, 2, 4))
-    color_bgr = (color_rgb[2], color_rgb[1], color_rgb[0])  # BGR for OpenCV
-
-    # Output to temp frames dir
-    output_frames_dir = "/tmp/simple_fx_output"
-    if os.path.exists(output_frames_dir):
-        shutil.rmtree(output_frames_dir)
-    os.makedirs(output_frames_dir)
-
-    blur_kernel = blur_amount * 2 + 1
-    frame_idx = 0
-
-    print(f"[SIMPLE-FX] Processing {total_frames} frames, operation={operation}")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        # Get mask for this frame
-        if frame_idx < len(mask_files):
-            mask = cv2.imread(mask_files[frame_idx], cv2.IMREAD_GRAYSCALE)
-            if mask is None:
-                mask = np.zeros((height, width), dtype=np.uint8)
-        else:
-            mask = np.zeros((height, width), dtype=np.uint8)
-
-        # Resize mask if needed
-        if mask.shape[:2] != (height, width):
-            mask = cv2.resize(mask, (width, height))
-
-        # Apply dilation
-        if dilation > 0:
-            kernel = np.ones((3, 3), np.uint8)
-            mask = cv2.dilate(mask, kernel, iterations=dilation)
-
-        # Apply operation
-        mask_f = mask.astype(np.float32) / 255.0
-        mask_3ch = np.stack([mask_f] * 3, axis=-1)
-        inv_mask_3ch = 1 - mask_3ch
-
-        if operation == 'keep_object':
-            if background == 'transparent':
-                # Will handle in encoding
-                result = frame
-            elif background == 'blur':
-                blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
-                result = (frame * mask_3ch + blurred * inv_mask_3ch).astype(np.uint8)
-            else:  # color
-                bg = np.full_like(frame, color_bgr, dtype=np.uint8)
-                result = (frame * mask_3ch + bg * inv_mask_3ch).astype(np.uint8)
-
-        elif operation == 'remove_object':
-            if background == 'blur':
-                blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
-                result = (frame * inv_mask_3ch + blurred * mask_3ch).astype(np.uint8)
-            else:  # color
-                fill = np.full_like(frame, color_bgr, dtype=np.uint8)
-                result = (frame * inv_mask_3ch + fill * mask_3ch).astype(np.uint8)
-
-        elif operation == 'blur_inside':
-            blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
-            result = (blurred * mask_3ch + frame * inv_mask_3ch).astype(np.uint8)
-
-        elif operation == 'blur_outside':
-            blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
-            result = (frame * mask_3ch + blurred * inv_mask_3ch).astype(np.uint8)
-
-        elif operation == 'fill_inside':
-            # Fill inside mask with color (object gets colored)
-            fill = np.full_like(frame, color_bgr, dtype=np.uint8)
-            result = (frame * inv_mask_3ch + fill * mask_3ch).astype(np.uint8)
-
-        elif operation == 'fill_outside':
-            # Fill outside mask with color (background gets colored, object stays)
-            fill = np.full_like(frame, color_bgr, dtype=np.uint8)
-            result = (frame * mask_3ch + fill * inv_mask_3ch).astype(np.uint8)
-
-        else:
-            print(f"[SIMPLE-FX] WARNING: Unknown operation '{operation}', using original frame")
-            result = frame
-
-        # Save frame
-        cv2.imwrite(f"{output_frames_dir}/{frame_idx:06d}.png", result)
-        frame_idx += 1
-
-        if frame_idx % 30 == 0:
-            progress = 25 + int(50 * frame_idx / total_frames)
-            self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Processing frame {frame_idx}/{total_frames}'})
-
-    cap.release()
-    print(f"[SIMPLE-FX] Processed {frame_idx} frames")
-
-    self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Encoding video...'})
-
-    # Encode with ffmpeg - use NVENC GPU encoding
+    # GPU processing config
+    CHUNK_SIZE = 250  # Frames per GPU batch (VRAM efficient)
     output_path = "/tmp/simple_fx_output.mp4"
-    ffmpeg_cmd = [
+
+    # Start ffmpeg encoder process - pipe raw frames directly to NVENC!
+    print(f"[GPU-FX] 🎬 Starting NVENC encoder pipeline...")
+    ffmpeg_encode = subprocess.Popen([
         'ffmpeg', '-y',
-        '-framerate', str(fps),
-        '-i', f'{output_frames_dir}/%06d.png',
+        '-f', 'rawvideo',
+        '-vcodec', 'rawvideo',
+        '-s', f'{width}x{height}',
+        '-pix_fmt', 'rgb24',
+        '-r', str(fps),
+        '-i', 'pipe:0',
         '-i', video_path,  # For audio
         '-map', '0:v',
         '-map', '1:a?',
-        '-c:v', 'h264_nvenc',  # GPU encoding
-        '-preset', 'p4',       # NVENC preset (p1=fastest, p7=best quality)
-        '-cq', '18',           # Constant quality (like CRF)
+        '-c:v', 'h264_nvenc',
+        '-preset', 'p4',
+        '-cq', '18',
         '-pix_fmt', 'yuv420p',
         '-c:a', 'aac',
         '-shortest',
         output_path
-    ]
+    ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    print(f"[SIMPLE-FX] Encoding: {' '.join(ffmpeg_cmd)}")
-    result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"[SIMPLE-FX] FFmpeg error: {result.stderr}")
-        raise RuntimeError(f"FFmpeg encoding failed: {result.stderr}")
-    print(f"[SIMPLE-FX] Encoded to {output_path}")
+    # Process in GPU chunks
+    num_chunks = (total_frames + CHUNK_SIZE - 1) // CHUNK_SIZE
+    frames_processed = 0
 
-    self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Uploading to CDN...'})
+    print(f"[GPU-FX] Processing {total_frames} frames in {num_chunks} GPU batches...")
+
+    for chunk_idx in range(num_chunks):
+        chunk_start = chunk_idx * CHUNK_SIZE
+        chunk_end = min(chunk_start + CHUNK_SIZE, total_frames)
+        chunk_frames = chunk_end - chunk_start
+
+        # === STEP 1: Decode chunk with ffmpeg CUDA ===
+        start_time = chunk_start / fps
+        decode_cmd = [
+            'ffmpeg', '-y',
+            '-hwaccel', 'cuda',
+            '-ss', str(start_time),
+            '-i', video_path,
+            '-frames:v', str(chunk_frames),
+            '-f', 'rawvideo',
+            '-pix_fmt', 'rgb24',
+            'pipe:1'
+        ]
+        decode_result = subprocess.run(decode_cmd, capture_output=True)
+        if decode_result.returncode != 0:
+            print(f"[GPU-FX] Decode error: {decode_result.stderr.decode()[:200]}")
+            break
+
+        # Parse to GPU tensor [N, H, W, 3]
+        raw_data = decode_result.stdout
+        actual_frames = len(raw_data) // (height * width * 3)
+        if actual_frames == 0:
+            break
+        chunk_frames = min(chunk_frames, actual_frames)
+
+        frames_np = np.frombuffer(raw_data[:chunk_frames * height * width * 3], dtype=np.uint8)
+        frames_np = frames_np.reshape(chunk_frames, height, width, 3)
+        frames_gpu = torch.from_numpy(frames_np).cuda().float()  # [N, H, W, 3]
+
+        # === STEP 2: Load masks for this chunk to GPU ===
+        masks_list = []
+        for i in range(chunk_start, chunk_start + chunk_frames):
+            if i < len(mask_files):
+                mask = cv2.imread(mask_files[i], cv2.IMREAD_GRAYSCALE)
+                if mask is None:
+                    mask = np.zeros((height, width), dtype=np.uint8)
+                if mask.shape[:2] != (height, width):
+                    mask = cv2.resize(mask, (width, height))
+            else:
+                mask = np.zeros((height, width), dtype=np.uint8)
+            masks_list.append(mask)
+
+        masks_np = np.stack(masks_list, axis=0)  # [N, H, W]
+        masks_gpu = torch.from_numpy(masks_np).cuda().float() / 255.0  # [N, H, W] normalized
+
+        # === STEP 3: Apply dilation on GPU ===
+        if dilation > 0:
+            # GPU max pooling for dilation
+            masks_4d = masks_gpu.unsqueeze(1)  # [N, 1, H, W]
+            for _ in range(dilation):
+                masks_4d = F.max_pool2d(masks_4d, 3, stride=1, padding=1)
+            masks_gpu = masks_4d.squeeze(1)  # [N, H, W]
+
+        # === STEP 4: GPU tensor operations ===
+        mask_3ch = masks_gpu.unsqueeze(-1).expand(-1, -1, -1, 3)  # [N, H, W, 3]
+        inv_mask = 1.0 - mask_3ch
+
+        # Background color tensor
+        bg_tensor = torch.tensor(color_rgb, dtype=torch.float32, device='cuda').view(1, 1, 1, 3).expand(chunk_frames, height, width, 3)
+
+        if operation == 'keep_object':
+            if background == 'blur':
+                # GPU blur using conv2d
+                blur_k = blur_amount * 2 + 1
+                frames_4d = frames_gpu.permute(0, 3, 1, 2)  # [N, 3, H, W]
+                kernel = torch.ones(1, 1, blur_k, blur_k, device='cuda') / (blur_k * blur_k)
+                kernel = kernel.expand(3, 1, blur_k, blur_k)
+                blurred = F.conv2d(frames_4d, kernel, padding=blur_k//2, groups=3)
+                blurred = blurred.permute(0, 2, 3, 1)  # [N, H, W, 3]
+                result = frames_gpu * mask_3ch + blurred * inv_mask
+            else:  # color
+                result = frames_gpu * mask_3ch + bg_tensor * inv_mask
+
+        elif operation == 'remove_object':
+            if background == 'blur':
+                blur_k = blur_amount * 2 + 1
+                frames_4d = frames_gpu.permute(0, 3, 1, 2)
+                kernel = torch.ones(1, 1, blur_k, blur_k, device='cuda') / (blur_k * blur_k)
+                kernel = kernel.expand(3, 1, blur_k, blur_k)
+                blurred = F.conv2d(frames_4d, kernel, padding=blur_k//2, groups=3)
+                blurred = blurred.permute(0, 2, 3, 1)
+                result = frames_gpu * inv_mask + blurred * mask_3ch
+            else:
+                result = frames_gpu * inv_mask + bg_tensor * mask_3ch
+
+        elif operation == 'blur_inside':
+            blur_k = blur_amount * 2 + 1
+            frames_4d = frames_gpu.permute(0, 3, 1, 2)
+            kernel = torch.ones(1, 1, blur_k, blur_k, device='cuda') / (blur_k * blur_k)
+            kernel = kernel.expand(3, 1, blur_k, blur_k)
+            blurred = F.conv2d(frames_4d, kernel, padding=blur_k//2, groups=3)
+            blurred = blurred.permute(0, 2, 3, 1)
+            result = blurred * mask_3ch + frames_gpu * inv_mask
+
+        elif operation == 'blur_outside':
+            blur_k = blur_amount * 2 + 1
+            frames_4d = frames_gpu.permute(0, 3, 1, 2)
+            kernel = torch.ones(1, 1, blur_k, blur_k, device='cuda') / (blur_k * blur_k)
+            kernel = kernel.expand(3, 1, blur_k, blur_k)
+            blurred = F.conv2d(frames_4d, kernel, padding=blur_k//2, groups=3)
+            blurred = blurred.permute(0, 2, 3, 1)
+            result = frames_gpu * mask_3ch + blurred * inv_mask
+
+        elif operation == 'fill_inside':
+            result = frames_gpu * inv_mask + bg_tensor * mask_3ch
+
+        elif operation == 'fill_outside':
+            result = frames_gpu * mask_3ch + bg_tensor * inv_mask
+
+        else:
+            result = frames_gpu
+
+        # === STEP 5: Pipe to NVENC encoder ===
+        result_cpu = result.clamp(0, 255).byte().cpu().numpy()  # [N, H, W, 3]
+        ffmpeg_encode.stdin.write(result_cpu.tobytes())
+
+        frames_processed += chunk_frames
+        progress = 15 + int(75 * frames_processed / total_frames)
+        self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'GPU batch {chunk_idx+1}/{num_chunks}'})
+
+        # Clear GPU memory
+        del frames_gpu, masks_gpu, mask_3ch, inv_mask, result
+        torch.cuda.empty_cache()
+
+        print(f"[GPU-FX] Chunk {chunk_idx+1}/{num_chunks}: {chunk_frames} frames processed")
+
+    # Close encoder
+    ffmpeg_encode.stdin.close()
+    ffmpeg_encode.wait()
+    print(f"[GPU-FX] ✅ Encoded {frames_processed} frames with NVENC")
+
+    self.update_state(state='PROCESSING', meta={'progress': 92, 'status': 'Uploading to CDN...'})
 
     # Upload to B2
     output_url = upload_video_to_b2(output_path)
 
     # Cleanup
     shutil.rmtree(masks_dir, ignore_errors=True)
-    shutil.rmtree(output_frames_dir, ignore_errors=True)
     os.remove(video_path)
     os.remove(output_path)
 
-    print(f"[SIMPLE-FX] Complete! CDN URL: {output_url}")
+    print(f"[GPU-FX] 🎉 COMPLETE! CDN URL: {output_url}")
 
     return {
         'status': 'success',

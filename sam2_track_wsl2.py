@@ -407,7 +407,7 @@ class DALIChunkedStreamer:
         print(f"[DALI-ASYNC] Converting to H.265: {orig_width}x{orig_height} -> {new_width}x{new_height}")
         result = subprocess.run(cmd, capture_output=True, text=True)
 
-        # Clean up downloaded file
+        # Clean up downloaded file (H.265 used for both DALI and ffmpeg fallback)
         if downloaded_file:
             try:
                 os.remove(downloaded_file.name)
@@ -515,59 +515,60 @@ class DALIChunkedStreamer:
                         print(f"[DALI] Error at chunk {chunk_num}: {e}")
                         traceback.print_exc()
                         break
-                # === PHASE 2: OpenCV for last 2 chunks ===
+                # === PHASE 2: FFmpeg CUDA for last 2 chunks (GPU decode, fast seeking) ===
                 if chunk_num < num_chunks:
-                    print(f"[OPENCV] Taking over for chunks {chunk_num} to {num_chunks-1}")
+                    print(f"[FFMPEG-CUDA] Taking over for chunks {chunk_num} to {num_chunks-1}")
+
+                    # Get FPS for time-based seeking
                     cap = cv2.VideoCapture(self.h265_path)
-
-                    if not cap.isOpened():
-                        print(f"[OPENCV] ERROR: Failed to open {self.h265_path}")
-                    else:
-                        cv_total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                        print(f"[OPENCV] Opened video: {cv_total_frames} frames reported")
-
-                    cv_start_frame = chunk_num * self.chunk_size
-                    print(f"[OPENCV] Seeking to frame {cv_start_frame}...")
-
-                    # H.265 seeking is unreliable - read sequentially to skip frames
-                    print(f"[OPENCV] Skipping {cv_start_frame} frames sequentially (H.265 seek unreliable)...")
-                    for skip_i in range(cv_start_frame):
-                        ret, _ = cap.read()
-                        if not ret:
-                            print(f"[OPENCV] ERROR: Failed to skip frame {skip_i}/{cv_start_frame}")
-                            break
-                    print(f"[OPENCV] Skipped to frame {cv_start_frame}, now reading chunks...")
+                    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                    cap.release()
 
                     while chunk_num < num_chunks and not self.stop_event.is_set():
                         chunk_start = chunk_num * self.chunk_size
                         chunk_end = min(chunk_start + self.chunk_size, self._length)
                         frames_needed = chunk_end - chunk_start
-                        print(f"[OPENCV] Reading chunk {chunk_num}: need {frames_needed} frames...")
 
-                        frames_list = []
-                        for frame_i in range(frames_needed):
-                            ret, frame = cap.read()
-                            if not ret:
-                                print(f"[OPENCV] cap.read() returned False at frame {frame_i}/{frames_needed}")
-                                break
-                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            frames_list.append(frame_rgb)
+                        # Calculate start time in seconds
+                        start_time = chunk_start / fps
+                        print(f"[FFMPEG-CUDA] Chunk {chunk_num}: extracting {frames_needed} frames from {start_time:.2f}s")
 
-                        print(f"[OPENCV] Got {len(frames_list)}/{frames_needed} frames for chunk {chunk_num}")
+                        # Use ffmpeg with CUDA for GPU-accelerated decoding
+                        cmd = [
+                            'ffmpeg', '-y',
+                            '-hwaccel', 'cuda',           # GPU decode
+                            '-ss', str(start_time),       # Seek BEFORE input (fast)
+                            '-i', self.h265_path,
+                            '-frames:v', str(frames_needed),
+                            '-f', 'rawvideo',
+                            '-pix_fmt', 'rgb24',
+                            'pipe:1'
+                        ]
 
-                        if len(frames_list) == 0:
-                            print(f"[OPENCV] ERROR: Zero frames read, breaking")
+                        result = subprocess.run(cmd, capture_output=True)
+                        if result.returncode != 0:
+                            print(f"[FFMPEG-CUDA] Error: {result.stderr.decode()[:200]}")
                             break
 
-                        frames_np = np.stack(frames_list, axis=0)
-                        frames_tensor = torch.from_numpy(frames_np).to(f'cuda:{self.device_id}')
+                        # Parse raw frames
+                        raw_data = result.stdout
+                        expected_size = frames_needed * self.video_height * self.video_width * 3
+                        if len(raw_data) < expected_size:
+                            actual_frames = len(raw_data) // (self.video_height * self.video_width * 3)
+                            print(f"[FFMPEG-CUDA] Got {actual_frames}/{frames_needed} frames")
+                            if actual_frames == 0:
+                                break
+                            frames_needed = actual_frames
 
-                        total_frames_read += len(frames_list)
+                        frames_np = np.frombuffer(raw_data, dtype=np.uint8)
+                        frames_np = frames_np[:frames_needed * self.video_height * self.video_width * 3]
+                        frames_np = frames_np.reshape(frames_needed, self.video_height, self.video_width, 3)
+                        frames_tensor = torch.from_numpy(frames_np.copy()).to(f'cuda:{self.device_id}')
+
+                        total_frames_read += frames_needed
                         self.load_queue.put((chunk_start, frames_tensor))
-                        print(f"[OPENCV] Chunk {chunk_num}: frames {chunk_start}-{chunk_start+len(frames_list)-1} queued")
+                        print(f"[FFMPEG-CUDA] Chunk {chunk_num}: frames {chunk_start}-{chunk_start+frames_needed-1} queued")
                         chunk_num += 1
-
-                    cap.release()
 
                 print(f"[LOADER] Finished: {chunk_num} chunks, {total_frames_read} frames")
 
