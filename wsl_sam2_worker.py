@@ -35,7 +35,7 @@ sys.path.insert(0, BASE_DIR)
 
 
 @celery.task(name='sam2.generate_masks_fullfps', bind=True)
-def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, bbox=None, frame_idx=0, api_base=None, reid_mode=None):
+def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, object_ids=None, bbox=None, frame_idx=0, api_base=None, reid_mode=None):
     """
     Generate SAM2 masks at full FPS inside WSL2.
 
@@ -45,6 +45,7 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
         prompt_mode (str): 'point' or 'bbox'
         points (list): List of (x, y) tuples if prompt_mode is 'point' (supports multiple clicks!)
         labels (list): List of labels (1=foreground, 0=background) for each point
+        object_ids (list): List of object IDs for each point (each click = separate object)
         bbox (list): [x1, y1, x2, y2] if prompt_mode is 'bbox'
         frame_idx (int): starting frame index
         api_base (str): Base URL for downloading video if path is remote
@@ -128,10 +129,12 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
         pts = [(int(p[0] * scale), int(p[1] * scale)) for p in points]
         # Labels default to all foreground (1) if not provided
         lbls = labels if labels is not None else [1] * len(pts)
-        print(f"[WSL-SAM2] Using {len(pts)} scaled point(s): {pts}")
+        # Object IDs: each click = separate object (default all to 0 if not provided)
+        obj_ids = object_ids if object_ids is not None else [0] * len(pts)
+        print(f"[WSL-SAM2] Using {len(pts)} scaled point(s): {pts}, object_ids: {obj_ids}")
         masks_saved = sam2w.track_video_pytorch_only(
             temp_frames_dir, total_frames, masks_dir_wsl,
-            points=pts, labels=lbls, bbox=None, frame_idx_start=int(frame_idx),
+            points=pts, labels=lbls, object_ids=obj_ids, bbox=None, frame_idx_start=int(frame_idx),
             video_path=video_path_wsl  # For DALI GPU-direct streaming
         )
     elif prompt_mode == 'bbox' and bbox is not None:

@@ -5484,6 +5484,8 @@ def objrem_track():
         # Convert points to format expected by SAM2 worker
         point_coords = [(p['x'], p['y']) for p in points]
         labels = [p.get('label', 1) for p in points]
+        # Extract object_ids - each click is a separate object
+        object_ids = [p.get('object_id', 0) for p in points]
 
         # WSL-native temp path for masks
         wsl_masks_dir = f"/tmp/sam2_masks/{job_id}"
@@ -5499,6 +5501,7 @@ def objrem_track():
                 'prompt_mode': 'point',
                 'points': point_coords,
                 'labels': labels,
+                'object_ids': object_ids,  # Pass object_ids to SAM2
                 'frame_idx': frame_idx,
                 'api_base': None
             },
@@ -5513,7 +5516,7 @@ def objrem_track():
         })
 
         print(f"[OBJREM-TRACK] Submitted task {task_id} for job {job_id}")
-        print(f"[OBJREM-TRACK] Points: {point_coords}, Frame: {frame_idx}")
+        print(f"[OBJREM-TRACK] Points: {point_coords}, Object IDs: {object_ids}, Frame: {frame_idx}")
 
         return jsonify({
             'status': 'success',

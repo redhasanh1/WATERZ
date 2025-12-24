@@ -1263,7 +1263,7 @@ def load_frames_as_tensors(frames_dir, start_idx, end_idx, img_mean, img_std, im
     return images
 
 
-def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=None, labels=None, bbox=None, frame_idx_start=0, video_path=None):
+def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=None, labels=None, object_ids=None, bbox=None, frame_idx_start=0, video_path=None):
     """
     SAM2 video tracking using OFFICIAL memory management parameters.
 
@@ -1273,6 +1273,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
     Args:
         points: List of (x, y) tuples for multiple click points
         labels: List of labels (1=foreground, 0=background) for each point
+        object_ids: List of object IDs for each point (each click = separate object)
         video_path: Original video path for DALI streaming (optional)
     """
     import gc
@@ -1337,16 +1338,43 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
             )
             print(f"[SAM2-Official] Added bbox prompt at frame {frame_idx_start}")
         elif points is not None and len(points) > 0:
-            points_array = np.array([[p[0], p[1]] for p in points], dtype=np.float32)
-            labels_array = np.array(labels, dtype=np.int32) if labels else np.ones(len(points), dtype=np.int32)
-            predictor.add_new_points_or_box(
-                inference_state=inference_state,
-                frame_idx=frame_idx_start,
-                obj_id=1,
-                points=points_array,
-                labels=labels_array
-            )
-            print(f"[SAM2-Official] Added point prompt at frame {frame_idx_start}")
+            # Handle multiple objects: each click can be a separate object
+            if object_ids is not None and len(object_ids) == len(points):
+                # Group points by object_id
+                unique_obj_ids = sorted(set(object_ids))
+                print(f"[SAM2-MultiObject] Found {len(unique_obj_ids)} objects: {unique_obj_ids}")
+
+                for obj_id in unique_obj_ids:
+                    # Get points for this object
+                    obj_points = [points[i] for i in range(len(points)) if object_ids[i] == obj_id]
+                    obj_labels = [labels[i] if labels else 1 for i in range(len(points)) if object_ids[i] == obj_id]
+
+                    points_array = np.array([[p[0], p[1]] for p in obj_points], dtype=np.float32)
+                    labels_array = np.array(obj_labels, dtype=np.int32)
+
+                    # SAM2 uses 1-based object IDs, so add 1 to our 0-based IDs
+                    sam2_obj_id = obj_id + 1
+
+                    predictor.add_new_points_or_box(
+                        inference_state=inference_state,
+                        frame_idx=frame_idx_start,
+                        obj_id=sam2_obj_id,
+                        points=points_array,
+                        labels=labels_array
+                    )
+                    print(f"[SAM2-MultiObject] Added object {sam2_obj_id}: {len(obj_points)} point(s) at frame {frame_idx_start}")
+            else:
+                # Legacy: all points as single object (obj_id=1)
+                points_array = np.array([[p[0], p[1]] for p in points], dtype=np.float32)
+                labels_array = np.array(labels, dtype=np.int32) if labels else np.ones(len(points), dtype=np.int32)
+                predictor.add_new_points_or_box(
+                    inference_state=inference_state,
+                    frame_idx=frame_idx_start,
+                    obj_id=1,
+                    points=points_array,
+                    labels=labels_array
+                )
+                print(f"[SAM2-Official] Added point prompt at frame {frame_idx_start}")
 
         masks_saved = 0
         reid_verifier = None
@@ -1381,8 +1409,14 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         total=backward_frames,
                         desc="Backward"
                     ):
-                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
-                        mask_uint8 = (mask * 255).astype(np.uint8)
+                        # Combine masks from all objects (logical OR)
+                        if mask_logits.shape[0] > 1:
+                            # Multiple objects: combine all masks
+                            combined_mask = (mask_logits > 0.0).any(dim=0).cpu().numpy().squeeze()
+                        else:
+                            # Single object
+                            combined_mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
+                        mask_uint8 = (combined_mask * 255).astype(np.uint8)
 
                         if np.sum(mask_uint8 > 127) < 100:
                             mask_uint8[:] = 0
@@ -1390,7 +1424,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
-                        del mask_logits, mask
+                        del mask_logits, combined_mask
 
                     print(f"[SAM2-Backward] Complete: {backward_frames} masks")
                     gc.collect()
@@ -1425,8 +1459,14 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         if frame_idx_start > 0 and frame_idx == frame_idx_start:
                             continue
 
-                        mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
-                        mask_uint8 = (mask * 255).astype(np.uint8)
+                        # Combine masks from all objects (logical OR)
+                        if mask_logits.shape[0] > 1:
+                            # Multiple objects: combine all masks
+                            combined_mask = (mask_logits > 0.0).any(dim=0).cpu().numpy().squeeze()
+                        else:
+                            # Single object
+                            combined_mask = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
+                        mask_uint8 = (combined_mask * 255).astype(np.uint8)
 
                         if np.sum(mask_uint8 > 127) < 100:
                             mask_uint8[:] = 0
@@ -1521,7 +1561,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
                         cv2.imwrite(f"{output_masks_dir}/{frame_idx:05d}.png", mask_uint8)
                         masks_saved += 1
 
-                        del mask_logits, mask
+                        del mask_logits, combined_mask
 
                     # Cleanup ReID video capture
                     if reid_cap is not None:

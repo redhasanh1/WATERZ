@@ -665,46 +665,6 @@
             background: rgba(249, 115, 22, 0.1);
         }
 
-        .checkbox-option {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.625rem 0;
-            cursor: pointer;
-        }
-
-        .checkbox-box {
-            width: 18px;
-            height: 18px;
-            border: 2px solid var(--border-color);
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-        }
-
-        .checkbox-option.checked .checkbox-box {
-            background: var(--accent);
-            border-color: var(--accent);
-        }
-
-        .checkbox-box svg {
-            width: 12px;
-            height: 12px;
-            color: white;
-            opacity: 0;
-        }
-
-        .checkbox-option.checked .checkbox-box svg {
-            opacity: 1;
-        }
-
-        .checkbox-label {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-        }
-
         /* Modal */
         .modal {
             position: fixed;
@@ -1026,25 +986,6 @@
                             WebM/PNG support transparency
                         </p>
                     </div>
-                    <div class="setting-group">
-                        <span class="setting-label">Options</span>
-                        <div class="checkbox-option checked" data-option="shadows">
-                            <div class="checkbox-box">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                                    <polyline points="20 6 9 17 4 12"/>
-                                </svg>
-                            </div>
-                            <span class="checkbox-label">Preserve shadows</span>
-                        </div>
-                        <div class="checkbox-option" data-option="reflections">
-                            <div class="checkbox-box">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                                    <polyline points="20 6 9 17 4 12"/>
-                                </svg>
-                            </div>
-                            <span class="checkbox-label">Preserve reflections</span>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -1113,8 +1054,6 @@
             bgColor: '#00FF00',
             blurAmount: 20,
             dilation: 0,
-            preserveShadows: true,
-            preserveReflections: false,
             isSelectingObject: false,
             isTracked: false
         };
@@ -1343,13 +1282,26 @@
             const frameIndex = Math.floor(videoPlayer.currentTime * 30); // Assume 30fps
 
             try {
-                // Store point for video tracking
+                // Create new object ID for this click
+                const newObjectId = state.objects.length;
+
+                // Collect ALL points from ALL objects, plus this new one
+                const allPoints = state.objects.map((obj, idx) => ({
+                    x: obj.x,
+                    y: obj.y,
+                    label: 1,
+                    object_id: idx  // Each existing object gets its index as ID
+                }));
+                // Add the new point with its own object_id
+                allPoints.push({ x: videoX, y: videoY, label: 1, object_id: newObjectId });
+
+                // Store ALL points for video tracking (each with unique object_id)
                 await fetch(`${API_BASE}/api/object-removal/select`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         job_id: state.jobId,
-                        points: [{ x: videoX, y: videoY, label: 1 }],
+                        points: allPoints,  // ALL points with object_ids
                         frame_index: frameIndex
                     })
                 });
@@ -1795,13 +1747,6 @@
             });
         }
 
-        document.querySelectorAll('.checkbox-option').forEach(option => {
-            option.addEventListener('click', () => {
-                option.classList.toggle('checked');
-                if (option.dataset.option === 'shadows') state.preserveShadows = option.classList.contains('checked');
-                if (option.dataset.option === 'reflections') state.preserveReflections = option.classList.contains('checked');
-            });
-        });
 
         // Export button - tracks + exports in one flow
         removeBtn.addEventListener('click', async () => {

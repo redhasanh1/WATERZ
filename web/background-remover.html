@@ -160,6 +160,12 @@
             .hero-subtitle {
                 font-size: 1rem;
             }
+
+            /* Mobile video sizing */
+            .video-preview video,
+            .result-video {
+                border-radius: 8px;
+            }
         }
 
         @media (max-width: 500px) {
@@ -175,6 +181,24 @@
             .submit-btn {
                 padding: 0.875rem 1.5rem;
                 font-size: 0.9rem;
+            }
+
+            /* Make video larger on small screens - escape card padding */
+            .video-preview {
+                margin-left: -0.5rem;
+                margin-right: -0.5rem;
+            }
+            .video-preview video {
+                width: calc(100% + 1rem);
+                border-radius: 6px;
+            }
+            .result-section {
+                margin-left: -0.5rem;
+                margin-right: -0.5rem;
+            }
+            .result-video {
+                width: calc(100% + 1rem);
+                border-radius: 6px;
             }
         }
 
