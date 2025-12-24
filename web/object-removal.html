@@ -844,9 +844,11 @@
                     <div class="controls-right">
                         <button class="action-btn action-btn-primary" id="removeBtn" disabled>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                            Remove Selected
+                            Export Video
                         </button>
                         <button class="action-btn action-btn-secondary hidden" id="previewBtn">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -854,14 +856,6 @@
                                 <polygon points="10 8 16 12 10 16 10 8"/>
                             </svg>
                             Preview
-                        </button>
-                        <button class="action-btn action-btn-secondary hidden" id="exportBtn">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Export
                         </button>
                     </div>
                 </div>
@@ -1046,7 +1040,6 @@
         const objectsPanel = document.getElementById('objectsPanel');
         const settingsSection = document.getElementById('settingsSection');
         const removeBtn = document.getElementById('removeBtn');
-        const exportBtn = document.getElementById('exportBtn');
         const processingModal = document.getElementById('processingModal');
         const successModal = document.getElementById('successModal');
 
@@ -1394,7 +1387,6 @@
             // Reset tracking state
             state.isTracked = false;
             document.getElementById('previewBtn').classList.add('hidden');
-            document.getElementById('exportBtn').classList.add('hidden');
         });
 
         // Auto-detect objects with YOLO
@@ -1624,7 +1616,7 @@
             });
         });
 
-        // Remove button - starts tracking through full video
+        // Export button - tracks + exports in one flow
         removeBtn.addEventListener('click', async () => {
             if (state.objects.length === 0) return;
             if (!state.jobId) {
@@ -1632,74 +1624,56 @@
                 return;
             }
 
-            showProcessingModal('Tracking Object...', 'SAM2 is tracking the object through all frames...');
+            showProcessingModal('Processing...', 'Step 1/2: Tracking object through all frames...');
 
             try {
-                // Start tracking
-                const response = await fetch(`${API_BASE}/api/object-removal/track`, {
+                // Step 1: Start tracking
+                const trackResponse = await fetch(`${API_BASE}/api/object-removal/track`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ job_id: state.jobId })
                 });
 
-                const data = await response.json();
-                if (data.status !== 'success' && data.status !== 'processing') {
-                    throw new Error(data.message || 'Failed to start tracking');
+                const trackData = await trackResponse.json();
+                if (trackData.status !== 'success' && trackData.status !== 'processing') {
+                    throw new Error(trackData.message || 'Failed to start tracking');
                 }
 
-                // Poll for progress
-                const pollInterval = setInterval(async () => {
-                    try {
-                        const statusResp = await fetch(`${API_BASE}/api/object-removal/status/${state.jobId}`);
-                        const statusData = await statusResp.json();
+                // Poll for tracking progress
+                const pollTracking = () => new Promise((resolve, reject) => {
+                    const pollInterval = setInterval(async () => {
+                        try {
+                            const statusResp = await fetch(`${API_BASE}/api/object-removal/status/${state.jobId}`);
+                            const statusData = await statusResp.json();
 
-                        console.log('[TRACK STATUS]', statusData);
+                            console.log('[TRACK STATUS]', statusData);
 
-                        if (statusData.status === 'completed') {
-                            clearInterval(pollInterval);
-                            updateProcessingProgress(100);
-                            state.isTracked = true;
-                            setTimeout(() => {
-                                hideProcessingModal();
-                                showSuccessModal();
-                                document.getElementById('previewBtn').classList.remove('hidden');
-                                exportBtn.classList.remove('hidden');
-                            }, 500);
-                        } else if (statusData.status === 'error') {
-                            clearInterval(pollInterval);
-                            hideProcessingModal();
-                            alert('Tracking failed: ' + (statusData.message || 'Unknown error'));
-                        } else {
-                            // Update progress
-                            const progress = statusData.progress || 0;
-                            updateProcessingProgress(progress);
-                            document.getElementById('modalText').textContent =
-                                `Tracking frame ${statusData.current_frame || 0} of ${statusData.total_frames || '?'}...`;
+                            if (statusData.status === 'completed') {
+                                clearInterval(pollInterval);
+                                updateProcessingProgress(50);
+                                state.isTracked = true;
+                                resolve(statusData);
+                            } else if (statusData.status === 'error') {
+                                clearInterval(pollInterval);
+                                reject(new Error(statusData.message || 'Tracking failed'));
+                            } else {
+                                const progress = (statusData.progress || 0) / 2; // 0-50% for tracking
+                                updateProcessingProgress(progress);
+                                document.getElementById('modalText').textContent =
+                                    `Step 1/2: Tracking frame ${statusData.current_frame || 0} of ${statusData.total_frames || '?'}...`;
+                            }
+                        } catch (err) {
+                            console.error('Status poll error:', err);
                         }
-                    } catch (err) {
-                        console.error('Status poll error:', err);
-                    }
-                }, 1000);
+                    }, 1000);
+                });
 
-            } catch (error) {
-                console.error('Tracking error:', error);
-                hideProcessingModal();
-                alert('Tracking failed: ' + error.message);
-            }
-        });
+                await pollTracking();
 
-        // Export button - export with background/format options
-        exportBtn.addEventListener('click', async () => {
-            if (!state.jobId || !state.isTracked) {
-                alert('Please track the object first');
-                return;
-            }
+                // Step 2: Start export with user options
+                document.getElementById('modalText').textContent = 'Step 2/2: Applying effects and encoding...';
 
-            showProcessingModal('Exporting...', 'Applying background and encoding video...');
-
-            try {
-                // Start export with options
-                const response = await fetch(`${API_BASE}/api/object-removal/export`, {
+                const exportResponse = await fetch(`${API_BASE}/api/object-removal/export`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1713,53 +1687,59 @@
                     })
                 });
 
-                const data = await response.json();
-                if (data.status !== 'success' && data.status !== 'processing') {
-                    throw new Error(data.message || 'Failed to start export');
+                const exportData = await exportResponse.json();
+                if (exportData.status !== 'success' && exportData.status !== 'processing') {
+                    throw new Error(exportData.message || 'Failed to start export');
                 }
 
                 // Poll for export progress
-                const pollInterval = setInterval(async () => {
-                    try {
-                        const statusResp = await fetch(`${API_BASE}/api/object-removal/status/${state.jobId}`);
-                        const statusData = await statusResp.json();
+                const pollExport = () => new Promise((resolve, reject) => {
+                    const pollInterval = setInterval(async () => {
+                        try {
+                            const statusResp = await fetch(`${API_BASE}/api/object-removal/status/${state.jobId}`);
+                            const statusData = await statusResp.json();
 
-                        console.log('[EXPORT STATUS]', statusData);
+                            console.log('[EXPORT STATUS]', statusData);
 
-                        if (statusData.status === 'export_complete') {
-                            clearInterval(pollInterval);
-                            updateProcessingProgress(100);
-                            setTimeout(() => {
-                                hideProcessingModal();
-                                // Trigger download - prefer CDN URL if available (production)
-                                const downloadUrl = statusData.cdn_url || `${API_BASE}/api/object-removal/download/${state.jobId}`;
-                                console.log('[DOWNLOAD] URL:', downloadUrl, statusData.cdn_url ? '(CDN)' : '(local)');
-                                const a = document.createElement('a');
-                                a.href = downloadUrl;
-                                a.download = `object_removed_${state.jobId}.${state.format}`;
-                                if (statusData.cdn_url) a.target = '_blank';  // CDN opens in new tab
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                            }, 500);
-                        } else if (statusData.status === 'error') {
-                            clearInterval(pollInterval);
-                            hideProcessingModal();
-                            alert('Export failed: ' + (statusData.message || 'Unknown error'));
-                        } else {
-                            // Update progress
-                            const progress = statusData.export_progress || statusData.progress || 0;
-                            updateProcessingProgress(progress);
+                            if (statusData.status === 'export_complete') {
+                                clearInterval(pollInterval);
+                                updateProcessingProgress(100);
+                                resolve(statusData);
+                            } else if (statusData.status === 'error') {
+                                clearInterval(pollInterval);
+                                reject(new Error(statusData.message || 'Export failed'));
+                            } else {
+                                const exportProgress = statusData.export_progress || statusData.progress || 0;
+                                const progress = 50 + (exportProgress / 2); // 50-100% for export
+                                updateProcessingProgress(progress);
+                            }
+                        } catch (err) {
+                            console.error('Export status poll error:', err);
                         }
-                    } catch (err) {
-                        console.error('Export status poll error:', err);
-                    }
-                }, 1000);
+                    }, 1000);
+                });
+
+                const finalStatus = await pollExport();
+
+                // Download result
+                hideProcessingModal();
+                const downloadUrl = finalStatus.cdn_url || `${API_BASE}/api/object-removal/download/${state.jobId}`;
+                console.log('[DOWNLOAD] URL:', downloadUrl, finalStatus.cdn_url ? '(CDN)' : '(local)');
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = `object_removed_${state.jobId}.${state.format}`;
+                if (finalStatus.cdn_url) a.target = '_blank';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+
+                // Show preview button for re-exports
+                document.getElementById('previewBtn').classList.remove('hidden');
 
             } catch (error) {
-                console.error('Export error:', error);
+                console.error('Processing error:', error);
                 hideProcessingModal();
-                alert('Export failed: ' + error.message);
+                alert('Processing failed: ' + error.message);
             }
         });
 
