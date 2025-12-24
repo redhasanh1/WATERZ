@@ -1198,19 +1198,53 @@
             if (!state.isSelectingObject) return;
             if (!state.jobId) return;
 
-            const rect = interactionLayer.getBoundingClientRect();
-            const percentX = (e.clientX - rect.left) / rect.width;
-            const percentY = (e.clientY - rect.top) / rect.height;
+            // Calculate actual video display bounds (accounting for letterboxing)
+            const containerRect = interactionLayer.getBoundingClientRect();
+            const videoAspect = state.videoWidth / state.videoHeight;
+            const containerAspect = containerRect.width / containerRect.height;
+
+            let displayWidth, displayHeight, offsetX, offsetY;
+
+            if (videoAspect > containerAspect) {
+                // Video is wider - letterbox top/bottom
+                displayWidth = containerRect.width;
+                displayHeight = containerRect.width / videoAspect;
+                offsetX = 0;
+                offsetY = (containerRect.height - displayHeight) / 2;
+            } else {
+                // Video is taller - letterbox left/right
+                displayHeight = containerRect.height;
+                displayWidth = containerRect.height * videoAspect;
+                offsetX = (containerRect.width - displayWidth) / 2;
+                offsetY = 0;
+            }
+
+            // Get click position relative to container
+            const clickX = e.clientX - containerRect.left;
+            const clickY = e.clientY - containerRect.top;
+
+            // Check if click is within video area (not on letterbox)
+            if (clickX < offsetX || clickX > offsetX + displayWidth ||
+                clickY < offsetY || clickY > offsetY + displayHeight) {
+                console.log('[SELECT] Click outside video area (on letterbox)');
+                return;
+            }
+
+            // Convert to percentage within the VIDEO display area
+            const percentX = (clickX - offsetX) / displayWidth;
+            const percentY = (clickY - offsetY) / displayHeight;
 
             // Convert to video coordinates
             const videoX = Math.floor(percentX * state.videoWidth);
             const videoY = Math.floor(percentY * state.videoHeight);
 
-            // Add click marker with loading state
+            console.log('[SELECT] Click:', clickX.toFixed(0), clickY.toFixed(0), '-> video:', videoX, videoY);
+
+            // Add click marker with loading state (positioned within video area)
             const marker = document.createElement('div');
             marker.className = 'click-marker';
-            marker.style.left = (percentX * 100) + '%';
-            marker.style.top = (percentY * 100) + '%';
+            marker.style.left = (offsetX + percentX * displayWidth) + 'px';
+            marker.style.top = (offsetY + percentY * displayHeight) + 'px';
             marker.style.animation = 'pulse 1s infinite';
             interactionLayer.appendChild(marker);
 
