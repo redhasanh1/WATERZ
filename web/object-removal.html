@@ -96,8 +96,52 @@
             color: var(--text-primary);
         }
 
+        .nav-auth {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .nav-login-btn {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+
+        .nav-login-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .nav-signup-btn {
+            background: var(--accent);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+
+        .nav-signup-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        .nav-profile-btn {
+            color: var(--text-primary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
         @media (max-width: 768px) {
             .nav-links { display: none; }
+            .nav-auth { display: none; }
         }
 
         /* Hero */
@@ -367,6 +411,16 @@
         .action-btn-secondary:hover {
             border-color: var(--text-muted);
             color: var(--text-primary);
+        }
+
+        .action-btn-reset {
+            background: var(--green);
+            color: white;
+            border: none;
+        }
+
+        .action-btn-reset:hover {
+            background: #16a34a;
         }
 
         .action-btn svg {
@@ -874,6 +928,7 @@
                 <li><a href="/premium#pricing">Pricing</a></li>
                 <li><a href="/api">API</a></li>
             </ul>
+            <div class="nav-auth" id="navAuth"></div>
         </div>
     </nav>
 
@@ -956,6 +1011,13 @@
                             </svg>
                             Remove Selected
                         </button>
+                        <button class="action-btn action-btn-reset" id="resetObjectsBtn" style="display: none;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                <path d="M3 3v5h5"/>
+                            </svg>
+                            Reset All
+                        </button>
                         <button class="action-btn action-btn-secondary hidden" id="previewBtn">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"/>
@@ -974,9 +1036,6 @@
                         <span class="objects-title">Objects to Remove</span>
                         <span class="objects-count" id="objectsCount">0 objects</span>
                     </div>
-                    <button class="action-btn action-btn-secondary" id="resetObjectsBtn" style="display: none; padding: 0.5rem 1rem; font-size: 0.8rem;">
-                        Reset All
-                    </button>
                 </div>
                 <div class="objects-list" id="objectsList">
                     <div class="add-object-card" id="addObjectCard">
@@ -1003,7 +1062,7 @@
                     <div class="setting-group">
                         <span class="setting-label">Operation</span>
                         <div class="setting-options" style="flex-wrap: wrap; gap: 0.5rem;">
-                            <div class="setting-option selected" data-operation="keep_object">Keep Object</div>
+                            <div class="setting-option selected" data-operation="keep_object" title="Keep only the selected object, remove everything else">Extract Object</div>
                             <div class="setting-option" data-operation="remove_object">Remove Object</div>
                             <div class="setting-option" data-operation="fill_inside">Fill Inside</div>
                             <div class="setting-option" data-operation="fill_outside">Fill Outside</div>
@@ -1094,6 +1153,34 @@
         // API Base (same origin for local server)
         const API_BASE = '';
 
+        // Auth helpers
+        function isLoggedIn() {
+            return !!localStorage.getItem('user');
+        }
+
+        function updateNavAuth() {
+            const navAuth = document.getElementById('navAuth');
+            if (!navAuth) return;
+
+            const user = localStorage.getItem('user');
+            if (user) {
+                try {
+                    const userData = JSON.parse(user);
+                    navAuth.innerHTML = `<a href="/profile" class="nav-profile-btn">${userData.name || 'Profile'}</a>`;
+                } catch (e) {
+                    navAuth.innerHTML = `<a href="/profile" class="nav-profile-btn">Profile</a>`;
+                }
+            } else {
+                navAuth.innerHTML = `
+                    <a href="/login" class="nav-login-btn">Log In</a>
+                    <a href="/login" class="nav-signup-btn">Sign Up</a>
+                `;
+            }
+        }
+
+        // Initialize nav auth on page load
+        updateNavAuth();
+
         // State
         const state = {
             jobId: null,
@@ -1151,6 +1238,12 @@
         });
 
         async function handleFile(file) {
+            // Check if user is logged in
+            if (!isLoggedIn()) {
+                window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+
             // Accept any video type - browsers report MIME types differently
             if (!file.type.startsWith('video/')) {
                 alert('Please upload a video file (MP4, MOV, WebM, MKV, WMV, etc.)');
@@ -1661,11 +1754,11 @@
         });
 
         document.getElementById('skipBackBtn').addEventListener('click', () => {
-            videoPlayer.currentTime = 0;
+            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - (1/30));
         });
 
         document.getElementById('skipEndBtn').addEventListener('click', () => {
-            videoPlayer.currentTime = videoPlayer.duration;
+            videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + (1/30));
         });
 
         document.getElementById('timelineBar').addEventListener('click', (e) => {
