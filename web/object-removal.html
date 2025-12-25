@@ -1357,9 +1357,10 @@
                         <div class="setting-options" style="flex-wrap: wrap; gap: 0.5rem;">
                             <div class="setting-option selected" data-format="mp4">MP4</div>
                             <div class="setting-option" data-format="webm">WebM</div>
+                            <div class="setting-option" data-format="png">PNG</div>
                         </div>
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            WebM supports transparency
+                            WebM & PNG support transparency
                         </p>
                     </div>
                 </div>
@@ -2493,7 +2494,7 @@
                 console.log('[DOWNLOAD] URL:', downloadUrl, finalStatus.cdn_url ? '(CDN)' : '(local)');
                 const a = document.createElement('a');
                 a.href = downloadUrl;
-                a.download = `object_removed_${state.jobId}.${state.format}`;
+                a.download = `object_removed_${state.jobId}.${state.format === 'png' ? 'zip' : state.format}`;
                 if (finalStatus.cdn_url) a.target = '_blank';
                 document.body.appendChild(a);
                 a.click();
