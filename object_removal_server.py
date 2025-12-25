@@ -516,9 +516,14 @@ def apply_operation(frame, mask, operation, options):
             return (frame * mask_3ch + blurred * (1 - mask_3ch)).astype(np.uint8)
 
     elif operation == 'remove_object':
-        # Keep outside mask, fill inside with color/blur
+        # Keep outside mask, fill inside with color/blur/transparent
         inv_mask_3ch = 1 - mask_3ch
-        if bg_type == 'color':
+        if bg_type == 'transparent':
+            # Object area becomes transparent, background stays visible
+            rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+            rgba[:, :, 3] = 255 - mask  # Invert: mask area = transparent
+            return rgba
+        elif bg_type == 'color':
             fill = np.full_like(frame, color_bgr, dtype=np.uint8)
         else:  # blur
             fill = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
@@ -529,6 +534,11 @@ def apply_operation(frame, mask, operation, options):
         return (fill * mask_3ch + frame * (1 - mask_3ch)).astype(np.uint8)
 
     elif operation == 'fill_outside':
+        if bg_type == 'transparent':
+            # Outside becomes transparent, inside stays visible
+            rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+            rgba[:, :, 3] = mask  # Mask area = opaque, outside = transparent
+            return rgba
         fill = np.full_like(frame, color_bgr, dtype=np.uint8)
         return (frame * mask_3ch + fill * (1 - mask_3ch)).astype(np.uint8)
 
@@ -553,7 +563,11 @@ def export_video():
     operation = data.get('operation', 'keep_object')  # keep_object, remove_object, fill_inside, fill_outside, blur_inside, blur_outside
     background = data.get('background', 'transparent')  # transparent, color, blur
     bg_color = data.get('bg_color', '#00FF00')  # hex color
-    output_format = data.get('format', 'mp4')  # mp4, webm, png
+    output_format = data.get('format', 'mp4')  # mp4, webm, png, png_sequence, gif
+
+    # Normalize format aliases
+    if output_format == 'png_sequence':
+        output_format = 'png'  # Same as png
     blur_amount = data.get('blur_amount', data.get('blur', 20))  # blur strength
     dilation = data.get('dilation', 0)  # mask dilation
 
@@ -618,9 +632,21 @@ def export_video():
                             result = apply_operation(frame, mask, operation, options)
                             cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), result)
                         else:
-                            cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), frame)
+                            # No valid mask - create RGBA with full opacity if transparent mode
+                            if background == 'transparent':
+                                rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+                                rgba[:, :, 3] = 255
+                                cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), rgba)
+                            else:
+                                cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), frame)
                     else:
-                        cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), frame)
+                        # No mask file - create RGBA with full opacity if transparent mode
+                        if background == 'transparent':
+                            rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+                            rgba[:, :, 3] = 255
+                            cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), rgba)
+                        else:
+                            cv2.imwrite(str(output_dir / f"{frame_idx:05d}.png"), frame)
 
                     job['progress'] = int((frame_idx + 1) / frame_count * 100)
 
@@ -645,9 +671,15 @@ def export_video():
                             result = apply_operation(frame, mask, operation, options)
                             cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), result)
                         else:
-                            cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), frame)
+                            # No valid mask - create RGBA with full opacity
+                            rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+                            rgba[:, :, 3] = 255
+                            cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), rgba)
                     else:
-                        cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), frame)
+                        # No mask file - create RGBA with full opacity
+                        rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+                        rgba[:, :, 3] = 255
+                        cv2.imwrite(str(temp_frames_dir / f"{frame_idx:05d}.png"), rgba)
 
                     job['progress'] = int((frame_idx + 1) / frame_count * 50)
 

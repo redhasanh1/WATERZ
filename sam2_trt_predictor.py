@@ -371,15 +371,30 @@ class SAM2TensorRTPredictor:
             raise RuntimeError(f"Could not find mask output. Available: {list(decoder_outputs_host.keys())}")
 
         # Post-process mask (sigmoid + threshold)
-        # MULTI-CLICK FIX: Combine masks from ALL prompts using OR logic
-        # Each click creates a separate prompt in the batch, so we OR them together
+        # MULTI-CLICK FIX: Combine masks respecting positive/negative labels
+        # Positive points (label=1) add to mask, negative points (label=0) subtract
         num_prompts = mask_logits.shape[0]
         if num_prompts > 1:
-            # Multiple clicks - combine all masks
+            # Multiple clicks - combine with label awareness
             all_masks_probs = 1 / (1 + np.exp(-mask_logits[:, 0]))  # Sigmoid on all batch items
-            mask_combined = np.any(all_masks_probs > 0.5, axis=0)  # OR combine
+
+            # Separate positive and negative masks based on labels
+            positive_mask = np.zeros(all_masks_probs.shape[1:], dtype=bool)
+            negative_mask = np.zeros(all_masks_probs.shape[1:], dtype=bool)
+
+            for i, label in enumerate(labels):  # Use original labels array
+                mask_binary_i = all_masks_probs[i] > 0.5
+                if label == 1:  # Positive - include this region
+                    positive_mask = positive_mask | mask_binary_i
+                else:  # Negative (label=0) - exclude this region
+                    negative_mask = negative_mask | mask_binary_i
+
+            # Final mask = positive regions MINUS negative regions
+            mask_combined = positive_mask & ~negative_mask
             mask_binary = mask_combined.astype(np.uint8)
-            logger.info(f"[TRT] Combined {num_prompts} click masks into one")
+            pos_count = int(np.sum(labels == 1))
+            neg_count = int(np.sum(labels == 0))
+            logger.info(f"[TRT] Combined {num_prompts} masks: {pos_count} positive, {neg_count} negative")
         else:
             # Single click - use original logic
             mask_logits_2d = mask_logits[0, 0]

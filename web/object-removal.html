@@ -191,7 +191,7 @@
         }
 
         .credit-estimate-cost {
-            background: var(--accent);
+            background: linear-gradient(135deg, #667eea, #764ba2);
             color: white;
             padding: 0.5rem 1rem;
             border-radius: 8px;
@@ -337,6 +337,7 @@
             position: absolute;
             inset: 0;
             cursor: crosshair;
+            z-index: 10;
         }
 
         .click-marker {
@@ -1229,6 +1230,7 @@
                     <p>Drag & drop or click to upload (MP4, MOV, WebM, MKV, WMV, and more)</p>
                 </div>
                 <video id="videoPlayer" class="hidden"></video>
+                <canvas id="drawingCanvas" class="hidden" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 15;"></canvas>
                 <div class="interaction-layer hidden" id="interactionLayer"></div>
             </div>
 
@@ -1412,9 +1414,10 @@
                             <div class="setting-option selected" data-format="mp4">MP4</div>
                             <div class="setting-option" data-format="webm">WebM</div>
                             <div class="setting-option" data-format="png">PNG</div>
+                            <div class="setting-option" data-format="png_sequence">PNG Seq</div>
                         </div>
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            WebM & PNG support transparency
+                            WebM, PNG & PNG Seq support transparency
                         </p>
                     </div>
                 </div>
@@ -2195,6 +2198,7 @@ console.log('[MaskDrawer] Class loaded');
                 videoPlayer.crossOrigin = 'anonymous';
                 videoPlayer.src = state.videoUrl;
                 videoPlayer.classList.remove('hidden');
+                document.getElementById('drawingCanvas').classList.remove('hidden');
                 uploadArea.classList.add('hidden');
                 interactionLayer.classList.remove('hidden');
                 instructions.classList.remove('hidden');
@@ -2359,9 +2363,14 @@ console.log('[MaskDrawer] Class loaded');
             }
         }
 
-        // Left-click = include (label: 1)
+        // Left-click = include (label: 1) - only when in click mode
         interactionLayer.addEventListener('click', (e) => {
             if (e.button !== 0) return; // Only left-click
+            // Don't trigger SAM2 when using drawing tools
+            if (typeof currentDrawingTool !== 'undefined' && currentDrawingTool !== 'click') {
+                console.log('[CLICK] Skipping SAM2 - drawing tool active:', currentDrawingTool);
+                return;
+            }
             handlePointSelection(e, 1);
         });
 
@@ -2633,49 +2642,63 @@ console.log('[MaskDrawer] Class loaded');
             }
         });
 
-        // Helper for reliable video seeking
-        function seekVideo(time) {
-            if (videoPlayer.fastSeek) {
-                videoPlayer.fastSeek(time);
-            } else {
-                videoPlayer.currentTime = time;
-            }
+        // Helper for reliable video seeking with callback
+        function seekVideo(time, callback) {
+            console.log('[SEEK] Requesting seek to:', time.toFixed(3));
+            const onSeeked = () => {
+                videoPlayer.removeEventListener('seeked', onSeeked);
+                console.log('[SEEK] Completed, now at:', videoPlayer.currentTime.toFixed(3));
+                if (callback) callback();
+            };
+            videoPlayer.addEventListener('seeked', onSeeked);
+
+            // Use currentTime directly - fastSeek can be unreliable
+            videoPlayer.currentTime = time;
         }
 
         // Back button - go back one frame
         document.getElementById('skipBackBtn').addEventListener('click', () => {
-            if (!videoPlayer.duration || videoPlayer.readyState < 2) return;
+            console.log('[FRAME] Back clicked, readyState:', videoPlayer.readyState, 'duration:', videoPlayer.duration);
+            if (!videoPlayer.duration || videoPlayer.readyState < 2) {
+                console.log('[FRAME] Video not ready, ignoring');
+                return;
+            }
             videoPlayer.pause();
             state.isPlaying = false;
             document.getElementById('playIcon').classList.remove('hidden');
             document.getElementById('pauseIcon').classList.add('hidden');
 
             const frameTime = 1 / 30;  // One frame at 30fps
-            const newTime = Math.max(0, videoPlayer.currentTime - frameTime);
-            seekVideo(newTime);
-            updateProgress();
+            const before = videoPlayer.currentTime;
+            const newTime = Math.max(0, before - frameTime);
+            console.log('[FRAME] Back: before=' + before.toFixed(3) + ', target=' + newTime.toFixed(3));
+            seekVideo(newTime, updateProgress);
         });
 
         // Forward button - go forward one frame
         document.getElementById('skipEndBtn').addEventListener('click', () => {
-            if (!videoPlayer.duration || videoPlayer.readyState < 2) return;
+            console.log('[FRAME] Forward clicked, readyState:', videoPlayer.readyState, 'duration:', videoPlayer.duration);
+            if (!videoPlayer.duration || videoPlayer.readyState < 2) {
+                console.log('[FRAME] Video not ready, ignoring');
+                return;
+            }
             videoPlayer.pause();
             state.isPlaying = false;
             document.getElementById('playIcon').classList.remove('hidden');
             document.getElementById('pauseIcon').classList.add('hidden');
 
             const frameTime = 1 / 30;  // One frame at 30fps
-            const newTime = Math.min(videoPlayer.duration - frameTime, videoPlayer.currentTime + frameTime);
-            seekVideo(newTime);
-            updateProgress();
+            const before = videoPlayer.currentTime;
+            const newTime = Math.min(videoPlayer.duration - frameTime, before + frameTime);
+            console.log('[FRAME] Forward: before=' + before.toFixed(3) + ', target=' + newTime.toFixed(3));
+            seekVideo(newTime, updateProgress);
         });
 
         document.getElementById('timelineBar').addEventListener('click', (e) => {
             if (!videoPlayer.duration || videoPlayer.readyState < 2) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const percent = (e.clientX - rect.left) / rect.width;
-            seekVideo(percent * videoPlayer.duration);
-            updateProgress();
+            seekVideo(percent * videoPlayer.duration, updateProgress);
         });
 
         function updateProgress() {
@@ -2987,7 +3010,9 @@ console.log('[MaskDrawer] Class loaded');
                 console.log('[DOWNLOAD] URL:', downloadUrl, finalStatus.cdn_url ? '(CDN)' : '(local)');
                 const a = document.createElement('a');
                 a.href = downloadUrl;
-                a.download = `object_removed_${state.jobId}.${state.format === 'png' ? 'zip' : state.format}`;
+                // Determine file extension: png and png_sequence become zip, others use their format
+                const ext = (state.format === 'png' || state.format === 'png_sequence') ? 'zip' : state.format;
+                a.download = `object_removed_${state.jobId}.${ext}`;
                 if (finalStatus.cdn_url) a.target = '_blank';
                 document.body.appendChild(a);
                 a.click();
@@ -3056,6 +3081,26 @@ console.log('[MaskDrawer] Class loaded');
 
         // Drawing Tools Toggle and Handlers
         let currentDrawingTool = 'click';
+        let maskDrawer = null;
+        const drawingCanvas = document.getElementById('drawingCanvas');
+
+        // Initialize MaskDrawer when video loads
+        function initMaskDrawer() {
+            if (maskDrawer) return;
+            maskDrawer = new MaskDrawer(videoPlayer, drawingCanvas, {
+                tool: 'click',
+                brushSize: 20,
+                fillColor: 'rgba(102, 126, 234, 0.4)',
+                strokeColor: '#667eea'
+            });
+            maskDrawer.init();
+            console.log('[MaskDrawer] Initialized');
+        }
+
+        // Initialize when video metadata loads
+        videoPlayer.addEventListener('loadedmetadata', () => {
+            initMaskDrawer();
+        });
 
         // Advanced Selection toggle
         document.getElementById('advancedSelectionToggle').addEventListener('click', () => {
@@ -3094,6 +3139,24 @@ console.log('[MaskDrawer] Class loaded');
                     brushContainer.style.display = (tool === 'brush' || tool === 'eraser') ? 'flex' : 'none';
                 }
 
+                // Enable/disable drawing canvas based on tool
+                const interactionLayer = document.getElementById('interactionLayer');
+                if (tool === 'click') {
+                    // Click mode - disable drawing canvas, enable interaction layer for SAM2 clicks
+                    drawingCanvas.style.pointerEvents = 'none';
+                    interactionLayer.style.pointerEvents = 'auto';
+                    if (maskDrawer) maskDrawer.enabled = false;
+                } else {
+                    // Drawing mode - enable drawing canvas, disable SAM2 interaction
+                    drawingCanvas.classList.remove('hidden');
+                    drawingCanvas.style.pointerEvents = 'auto';
+                    interactionLayer.style.pointerEvents = 'none';
+                    if (maskDrawer) {
+                        maskDrawer.enabled = true;
+                        maskDrawer.setTool(tool);
+                    }
+                }
+
                 console.log('[TOOL] Selected:', tool);
             });
         });
@@ -3103,7 +3166,9 @@ console.log('[MaskDrawer] Class loaded');
         const brushValue = document.getElementById('brushSizeValue');
         if (brushSlider && brushValue) {
             brushSlider.addEventListener('input', (e) => {
-                brushValue.textContent = e.target.value + 'px';
+                const size = parseInt(e.target.value);
+                brushValue.textContent = size + 'px';
+                if (maskDrawer) maskDrawer.setBrushSize(size);
             });
         }
 
