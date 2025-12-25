@@ -470,6 +470,15 @@ def serve_js(path):
         return jsonify({'error': 'Access denied'}), 403
 
 
+@app.route('/demo/<path:path>')
+def serve_demo(path):
+    """Serve demo images"""
+    allowed_exts = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+    if any(path.endswith(ext) for ext in allowed_exts):
+        return send_file(f'demo/{path}')
+    return jsonify({'error': 'Not found'}), 404
+
+
 @app.route('/<path:filename>')
 def serve_static_root(filename):
     """Serve static files from root with path traversal protection"""
