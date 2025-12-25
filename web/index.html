@@ -2145,10 +2145,10 @@
                             const height = videoElem.videoHeight || 720;
                             const duration = videoElem.duration || 10;
 
-                            // Enforce 10 minute maximum duration
-                            const MAX_DURATION_SECONDS = 600;
+                            // Enforce 1 minute 33 seconds maximum duration
+                            const MAX_DURATION_SECONDS = 93;
                             if (duration > MAX_DURATION_SECONDS) {
-                                alert(`Video too long! Maximum duration is 10 minutes.\n\nYour video: ${Math.round(duration)} seconds\n\nPlease upload a shorter video.`);
+                                alert(`Video too long! Maximum duration is 1 minute 33 seconds.\n\nYour video: ${Math.round(duration)} seconds\n\nPlease upload a shorter video.`);
                                 // Reset the upload
                                 previewContainer.classList.remove('active');
                                 videoElem.src = '';
@@ -2722,14 +2722,7 @@
                 const processTaskId = data.task_id || data.job_id;
                 console.log('[SAM2] Job started:', processTaskId);
                 startStatusPolling(processTaskId);
-
-                // Update credits display (subtract estimated amount, will sync from server on completion)
-                const user = JSON.parse(localStorage.getItem('user') || '{}');
-                if (user.id && user.credits !== undefined) {
-                    user.credits = Math.max(0, user.credits - estimatedCredits);
-                    localStorage.setItem('user', JSON.stringify(user));
-                    updateCreditsDisplay(user.credits);
-                }
+                // Credits will be deducted server-side and updated on completion
             } else {
                 throw new Error(data.message || 'Processing failed');
             }
@@ -2774,14 +2767,7 @@
                 const processTaskId = data.task_id || data.job_id || taskId;
                 console.log('[STATIC] Job started:', processTaskId);
                 startStatusPolling(processTaskId);
-
-                // Update credits display
-                const user = JSON.parse(localStorage.getItem('user') || '{}');
-                if (user.id && user.credits !== undefined) {
-                    user.credits = Math.max(0, user.credits - estimatedCredits);
-                    localStorage.setItem('user', JSON.stringify(user));
-                    updateCreditsDisplay(user.credits);
-                }
+                // Credits will be deducted server-side and updated on completion
             } else {
                 throw new Error(data.message || 'Processing failed');
             }
@@ -2825,14 +2811,7 @@
                 const processTaskId = data.task_id || data.job_id;
                 console.log('[TRACKED] Job started:', processTaskId);
                 startStatusPolling(processTaskId);
-
-                // Update credits display
-                const user = JSON.parse(localStorage.getItem('user') || '{}');
-                if (user.id && user.credits !== undefined) {
-                    user.credits = Math.max(0, user.credits - estimatedCredits);
-                    localStorage.setItem('user', JSON.stringify(user));
-                    updateCreditsDisplay(user.credits);
-                }
+                // Credits will be deducted server-side and updated on completion
             } else {
                 throw new Error(data.message || 'Processing failed');
             }
