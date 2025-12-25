@@ -2205,47 +2205,48 @@
             }
         });
 
+        // Helper for reliable video seeking
+        function seekVideo(time) {
+            if (videoPlayer.fastSeek) {
+                videoPlayer.fastSeek(time);
+            } else {
+                videoPlayer.currentTime = time;
+            }
+        }
+
+        // Back button - go back one frame
         document.getElementById('skipBackBtn').addEventListener('click', () => {
-            console.log('[SKIP] Back: before=', videoPlayer.currentTime, 'duration=', videoPlayer.duration);
-            if (!videoPlayer.duration) return;
+            if (!videoPlayer.duration || videoPlayer.readyState < 2) return;
             videoPlayer.pause();
             state.isPlaying = false;
             document.getElementById('playIcon').classList.remove('hidden');
             document.getElementById('pauseIcon').classList.add('hidden');
-            const newTime = Math.max(0, videoPlayer.currentTime - 0.5);
-            console.log('[SKIP] Back: setting to', newTime);
-            videoPlayer.currentTime = newTime;
-            // Wait for seek to complete
-            setTimeout(() => {
-                updateProgress();
-                console.log('[SKIP] Back: after=', videoPlayer.currentTime);
-            }, 50);
+
+            const frameTime = 1 / 30;  // One frame at 30fps
+            const newTime = Math.max(0, videoPlayer.currentTime - frameTime);
+            seekVideo(newTime);
+            updateProgress();
         });
 
+        // Forward button - go forward one frame
         document.getElementById('skipEndBtn').addEventListener('click', () => {
-            console.log('[SKIP] Forward: before=', videoPlayer.currentTime, 'duration=', videoPlayer.duration);
-            if (!videoPlayer.duration) return;
+            if (!videoPlayer.duration || videoPlayer.readyState < 2) return;
             videoPlayer.pause();
             state.isPlaying = false;
             document.getElementById('playIcon').classList.remove('hidden');
             document.getElementById('pauseIcon').classList.add('hidden');
-            const newTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + 0.5);
-            console.log('[SKIP] Forward: setting to', newTime);
-            videoPlayer.currentTime = newTime;
-            // Wait for seek to complete
-            setTimeout(() => {
-                updateProgress();
-                console.log('[SKIP] Forward: after=', videoPlayer.currentTime);
-            }, 50);
+
+            const frameTime = 1 / 30;  // One frame at 30fps
+            const newTime = Math.min(videoPlayer.duration - frameTime, videoPlayer.currentTime + frameTime);
+            seekVideo(newTime);
+            updateProgress();
         });
 
         document.getElementById('timelineBar').addEventListener('click', (e) => {
-            console.log('[TIMELINE] Click detected');
-            if (!videoPlayer.duration) return;
+            if (!videoPlayer.duration || videoPlayer.readyState < 2) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const percent = (e.clientX - rect.left) / rect.width;
-            console.log('[TIMELINE] Seeking to', (percent * 100).toFixed(1) + '%');
-            videoPlayer.currentTime = percent * videoPlayer.duration;
+            seekVideo(percent * videoPlayer.duration);
             updateProgress();
         });
 
