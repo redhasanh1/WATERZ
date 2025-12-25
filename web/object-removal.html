@@ -1652,9 +1652,14 @@
                 return;
             }
 
-            // Accept any video type - browsers report MIME types differently
-            if (!file.type.startsWith('video/')) {
-                alert('Please upload a video file (MP4, MOV, WebM, MKV, WMV, etc.)');
+            // Accept any video type - check MIME or extension (browsers report types differently)
+            const videoExtensions = ['.mp4', '.mov', '.webm', '.mkv', '.wmv', '.avi', '.flv', '.m4v', '.mpeg', '.mpg', '.3gp', '.ts', '.mts', '.m2ts', '.vob', '.ogv'];
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            const isVideoMime = file.type.startsWith('video/');
+            const isVideoExt = videoExtensions.includes(ext);
+
+            if (!isVideoMime && !isVideoExt) {
+                alert('Please upload a video file (MP4, MOV, WebM, MKV, WMV, AVI, etc.)');
                 return;
             }
 
