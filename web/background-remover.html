@@ -1,0 +1,1752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Video Background Remover - Remove & Replace Backgrounds | MarkRemoverAI</title>
+    <meta name="description" content="Remove and replace video backgrounds instantly with AI. Transparent, green screen, custom colors, blur effects. Free online tool.">
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #09090b;
+            --bg-secondary: #0f0f12;
+            --bg-card: #18181b;
+            --bg-card-hover: #1f1f23;
+            --border-color: #27272a;
+            --text-primary: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent: #8b5cf6;
+            --accent-hover: #7c3aed;
+            --accent-glow: rgba(139, 92, 246, 0.3);
+            --green: #22c55e;
+            --blue: #3b82f6;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Navigation */
+        .nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .nav-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1.125rem;
+        }
+
+        .nav-logo img {
+            height: 32px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: var(--text-primary);
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .nav-btn {
+            padding: 0.5rem 1.25rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .nav-btn-ghost {
+            color: var(--text-secondary);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+        }
+
+        .nav-btn-ghost:hover {
+            color: var(--text-primary);
+        }
+
+        .nav-btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .nav-btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        @media (max-width: 768px) {
+            .nav-links { display: none; }
+
+            /* Nav mobile */
+            .nav-inner {
+                padding: 0.75rem 1rem;
+            }
+            .nav-logo span {
+                display: none;
+            }
+            .nav-logo img {
+                height: 28px;
+            }
+
+            /* Mobile app section */
+            .app-section {
+                padding: 3rem 1rem;
+            }
+            .app-card {
+                padding: 1.5rem;
+                border-radius: 16px;
+            }
+            .upload-zone {
+                padding: 2rem 1rem;
+            }
+            .upload-zone-icon {
+                width: 48px;
+                height: 48px;
+            }
+
+            /* Hero mobile */
+            .hero {
+                min-height: auto;
+                padding: 6rem 1rem 3rem;
+            }
+            .hero-title {
+                font-size: 2rem;
+            }
+            .hero-subtitle {
+                font-size: 1rem;
+            }
+
+            /* Mobile video sizing */
+            .video-preview video,
+            .result-video {
+                border-radius: 8px;
+            }
+
+            /* Video info - compact on mobile */
+            .video-info {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+            .video-info-item {
+                flex: 1;
+                min-width: 80px;
+            }
+
+            /* Result actions stack */
+            .result-actions {
+                flex-direction: column;
+            }
+            .download-btn, .restart-btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            /* Modal less padding */
+            .modal-content {
+                padding: 1.5rem;
+            }
+
+            /* Footer stack */
+            .footer-inner {
+                flex-direction: column;
+                text-align: center;
+                gap: 1.5rem;
+            }
+            .footer-links {
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 1rem;
+            }
+        }
+
+        @media (max-width: 500px) {
+            /* Even smaller nav */
+            .nav-inner {
+                padding: 0.5rem 0.75rem;
+            }
+
+            .app-section {
+                padding: 2rem 0.75rem;
+            }
+            .app-card {
+                padding: 1rem;
+            }
+            .upload-zone {
+                padding: 1.5rem 0.75rem;
+            }
+            .submit-btn {
+                padding: 0.875rem 1.5rem;
+                font-size: 0.9rem;
+            }
+
+            /* Make video larger on small screens - escape card padding */
+            .video-preview {
+                margin-left: -0.5rem;
+                margin-right: -0.5rem;
+            }
+            .video-preview video {
+                width: calc(100% + 1rem);
+                border-radius: 6px;
+            }
+            .result-section {
+                margin-left: -0.5rem;
+                margin-right: -0.5rem;
+            }
+            .result-video {
+                width: calc(100% + 1rem);
+                border-radius: 6px;
+            }
+
+            /* Background options - single column horizontal */
+            .bg-options {
+                grid-template-columns: 1fr;
+            }
+            .bg-option {
+                flex-direction: row;
+                justify-content: flex-start;
+                padding: 0.75rem 1rem;
+                gap: 1rem;
+            }
+            .bg-option-preview {
+                width: 32px;
+                height: 32px;
+            }
+            .bg-option-name {
+                font-size: 0.9rem;
+            }
+
+            /* Video info compact */
+            .video-info-value {
+                font-size: 0.9rem;
+            }
+            .video-info-label {
+                font-size: 0.65rem;
+            }
+
+            /* FAQ smaller text */
+            .faq-question {
+                font-size: 0.95rem;
+                padding: 1rem 0;
+            }
+        }
+
+        @media (max-width: 400px) {
+            /* Tiny screens */
+            .hero-cta {
+                padding: 0.875rem 1.5rem;
+                font-size: 1rem;
+            }
+
+            /* Modal even smaller */
+            .modal-content {
+                padding: 1.25rem;
+                border-radius: 16px;
+            }
+            .modal-spinner {
+                width: 40px;
+                height: 40px;
+            }
+            .modal h3 {
+                font-size: 1.1rem;
+            }
+
+            /* Showcase label smaller */
+            .showcase-label {
+                font-size: 0.75rem;
+                padding: 0.4rem 0.75rem;
+            }
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 8rem 1.5rem 4rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 100px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+
+        .hero-badge-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 8vw, 4.5rem);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #fff 0%, #a1a1aa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-subtitle {
+            font-size: clamp(1rem, 2.5vw, 1.25rem);
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto 3rem;
+            line-height: 1.7;
+        }
+
+        .hero-cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem 2rem;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+
+        .hero-cta:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 20px 40px var(--accent-glow);
+        }
+
+        .hero-cta svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Showcase Section */
+        .showcase {
+            padding: 4rem 1.5rem 6rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .showcase-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        @media (max-width: 768px) {
+            .showcase-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+        }
+
+        .showcase-item {
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+        }
+
+        .showcase-item video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .showcase-label {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            padding: 0.5rem 1rem;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .showcase-arrow {
+            display: none;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            color: var(--accent);
+        }
+
+        @media (min-width: 769px) {
+            .showcase-arrow {
+                display: block;
+                position: relative;
+                left: auto;
+                top: auto;
+                transform: none;
+                grid-column: 1 / -1;
+                text-align: center;
+                margin: -1rem 0;
+            }
+        }
+
+        /* App Section */
+        .app-section {
+            padding: 6rem 1.5rem;
+            background: var(--bg-secondary);
+        }
+
+        .app-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .app-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 2.5rem;
+        }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 16px;
+            padding: 4rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--bg-primary);
+        }
+
+        .upload-zone:hover,
+        .upload-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(139, 92, 246, 0.05);
+        }
+
+        .upload-zone-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 1.5rem;
+            color: var(--text-muted);
+        }
+
+        .upload-zone h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-zone p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Video Preview */
+        .video-preview {
+            display: none;
+            margin-bottom: 2rem;
+        }
+
+        .video-preview.visible {
+            display: block;
+        }
+
+        .video-preview video {
+            width: 100%;
+            border-radius: 12px;
+            background: #000;
+        }
+
+        .video-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-primary);
+            border-radius: 8px;
+        }
+
+        .video-info-item {
+            text-align: center;
+        }
+
+        .video-info-value {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .video-info-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Divider */
+        .divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 2rem 0;
+        }
+
+        /* Options */
+        .options-label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        .bg-options {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 500px) {
+            .bg-options {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .bg-option {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .bg-option:hover {
+            border-color: var(--text-muted);
+        }
+
+        .bg-option.selected {
+            border-color: var(--accent);
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        .bg-option-preview {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .bg-option-preview.transparent {
+            background: repeating-conic-gradient(#333 0% 25%, #222 0% 50%) 50% / 12px 12px;
+        }
+
+        .bg-option-preview.green { background: #00FF00; }
+        .bg-option-preview.blue { background: #0066FF; }
+        .bg-option-preview.blur {
+            background: linear-gradient(135deg, #333, #222);
+            position: relative;
+        }
+        .bg-option-preview.blur::after {
+            content: '';
+            position: absolute;
+            inset: 4px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            filter: blur(2px);
+        }
+
+        .bg-option-name {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .bg-option.selected .bg-option-name {
+            color: var(--text-primary);
+        }
+
+        /* Color Picker */
+        .color-picker-wrapper {
+            position: relative;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .color-picker-wrapper input {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            top: -10px;
+            left: -10px;
+            border: none;
+            cursor: pointer;
+        }
+
+        /* Image Upload Preview */
+        .custom-image-preview {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background-size: cover;
+            background-position: center;
+            background-color: var(--bg-card);
+        }
+
+        /* Format Options */
+        .format-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 500px) {
+            .format-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .select-wrapper {
+            position: relative;
+        }
+
+        .select-wrapper select {
+            width: 100%;
+            padding: 0.875rem 1rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            cursor: pointer;
+            appearance: none;
+        }
+
+        .select-wrapper::after {
+            content: '';
+            position: absolute;
+            right: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            border: 5px solid transparent;
+            border-top-color: var(--text-muted);
+        }
+
+        /* Submit Button */
+        .submit-btn {
+            width: 100%;
+            padding: 1.125rem;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+        }
+
+        .submit-btn:hover:not(:disabled) {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px var(--accent-glow);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .submit-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* How It Works */
+        .how-section {
+            padding: 6rem 1.5rem;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: clamp(1.75rem, 4vw, 2.5rem);
+            font-weight: 700;
+            margin-bottom: 4rem;
+        }
+
+        .steps {
+            max-width: 900px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2rem;
+        }
+
+        @media (max-width: 700px) {
+            .steps {
+                grid-template-columns: 1fr;
+                max-width: 400px;
+            }
+        }
+
+        .step {
+            text-align: center;
+        }
+
+        .step-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .step-icon svg {
+            width: 36px;
+            height: 36px;
+            color: var(--accent);
+        }
+
+        .step-number {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 0.5rem;
+        }
+
+        .step h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .step p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Examples Gallery */
+        .examples-section {
+            padding: 6rem 1.5rem;
+            background: var(--bg-secondary);
+        }
+
+        .examples-grid {
+            max-width: 1100px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 900px) {
+            .examples-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 500px) {
+            .examples-grid {
+                grid-template-columns: 1fr;
+                max-width: 400px;
+            }
+        }
+
+        .example-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+
+        .example-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--text-muted);
+        }
+
+        .example-videos {
+            display: grid;
+            grid-template-rows: 1fr 1fr;
+        }
+
+        .example-videos video {
+            width: 100%;
+            height: 100px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .example-info {
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .example-type {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        /* FAQ Section */
+        .faq-section {
+            padding: 6rem 1.5rem;
+        }
+
+        .faq-list {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .faq-item {
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .faq-question {
+            width: 100%;
+            padding: 1.5rem 0;
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .faq-question svg {
+            width: 20px;
+            height: 20px;
+            color: var(--text-muted);
+            transition: transform 0.2s;
+        }
+
+        .faq-item.open .faq-question svg {
+            transform: rotate(180deg);
+        }
+
+        .faq-answer {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .faq-item.open .faq-answer {
+            max-height: 200px;
+        }
+
+        .faq-answer p {
+            padding-bottom: 1.5rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 3rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .footer-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .footer-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: var(--text-primary);
+        }
+
+        .footer-copy {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Processing Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+        }
+
+        .modal.visible {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 3rem;
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .modal-spinner {
+            width: 56px;
+            height: 56px;
+            border: 4px solid var(--border-color);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1.5rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .modal h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .modal-status {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .progress-text {
+            margin-top: 0.75rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        /* Result */
+        .result-section {
+            display: none;
+            text-align: center;
+        }
+
+        .result-section.visible {
+            display: block;
+        }
+
+        .result-video {
+            width: 100%;
+            max-height: 400px;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+        }
+
+        .result-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem 2rem;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .download-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        .restart-btn {
+            padding: 1rem 2rem;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .restart-btn:hover {
+            background: var(--bg-card);
+        }
+
+        /* Utility */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="/" class="nav-logo">
+                <img src="logo.svg" alt="MarkRemoverAI">
+                <span>MarkRemoverAI</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Object Remover</a></li>
+                <li><a href="/background-remover" class="active">Background Remover</a></li>
+                <li><a href="/premium#pricing">Pricing</a></li>
+                <li><a href="/api">API</a></li>
+            </ul>
+            <div class="nav-right">
+                <a href="/login" class="nav-btn nav-btn-ghost" id="signInBtn">Sign In</a>
+                <span id="userCredits" class="nav-btn nav-btn-ghost" style="display:none;"></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-badge">
+            <span class="hero-badge-dot"></span>
+            AI-Powered Video Processing
+        </div>
+        <h1>Remove Video<br>Backgrounds Instantly</h1>
+        <p class="hero-subtitle">
+            Keep your subject, change the world behind them. Transparent exports,
+            green screen, custom colors, blur effects - all powered by AI.
+        </p>
+        <a href="#app" class="hero-cta">
+            Get Started Free
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+        </a>
+    </section>
+
+    <!-- Before/After Showcase -->
+    <section class="showcase">
+        <div class="showcase-grid">
+            <div class="showcase-item">
+                <video autoplay loop muted playsinline>
+                    <source src="demo/input-sample.mp4" type="video/mp4">
+                </video>
+                <span class="showcase-label">Original</span>
+            </div>
+            <div class="showcase-item">
+                <video autoplay loop muted playsinline>
+                    <source src="demo/output-sample.mp4" type="video/mp4">
+                </video>
+                <span class="showcase-label">Background Removed</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main App Section -->
+    <section class="app-section" id="app">
+        <div class="app-container">
+            <div class="app-card">
+                <!-- Upload Zone -->
+                <div class="upload-zone" id="uploadZone">
+                    <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm" style="display:none">
+                    <svg class="upload-zone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <h3>Drop your video here</h3>
+                    <p>or click to upload (MP4, MOV, WebM up to 100MB)</p>
+                </div>
+
+                <!-- Video Preview -->
+                <div class="video-preview" id="videoPreview">
+                    <video id="previewVideo" controls></video>
+                    <div class="video-info">
+                        <div class="video-info-item">
+                            <div class="video-info-value" id="videoDuration">0:00</div>
+                            <div class="video-info-label">Duration</div>
+                        </div>
+                        <div class="video-info-item">
+                            <div class="video-info-value" id="videoResolution">-</div>
+                            <div class="video-info-label">Resolution</div>
+                        </div>
+                        <div class="video-info-item">
+                            <div class="video-info-value" id="videoSize">-</div>
+                            <div class="video-info-label">Size</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Result Section -->
+                <div class="result-section" id="resultSection">
+                    <video class="result-video" id="resultVideo" controls></video>
+                    <div class="result-actions">
+                        <a href="#" class="download-btn" id="downloadBtn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                            </svg>
+                            Download
+                        </a>
+                        <button class="restart-btn" id="restartBtn">Process Another</button>
+                    </div>
+                </div>
+
+                <div class="divider" id="optionsDivider" style="display:none;"></div>
+
+                <!-- Background Options -->
+                <div id="optionsPanel" style="display:none;">
+                    <span class="options-label">Choose Background</span>
+                    <div class="bg-options">
+                        <div class="bg-option selected" data-bg="transparent">
+                            <div class="bg-option-preview transparent"></div>
+                            <span class="bg-option-name">Transparent</span>
+                        </div>
+                        <div class="bg-option" data-bg="green">
+                            <div class="bg-option-preview green"></div>
+                            <span class="bg-option-name">Green Screen</span>
+                        </div>
+                        <div class="bg-option" data-bg="blue">
+                            <div class="bg-option-preview blue"></div>
+                            <span class="bg-option-name">Blue Screen</span>
+                        </div>
+                        <div class="bg-option" data-bg="color">
+                            <div class="bg-option-preview">
+                                <div class="color-picker-wrapper">
+                                    <input type="color" id="colorPicker" value="#8b5cf6">
+                                </div>
+                            </div>
+                            <span class="bg-option-name">Solid Color</span>
+                        </div>
+                        <div class="bg-option" data-bg="blur">
+                            <div class="bg-option-preview blur"></div>
+                            <span class="bg-option-name">Blur</span>
+                        </div>
+                        <div class="bg-option" data-bg="image">
+                            <div class="bg-option-preview custom-image-preview" id="customImagePreview">
+                                <input type="file" id="bgImageInput" accept="image/*" style="display:none">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                                    <path d="M21 15l-5-5L5 21"/>
+                                </svg>
+                            </div>
+                            <span class="bg-option-name">Custom Image</span>
+                        </div>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <span class="options-label">Output Settings</span>
+                    <div class="format-row">
+                        <div class="select-wrapper">
+                            <select id="formatSelect">
+                                <option value="webm">WebM (Transparent)</option>
+                                <option value="mp4">MP4 (Universal)</option>
+                                <option value="mov">MOV (ProRes)</option>
+                            </select>
+                        </div>
+                        <div class="select-wrapper">
+                            <select id="qualitySelect">
+                                <option value="1">Fast Processing</option>
+                                <option value="2" selected>Balanced</option>
+                                <option value="3">Best Quality</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button class="submit-btn" id="submitBtn">
+                        Remove Background
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M5 12h14M12 5l7 7-7 7"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-section">
+        <h2 class="section-title">How It Works</h2>
+        <div class="steps">
+            <div class="step">
+                <div class="step-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                </div>
+                <div class="step-number">Step 1</div>
+                <h3>Upload Video</h3>
+                <p>Drop your video file into the app. We support MP4, MOV, and WebM formats.</p>
+            </div>
+            <div class="step">
+                <div class="step-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <path d="M3 9h18M9 21V9"/>
+                    </svg>
+                </div>
+                <div class="step-number">Step 2</div>
+                <h3>Choose Background</h3>
+                <p>Select transparent, green screen, solid color, blur, or upload your own image.</p>
+            </div>
+            <div class="step">
+                <div class="step-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                    </svg>
+                </div>
+                <div class="step-number">Step 3</div>
+                <h3>Download</h3>
+                <p>Get your processed video with the new background, ready to use anywhere.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Examples -->
+    <section class="examples-section">
+        <h2 class="section-title">See It In Action</h2>
+        <div class="examples-grid">
+            <div class="example-card">
+                <div class="example-videos">
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example1-in.mp4" type="video/mp4">
+                    </video>
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example1-out.mp4" type="video/mp4">
+                    </video>
+                </div>
+                <div class="example-info">
+                    <span class="example-type">Transparent</span>
+                </div>
+            </div>
+            <div class="example-card">
+                <div class="example-videos">
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example2-in.mp4" type="video/mp4">
+                    </video>
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example2-out.mp4" type="video/mp4">
+                    </video>
+                </div>
+                <div class="example-info">
+                    <span class="example-type">Green Screen</span>
+                </div>
+            </div>
+            <div class="example-card">
+                <div class="example-videos">
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example3-in.mp4" type="video/mp4">
+                    </video>
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example3-out.mp4" type="video/mp4">
+                    </video>
+                </div>
+                <div class="example-info">
+                    <span class="example-type">Custom Image</span>
+                </div>
+            </div>
+            <div class="example-card">
+                <div class="example-videos">
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example4-in.mp4" type="video/mp4">
+                    </video>
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example4-out.mp4" type="video/mp4">
+                    </video>
+                </div>
+                <div class="example-info">
+                    <span class="example-type">Blur Effect</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq-section">
+        <h2 class="section-title">Frequently Asked Questions</h2>
+        <div class="faq-list">
+            <div class="faq-item">
+                <button class="faq-question">
+                    What video formats are supported?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>We support MP4, MOV, and WebM video formats. Most videos from phones, cameras, and screen recordings work perfectly.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    What's the maximum video length?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>Videos can be up to 5 minutes long for free users. Premium users can process videos up to 30 minutes. File size limit is 100MB.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    Which output format supports transparency?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>WebM and MOV (ProRes 4444) formats support alpha transparency. MP4 does not support transparency, so a solid background will be applied.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    How does the AI detect the subject?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>We use state-of-the-art AI models (SAM2) that automatically detect and segment the main subject in your video, separating it from the background frame by frame.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    Can I use this for commercial projects?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>Yes! All processed videos can be used for personal and commercial projects. You own full rights to your output files.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-inner">
+            <div class="footer-links">
+                <a href="/terms">Terms</a>
+                <a href="/privacy">Privacy</a>
+                <a href="/contact">Contact</a>
+                <a href="/api">API</a>
+            </div>
+            <p class="footer-copy">&copy; 2024 MarkRemoverAI. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <!-- Processing Modal -->
+    <div class="modal" id="processingModal">
+        <div class="modal-content">
+            <div class="modal-spinner"></div>
+            <h3>Processing Your Video</h3>
+            <p class="modal-status" id="modalStatus">Analyzing video...</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p class="progress-text" id="progressText">0%</p>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // State
+        const state = {
+            videoFile: null,
+            videoUrl: null,
+            selectedBg: 'transparent',
+            customColor: '#8b5cf6',
+            customImage: null,
+            format: 'webm',
+            quality: 2,
+            taskId: null
+        };
+
+        // Elements
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const videoPreview = document.getElementById('videoPreview');
+        const previewVideo = document.getElementById('previewVideo');
+        const optionsDivider = document.getElementById('optionsDivider');
+        const optionsPanel = document.getElementById('optionsPanel');
+        const submitBtn = document.getElementById('submitBtn');
+        const processingModal = document.getElementById('processingModal');
+        const resultSection = document.getElementById('resultSection');
+        const resultVideo = document.getElementById('resultVideo');
+
+        // Upload handling
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            const validTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
+            if (!validTypes.includes(file.type)) {
+                alert('Please upload a video file (MP4, MOV, or WebM)');
+                return;
+            }
+
+            state.videoFile = file;
+            state.videoUrl = URL.createObjectURL(file);
+
+            previewVideo.src = state.videoUrl;
+            uploadZone.style.display = 'none';
+            videoPreview.classList.add('visible');
+            optionsDivider.style.display = 'block';
+            optionsPanel.style.display = 'block';
+
+            // Update video info
+            previewVideo.addEventListener('loadedmetadata', () => {
+                const duration = previewVideo.duration;
+                const mins = Math.floor(duration / 60);
+                const secs = Math.floor(duration % 60);
+                document.getElementById('videoDuration').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                document.getElementById('videoResolution').textContent = `${previewVideo.videoWidth}x${previewVideo.videoHeight}`;
+                document.getElementById('videoSize').textContent = formatFileSize(file.size);
+            });
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // Background options
+        document.querySelectorAll('.bg-option').forEach(option => {
+            option.addEventListener('click', () => {
+                document.querySelectorAll('.bg-option').forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+                state.selectedBg = option.dataset.bg;
+
+                if (option.dataset.bg === 'image') {
+                    document.getElementById('bgImageInput').click();
+                }
+            });
+        });
+
+        // Color picker
+        document.getElementById('colorPicker').addEventListener('change', (e) => {
+            state.customColor = e.target.value;
+            document.querySelector('[data-bg="color"]').click();
+        });
+
+        // Custom image
+        document.getElementById('bgImageInput').addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    state.customImage = event.target.result;
+                    const preview = document.getElementById('customImagePreview');
+                    preview.style.backgroundImage = `url(${event.target.result})`;
+                    preview.innerHTML = '';
+                };
+                reader.readAsDataURL(e.target.files[0]);
+            }
+        });
+
+        // Format & quality
+        document.getElementById('formatSelect').addEventListener('change', (e) => {
+            state.format = e.target.value;
+        });
+
+        document.getElementById('qualitySelect').addEventListener('change', (e) => {
+            state.quality = parseInt(e.target.value);
+        });
+
+        // Submit
+        submitBtn.addEventListener('click', processVideo);
+
+        async function processVideo() {
+            if (!state.videoFile) return;
+
+            processingModal.classList.add('visible');
+            const statusEl = document.getElementById('modalStatus');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+
+            try {
+                statusEl.textContent = 'Uploading video...';
+                progressFill.style.width = '10%';
+                progressText.textContent = '10%';
+
+                const formData = new FormData();
+                formData.append('video', state.videoFile);
+                formData.append('output_type', state.selectedBg);
+                formData.append('background_color', state.customColor);
+                formData.append('format', state.format);
+                formData.append('quality', state.quality);
+                formData.append('mode', 'keep');
+                formData.append('selections', '[]');
+
+                if (state.customImage) {
+                    formData.append('background_image', state.customImage);
+                }
+
+                const API_BASE = window.API_BASE_URL || '';
+                const response = await fetch(API_BASE + '/api/background-remove', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Failed');
+
+                state.taskId = data.task_id;
+                statusEl.textContent = 'Processing...';
+                progressFill.style.width = '30%';
+                progressText.textContent = '30%';
+
+                await pollStatus(statusEl, progressFill, progressText);
+
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = 'Error: ' + err.message;
+                progressFill.style.background = '#ef4444';
+            }
+        }
+
+        async function pollStatus(statusEl, progressFill, progressText) {
+            const API_BASE = window.API_BASE_URL || '';
+
+            while (true) {
+                await new Promise(r => setTimeout(r, 2000));
+
+                const res = await fetch(API_BASE + '/api/background-remove/status/' + state.taskId, {
+                    credentials: 'include'
+                });
+                const data = await res.json();
+
+                if (data.status === 'completed') {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '100%';
+                    statusEl.textContent = 'Complete!';
+
+                    setTimeout(() => {
+                        processingModal.classList.remove('visible');
+                        showResult(data.result_url);
+                    }, 1000);
+                    break;
+
+                } else if (data.status === 'failed') {
+                    throw new Error(data.error || 'Processing failed');
+
+                } else {
+                    const progress = data.progress || 30;
+                    progressFill.style.width = progress + '%';
+                    progressText.textContent = progress + '%';
+                    statusEl.textContent = data.message || 'Processing...';
+                }
+            }
+        }
+
+        function showResult(url) {
+            videoPreview.classList.remove('visible');
+            optionsDivider.style.display = 'none';
+            optionsPanel.style.display = 'none';
+            resultSection.classList.add('visible');
+            resultVideo.src = url;
+            document.getElementById('downloadBtn').href = url;
+        }
+
+        // Restart
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            resultSection.classList.remove('visible');
+            uploadZone.style.display = 'block';
+            state.videoFile = null;
+            state.videoUrl = null;
+            state.taskId = null;
+            fileInput.value = '';
+        });
+
+        // FAQ accordion
+        document.querySelectorAll('.faq-question').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = btn.parentElement;
+                const isOpen = item.classList.contains('open');
+                document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+                if (!isOpen) item.classList.add('open');
+            });
+        });
+
+        // Auth check
+        try {
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            if (user && user.id) {
+                document.getElementById('signInBtn').style.display = 'none';
+                const credits = document.getElementById('userCredits');
+                credits.textContent = (user.credits || 0) + ' credits';
+                credits.style.display = 'block';
+            }
+        } catch (e) {}
+
+        // Smooth scroll for CTA
+        document.querySelector('.hero-cta').addEventListener('click', (e) => {
+            e.preventDefault();
+            document.getElementById('app').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+
+    })();
+    </script>
+</body>
+</html>

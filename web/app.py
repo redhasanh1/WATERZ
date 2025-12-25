@@ -402,6 +402,12 @@ def contact_page():
     return send_file('contact.html')
 
 
+@app.route('/background-remover.html')
+def background_remover_page():
+    """Serve the background remover page"""
+    return send_file('background-remover.html')
+
+
 @app.route('/video-tools.html')
 def video_tools_page():
     """Serve the video tools hub page"""
@@ -423,6 +429,12 @@ def redaction_page():
 @app.route('/object-removal.html')
 def object_removal_page():
     """Serve the object removal page"""
+    return send_file('object-removal.html')
+
+
+@app.route('/backgroundremover')
+def backgroundremover_page():
+    """Serve the background remover page"""
     return send_file('object-removal.html')
 
 

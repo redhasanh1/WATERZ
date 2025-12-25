@@ -1512,7 +1512,10 @@
                 <ul class="nav-menu" id="navMenu">
                     <li class="mobile-profile-item" style="display: none;"><a href="profile" id="mobileUserName" style="color: var(--primary); font-weight: 700;"></a></li>
                     <li class="mobile-profile-item" style="display: none;"><span id="mobileUserCredits" style="color: var(--text-secondary); font-weight: 600;"></span></li>
-                    <li><a href="backgroundremover">Background Removal</a></li>
+                    <!-- Hidden for now
+                    <li><a href="video-tools">Video Tools</a></li>
+                    <li><a href="background-remover">Background Remover</a></li>
+                    -->
                     <li><a href="premium#pricing">Pricing</a></li>
                     <li><a href="api">API</a></li>
                     <li><a href="contact">Contact</a></li>
@@ -1947,114 +1950,6 @@
 
     <!-- Ezoic: longest_content -->
     <div id="ezoic-pub-ad-placeholder-114" style="margin: 1rem auto; max-width: 728px;"></div>
-
-    <!-- See It In Action -->
-    <section style="padding: 4rem 1.5rem; background: var(--bg-secondary);">
-        <h2 style="text-align: center; font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 700; margin-bottom: 3rem; color: var(--text-primary);">See It In Action</h2>
-        <div style="max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem;">
-            <!-- Transparent -->
-            <div style="background: var(--bg-card, #18181b); border: 1px solid var(--border-color, #27272a); border-radius: 16px; overflow: hidden; transition: all 0.2s;">
-                <div style="height: 140px; display: flex; align-items: center; justify-content: center; background: repeating-conic-gradient(#444 0% 25%, #333 0% 50%) 50% / 20px 20px;">
-                    <div style="width: 50px; height: 80px; background: #1a1a1a; border-radius: 25px 25px 0 0; position: relative;">
-                        <div style="position: absolute; top: -20px; left: 50%; transform: translateX(-50%); width: 28px; height: 28px; background: #1a1a1a; border-radius: 50%;"></div>
-                    </div>
-                </div>
-                <div style="text-align: center; padding: 1rem; font-weight: 600; color: var(--text-primary, #fafafa);">Transparent</div>
-            </div>
-            <!-- Green Screen -->
-            <div style="background: var(--bg-card, #18181b); border: 1px solid var(--border-color, #27272a); border-radius: 16px; overflow: hidden; transition: all 0.2s;">
-                <div style="height: 140px; display: flex; align-items: center; justify-content: center; background: #00FF00;">
-                    <div style="width: 50px; height: 80px; background: #1a1a1a; border-radius: 25px 25px 0 0; position: relative;">
-                        <div style="position: absolute; top: -20px; left: 50%; transform: translateX(-50%); width: 28px; height: 28px; background: #1a1a1a; border-radius: 50%;"></div>
-                    </div>
-                </div>
-                <div style="text-align: center; padding: 1rem; font-weight: 600; color: var(--text-primary, #fafafa);">Green Screen</div>
-            </div>
-            <!-- Custom Image -->
-            <div style="background: var(--bg-card, #18181b); border: 1px solid var(--border-color, #27272a); border-radius: 16px; overflow: hidden; transition: all 0.2s;">
-                <div style="height: 140px; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #1e3a5f 0%, #0f1c2e 60%, #1a1a2e 100%);">
-                    <div style="width: 50px; height: 80px; background: #1a1a1a; border-radius: 25px 25px 0 0; position: relative;">
-                        <div style="position: absolute; top: -20px; left: 50%; transform: translateX(-50%); width: 28px; height: 28px; background: #1a1a1a; border-radius: 50%;"></div>
-                    </div>
-                </div>
-                <div style="text-align: center; padding: 1rem; font-weight: 600; color: var(--text-primary, #fafafa);">Custom Image</div>
-            </div>
-            <!-- Blur Effect -->
-            <div style="background: var(--bg-card, #18181b); border: 1px solid var(--border-color, #27272a); border-radius: 16px; overflow: hidden; transition: all 0.2s;">
-                <div style="height: 140px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); position: relative;">
-                    <div style="position: absolute; inset: 0; background: inherit; filter: blur(8px); opacity: 0.7;"></div>
-                    <div style="width: 50px; height: 80px; background: #1a1a1a; border-radius: 25px 25px 0 0; position: relative; z-index: 1;">
-                        <div style="position: absolute; top: -20px; left: 50%; transform: translateX(-50%); width: 28px; height: 28px; background: #1a1a1a; border-radius: 50%;"></div>
-                    </div>
-                </div>
-                <div style="text-align: center; padding: 1rem; font-weight: 600; color: var(--text-primary, #fafafa);">Blur Effect</div>
-            </div>
-        </div>
-        <style>
-            @media (max-width: 900px) {
-                section > div[style*="grid-template-columns: repeat(4"] { grid-template-columns: repeat(2, 1fr) !important; }
-            }
-            @media (max-width: 500px) {
-                section > div[style*="grid-template-columns: repeat(4"] { grid-template-columns: 1fr 1fr !important; gap: 1rem !important; }
-            }
-        </style>
-    </section>
-
-    <!-- FAQ Section -->
-    <section style="padding: 4rem 1.5rem;">
-        <h2 style="text-align: center; font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 700; margin-bottom: 3rem; color: var(--text-primary);">Frequently Asked Questions</h2>
-        <div style="max-width: 700px; margin: 0 auto;" id="faqList">
-            <div style="border-bottom: 1px solid var(--border-color, #27272a);">
-                <button onclick="this.parentElement.classList.toggle('open')" style="width: 100%; padding: 1.25rem 0; background: none; border: none; color: var(--text-primary, #fafafa); font-size: 1rem; font-weight: 600; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-                    What video formats are supported?
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-                <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s;">
-                    <p style="padding-bottom: 1.25rem; color: var(--text-secondary, #a1a1aa); line-height: 1.7;">We support MP4, MOV, WebM, MKV, and WMV formats. Most videos from phones, cameras, and screen recordings work perfectly.</p>
-                </div>
-            </div>
-            <div style="border-bottom: 1px solid var(--border-color, #27272a);">
-                <button onclick="this.parentElement.classList.toggle('open')" style="width: 100%; padding: 1.25rem 0; background: none; border: none; color: var(--text-primary, #fafafa); font-size: 1rem; font-weight: 600; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-                    What's the maximum video length?
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-                <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s;">
-                    <p style="padding-bottom: 1.25rem; color: var(--text-secondary, #a1a1aa); line-height: 1.7;">Videos can be up to 5 minutes long for free users. Premium users can process videos up to 30 minutes. File size limit is 500MB.</p>
-                </div>
-            </div>
-            <div style="border-bottom: 1px solid var(--border-color, #27272a);">
-                <button onclick="this.parentElement.classList.toggle('open')" style="width: 100%; padding: 1.25rem 0; background: none; border: none; color: var(--text-primary, #fafafa); font-size: 1rem; font-weight: 600; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-                    Which output format supports transparency?
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-                <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s;">
-                    <p style="padding-bottom: 1.25rem; color: var(--text-secondary, #a1a1aa); line-height: 1.7;">WebM and PNG sequence formats support alpha transparency. MP4 does not support transparency, so a solid background will be applied.</p>
-                </div>
-            </div>
-            <div style="border-bottom: 1px solid var(--border-color, #27272a);">
-                <button onclick="this.parentElement.classList.toggle('open')" style="width: 100%; padding: 1.25rem 0; background: none; border: none; color: var(--text-primary, #fafafa); font-size: 1rem; font-weight: 600; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-                    How does the AI detect the subject?
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-                <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s;">
-                    <p style="padding-bottom: 1.25rem; color: var(--text-secondary, #a1a1aa); line-height: 1.7;">We use state-of-the-art SAM2 AI models that detect and track objects through every frame. Just click on what you want to remove and the AI handles the rest.</p>
-                </div>
-            </div>
-            <div style="border-bottom: 1px solid var(--border-color, #27272a);">
-                <button onclick="this.parentElement.classList.toggle('open')" style="width: 100%; padding: 1.25rem 0; background: none; border: none; color: var(--text-primary, #fafafa); font-size: 1rem; font-weight: 600; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-                    Can I use this for commercial projects?
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-                <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s;">
-                    <p style="padding-bottom: 1.25rem; color: var(--text-secondary, #a1a1aa); line-height: 1.7;">Yes! All processed videos can be used for personal and commercial projects. You own full rights to your output files.</p>
-                </div>
-            </div>
-        </div>
-        <style>
-            #faqList .open svg { transform: rotate(180deg); }
-            #faqList .open > div { max-height: 200px; }
-        </style>
-    </section>
 
     <!-- Simple Footer -->
     <footer style="padding: 3rem; text-align: center; background: rgba(102, 126, 234, 0.03); border-top: 1px solid rgba(102, 126, 234, 0.1);">

@@ -146,10 +146,28 @@
 
         /* Hero */
         .hero {
-            padding: 8rem 1.5rem 3rem;
+            min-height: 60vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             text-align: center;
-            max-width: 800px;
-            margin: 0 auto;
+            padding: 8rem 1.5rem 4rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            opacity: 0.4;
+            pointer-events: none;
         }
 
         .hero-badge {
@@ -157,24 +175,44 @@
             align-items: center;
             gap: 0.5rem;
             padding: 0.5rem 1rem;
-            background: rgba(249, 115, 22, 0.15);
-            border: 1px solid rgba(249, 115, 22, 0.3);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
             border-radius: 100px;
             font-size: 0.85rem;
-            color: var(--accent);
+            color: var(--text-secondary);
             margin-bottom: 2rem;
         }
 
+        .hero-badge-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--green);
+            border-radius: 50%;
+            animation: badgePulse 2s infinite;
+        }
+
+        @keyframes badgePulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         .hero h1 {
-            font-size: clamp(2.5rem, 6vw, 3.5rem);
+            font-size: clamp(2.5rem, 8vw, 4rem);
             font-weight: 800;
             line-height: 1.1;
             margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #fff 0%, #a1a1aa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .hero-subtitle {
-            font-size: 1.2rem;
+            font-size: clamp(1rem, 2.5vw, 1.25rem);
             color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto 2.5rem;
+            line-height: 1.7;
         }
 
         /* Main App */
@@ -421,6 +459,17 @@
 
         .action-btn-reset:hover {
             background: #16a34a;
+        }
+
+        .action-btn-process {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+        }
+
+        .action-btn-process:hover {
+            background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+            transform: translateY(-1px);
         }
 
         .action-btn svg {
@@ -910,6 +959,134 @@
             font-size: 0.85rem;
         }
 
+        /* Section Title */
+        .section-title {
+            text-align: center;
+            font-size: clamp(1.75rem, 4vw, 2.5rem);
+            font-weight: 700;
+            margin-bottom: 3rem;
+        }
+
+        /* Examples Gallery */
+        .examples-section {
+            padding: 5rem 1.5rem;
+            background: var(--bg-secondary);
+        }
+
+        .examples-grid {
+            max-width: 1100px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 900px) {
+            .examples-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 500px) {
+            .examples-grid {
+                grid-template-columns: 1fr;
+                max-width: 400px;
+            }
+        }
+
+        .example-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+
+        .example-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--text-muted);
+        }
+
+        .example-videos {
+            display: grid;
+            grid-template-rows: 1fr 1fr;
+        }
+
+        .example-videos video {
+            width: 100%;
+            height: 100px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .example-info {
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .example-type {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        /* FAQ Section */
+        .faq-section {
+            padding: 5rem 1.5rem;
+        }
+
+        .faq-list {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .faq-item {
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .faq-question {
+            width: 100%;
+            padding: 1.5rem 0;
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: inherit;
+        }
+
+        .faq-question svg {
+            width: 20px;
+            height: 20px;
+            color: var(--text-muted);
+            transition: transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .faq-item.open .faq-question svg {
+            transform: rotate(180deg);
+        }
+
+        .faq-answer {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .faq-item.open .faq-answer {
+            max-height: 200px;
+        }
+
+        .faq-answer p {
+            padding-bottom: 1.5rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
         /* Hidden */
         .hidden { display: none !important; }
     </style>
@@ -935,11 +1112,13 @@
     <!-- Hero -->
     <section class="hero">
         <div class="hero-badge">
-            AI-Powered Inpainting
+            <span class="hero-badge-dot"></span>
+            AI-Powered Video Processing
         </div>
-        <h1>Remove Any Object from Video</h1>
+        <h1>Remove Video<br>Backgrounds Instantly</h1>
         <p class="hero-subtitle">
-            Click on any object to remove it. AI seamlessly fills the gap with surrounding context.
+            Keep your subject, change the world behind them. Transparent exports,
+            green screen, custom colors, blur effects - all powered by AI.
         </p>
     </section>
 
@@ -1003,18 +1182,25 @@
                         <span class="time-display" id="timeDisplay">0:00 / 0:00</span>
                     </div>
                     <div class="controls-right">
+                        <button class="action-btn action-btn-primary" id="removeBtn" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                            </svg>
+                            Remove Selected
+                        </button>
                         <button class="action-btn action-btn-reset" id="resetObjectsBtn" style="display: none;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
                                 <path d="M3 3v5h5"/>
                             </svg>
-                            Reset All
+                            Reset Mask Selections
                         </button>
-                        <button class="action-btn action-btn-primary" id="removeBtn" disabled>
+                        <button class="action-btn action-btn-process" id="processJobBtn" style="display: none;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
                             </svg>
-                            Remove Objects
+                            Process Job
                         </button>
                         <button class="action-btn action-btn-secondary hidden" id="previewBtn">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1094,12 +1280,132 @@
                         <div class="setting-options" style="flex-wrap: wrap; gap: 0.5rem;">
                             <div class="setting-option selected" data-format="mp4">MP4</div>
                             <div class="setting-option" data-format="webm">WebM</div>
-                            <div class="setting-option" data-format="png">PNG Seq</div>
                         </div>
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            WebM/PNG support transparency
+                            WebM supports transparency
                         </p>
                     </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- See It In Action -->
+    <section class="examples-section">
+        <h2 class="section-title">See It In Action</h2>
+        <div class="examples-grid">
+            <div class="example-card">
+                <div class="example-videos">
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example1-in.mp4" type="video/mp4">
+                    </video>
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example1-out.mp4" type="video/mp4">
+                    </video>
+                </div>
+                <div class="example-info">
+                    <span class="example-type">Transparent</span>
+                </div>
+            </div>
+            <div class="example-card">
+                <div class="example-videos">
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example2-in.mp4" type="video/mp4">
+                    </video>
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example2-out.mp4" type="video/mp4">
+                    </video>
+                </div>
+                <div class="example-info">
+                    <span class="example-type">Green Screen</span>
+                </div>
+            </div>
+            <div class="example-card">
+                <div class="example-videos">
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example3-in.mp4" type="video/mp4">
+                    </video>
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example3-out.mp4" type="video/mp4">
+                    </video>
+                </div>
+                <div class="example-info">
+                    <span class="example-type">Custom Image</span>
+                </div>
+            </div>
+            <div class="example-card">
+                <div class="example-videos">
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example4-in.mp4" type="video/mp4">
+                    </video>
+                    <video muted loop playsinline onmouseenter="this.play()" onmouseleave="this.pause()">
+                        <source src="demo/example4-out.mp4" type="video/mp4">
+                    </video>
+                </div>
+                <div class="example-info">
+                    <span class="example-type">Blur Effect</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq-section">
+        <h2 class="section-title">Frequently Asked Questions</h2>
+        <div class="faq-list">
+            <div class="faq-item">
+                <button class="faq-question">
+                    What video formats are supported?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>We support MP4, MOV, WebM, MKV, WMV, and most common video formats. Videos from phones, cameras, and screen recordings work perfectly.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    What's the maximum video length?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>Videos can be up to 5 minutes long for free users. Premium users can process videos up to 30 minutes. File size limit is 500MB.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    How does the AI remove objects?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>We use SAM2 (Segment Anything Model 2) to track objects across frames, then AI inpainting fills in the removed area with realistic content matching the surrounding scene.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    Can I remove multiple objects?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>Yes! Click on multiple objects to select them all. Each object will be tracked and removed in a single processing pass.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    Can I use this for commercial projects?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>Yes! All processed videos can be used for personal and commercial projects. You own full rights to your output files.</p>
                 </div>
             </div>
         </div>
@@ -1657,10 +1963,14 @@
 
         function updateRemoveButton() {
             removeBtn.disabled = state.objects.length === 0;
-            // Show/hide reset button based on objects count
+            // Show/hide reset and process buttons based on objects count
             const resetBtn = document.getElementById('resetObjectsBtn');
+            const processBtn = document.getElementById('processJobBtn');
             if (resetBtn) {
                 resetBtn.style.display = state.objects.length > 0 ? 'inline-flex' : 'none';
+            }
+            if (processBtn) {
+                processBtn.style.display = state.objects.length > 0 ? 'inline-flex' : 'none';
             }
         }
 
@@ -1674,6 +1984,12 @@
             // Reset tracking state
             state.isTracked = false;
             document.getElementById('previewBtn').classList.add('hidden');
+        });
+
+        // Process Job button - triggers same flow as Remove Selected
+        document.getElementById('processJobBtn').addEventListener('click', () => {
+            // Trigger the remove button click (same processing flow)
+            removeBtn.click();
         });
 
         // Auto-detect objects with YOLO
@@ -1904,14 +2220,7 @@
                 return;
             }
 
-            // Calculate estimated processing time (~1.5x video duration)
-            const videoDuration = videoPlayer.duration || 60;
-            const estimatedSeconds = Math.ceil(videoDuration * 1.5);
-            const estMins = Math.floor(estimatedSeconds / 60);
-            const estSecs = estimatedSeconds % 60;
-            const timeStr = estMins > 0 ? `~${estMins}:${estSecs.toString().padStart(2, '0')}` : `~${estSecs}s`;
-
-            showProcessingModal('Processing...', `Step 1/2: Tracking objects... (Est. ${timeStr})`);
+            showProcessingModal('Processing...', 'Step 1/2: Tracking object through all frames...');
 
             try {
                 // Step 1: Start tracking
@@ -2083,6 +2392,16 @@
         document.getElementById('downloadBtn').addEventListener('click', () => {
             hideSuccessModal();
             alert('Download started!');
+        });
+
+        // FAQ accordion
+        document.querySelectorAll('.faq-question').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = btn.parentElement;
+                const isOpen = item.classList.contains('open');
+                document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+                if (!isOpen) item.classList.add('open');
+            });
         });
 
     })();
