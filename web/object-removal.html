@@ -1500,6 +1500,7 @@
             <div class="modal-spinner"></div>
             <h3 class="modal-title" id="modalTitle">Processing...</h3>
             <p class="modal-text" id="modalText">Removing object and filling with AI...</p>
+            <p class="modal-eta" id="modalEta" style="color: var(--accent); font-weight: 600; margin: 0.5rem 0;"></p>
             <div class="modal-progress">
                 <div class="modal-progress-fill" id="modalProgressFill"></div>
             </div>
@@ -2519,6 +2520,22 @@
             document.getElementById('modalText').textContent = text;
             document.getElementById('modalProgressFill').style.width = '0%';
             document.getElementById('modalProgressText').textContent = '0%';
+
+            // Calculate and show estimated time (duration * 1.25 for buffer)
+            const etaEl = document.getElementById('modalEta');
+            if (etaEl && state.videoDuration > 0) {
+                const estSeconds = Math.ceil(state.videoDuration * 1.25);
+                if (estSeconds < 60) {
+                    etaEl.textContent = `Estimated time: ~${estSeconds} seconds`;
+                } else {
+                    const mins = Math.floor(estSeconds / 60);
+                    const secs = estSeconds % 60;
+                    etaEl.textContent = `Estimated time: ~${mins}m ${secs}s`;
+                }
+            } else if (etaEl) {
+                etaEl.textContent = '';
+            }
+
             processingModal.classList.remove('hidden');
         }
 
