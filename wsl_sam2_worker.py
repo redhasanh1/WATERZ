@@ -673,7 +673,10 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
                                    blur_kernel, padding=0, groups=3)
                 blurred = blurred.squeeze(0).permute(1, 2, 0)  # [H, W, 3]
                 result = frame_gpu * mask_3ch + blurred * inv_mask
-            else:
+            elif background == 'transparent':
+                # Don't composite RGB - alpha channel handles transparency
+                result = frame_gpu
+            else:  # color
                 result = frame_gpu * mask_3ch + bg_tensor.expand(height, width, 3) * inv_mask
 
         elif operation == 'remove_object':
@@ -683,7 +686,10 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
                                    blur_kernel, padding=0, groups=3)
                 blurred = blurred.squeeze(0).permute(1, 2, 0)
                 result = frame_gpu * inv_mask + blurred * mask_3ch
-            else:
+            elif background == 'transparent':
+                # Don't composite RGB - alpha channel handles transparency
+                result = frame_gpu
+            else:  # color
                 result = frame_gpu * inv_mask + bg_tensor.expand(height, width, 3) * mask_3ch
 
         elif operation == 'blur_inside':
@@ -704,7 +710,11 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             result = frame_gpu * inv_mask + bg_tensor.expand(height, width, 3) * mask_3ch
 
         elif operation == 'fill_outside':
-            result = frame_gpu * mask_3ch + bg_tensor.expand(height, width, 3) * inv_mask
+            if background == 'transparent':
+                # Don't composite RGB - alpha channel handles transparency
+                result = frame_gpu
+            else:
+                result = frame_gpu * mask_3ch + bg_tensor.expand(height, width, 3) * inv_mask
 
         else:
             result = frame_gpu

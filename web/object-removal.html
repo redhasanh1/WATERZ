@@ -2078,6 +2078,9 @@ console.log('[MaskDrawer] Class loaded');
         });
 
         async function handleFile(file) {
+            // Save original upload area HTML for reset on error
+            const originalUploadAreaHTML = uploadArea.innerHTML;
+
             // Check if user is logged in
             if (!isLoggedIn()) {
                 window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
@@ -2092,6 +2095,39 @@ console.log('[MaskDrawer] Class loaded');
 
             if (!isVideoMime && !isVideoExt) {
                 alert('Please upload a video file (MP4, MOV, WebM, MKV, WMV, AVI, etc.)');
+                return;
+            }
+
+            // Check video duration BEFORE uploading to save bandwidth
+            uploadArea.innerHTML = '<div class="modal-spinner"></div><p style="color: var(--text-secondary); margin-top: 1rem;">Checking video...</p>';
+
+            const tempVideo = document.createElement('video');
+            tempVideo.preload = 'metadata';
+            tempVideo.src = URL.createObjectURL(file);
+
+            try {
+                await new Promise((resolve, reject) => {
+                    tempVideo.onloadedmetadata = resolve;
+                    tempVideo.onerror = () => reject(new Error('Failed to read video metadata'));
+                    setTimeout(() => reject(new Error('Video metadata timeout')), 10000);
+                });
+            } catch (err) {
+                URL.revokeObjectURL(tempVideo.src);
+                uploadArea.innerHTML = originalUploadAreaHTML;
+                alert('Could not read video file. Please try a different format.');
+                return;
+            }
+
+            const videoWidth = tempVideo.videoWidth;
+            const videoHeight = tempVideo.videoHeight;
+            const videoDuration = tempVideo.duration || 0;
+            URL.revokeObjectURL(tempVideo.src);
+
+            // Enforce max duration (10 minutes 10 seconds) BEFORE upload
+            const MAX_DURATION_SECONDS = 610;
+            if (videoDuration > MAX_DURATION_SECONDS) {
+                uploadArea.innerHTML = originalUploadAreaHTML;
+                alert(`Video too long! Maximum duration is 10 minutes 10 seconds.\n\nYour video: ${Math.round(videoDuration)} seconds\n\nPlease upload a shorter video.`);
                 return;
             }
 
@@ -2134,39 +2170,15 @@ console.log('[MaskDrawer] Class loaded');
                 }
                 console.log(`[UPLOAD] B2 upload complete`);
 
-                // Step 3: Get video dimensions from browser
+                // Step 3: Notify server that upload is complete (using pre-extracted metadata)
                 uploadArea.innerHTML = '<div class="modal-spinner"></div><p style="color: var(--text-secondary); margin-top: 1rem;">Processing...</p>';
 
-                const tempVideo = document.createElement('video');
-                tempVideo.preload = 'metadata';
-                tempVideo.src = URL.createObjectURL(file);
-
-                await new Promise((resolve, reject) => {
-                    tempVideo.onloadedmetadata = resolve;
-                    tempVideo.onerror = () => reject(new Error('Failed to read video metadata'));
-                    setTimeout(() => reject(new Error('Video metadata timeout')), 10000);
-                });
-
-                const width = tempVideo.videoWidth;
-                const height = tempVideo.videoHeight;
-                const duration = tempVideo.duration || 0;
                 const fps = 30; // Assume 30fps (browser can't reliably detect this)
-                const frame_count = Math.round(duration * fps);
-                URL.revokeObjectURL(tempVideo.src);
-
-                // Enforce max duration (10 minutes 10 seconds)
-                const MAX_DURATION_SECONDS = 610;
-                if (duration > MAX_DURATION_SECONDS) {
-                    hideProgress();
-                    alert(`Video too long! Maximum duration is 10 minutes 10 seconds.\n\nYour video: ${Math.round(duration)} seconds\n\nPlease upload a shorter video.`);
-                    return;
-                }
-
-                // Step 4: Notify server that upload is complete
+                const frame_count = Math.round(videoDuration * fps);
                 const completeResponse = await fetch(`${API_BASE}/api/object-removal/upload-complete`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ job_id, cdn_url, width, height, fps, duration, frame_count })
+                    body: JSON.stringify({ job_id, cdn_url, width: videoWidth, height: videoHeight, fps, duration: videoDuration, frame_count })
                 });
                 const data = await completeResponse.json();
 
