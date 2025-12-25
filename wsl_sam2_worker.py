@@ -559,29 +559,62 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     bg_color_hex = bg_color.lstrip('#')
     color_rgb = [int(bg_color_hex[i:i+2], 16) for i in (0, 2, 4)]
 
-    output_path = "/tmp/simple_fx_output.mp4"
+    # Determine output format and setup encoder
+    print(f"[GPU-FX] Output format: {output_format}")
 
-    # Start ffmpeg encoder - pipe raw frames directly to NVENC!
-    print(f"[GPU-FX] 🎬 Starting NVENC encoder pipeline...")
-    ffmpeg_encode = subprocess.Popen([
-        'ffmpeg', '-y',
-        '-f', 'rawvideo',
-        '-vcodec', 'rawvideo',
-        '-s', f'{width}x{height}',
-        '-pix_fmt', 'rgb24',
-        '-r', str(fps),
-        '-i', 'pipe:0',
-        '-i', video_path,  # For audio
-        '-map', '0:v',
-        '-map', '1:a?',
-        '-c:v', 'h264_nvenc',
-        '-preset', 'p4',
-        '-cq', '18',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-shortest',
-        output_path
-    ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    # PNG sequence mode - no ffmpeg encoder, save frames directly
+    png_output_dir = None
+    ffmpeg_encode = None
+
+    if output_format == 'png':
+        # PNG sequence mode - save RGBA frames with transparency
+        png_output_dir = "/tmp/simple_fx_png_output"
+        if os.path.exists(png_output_dir):
+            shutil.rmtree(png_output_dir)
+        os.makedirs(png_output_dir)
+        output_path = f"/tmp/simple_fx_output_{int(time.time())}.zip"
+        print(f"[GPU-FX] PNG sequence mode - saving frames to {png_output_dir}")
+    elif output_format == 'webm':
+        # WebM with VP9 + alpha channel for transparency
+        output_path = "/tmp/simple_fx_output.webm"
+        print(f"[GPU-FX] WebM mode with VP9 alpha - starting encoder...")
+        ffmpeg_encode = subprocess.Popen([
+            'ffmpeg', '-y',
+            '-f', 'rawvideo',
+            '-vcodec', 'rawvideo',
+            '-s', f'{width}x{height}',
+            '-pix_fmt', 'rgba',  # RGBA for transparency
+            '-r', str(fps),
+            '-i', 'pipe:0',
+            '-c:v', 'libvpx-vp9',
+            '-pix_fmt', 'yuva420p',  # VP9 with alpha
+            '-crf', '18',
+            '-b:v', '0',
+            output_path
+        ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    else:
+        # MP4 mode (default) - NVENC h264
+        output_path = "/tmp/simple_fx_output.mp4"
+        print(f"[GPU-FX] MP4 mode - starting NVENC encoder pipeline...")
+        ffmpeg_encode = subprocess.Popen([
+            'ffmpeg', '-y',
+            '-f', 'rawvideo',
+            '-vcodec', 'rawvideo',
+            '-s', f'{width}x{height}',
+            '-pix_fmt', 'rgb24',
+            '-r', str(fps),
+            '-i', 'pipe:0',
+            '-i', video_path,  # For audio
+            '-map', '0:v',
+            '-map', '1:a?',
+            '-c:v', 'h264_nvenc',
+            '-preset', 'p4',
+            '-cq', '18',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-shortest',
+            output_path
+        ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
     # === GPU STREAMING: Process ONE frame at a time (like CPU, but fast!) ===
     # Pre-allocate reusable GPU buffers (~25MB total, not 12GB!)
@@ -676,9 +709,45 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         else:
             result = frame_gpu
 
-        # === Pipe to NVENC encoder ===
-        result_cpu = result.clamp(0, 255).byte().cpu().numpy()
-        ffmpeg_encode.stdin.write(result_cpu.tobytes())
+        # === Output frame based on format ===
+        if output_format == 'png':
+            # PNG sequence: Save RGBA frame with transparency
+            # For keep_object: object is opaque, background is transparent
+            # For remove_object: object area is transparent
+            result_cpu = result.clamp(0, 255).byte().cpu().numpy()
+
+            # Create alpha channel from mask
+            if operation == 'keep_object':
+                # Object visible, background transparent
+                alpha = (mask_gpu * 255).clamp(0, 255).byte().cpu().numpy()
+            else:
+                # Background visible, object transparent
+                alpha = ((1.0 - mask_gpu) * 255).clamp(0, 255).byte().cpu().numpy()
+
+            # Combine RGB + Alpha into RGBA
+            rgba_frame = np.dstack([result_cpu, alpha])
+
+            # Save as PNG (OpenCV expects BGRA)
+            bgra_frame = cv2.cvtColor(rgba_frame, cv2.COLOR_RGBA2BGRA)
+            png_path = os.path.join(png_output_dir, f"{frame_idx:05d}.png")
+            cv2.imwrite(png_path, bgra_frame)
+
+        elif output_format == 'webm':
+            # WebM: Send RGBA to VP9 encoder with alpha
+            result_cpu = result.clamp(0, 255).byte().cpu().numpy()
+
+            if operation == 'keep_object':
+                alpha = (mask_gpu * 255).clamp(0, 255).byte().cpu().numpy()
+            else:
+                alpha = ((1.0 - mask_gpu) * 255).clamp(0, 255).byte().cpu().numpy()
+
+            rgba_frame = np.dstack([result_cpu, alpha])
+            ffmpeg_encode.stdin.write(rgba_frame.tobytes())
+
+        else:
+            # MP4: Pipe RGB to NVENC encoder
+            result_cpu = result.clamp(0, 255).byte().cpu().numpy()
+            ffmpeg_encode.stdin.write(result_cpu.tobytes())
 
         frame_idx += 1
 
@@ -689,12 +758,23 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             print(f"[GPU-FX] Frame {frame_idx}/{total_frames}")
 
     cap.release()
-    print(f"[GPU-FX] ✅ Processed {frame_idx} frames with GPU streaming")
+    print(f"[GPU-FX] Processed {frame_idx} frames with GPU streaming")
 
-    # Close encoder
-    ffmpeg_encode.stdin.close()
-    ffmpeg_encode.wait()
-    print(f"[GPU-FX] ✅ Encoded {frame_idx} frames with NVENC")
+    # Close encoder / finalize output
+    if output_format == 'png':
+        # Zip the PNG sequence
+        print(f"[GPU-FX] Zipping {frame_idx} PNG frames...")
+        self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Zipping PNG sequence...'})
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for png_file in sorted(glob.glob(f"{png_output_dir}/*.png")):
+                zf.write(png_file, os.path.basename(png_file))
+        shutil.rmtree(png_output_dir)
+        print(f"[GPU-FX] Created PNG zip: {output_path}")
+    else:
+        # Close ffmpeg encoder
+        ffmpeg_encode.stdin.close()
+        ffmpeg_encode.wait()
+        print(f"[GPU-FX] Encoded {frame_idx} frames")
 
     self.update_state(state='PROCESSING', meta={'progress': 92, 'status': 'Uploading to CDN...'})
 
@@ -703,8 +783,16 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
 
     # Cleanup
     shutil.rmtree(masks_dir, ignore_errors=True)
-    os.remove(video_path)
-    os.remove(output_path)
+    # Only remove video if it was downloaded to /tmp (not if it was a local path we received)
+    if video_path.startswith('/tmp/simple_fx_video'):
+        try:
+            os.remove(video_path)
+        except Exception:
+            pass
+    try:
+        os.remove(output_path)
+    except Exception:
+        pass
 
     print(f"[GPU-FX] 🎉 COMPLETE! CDN URL: {output_url}")
 
@@ -714,8 +802,8 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     }
 
 
-def upload_video_to_b2(video_path):
-    """Upload video to B2 and return CDN URL."""
+def upload_video_to_b2(file_path):
+    """Upload video/zip to B2 and return CDN URL."""
     from b2sdk.v2 import B2Api, InMemoryAccountInfo
 
     B2_KEY_ID = os.getenv('B2_KEY_ID')
@@ -727,20 +815,33 @@ def upload_video_to_b2(video_path):
         print("[B2] Warning: B2 credentials not set")
         return None
 
-    video_id = os.path.basename(video_path).replace('.mp4', '').replace('.webm', '')
-    timestamp = int(time.time())
-    b2_filename = f"videos/{timestamp}_{video_id}.mp4"
+    # Get file extension from original file
+    basename = os.path.basename(file_path)
+    if basename.endswith('.zip'):
+        ext = '.zip'
+        folder = 'exports'
+    elif basename.endswith('.webm'):
+        ext = '.webm'
+        folder = 'videos'
+    else:
+        ext = '.mp4'
+        folder = 'videos'
 
-    print(f"[B2] Uploading video to {B2_BUCKET}...")
+    # Remove extension to get ID
+    file_id = basename.replace('.mp4', '').replace('.webm', '').replace('.zip', '')
+    timestamp = int(time.time())
+    b2_filename = f"{folder}/{timestamp}_{file_id}{ext}"
+
+    print(f"[B2] Uploading {ext} to {B2_BUCKET}...")
     info = InMemoryAccountInfo()
     b2_api = B2Api(info)
     b2_api.authorize_account('production', B2_KEY_ID, B2_APP_KEY)
     bucket = b2_api.get_bucket_by_name(B2_BUCKET)
 
-    with open(video_path, 'rb') as f:
+    with open(file_path, 'rb') as f:
         bucket.upload_bytes(f.read(), b2_filename)
 
-    video_url = f"{B2_CDN_URL}/{b2_filename}"
-    print(f"[B2] Upload complete: {video_url}")
+    file_url = f"{B2_CDN_URL}/{b2_filename}"
+    print(f"[B2] Upload complete: {file_url}")
 
-    return video_url
+    return file_url
