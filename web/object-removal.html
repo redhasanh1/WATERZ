@@ -2189,9 +2189,9 @@ console.log('[MaskDrawer] Class loaded');
                     creditEstimate.classList.remove('hidden');
                 }
 
-                // Setup video player (crossOrigin needed for canvas export)
-                videoPlayer.crossOrigin = 'anonymous';
-                videoPlayer.src = state.videoUrl;
+                // Setup video player - use local blob URL for reliable seeking
+                // (Remote CDN URLs don't support Range requests, breaking seek)
+                videoPlayer.src = URL.createObjectURL(state.videoFile);
                 videoPlayer.classList.remove('hidden');
                 document.getElementById('drawingCanvas').classList.remove('hidden');
                 uploadArea.classList.add('hidden');
