@@ -471,6 +471,7 @@ def serve_js(path):
 
 
 @app.route('/demo/<path:path>')
+@app.route('/static/demo/<path:path>')
 def serve_demo(path):
     """Serve demo images"""
     allowed_exts = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
