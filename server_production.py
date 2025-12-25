@@ -5630,6 +5630,15 @@ def objrem_export():
         if not job:
             return jsonify({'status': 'error', 'message': 'Job not found'}), 404
 
+        # Check if tracking completed successfully
+        job_status = job.get('status', '')
+        if job_status == 'error':
+            error_msg = job.get('message', 'Tracking failed')
+            return jsonify({'status': 'error', 'message': f'Tracking failed: {error_msg}'}), 400
+
+        if job_status not in ('completed', 'inpainting', 'processing'):
+            return jsonify({'status': 'error', 'message': f'Tracking not complete. Status: {job_status}'}), 400
+
         masks_url = job.get('masks_url')
         masks_dir_local = job.get('masks_dir')
 

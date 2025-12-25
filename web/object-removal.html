@@ -1921,9 +1921,19 @@
                     throw new Error(trackData.message || 'Failed to start tracking');
                 }
 
-                // Poll for tracking progress
+                // Poll for tracking progress (with 5 minute timeout)
                 const pollTracking = () => new Promise((resolve, reject) => {
+                    const startTime = Date.now();
+                    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
                     const pollInterval = setInterval(async () => {
+                        // Check for timeout
+                        if (Date.now() - startTime > TIMEOUT_MS) {
+                            clearInterval(pollInterval);
+                            reject(new Error('Tracking timed out - please try again'));
+                            return;
+                        }
+
                         try {
                             const statusResp = await fetch(`${API_BASE}/api/object-removal/status/${state.jobId}`);
                             const statusData = await statusResp.json();
@@ -1974,9 +1984,19 @@
                     throw new Error(exportData.message || 'Failed to start export');
                 }
 
-                // Poll for export progress
+                // Poll for export progress (with 10 minute timeout)
                 const pollExport = () => new Promise((resolve, reject) => {
+                    const startTime = Date.now();
+                    const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for export
+
                     const pollInterval = setInterval(async () => {
+                        // Check for timeout
+                        if (Date.now() - startTime > TIMEOUT_MS) {
+                            clearInterval(pollInterval);
+                            reject(new Error('Export timed out - please try again'));
+                            return;
+                        }
+
                         try {
                             const statusResp = await fetch(`${API_BASE}/api/object-removal/status/${state.jobId}`);
                             const statusData = await statusResp.json();

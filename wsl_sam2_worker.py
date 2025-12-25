@@ -52,6 +52,48 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     Returns:
         dict: {status, masks_dir, masks_saved, total_frames}
     """
+    # Extract job_id early for error handling
+    job_id = None
+    task_id = self.request.id
+    if task_id and task_id.startswith('objrem_'):
+        job_id = task_id.replace('objrem_', '')
+
+    try:
+        return _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[SAM2-ERROR] Task failed: {e}")
+
+        # Update Redis with error status so frontend knows
+        if job_id:
+            try:
+                import redis
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                redis_client.hset(f"objrem:{job_id}", mapping={
+                    'status': 'error',
+                    'message': str(e)[:500]
+                })
+                print(f"[SAM2-ERROR] Updated Redis with error status for job {job_id}")
+            except Exception as redis_err:
+                print(f"[SAM2-ERROR] Failed to update Redis: {redis_err}")
+
+        # Force VRAM cleanup to prevent memory buildup
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                print("[SAM2-ERROR] Cleaned up CUDA memory")
+        except Exception:
+            pass
+
+        # Re-raise so Celery marks the task as FAILED
+        raise
+
+
+def _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id):
+    """Actual implementation of generate_masks_fullfps (wrapped for error handling)."""
     import os
     import cv2
     import numpy as np
@@ -188,9 +230,7 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
             print(f"[CLEANUP] Could not remove video: {e}")
 
     # Update Redis directly (fixes race condition - export may be called before /status is polled)
-    task_id = self.request.id  # e.g., "objrem_e161aafea234"
-    if task_id and task_id.startswith('objrem_'):
-        job_id = task_id.replace('objrem_', '')
+    if job_id:
         try:
             import redis
             redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
