@@ -1872,7 +1872,7 @@
                 const allPoints = state.objects.map((obj, idx) => ({
                     x: obj.x,
                     y: obj.y,
-                    label: obj.label || 1,
+                    label: obj.label ?? 1,  // Use ?? not || (0 is valid label for exclude)
                     object_id: idx
                 }));
                 allPoints.push({ x: videoX, y: videoY, label: label, object_id: newObjectId });
