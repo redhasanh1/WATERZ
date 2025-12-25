@@ -343,11 +343,23 @@
             position: absolute;
             width: 24px;
             height: 24px;
-            border: 3px solid var(--accent);
+            border: 3px solid #22c55e;
+            background: rgba(34, 197, 94, 0.3);
             border-radius: 50%;
             transform: translate(-50%, -50%);
-            pointer-events: none;
+            pointer-events: auto;
+            cursor: pointer;
             animation: clickPulse 0.5s ease-out;
+            z-index: 10;
+        }
+
+        .click-marker:hover {
+            transform: translate(-50%, -50%) scale(1.2);
+        }
+
+        .click-marker.negative {
+            border-color: #ef4444;
+            background: rgba(239, 68, 68, 0.3);
         }
 
         @keyframes clickPulse {
@@ -1224,7 +1236,7 @@
                     <line x1="12" y1="16" x2="12" y2="12"/>
                     <line x1="12" y1="8" x2="12.01" y2="8"/>
                 </svg>
-                Click on the object you want to remove
+                <span style="color: #22c55e;">Left-click</span> to include, <span style="color: #ef4444;">right-click</span> to exclude. Click marker to remove.
             </div>
 
             <!-- Controls Panel -->
@@ -1774,8 +1786,8 @@
             }
         }
 
-        // Interaction layer - click to select object (with optional SAM2 TensorRT mask preview)
-        interactionLayer.addEventListener('click', async (e) => {
+        // Shared function for handling point selection (left-click = include, right-click = exclude)
+        async function handlePointSelection(e, label = 1) {
             if (!state.isSelectingObject) return;
             if (!state.jobId) return;
 
@@ -1787,123 +1799,129 @@
             let displayWidth, displayHeight, offsetX, offsetY;
 
             if (videoAspect > containerAspect) {
-                // Video is wider - letterbox top/bottom
                 displayWidth = containerRect.width;
                 displayHeight = containerRect.width / videoAspect;
                 offsetX = 0;
                 offsetY = (containerRect.height - displayHeight) / 2;
             } else {
-                // Video is taller - letterbox left/right
                 displayHeight = containerRect.height;
                 displayWidth = containerRect.height * videoAspect;
                 offsetX = (containerRect.width - displayWidth) / 2;
                 offsetY = 0;
             }
 
-            // Get click position relative to container
             const clickX = e.clientX - containerRect.left;
             const clickY = e.clientY - containerRect.top;
 
-            // Check if click is within video area (not on letterbox)
             if (clickX < offsetX || clickX > offsetX + displayWidth ||
                 clickY < offsetY || clickY > offsetY + displayHeight) {
-                console.log('[SELECT] Click outside video area (on letterbox)');
                 return;
             }
 
-            // Convert to percentage within the VIDEO display area
             const percentX = (clickX - offsetX) / displayWidth;
             const percentY = (clickY - offsetY) / displayHeight;
-
-            // Convert to video coordinates
             const videoX = Math.floor(percentX * state.videoWidth);
             const videoY = Math.floor(percentY * state.videoHeight);
 
-            console.log('[SELECT] Click:', clickX.toFixed(0), clickY.toFixed(0), '-> video:', videoX, videoY);
+            console.log('[SELECT]', label === 1 ? 'Include' : 'Exclude', 'at:', videoX, videoY);
 
-            // Add click marker with loading state (positioned within video area)
+            // Add click marker (green for include, red for exclude)
             const marker = document.createElement('div');
-            marker.className = 'click-marker';
+            marker.className = 'click-marker' + (label === 0 ? ' negative' : '');
             marker.style.left = (offsetX + percentX * displayWidth) + 'px';
             marker.style.top = (offsetY + percentY * displayHeight) + 'px';
             marker.style.animation = 'pulse 1s infinite';
+
+            // Store point data on marker for removal
+            marker.dataset.videoX = videoX;
+            marker.dataset.videoY = videoY;
+            marker.dataset.label = label;
+            marker.dataset.objectId = state.objects.length;
+
+            // Click on marker to remove it
+            marker.addEventListener('click', (evt) => {
+                evt.stopPropagation();
+                const objId = parseInt(marker.dataset.objectId);
+                // Remove from state
+                state.objects = state.objects.filter((_, idx) => idx !== objId);
+                // Remove marker
+                marker.remove();
+                // Update UI
+                renderObjects();
+                updateRemoveButton();
+                console.log('[SELECT] Removed point', objId);
+            });
+
             interactionLayer.appendChild(marker);
 
-            // Get current frame index
-            const frameIndex = Math.floor(videoPlayer.currentTime * 30); // Assume 30fps
+            const frameIndex = Math.floor(videoPlayer.currentTime * 30);
 
             try {
-                // Create new object ID for this click
                 const newObjectId = state.objects.length;
 
-                // Collect ALL points from ALL objects, plus this new one
                 const allPoints = state.objects.map((obj, idx) => ({
                     x: obj.x,
                     y: obj.y,
-                    label: 1,
-                    object_id: idx  // Each existing object gets its index as ID
+                    label: obj.label || 1,
+                    object_id: idx
                 }));
-                // Add the new point with its own object_id
-                allPoints.push({ x: videoX, y: videoY, label: 1, object_id: newObjectId });
+                allPoints.push({ x: videoX, y: videoY, label: label, object_id: newObjectId });
 
-                // Store ALL points for video tracking (each with unique object_id)
                 await fetch(`${API_BASE}/api/object-removal/select`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         job_id: state.jobId,
-                        points: allPoints,  // ALL points with object_ids
+                        points: allPoints,
                         frame_index: frameIndex
                     })
                 });
 
-                // Try to get instant mask preview from SAM2 TensorRT worker
+                // Try SAM2 mask preview
                 try {
-                    // Capture current frame as base64 PNG (lossless like index.html)
                     const canvas = document.createElement('canvas');
                     canvas.width = videoPlayer.videoWidth;
                     canvas.height = videoPlayer.videoHeight;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(videoPlayer, 0, 0);
                     const frameData = canvas.toDataURL('image/png').split(',')[1];
-                    console.log('[SAM2] Sending frame:', canvas.width, 'x', canvas.height, 'point:', videoX, videoY);
 
                     const sam2Response = await fetch(`${API_BASE}/api/sam2/select-object`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             frame_data: frameData,
-                            points: [{ x: videoX, y: videoY, label: 1 }],
+                            points: allPoints.map(p => ({ x: p.x, y: p.y, label: p.label })),
                             video_width: state.videoWidth,
                             video_height: state.videoHeight
                         })
                     });
 
                     const sam2Data = await sam2Response.json();
-                    console.log('[SAM2] Response:', sam2Data.status, sam2Data.message || '', 'mask:', !!sam2Data.mask);
-
                     if (sam2Data.status === 'success' && sam2Data.mask) {
-                        console.log('[SAM2] Got mask preview! Length:', sam2Data.mask.length);
-                        // Display mask overlay
                         displayMaskOverlay(sam2Data.mask, percentX, percentY);
-                    } else {
-                        console.warn('[SAM2] No mask in response:', sam2Data);
                     }
                 } catch (sam2Error) {
-                    // SAM2 TensorRT worker not running - that's OK, mask will be generated during tracking
                     console.error('[SAM2] TensorRT worker error:', sam2Error);
                 }
 
-                marker.remove();
-                addObject(percentX * 100, percentY * 100, null);
-                console.log('[SELECT] Point stored at:', videoX, videoY);
+                marker.style.animation = '';
+                addObject(percentX * 100, percentY * 100, null, label, videoX, videoY);
+                console.log('[SELECT] Point stored at:', videoX, videoY, 'label:', label);
 
             } catch (error) {
                 console.error('Selection error:', error);
                 marker.remove();
-                // Still add object visually for demo
-                addObject(percentX * 100, percentY * 100, null);
             }
+        }
+
+        // Left-click = include (label: 1)
+        interactionLayer.addEventListener('click', (e) => handlePointSelection(e, 1));
+
+        // Right-click = exclude (label: 0)
+        interactionLayer.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            handlePointSelection(e, 0);
         });
 
         // Display SAM2 mask overlay on the video (canvas rendering - reliable cross-browser)
@@ -1978,15 +1996,18 @@
             img.src = 'data:image/png;base64,' + maskBase64;
         }
 
-        function addObject(x, y, maskData) {
+        function addObject(x, y, maskData, label = 1, videoX = 0, videoY = 0) {
             const id = Date.now();
             const objectNum = state.objects.length + 1;
 
             state.objects.push({
                 id,
-                name: 'Object ' + objectNum,
-                x: x,
-                y: y,
+                name: label === 1 ? 'Object ' + objectNum : 'Exclude ' + objectNum,
+                x: videoX,  // Store actual video coordinates for API
+                y: videoY,
+                percentX: x,  // Store percentages for display
+                percentY: y,
+                label: label,  // 1 = include, 0 = exclude
                 mask: maskData,
                 width: 15 + Math.random() * 10,
                 height: 20 + Math.random() * 10
@@ -1995,7 +2016,6 @@
             renderObjects();
             updateRemoveButton();
 
-            // If we have mask data, show it as overlay
             if (maskData) {
                 showMaskOverlay(maskData);
             }
