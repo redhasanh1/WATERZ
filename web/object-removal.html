@@ -1926,7 +1926,10 @@
         }
 
         // Left-click = include (label: 1)
-        interactionLayer.addEventListener('click', (e) => handlePointSelection(e, 1));
+        interactionLayer.addEventListener('click', (e) => {
+            if (e.button !== 0) return; // Only left-click
+            handlePointSelection(e, 1);
+        });
 
         // Right-click = exclude (label: 0)
         interactionLayer.addEventListener('contextmenu', (e) => {
