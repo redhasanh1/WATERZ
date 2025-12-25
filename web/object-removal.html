@@ -423,6 +423,17 @@
             background: #16a34a;
         }
 
+        .action-btn-process {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+        }
+
+        .action-btn-process:hover {
+            background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+            transform: translateY(-1px);
+        }
+
         .action-btn svg {
             width: 18px;
             height: 18px;
@@ -977,10 +988,9 @@
                 <div class="controls-row">
                     <div class="controls-left">
                         <div class="playback-controls-group">
-                            <button class="playback-btn" id="skipBackBtn">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polygon points="19 20 9 12 19 4 19 20"/>
-                                    <line x1="5" y1="19" x2="5" y2="5"/>
+                            <button class="playback-btn" id="skipBackBtn" title="Previous frame">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M15 18l-6-6 6-6"/>
                                 </svg>
                             </button>
                             <button class="playback-btn primary" id="playPauseBtn">
@@ -992,10 +1002,9 @@
                                     <rect x="14" y="4" width="4" height="16"/>
                                 </svg>
                             </button>
-                            <button class="playback-btn" id="skipEndBtn">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polygon points="5 4 15 12 5 20 5 4"/>
-                                    <line x1="19" y1="5" x2="19" y2="19"/>
+                            <button class="playback-btn" id="skipEndBtn" title="Next frame">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M9 6l6 6-6 6"/>
                                 </svg>
                             </button>
                         </div>
@@ -1016,7 +1025,14 @@
                                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
                                 <path d="M3 3v5h5"/>
                             </svg>
-                            Reset All
+                            Reset Mask Selections
+                        </button>
+                        <button class="action-btn action-btn-process" id="processJobBtn" style="display: none;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                            </svg>
+                            Process Job
                         </button>
                         <button class="action-btn action-btn-secondary hidden" id="previewBtn">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1096,10 +1112,9 @@
                         <div class="setting-options" style="flex-wrap: wrap; gap: 0.5rem;">
                             <div class="setting-option selected" data-format="mp4">MP4</div>
                             <div class="setting-option" data-format="webm">WebM</div>
-                            <div class="setting-option" data-format="png">PNG Seq</div>
                         </div>
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            WebM/PNG support transparency
+                            WebM supports transparency
                         </p>
                     </div>
                 </div>
@@ -1659,10 +1674,14 @@
 
         function updateRemoveButton() {
             removeBtn.disabled = state.objects.length === 0;
-            // Show/hide reset button based on objects count
+            // Show/hide reset and process buttons based on objects count
             const resetBtn = document.getElementById('resetObjectsBtn');
+            const processBtn = document.getElementById('processJobBtn');
             if (resetBtn) {
                 resetBtn.style.display = state.objects.length > 0 ? 'inline-flex' : 'none';
+            }
+            if (processBtn) {
+                processBtn.style.display = state.objects.length > 0 ? 'inline-flex' : 'none';
             }
         }
 
@@ -1676,6 +1695,12 @@
             // Reset tracking state
             state.isTracked = false;
             document.getElementById('previewBtn').classList.add('hidden');
+        });
+
+        // Process Job button - triggers same flow as Remove Selected
+        document.getElementById('processJobBtn').addEventListener('click', () => {
+            // Trigger the remove button click (same processing flow)
+            removeBtn.click();
         });
 
         // Auto-detect objects with YOLO
