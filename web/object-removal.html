@@ -2188,29 +2188,35 @@
         });
 
         document.getElementById('skipBackBtn').addEventListener('click', () => {
+            console.log('[SKIP] Back button clicked, duration:', videoPlayer.duration);
             if (!videoPlayer.duration) return;
             videoPlayer.pause();
             state.isPlaying = false;
             document.getElementById('playIcon').classList.remove('hidden');
             document.getElementById('pauseIcon').classList.add('hidden');
-            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - (1/30));
+            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 0.5);
             updateProgress();
+            console.log('[SKIP] Back to', videoPlayer.currentTime.toFixed(2));
         });
 
         document.getElementById('skipEndBtn').addEventListener('click', () => {
+            console.log('[SKIP] Forward button clicked, duration:', videoPlayer.duration);
             if (!videoPlayer.duration) return;
             videoPlayer.pause();
             state.isPlaying = false;
             document.getElementById('playIcon').classList.remove('hidden');
             document.getElementById('pauseIcon').classList.add('hidden');
-            videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + (1/30));
+            videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + 0.5);
             updateProgress();
+            console.log('[SKIP] Forward to', videoPlayer.currentTime.toFixed(2));
         });
 
         document.getElementById('timelineBar').addEventListener('click', (e) => {
+            console.log('[TIMELINE] Click detected');
             if (!videoPlayer.duration) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const percent = (e.clientX - rect.left) / rect.width;
+            console.log('[TIMELINE] Seeking to', (percent * 100).toFixed(1) + '%');
             videoPlayer.currentTime = percent * videoPlayer.duration;
             updateProgress();
         });
