@@ -157,6 +157,9 @@ def process_selection_request(request_data):
         points_array = np.array([[p['x'], p['y']] for p in points], dtype=np.float32)
         labels_array = np.array([p['label'] for p in points], dtype=np.int32)
 
+        print(f"[TRT] Points: {points_array.tolist()}")
+        print(f"[TRT] Labels: {labels_array.tolist()} (0=exclude, 1=include)")
+
         # Get mask
         mask, score = predictor.predict(points_array, labels_array)
 
