@@ -465,6 +465,7 @@
             height: 100%;
             background: var(--accent);
             width: 0%;
+            pointer-events: none;
         }
 
         .time-display {
@@ -2164,14 +2165,19 @@
         });
 
         document.getElementById('skipBackBtn').addEventListener('click', () => {
+            if (!videoPlayer.duration) return;
             videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - (1/30));
+            updateProgress();
         });
 
         document.getElementById('skipEndBtn').addEventListener('click', () => {
+            if (!videoPlayer.duration) return;
             videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + (1/30));
+            updateProgress();
         });
 
         document.getElementById('timelineBar').addEventListener('click', (e) => {
+            if (!videoPlayer.duration) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const percent = (e.clientX - rect.left) / rect.width;
             videoPlayer.currentTime = percent * videoPlayer.duration;
