@@ -139,6 +139,66 @@
             gap: 0.5rem;
         }
 
+        .credits-badge {
+            background: rgba(139, 92, 246, 0.9);
+            color: white;
+            padding: 0.4rem 0.9rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        .credits-badge.low {
+            background: rgba(245, 158, 11, 0.9);
+        }
+
+        .credits-badge.empty {
+            background: rgba(239, 68, 68, 0.9);
+        }
+
+        /* Credit Estimate Box */
+        .credit-estimate {
+            display: none;
+            margin-top: 1rem;
+            padding: 1rem 1.5rem;
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+        }
+
+        .credit-estimate-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 2rem;
+        }
+
+        .credit-estimate-item {
+            text-align: center;
+        }
+
+        .credit-estimate-value {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .credit-estimate-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .credit-estimate-cost {
+            background: var(--accent);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 700;
+        }
+
         @media (max-width: 768px) {
             .nav-links { display: none; }
             .nav-auth { display: none; }
@@ -1211,6 +1271,24 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Credit Estimate -->
+                <div class="credit-estimate" id="creditEstimate">
+                    <div class="credit-estimate-row">
+                        <div class="credit-estimate-item">
+                            <div class="credit-estimate-value" id="estDuration">0s</div>
+                            <div class="credit-estimate-label">Duration</div>
+                        </div>
+                        <div class="credit-estimate-item">
+                            <div class="credit-estimate-value" id="estResolution">0×0</div>
+                            <div class="credit-estimate-label">Resolution</div>
+                        </div>
+                        <div class="credit-estimate-item">
+                            <div class="credit-estimate-cost" id="estCost">0 credits</div>
+                            <div class="credit-estimate-label">Est. Cost</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Objects Panel -->
@@ -1470,7 +1548,13 @@
             if (user) {
                 try {
                     const userData = JSON.parse(user);
-                    navAuth.innerHTML = `<a href="/profile" class="nav-profile-btn">${userData.name || 'Profile'}</a>`;
+                    const credits = userData.credits || 0;
+                    const creditClass = credits === 0 ? 'empty' : credits < 3 ? 'low' : '';
+                    const creditText = credits === 1 ? '1 credit' : credits + ' credits';
+                    navAuth.innerHTML = `
+                        <span id="userCredits" class="credits-badge ${creditClass}">${creditText}</span>
+                        <a href="/profile" class="nav-profile-btn">${userData.name || 'Profile'}</a>
+                    `;
                 } catch (e) {
                     navAuth.innerHTML = `<a href="/profile" class="nav-profile-btn">Profile</a>`;
                 }
@@ -1482,12 +1566,31 @@
             }
         }
 
+        function updateCreditsDisplay(credits) {
+            const creditsEl = document.getElementById('userCredits');
+            if (!creditsEl) return;
+
+            // Handle decimals properly
+            const creditText = credits === 1 ? '1 credit' : credits + ' credits';
+            creditsEl.textContent = creditText;
+
+            // Update color based on amount
+            creditsEl.classList.remove('low', 'empty');
+            if (credits === 0) {
+                creditsEl.classList.add('empty');
+            } else if (credits < 3) {
+                creditsEl.classList.add('low');
+            }
+        }
+
         // Initialize nav auth on page load
         updateNavAuth();
 
         // State
         const state = {
             jobId: null,
+            estimatedCredits: 0,
+            videoDuration: 0,
             videoFile: null,
             videoUrl: null,
             videoWidth: 0,
@@ -1640,6 +1743,25 @@
                 state.videoUrl = data.video_url;
                 state.videoWidth = data.width;
                 state.videoHeight = data.height;
+                state.videoDuration = duration;
+
+                // Calculate credit cost (HALF PRICE for background removal)
+                const basePixels = 1280 * 720;
+                const baseDuration = 10;
+                const durationFactor = duration / baseDuration;
+                const resolutionFactor = Math.sqrt((data.width * data.height) / basePixels);
+                const rawCredits = (durationFactor * 0.7) + (resolutionFactor * 0.3);
+                // Divide by 2 for background removal, round to 1 decimal, min 0.5
+                state.estimatedCredits = Math.max(0.5, Math.round((rawCredits / 2) * 10) / 10);
+
+                // Show credit estimate
+                const creditEstimate = document.getElementById('creditEstimate');
+                if (creditEstimate) {
+                    document.getElementById('estDuration').textContent = Math.round(duration) + 's';
+                    document.getElementById('estResolution').textContent = data.width + '×' + data.height;
+                    document.getElementById('estCost').textContent = state.estimatedCredits + (state.estimatedCredits === 1 ? ' credit' : ' credits');
+                    creditEstimate.style.display = 'block';
+                }
 
                 // Setup video player (crossOrigin needed for canvas export)
                 videoPlayer.crossOrigin = 'anonymous';
@@ -2220,6 +2342,21 @@
                 return;
             }
 
+            // Check if user has enough credits
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            if (user.id && state.estimatedCredits > 0) {
+                const userCredits = user.credits || 0;
+                if (userCredits < state.estimatedCredits) {
+                    alert(`Not enough credits. Need ${state.estimatedCredits}, you have ${userCredits}. Please purchase more credits.`);
+                    return;
+                }
+
+                // Deduct credits optimistically
+                user.credits = Math.max(0, userCredits - state.estimatedCredits);
+                localStorage.setItem('user', JSON.stringify(user));
+                updateCreditsDisplay(user.credits);
+            }
+
             showProcessingModal('Processing...', 'Step 1/2: Tracking object through all frames...');
 
             try {
@@ -2337,6 +2474,14 @@
 
                 const finalStatus = await pollExport();
 
+                // Sync credits from server response
+                if (finalStatus.new_credits !== undefined) {
+                    const user = JSON.parse(localStorage.getItem('user') || '{}');
+                    user.credits = finalStatus.new_credits;
+                    localStorage.setItem('user', JSON.stringify(user));
+                    updateCreditsDisplay(finalStatus.new_credits);
+                }
+
                 // Download result
                 hideProcessingModal();
                 const downloadUrl = finalStatus.cdn_url || `${API_BASE}/api/object-removal/download/${state.jobId}`;
@@ -2355,6 +2500,15 @@
             } catch (error) {
                 console.error('Processing error:', error);
                 hideProcessingModal();
+
+                // Restore credits on failure
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                if (user.id && state.estimatedCredits > 0) {
+                    user.credits = (user.credits || 0) + state.estimatedCredits;
+                    localStorage.setItem('user', JSON.stringify(user));
+                    updateCreditsDisplay(user.credits);
+                }
+
                 alert('Processing failed: ' + error.message);
             }
         });
