@@ -1590,7 +1590,8 @@
             blurAmount: 20,
             dilation: 0,
             isSelectingObject: false,
-            isTracked: false
+            isTracked: false,
+            currentObjectId: 0  // Only increments when user clicks "Add Object"
         };
 
         // Elements
@@ -1867,15 +1868,17 @@
             const frameIndex = Math.floor(videoPlayer.currentTime * 30);
 
             try {
-                const newObjectId = state.objects.length;
+                const currentObjId = state.currentObjectId;
+                console.log('[SELECT] Using object_id:', currentObjId, 'label:', label);
 
-                const allPoints = state.objects.map((obj, idx) => ({
+                const allPoints = state.objects.map((obj) => ({
                     x: obj.x,
                     y: obj.y,
                     label: obj.label ?? 1,  // Use ?? not || (0 is valid label for exclude)
-                    object_id: idx
+                    object_id: obj.objectId ?? 0  // Use stored objectId
                 }));
-                allPoints.push({ x: videoX, y: videoY, label: label, object_id: newObjectId });
+                allPoints.push({ x: videoX, y: videoY, label: label, object_id: currentObjId });
+                console.log('[SELECT] All points:', allPoints);
 
                 await fetch(`${API_BASE}/api/object-removal/select`, {
                     method: 'POST',
@@ -2011,7 +2014,7 @@
 
         function addObject(x, y, maskData, label = 1, videoX = 0, videoY = 0) {
             const id = Date.now();
-            const objectNum = state.objects.length + 1;
+            const objectNum = state.currentObjectId + 1;
 
             state.objects.push({
                 id,
@@ -2021,6 +2024,7 @@
                 percentX: x,  // Store percentages for display
                 percentY: y,
                 label: label,  // 1 = include, 0 = exclude
+                objectId: state.currentObjectId,  // All points for same object share this ID
                 mask: maskData,
                 width: 15 + Math.random() * 10,
                 height: 20 + Math.random() * 10
@@ -2083,8 +2087,11 @@
                 <span>Add Object</span>
             `;
             addCard.addEventListener('click', () => {
+                // Increment object ID for the NEW object
+                state.currentObjectId++;
                 state.isSelectingObject = true;
                 instructions.classList.remove('hidden');
+                console.log('[ADD OBJECT] Now selecting object ID:', state.currentObjectId);
             });
             list.appendChild(addCard);
 
