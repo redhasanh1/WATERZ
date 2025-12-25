@@ -2567,6 +2567,14 @@ console.log('[MaskDrawer] Class loaded');
             document.getElementById('previewBtn').classList.add('hidden');
         });
 
+        // Add Object button - static button (before any objects added)
+        document.getElementById('addObjectCard').addEventListener('click', () => {
+            state.currentObjectId++;
+            state.isSelectingObject = true;
+            document.getElementById('selectionInstructions').classList.remove('hidden');
+            console.log('[ADD OBJECT] Now selecting object ID:', state.currentObjectId);
+        });
+
         // Auto-detect objects with YOLO
         document.getElementById('autoDetectCard').addEventListener('click', async () => {
             if (!state.jobId) {
