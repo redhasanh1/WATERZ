@@ -2055,9 +2055,22 @@
             const list = document.getElementById('objectsList');
             list.innerHTML = '';
 
+            // Group points by objectId
+            const objectGroups = {};
             state.objects.forEach(obj => {
+                const oid = obj.objectId ?? 0;
+                if (!objectGroups[oid]) objectGroups[oid] = { points: [], includeCount: 0, excludeCount: 0 };
+                objectGroups[oid].points.push(obj);
+                if (obj.label === 0) objectGroups[oid].excludeCount++;
+                else objectGroups[oid].includeCount++;
+            });
+
+            // Render one card per objectId group
+            Object.keys(objectGroups).forEach(oid => {
+                const group = objectGroups[oid];
+                const pointCount = group.points.length;
                 const item = document.createElement('div');
-                item.className = `object-item ${obj.id === state.selectedObjectId ? 'selected' : ''}`;
+                item.className = `object-item ${parseInt(oid) === state.currentObjectId ? 'selected' : ''}`;
                 item.innerHTML = `
                     <div class="object-thumb">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2065,14 +2078,10 @@
                         </svg>
                     </div>
                     <div class="object-info">
-                        <div class="object-name">${obj.name}</div>
-                        <div class="object-frames">All frames</div>
+                        <div class="object-name">Object ${parseInt(oid) + 1}</div>
+                        <div class="object-frames">${pointCount} point${pointCount > 1 ? 's' : ''} (${group.includeCount}+ ${group.excludeCount}-)</div>
                     </div>
                 `;
-                item.addEventListener('click', () => {
-                    state.selectedObjectId = obj.id;
-                    renderObjects();
-                });
                 list.appendChild(item);
             });
 
@@ -2095,7 +2104,9 @@
             });
             list.appendChild(addCard);
 
-            document.getElementById('objectsCount').textContent = state.objects.length + ' object' + (state.objects.length !== 1 ? 's' : '');
+            // Show count of object groups, not individual points
+            const numObjects = Object.keys(objectGroups).length;
+            document.getElementById('objectsCount').textContent = numObjects + ' object' + (numObjects !== 1 ? 's' : '');
         }
 
         function updateRemoveButton() {
@@ -2195,27 +2206,37 @@
         });
 
         document.getElementById('skipBackBtn').addEventListener('click', () => {
-            console.log('[SKIP] Back button clicked, duration:', videoPlayer.duration);
+            console.log('[SKIP] Back: before=', videoPlayer.currentTime, 'duration=', videoPlayer.duration);
             if (!videoPlayer.duration) return;
             videoPlayer.pause();
             state.isPlaying = false;
             document.getElementById('playIcon').classList.remove('hidden');
             document.getElementById('pauseIcon').classList.add('hidden');
-            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 0.5);
-            updateProgress();
-            console.log('[SKIP] Back to', videoPlayer.currentTime.toFixed(2));
+            const newTime = Math.max(0, videoPlayer.currentTime - 0.5);
+            console.log('[SKIP] Back: setting to', newTime);
+            videoPlayer.currentTime = newTime;
+            // Wait for seek to complete
+            setTimeout(() => {
+                updateProgress();
+                console.log('[SKIP] Back: after=', videoPlayer.currentTime);
+            }, 50);
         });
 
         document.getElementById('skipEndBtn').addEventListener('click', () => {
-            console.log('[SKIP] Forward button clicked, duration:', videoPlayer.duration);
+            console.log('[SKIP] Forward: before=', videoPlayer.currentTime, 'duration=', videoPlayer.duration);
             if (!videoPlayer.duration) return;
             videoPlayer.pause();
             state.isPlaying = false;
             document.getElementById('playIcon').classList.remove('hidden');
             document.getElementById('pauseIcon').classList.add('hidden');
-            videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + 0.5);
-            updateProgress();
-            console.log('[SKIP] Forward to', videoPlayer.currentTime.toFixed(2));
+            const newTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + 0.5);
+            console.log('[SKIP] Forward: setting to', newTime);
+            videoPlayer.currentTime = newTime;
+            // Wait for seek to complete
+            setTimeout(() => {
+                updateProgress();
+                console.log('[SKIP] Forward: after=', videoPlayer.currentTime);
+            }, 50);
         });
 
         document.getElementById('timelineBar').addEventListener('click', (e) => {
