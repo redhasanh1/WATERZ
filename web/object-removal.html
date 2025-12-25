@@ -157,18 +157,13 @@
             background: rgba(239, 68, 68, 0.9);
         }
 
-        /* Credit Estimate Box - positioned as overlay on video */
+        /* Credit Estimate Box - above video */
         .credit-estimate {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 10;
+            margin-bottom: 1rem;
             padding: 1rem 1.5rem;
             background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(168, 85, 247, 0.15) 100%);
-            border-bottom: 1px solid rgba(139, 92, 246, 0.3);
-            border-radius: 16px 16px 0 0;
-            backdrop-filter: blur(10px);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
         }
 
         .credit-estimate-row {
@@ -1188,25 +1183,26 @@
     <!-- Main App -->
     <section class="app-section">
         <div class="app-card">
-            <!-- Video Container -->
-            <div class="video-container" id="videoContainer">
-                <!-- Credit Estimate Overlay -->
-                <div class="credit-estimate hidden" id="creditEstimate">
-                    <div class="credit-estimate-row">
-                        <div class="credit-estimate-item">
-                            <div class="credit-estimate-value" id="estDuration">0s</div>
-                            <div class="credit-estimate-label">Duration</div>
-                        </div>
-                        <div class="credit-estimate-item">
-                            <div class="credit-estimate-value" id="estResolution">0×0</div>
-                            <div class="credit-estimate-label">Resolution</div>
-                        </div>
-                        <div class="credit-estimate-item">
-                            <div class="credit-estimate-cost" id="estCost">0 credits</div>
-                            <div class="credit-estimate-label">Est. Cost</div>
-                        </div>
+            <!-- Credit Estimate - Above Video -->
+            <div class="credit-estimate hidden" id="creditEstimate">
+                <div class="credit-estimate-row">
+                    <div class="credit-estimate-item">
+                        <div class="credit-estimate-value" id="estDuration">0s</div>
+                        <div class="credit-estimate-label">Duration</div>
+                    </div>
+                    <div class="credit-estimate-item">
+                        <div class="credit-estimate-value" id="estResolution">0×0</div>
+                        <div class="credit-estimate-label">Resolution</div>
+                    </div>
+                    <div class="credit-estimate-item">
+                        <div class="credit-estimate-cost" id="estCost">0 credits</div>
+                        <div class="credit-estimate-label">Est. Cost</div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Video Container -->
+            <div class="video-container" id="videoContainer">
                 <div class="video-placeholder" id="uploadArea">
                     <input type="file" id="fileInput" style="display:none">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2316,11 +2312,7 @@
                     alert(`Not enough credits. Need ${state.estimatedCredits}, you have ${userCredits}. Please purchase more credits.`);
                     return;
                 }
-
-                // Deduct credits optimistically
-                user.credits = Math.max(0, userCredits - state.estimatedCredits);
-                localStorage.setItem('user', JSON.stringify(user));
-                updateCreditsDisplay(user.credits);
+                // Credits will be deducted server-side and updated on completion
             }
 
             showProcessingModal('Processing...', 'Step 1/2: Tracking object through all frames...');
@@ -2466,15 +2458,6 @@
             } catch (error) {
                 console.error('Processing error:', error);
                 hideProcessingModal();
-
-                // Restore credits on failure
-                const user = JSON.parse(localStorage.getItem('user') || '{}');
-                if (user.id && state.estimatedCredits > 0) {
-                    user.credits = (user.credits || 0) + state.estimatedCredits;
-                    localStorage.setItem('user', JSON.stringify(user));
-                    updateCreditsDisplay(user.credits);
-                }
-
                 alert('Processing failed: ' + error.message);
             }
         });
