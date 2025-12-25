@@ -1368,23 +1368,18 @@
                 <div class="settings-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1.5rem;">
                     <!-- Operation Selector -->
                     <div class="setting-group">
-                        <span class="setting-label">Operation</span>
+                        <span class="setting-label"><span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: var(--accent-primary); color: white; border-radius: 50%; font-weight: 700; font-size: 0.85rem; margin-right: 0.5rem;">1</span>Operation</span>
                         <div class="setting-options" style="flex-wrap: wrap; gap: 0.5rem;">
-                            <div class="setting-option selected" data-operation="keep_object" title="Keep only the selected object, remove everything else">Extract Object</div>
+                            <div class="setting-option selected" data-operation="keep_object" title="Keep only the selected object, remove everything else">Keep Object</div>
                             <div class="setting-option" data-operation="remove_object">Remove Object</div>
-                            <div class="setting-option" data-operation="fill_inside">Fill Inside</div>
-                            <div class="setting-option" data-operation="fill_outside">Fill Outside</div>
-                            <div class="setting-option" data-operation="blur_inside">Blur Inside</div>
-                            <div class="setting-option" data-operation="blur_outside">Blur Outside</div>
                         </div>
                     </div>
                     <div class="setting-group">
-                        <span class="setting-label">Background</span>
+                        <span class="setting-label"><span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: var(--accent-primary); color: white; border-radius: 50%; font-weight: 700; font-size: 0.85rem; margin-right: 0.5rem;">2</span>Background</span>
                         <div class="setting-options" style="flex-wrap: wrap; gap: 0.5rem;">
                             <div class="setting-option selected" data-background="transparent">Transparent</div>
                             <div class="setting-option" data-background="color">Solid Color</div>
                             <div class="setting-option" data-background="blur">Blur BG</div>
-                            <div class="setting-option" data-background="image">Custom Image</div>
                         </div>
                         <div id="colorPickerRow" class="hidden" style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
                             <input type="color" id="bgColorPicker" value="#00FF00" style="width: 40px; height: 30px; border: none; border-radius: 4px; cursor: pointer;">
@@ -1394,14 +1389,6 @@
                             <input type="range" id="blurSlider" min="5" max="50" value="20" style="width: 100%;">
                             <span style="font-size: 0.8rem; color: var(--text-muted);">Blur: <span id="blurValueLabel">20</span>px</span>
                         </div>
-                        <div id="imagePickerRow" class="hidden" style="margin-top: 0.75rem;">
-                            <input type="file" id="bgImagePicker" accept="image/*" style="display: none;">
-                            <button type="button" id="bgImageBtn" style="padding: 0.5rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 0.8rem;">Choose Image</button>
-                            <span id="bgImageLabel" style="font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem;">No image selected</span>
-                            <div id="bgImagePreview" class="hidden" style="margin-top: 0.5rem;">
-                                <img id="bgImageThumb" style="max-height: 60px; border-radius: 4px;">
-                            </div>
-                        </div>
                         <div style="margin-top: 0.75rem;">
                             <span style="font-size: 0.8rem; color: var(--text-muted);">Dilation: </span>
                             <input type="range" id="dilationSlider" min="0" max="20" value="0" style="width: 80px; vertical-align: middle;">
@@ -1409,7 +1396,7 @@
                         </div>
                     </div>
                     <div class="setting-group">
-                        <span class="setting-label">Output Format</span>
+                        <span class="setting-label"><span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: var(--accent-primary); color: white; border-radius: 50%; font-weight: 700; font-size: 0.85rem; margin-right: 0.5rem;">3</span>Output Format</span>
                         <div class="setting-options" style="flex-wrap: wrap; gap: 0.5rem;">
                             <div class="setting-option selected" data-format="mp4">MP4</div>
                             <div class="setting-option" data-format="webm">WebM</div>
@@ -1424,6 +1411,14 @@
 
                 <!-- Remove Selected Button (moved to settings) -->
                 <div style="grid-column: 1 / -1; margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-start;">
+                    <button class="action-btn action-btn-secondary hidden" id="newVideoBtn" style="padding: 0.875rem 1.5rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        New Video
+                    </button>
                     <button class="action-btn action-btn-secondary hidden" id="previewBtn" style="padding: 0.875rem 1.5rem;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
                             <circle cx="12" cy="12" r="10"/>
@@ -2502,12 +2497,18 @@ console.log('[MaskDrawer] Class loaded');
                 else objectGroups[oid].includeCount++;
             });
 
-            // Render one card per objectId group
-            Object.keys(objectGroups).forEach(oid => {
+            // If current object has no points yet, add it to groups so it shows
+            if (!objectGroups[state.currentObjectId]) {
+                objectGroups[state.currentObjectId] = { points: [], includeCount: 0, excludeCount: 0 };
+            }
+
+            // Render one card per objectId group (sorted by ID)
+            Object.keys(objectGroups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(oid => {
                 const group = objectGroups[oid];
                 const pointCount = group.points.length;
+                const isSelected = parseInt(oid) === state.currentObjectId;
                 const item = document.createElement('div');
-                item.className = `object-item ${parseInt(oid) === state.currentObjectId ? 'selected' : ''}`;
+                item.className = `object-item ${isSelected ? 'selected' : ''}`;
                 item.innerHTML = `
                     <div class="object-thumb">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2515,8 +2516,8 @@ console.log('[MaskDrawer] Class loaded');
                         </svg>
                     </div>
                     <div class="object-info">
-                        <div class="object-name">Object ${parseInt(oid) + 1}</div>
-                        <div class="object-frames">${pointCount} point${pointCount > 1 ? 's' : ''} (${group.includeCount}+ ${group.excludeCount}-)</div>
+                        <div class="object-name">Object ${parseInt(oid) + 1}${isSelected ? ' (selecting)' : ''}</div>
+                        <div class="object-frames">${pointCount} point${pointCount !== 1 ? 's' : ''} selected${pointCount > 0 ? ` (${group.includeCount}+ ${group.excludeCount}-)` : ''}</div>
                     </div>
                 `;
                 list.appendChild(item);
@@ -2537,6 +2538,7 @@ console.log('[MaskDrawer] Class loaded');
                 state.currentObjectId++;
                 state.isSelectingObject = true;
                 instructions.classList.remove('hidden');
+                renderObjects();  // Show the new object card immediately
                 console.log('[ADD OBJECT] Now selecting object ID:', state.currentObjectId);
             });
             list.appendChild(addCard);
@@ -2558,8 +2560,9 @@ console.log('[MaskDrawer] Class loaded');
         // Reset all objects button
         document.getElementById('resetObjectsBtn').addEventListener('click', () => {
             state.objects = [];
-            // Remove all mask overlays from interaction layer
-            interactionLayer.querySelectorAll('.mask-overlay, .mask-tint').forEach(el => el.remove());
+            state.currentObjectId = 0;  // Reset to first object
+            // Remove all mask overlays AND click markers from interaction layer
+            interactionLayer.querySelectorAll('.mask-overlay, .mask-tint, .click-marker').forEach(el => el.remove());
             renderObjects();
             updateRemoveButton();
             // Reset tracking state
@@ -2572,6 +2575,7 @@ console.log('[MaskDrawer] Class loaded');
             state.currentObjectId++;
             state.isSelectingObject = true;
             document.getElementById('selectionInstructions').classList.remove('hidden');
+            renderObjects();  // Show the new object card immediately
             console.log('[ADD OBJECT] Now selecting object ID:', state.currentObjectId);
         });
 
@@ -2743,20 +2747,16 @@ console.log('[MaskDrawer] Class loaded');
                     state.background = option.dataset.background;
                     const colorPickerRow = document.getElementById('colorPickerRow');
                     const blurSliderRow = document.getElementById('blurSliderRow');
-                    const imagePickerRow = document.getElementById('imagePickerRow');
 
                     // Hide all first
                     colorPickerRow.classList.add('hidden');
                     blurSliderRow.classList.add('hidden');
-                    imagePickerRow.classList.add('hidden');
 
                     // Show relevant one
                     if (state.background === 'color') {
                         colorPickerRow.classList.remove('hidden');
                     } else if (state.background === 'blur') {
                         blurSliderRow.classList.remove('hidden');
-                    } else if (state.background === 'image') {
-                        imagePickerRow.classList.remove('hidden');
                     }
                 }
             });
@@ -2789,27 +2789,51 @@ console.log('[MaskDrawer] Class loaded');
             });
         }
 
-        // Custom background image picker
-        const bgImagePicker = document.getElementById('bgImagePicker');
-        const bgImageBtn = document.getElementById('bgImageBtn');
-        if (bgImageBtn) {
-            bgImageBtn.addEventListener('click', () => bgImagePicker.click());
-        }
-        if (bgImagePicker) {
-            bgImagePicker.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (evt) => {
-                        state.bgImage = evt.target.result; // base64
-                        document.getElementById('bgImageLabel').textContent = file.name;
-                        document.getElementById('bgImageThumb').src = state.bgImage;
-                        document.getElementById('bgImagePreview').classList.remove('hidden');
-                    };
-                    reader.readAsDataURL(file);
-                }
-            });
-        }
+        // New Video button - reset everything and show upload area
+        document.getElementById('newVideoBtn').addEventListener('click', () => {
+            // Reset ALL state
+            state.jobId = null;
+            state.objects = [];
+            state.isSelectingObject = false;
+            state.isTracked = false;
+            state.videoFile = null;
+            state.videoUrl = null;
+            state.videoWidth = 0;
+            state.videoHeight = 0;
+            state.videoDuration = 0;
+            state.estimatedCredits = 0;
+
+            // Clear UI elements
+            interactionLayer.querySelectorAll('.mask-overlay, .mask-tint, .click-marker').forEach(el => el.remove());
+            renderObjects();
+            updateRemoveButton();
+
+            // Hide video and panels, show upload area
+            videoPlayer.classList.add('hidden');
+            videoPlayer.src = '';
+            document.getElementById('drawingCanvas').classList.add('hidden');
+            uploadArea.classList.remove('hidden');
+            uploadArea.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <h3>Upload Your Video</h3>
+                <p>Drag & drop or click to upload (MP4, MOV, WebM, MKV, WMV, and more)</p>
+            `;
+            interactionLayer.classList.add('hidden');
+            instructions.classList.add('hidden');
+            controlsPanel.classList.add('hidden');
+            objectsPanel.classList.add('hidden');
+            settingsSection.classList.add('hidden');
+            document.getElementById('advancedToolsSection').classList.add('hidden');
+            document.getElementById('creditEstimate').classList.add('hidden');
+            document.getElementById('previewBtn').classList.add('hidden');
+            document.getElementById('newVideoBtn').classList.add('hidden');
+
+            console.log('[NEW VIDEO] State reset, ready for new upload');
+        });
 
         // Preview button - show preview button when tracked
         const previewBtn = document.getElementById('previewBtn');
@@ -3026,8 +3050,18 @@ console.log('[MaskDrawer] Class loaded');
                 a.click();
                 document.body.removeChild(a);
 
-                // Show preview button for re-exports
+                // Show preview button for re-exports and New Video button
                 document.getElementById('previewBtn').classList.remove('hidden');
+                document.getElementById('newVideoBtn').classList.remove('hidden');
+
+                // Reset state so user can add more objects or start fresh
+                state.objects = [];
+                state.isSelectingObject = true;
+                state.isTracked = false;
+                interactionLayer.querySelectorAll('.mask-overlay, .mask-tint, .click-marker').forEach(el => el.remove());
+                renderObjects();
+                updateRemoveButton();
+                instructions.classList.remove('hidden');
 
             } catch (error) {
                 console.error('Processing error:', error);
