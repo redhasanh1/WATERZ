@@ -1341,6 +1341,7 @@
                             <div class="setting-option selected" data-background="transparent">Transparent</div>
                             <div class="setting-option" data-background="color">Solid Color</div>
                             <div class="setting-option" data-background="blur">Blur BG</div>
+                            <div class="setting-option" data-background="image">Custom Image</div>
                         </div>
                         <div id="colorPickerRow" class="hidden" style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
                             <input type="color" id="bgColorPicker" value="#00FF00" style="width: 40px; height: 30px; border: none; border-radius: 4px; cursor: pointer;">
@@ -1349,6 +1350,14 @@
                         <div id="blurSliderRow" class="hidden" style="margin-top: 0.75rem;">
                             <input type="range" id="blurSlider" min="5" max="50" value="20" style="width: 100%;">
                             <span style="font-size: 0.8rem; color: var(--text-muted);">Blur: <span id="blurValueLabel">20</span>px</span>
+                        </div>
+                        <div id="imagePickerRow" class="hidden" style="margin-top: 0.75rem;">
+                            <input type="file" id="bgImagePicker" accept="image/*" style="display: none;">
+                            <button type="button" id="bgImageBtn" style="padding: 0.5rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 0.8rem;">Choose Image</button>
+                            <span id="bgImageLabel" style="font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem;">No image selected</span>
+                            <div id="bgImagePreview" class="hidden" style="margin-top: 0.5rem;">
+                                <img id="bgImageThumb" style="max-height: 60px; border-radius: 4px;">
+                            </div>
                         </div>
                         <div style="margin-top: 0.75rem;">
                             <span style="font-size: 0.8rem; color: var(--text-muted);">Dilation: </span>
@@ -1575,8 +1584,9 @@
             quality: 'balanced',
             format: 'mp4',
             operation: 'keep_object', // keep_object, remove_object, fill_inside, fill_outside, blur_inside, blur_outside
-            background: 'transparent', // transparent, color, blur
+            background: 'transparent', // transparent, color, blur, image
             bgColor: '#00FF00',
+            bgImage: null, // base64 custom background image
             blurAmount: 20,
             dilation: 0,
             isSelectingObject: false,
@@ -2236,16 +2246,20 @@
                     state.background = option.dataset.background;
                     const colorPickerRow = document.getElementById('colorPickerRow');
                     const blurSliderRow = document.getElementById('blurSliderRow');
+                    const imagePickerRow = document.getElementById('imagePickerRow');
 
-                    // Hide both first
+                    // Hide all first
                     colorPickerRow.classList.add('hidden');
                     blurSliderRow.classList.add('hidden');
+                    imagePickerRow.classList.add('hidden');
 
                     // Show relevant one
                     if (state.background === 'color') {
                         colorPickerRow.classList.remove('hidden');
                     } else if (state.background === 'blur') {
                         blurSliderRow.classList.remove('hidden');
+                    } else if (state.background === 'image') {
+                        imagePickerRow.classList.remove('hidden');
                     }
                 }
             });
@@ -2278,6 +2292,28 @@
             });
         }
 
+        // Custom background image picker
+        const bgImagePicker = document.getElementById('bgImagePicker');
+        const bgImageBtn = document.getElementById('bgImageBtn');
+        if (bgImageBtn) {
+            bgImageBtn.addEventListener('click', () => bgImagePicker.click());
+        }
+        if (bgImagePicker) {
+            bgImagePicker.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                        state.bgImage = evt.target.result; // base64
+                        document.getElementById('bgImageLabel').textContent = file.name;
+                        document.getElementById('bgImageThumb').src = state.bgImage;
+                        document.getElementById('bgImagePreview').classList.remove('hidden');
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
+
         // Preview button - show preview button when tracked
         const previewBtn = document.getElementById('previewBtn');
         if (previewBtn) {
@@ -2298,6 +2334,7 @@
                             operation: state.operation,
                             background: state.background,
                             bg_color: state.bgColor,
+                            bg_image: state.bgImage,
                             blur_amount: state.blurAmount,
                             dilation: state.dilation,
                             frame_index: Math.floor(videoPlayer.currentTime * 30) // Assume 30fps
@@ -2419,6 +2456,7 @@
                         operation: state.operation,
                         background: state.background,
                         bg_color: state.bgColor,
+                        bg_image: state.bgImage,
                         blur_amount: state.blurAmount,
                         dilation: state.dilation,
                         format: state.format
