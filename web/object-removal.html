@@ -1683,6 +1683,14 @@
                 const frame_count = Math.round(duration * fps);
                 URL.revokeObjectURL(tempVideo.src);
 
+                // Enforce max duration (10 minutes 10 seconds)
+                const MAX_DURATION_SECONDS = 610;
+                if (duration > MAX_DURATION_SECONDS) {
+                    hideProgress();
+                    alert(`Video too long! Maximum duration is 10 minutes 10 seconds.\n\nYour video: ${Math.round(duration)} seconds\n\nPlease upload a shorter video.`);
+                    return;
+                }
+
                 // Step 4: Notify server that upload is complete
                 const completeResponse = await fetch(`${API_BASE}/api/object-removal/upload-complete`, {
                     method: 'POST',
