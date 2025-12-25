@@ -1433,6 +1433,26 @@
                         Remove Selected
                     </button>
                 </div>
+
+                <!-- Download Section (shown after processing complete) -->
+                <div id="downloadSection" class="hidden" style="grid-column: 1 / -1; margin-top: 2rem; padding: 2rem; background: linear-gradient(135deg, rgba(249, 115, 22, 0.15), rgba(234, 88, 12, 0.1)); border: 2px solid rgba(249, 115, 22, 0.5); border-radius: 16px; text-align: center;">
+                    <h3 style="color: #f97316; margin-bottom: 0.75rem; font-size: 1.25rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 24px; height: 24px; display: inline-block; vertical-align: middle; margin-right: 0.5rem;">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        Processing Complete!
+                    </h3>
+                    <p style="margin-bottom: 1.25rem; color: var(--text-secondary);">Your video is ready for download.</p>
+                    <a id="downloadBtn" href="#" download style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 1rem 2rem; background: linear-gradient(135deg, #f97316, #ea580c); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 1rem; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 15px rgba(249, 115, 22, 0.4);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        Download Clean Copy
+                    </a>
+                </div>
             </div>
         </div>
     </section>
@@ -2831,6 +2851,7 @@ console.log('[MaskDrawer] Class loaded');
             document.getElementById('creditEstimate').classList.add('hidden');
             document.getElementById('previewBtn').classList.add('hidden');
             document.getElementById('newVideoBtn').classList.add('hidden');
+            document.getElementById('downloadSection').classList.add('hidden');
 
             console.log('[NEW VIDEO] State reset, ready for new upload');
         });
@@ -2917,7 +2938,10 @@ console.log('[MaskDrawer] Class loaded');
                 const trackResponse = await fetch(`${API_BASE}/api/object-removal/track`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ job_id: state.jobId })
+                    body: JSON.stringify({
+                        job_id: state.jobId,
+                        estimated_credits: state.estimatedCredits
+                    })
                 });
 
                 const trackData = await trackResponse.json();
@@ -3036,19 +3060,24 @@ console.log('[MaskDrawer] Class loaded');
                     updateCreditsDisplay(finalStatus.new_credits);
                 }
 
-                // Download result
+                // Show inline download section (no popup!)
                 hideProcessingModal();
                 const downloadUrl = finalStatus.cdn_url || `${API_BASE}/api/object-removal/download/${state.jobId}`;
                 console.log('[DOWNLOAD] URL:', downloadUrl, finalStatus.cdn_url ? '(CDN)' : '(local)');
-                const a = document.createElement('a');
-                a.href = downloadUrl;
+
                 // Determine file extension: png and png_sequence become zip, others use their format
                 const ext = (state.format === 'png' || state.format === 'png_sequence') ? 'zip' : state.format;
-                a.download = `object_removed_${state.jobId}.${ext}`;
-                if (finalStatus.cdn_url) a.target = '_blank';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+                const filename = `object_removed_${state.jobId}.${ext}`;
+
+                // Setup inline download button
+                const downloadBtn = document.getElementById('downloadBtn');
+                const downloadSection = document.getElementById('downloadSection');
+                downloadBtn.href = downloadUrl;
+                downloadBtn.download = filename;
+                downloadSection.classList.remove('hidden');
+
+                // Scroll to download section
+                downloadSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
                 // Show preview button for re-exports and New Video button
                 document.getElementById('previewBtn').classList.remove('hidden');

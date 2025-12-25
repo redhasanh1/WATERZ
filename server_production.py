@@ -5509,13 +5509,19 @@ def objrem_track():
         )
         result = s1.apply_async(task_id=task_id)
 
+        # Store user_id and estimated credits for deduction on completion
+        user_id = session.get('user_id')
+        estimated_credits = float(data.get('estimated_credits', 0.5))
+
         redis_client.hset(f"objrem:{job_id}", mapping={
             'celery_task_id': task_id,
             'wsl_masks_dir': wsl_masks_dir,
-            'message': 'Tracking in progress...'
+            'message': 'Tracking in progress...',
+            'user_id': user_id or '',
+            'estimated_credits': str(estimated_credits)
         })
 
-        print(f"[OBJREM-TRACK] Submitted task {task_id} for job {job_id}")
+        print(f"[OBJREM-TRACK] Submitted task {task_id} for job {job_id}, user={user_id}, credits={estimated_credits}")
         print(f"[OBJREM-TRACK] Points: {point_coords}, Object IDs: {object_ids}, Frame: {frame_idx}")
 
         return jsonify({
@@ -5589,7 +5595,35 @@ def objrem_status(job_id):
         # Refresh job data
         job = redis_client.hgetall(f"objrem:{job_id}")
 
-        return jsonify({
+        # Deduct credits when export completes (only once)
+        new_credits = None
+        if job.get('status') == 'export_complete' and not job.get('credits_deducted'):
+            user_id = job.get('user_id')
+            estimated_credits = float(job.get('estimated_credits', 0.5))
+
+            if user_id:
+                try:
+                    credits_to_deduct = max(1, int(estimated_credits))  # Minimum 1 credit
+                    conn = get_db_connection()
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE users SET credits = credits - %s WHERE id = %s RETURNING credits",
+                        (credits_to_deduct, user_id)
+                    )
+                    result = cur.fetchone()
+                    if result:
+                        new_credits = result[0]
+                        print(f"[OBJREM-CREDITS] Deducted {credits_to_deduct} credits for user {user_id}. New balance: {new_credits}")
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+
+                    # Mark as deducted
+                    redis_client.hset(f"objrem:{job_id}", 'credits_deducted', '1')
+                except Exception as e:
+                    print(f"[OBJREM-CREDITS] Error deducting credits: {e}")
+
+        response = {
             'status': job.get('status', 'unknown'),
             'progress': int(job.get('progress', 0)),
             'message': job.get('message', ''),
@@ -5597,7 +5631,12 @@ def objrem_status(job_id):
             'cdn_url': job.get('result_cdn_url', ''),
             'width': int(job.get('width', 0)),
             'height': int(job.get('height', 0))
-        })
+        }
+
+        if new_credits is not None:
+            response['new_credits'] = new_credits
+
+        return jsonify(response)
 
     except Exception as e:
         import traceback
