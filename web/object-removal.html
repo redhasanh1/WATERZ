@@ -3332,12 +3332,19 @@ console.log('[MaskDrawer] Class loaded');
                     drawingCanvas.style.pointerEvents = 'none';
                     interactionLayer.style.pointerEvents = 'auto';
                     if (maskDrawer) maskDrawer.enabled = false;
-                } else if (tool === 'eraser' && state.maskCanvas) {
-                    // Eraser on SAM2 mask - enable eraser on mask canvas
-                    drawingCanvas.style.pointerEvents = 'none';
+                } else if (tool === 'eraser') {
+                    // Eraser works on BOTH SAM2 mask AND drawing canvas (brush/rectangle)
+                    drawingCanvas.classList.remove('hidden');
+                    drawingCanvas.style.pointerEvents = 'auto';
                     interactionLayer.style.pointerEvents = 'none';
-                    if (maskDrawer) maskDrawer.enabled = false;
-                    setupMaskEraser();
+                    if (maskDrawer) {
+                        maskDrawer.enabled = true;
+                        maskDrawer.setTool('eraser');
+                    }
+                    // Also enable SAM2 mask eraser if mask exists
+                    if (state.maskCanvas) {
+                        setupMaskEraser();
+                    }
                 } else {
                     // Drawing mode - enable drawing canvas, disable SAM2 interaction
                     drawingCanvas.classList.remove('hidden');
