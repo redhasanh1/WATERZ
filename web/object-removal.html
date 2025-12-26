@@ -1397,11 +1397,10 @@
                             <div class="setting-option selected" data-format="mp4">MP4</div>
                             <div class="setting-option" data-format="webm">WebM</div>
                             <div class="setting-option" data-format="png">PNG</div>
-                            <div class="setting-option" data-format="png_sequence">PNG Seq</div>
                             <div class="setting-option" data-format="masks" title="Raw tracking masks for manual compositing">Masks</div>
                         </div>
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            WebM/PNG/PNG Seq = transparency. Masks = raw tracking data for editors.
+                            WebM/PNG = transparency. Masks = raw tracking data for editors.
                         </p>
                     </div>
                 </div>
@@ -3047,12 +3046,16 @@ console.log('[MaskDrawer] Class loaded');
                     .filter(o => o.mask)  // Only objects with masks
                     .map(o => ({ objectId: o.objectId, mask: o.mask }));
 
+                // Get user_id from localStorage for credit deduction
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+
                 const trackResponse = await fetch(`${API_BASE}/api/object-removal/track`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         job_id: state.jobId,
                         estimated_credits: state.estimatedCredits,
+                        user_id: user.id || null,
                         modified_masks: modifiedMasks.length > 0 ? modifiedMasks : undefined
                     })
                 });
@@ -3178,8 +3181,8 @@ console.log('[MaskDrawer] Class loaded');
                 const downloadUrl = finalStatus.cdn_url || `${API_BASE}/api/object-removal/download/${state.jobId}`;
                 console.log('[DOWNLOAD] URL:', downloadUrl, finalStatus.cdn_url ? '(CDN)' : '(local)');
 
-                // Determine file extension: png, png_sequence, masks become zip, others use their format
-                const ext = ['png', 'png_sequence', 'masks'].includes(state.format) ? 'zip' : state.format;
+                // Determine file extension: png, masks become zip, others use their format
+                const ext = ['png', 'masks'].includes(state.format) ? 'zip' : state.format;
                 const filename = state.format === 'masks' ? `masks_${state.jobId}.zip` : `object_removed_${state.jobId}.${ext}`;
 
                 // Setup inline download button
