@@ -188,11 +188,14 @@ class SAM2Selector {
         if (!this.enabled) return;
         if (this.isLoading) return;
 
+        // Debug: log raw touch coordinates
+        console.log(`[SAM2Selector] Raw touch: clientX=${touch.clientX}, clientY=${touch.clientY}, pageX=${touch.pageX}, pageY=${touch.pageY}`);
+
         // Touch object has clientX/clientY like mouse events
         const point = this.getCanvasPoint(touch);
         if (!point) return; // Ignore touches in letterbox area
         this.addPoint(point.x, point.y, 1);
-        console.log(`[SAM2Selector] Touch at (${point.x}, ${point.y})`);
+        console.log(`[SAM2Selector] Touch mapped to video coords: (${point.x}, ${point.y})`);
     }
 
     /**
@@ -200,8 +203,15 @@ class SAM2Selector {
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
+        // Android fix: use pageX/pageY with scroll offset for more reliable coordinates
+        const scrollX = window.scrollX || window.pageXOffset || 0;
+        const scrollY = window.scrollY || window.pageYOffset || 0;
+        // clientX/clientY are viewport-relative, pageX/pageY are page-relative
+        const clickX = (e.clientX !== undefined ? e.clientX : (e.pageX - scrollX)) - rect.left;
+        const clickY = (e.clientY !== undefined ? e.clientY : (e.pageY - scrollY)) - rect.top;
+
+        // Debug: log coordinate calculation details
+        console.log(`[SAM2Selector] getCanvasPoint: rect=(${rect.left.toFixed(1)},${rect.top.toFixed(1)},${rect.width.toFixed(1)}x${rect.height.toFixed(1)}), scroll=(${scrollX},${scrollY}), click=(${clickX.toFixed(1)},${clickY.toFixed(1)})`);
 
         // Calculate actual video render area (accounting for object-fit: contain letterboxing)
         const containerAspect = rect.width / rect.height;
