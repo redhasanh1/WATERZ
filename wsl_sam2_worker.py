@@ -552,29 +552,32 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             masks_dir_local = derived_masks_dir
             print(f"[GPU-FX] Using local masks: {masks_dir_local}")
 
-    self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Loading video...'})
+    # Skip video download for masks-only mode (not needed)
+    video_path = None
+    if output_format != 'masks':
+        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Loading video...'})
 
-    # Check for local video first (avoids re-downloading)
-    if video_path_local and os.path.exists(video_path_local):
-        video_path = video_path_local
-        print(f"[GPU-FX] Using LOCAL video: {video_path}")
-    else:
-        # Download video
-        video_path = "/tmp/simple_fx_video.mp4"
-        print(f"[GPU-FX] Downloading video...")
-        r = requests.get(video_url, timeout=300)
-        r.raise_for_status()
-        with open(video_path, 'wb') as f:
-            f.write(r.content)
-        print(f"[GPU-FX] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
+        # Check for local video first (avoids re-downloading)
+        if video_path_local and os.path.exists(video_path_local):
+            video_path = video_path_local
+            print(f"[GPU-FX] Using LOCAL video: {video_path}")
+        else:
+            # Download video
+            video_path = "/tmp/simple_fx_video.mp4"
+            print(f"[GPU-FX] Downloading video...")
+            r = requests.get(video_url, timeout=300)
+            r.raise_for_status()
+            with open(video_path, 'wb') as f:
+                f.write(r.content)
+            print(f"[GPU-FX] Downloaded {len(r.content) / 1024 / 1024:.1f} MB")
 
-    # Get video info
-    cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap.release()
+        # Get video info
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
 
     # Load masks
     self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Loading masks to GPU...'})
@@ -609,7 +612,13 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             for mask_file in mask_files:
                 zf.write(mask_file, os.path.basename(mask_file))
         print(f"[GPU-FX] Masks ZIP created: {output_path}")
-        return {'status': 'success', 'output_path': output_path}
+
+        # Upload to B2
+        self.update_state(state='PROCESSING', meta={'progress': 80, 'status': 'Uploading masks...'})
+        output_url = upload_video_to_b2(output_path)
+        os.remove(output_path)
+        print(f"[GPU-FX] Masks uploaded: {output_url}")
+        return {'status': 'success', 'cdn_url': output_url}
 
     # Parse color to RGB
     bg_color_hex = bg_color.lstrip('#')
@@ -622,7 +631,7 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     png_output_dir = None
     ffmpeg_encode = None
 
-    if output_format == 'png':
+    if output_format in ('png', 'png_sequence'):
         # PNG sequence mode - save RGBA frames with transparency
         png_output_dir = "/tmp/simple_fx_png_output"
         if os.path.exists(png_output_dir):
@@ -776,7 +785,7 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             result = frame_gpu
 
         # === Output frame based on format ===
-        if output_format == 'png':
+        if output_format in ('png', 'png_sequence'):
             # PNG sequence: Save RGBA frame with transparency
             # For keep_object: object is opaque, background is transparent
             # For remove_object: object area is transparent
@@ -827,7 +836,7 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     print(f"[GPU-FX] Processed {frame_idx} frames with GPU streaming")
 
     # Close encoder / finalize output
-    if output_format == 'png':
+    if output_format in ('png', 'png_sequence'):
         # Zip the PNG sequence
         print(f"[GPU-FX] Zipping {frame_idx} PNG frames...")
         self.update_state(state='PROCESSING', meta={'progress': 90, 'status': 'Zipping PNG sequence...'})
