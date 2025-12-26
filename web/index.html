@@ -4009,6 +4009,13 @@ console.log('[INLINE] MaskDrawer class loaded');
                 window.currentDrawingTool = 'click';
                 console.log('[SAM2] Auto-enabled Select Object mode');
 
+                // Force canvas size update after layout completes (fixes small canvas on initial load)
+                setTimeout(() => {
+                    if (sam2Selector) {
+                        sam2Selector.updateCanvasSize();
+                    }
+                }, 100);
+
                 video.addEventListener('seeked', () => {
                     if (sam2Selector) {
                         // iOS Safari fix: force frame render by play/pause trick
