@@ -292,13 +292,13 @@
         .video-container {
             position: relative;
             background: #000;
-            aspect-ratio: 16/9;
+            /* No fixed aspect ratio - video determines height */
         }
 
         .video-container video {
             width: 100%;
-            height: 100%;
-            object-fit: contain;
+            height: auto;
+            display: block;
         }
 
         .video-placeholder {
@@ -2249,7 +2249,14 @@ console.log('[MaskDrawer] Class loaded');
                 settingsSection.classList.remove('hidden');
                 document.getElementById('advancedToolsSection').classList.remove('hidden');
 
-                videoPlayer.addEventListener('loadedmetadata', updateTimeDisplay);
+                videoPlayer.addEventListener('loadedmetadata', () => {
+                    updateTimeDisplay();
+                    // Align drawing canvas after video loads
+                    setTimeout(() => {
+                        if (typeof alignDrawingCanvas === 'function') alignDrawingCanvas();
+                        if (typeof repositionMarkersAndMasks === 'function') repositionMarkersAndMasks();
+                    }, 100);
+                });
                 videoPlayer.addEventListener('timeupdate', updateProgress);
 
                 state.isSelectingObject = true;
@@ -3374,6 +3381,38 @@ console.log('[MaskDrawer] Class loaded');
                 canvas.style.width = displayWidth + 'px';
                 canvas.style.height = displayHeight + 'px';
             });
+
+            // Also align the main drawing canvas
+            alignDrawingCanvas();
+        }
+
+        // Align drawing canvas to match video position (like index.html does)
+        function alignDrawingCanvas() {
+            const container = document.getElementById('videoContainer');
+            const drawingCanvas = document.getElementById('drawingCanvas');
+            if (!container || !drawingCanvas || !state.videoWidth || !state.videoHeight) return;
+
+            const containerRect = container.getBoundingClientRect();
+            const videoAspect = state.videoWidth / state.videoHeight;
+            const containerAspect = containerRect.width / containerRect.height;
+
+            let renderWidth, renderHeight, offsetX, offsetY;
+            if (videoAspect > containerAspect) {
+                renderWidth = containerRect.width;
+                renderHeight = containerRect.width / videoAspect;
+                offsetX = 0;
+                offsetY = (containerRect.height - renderHeight) / 2;
+            } else {
+                renderHeight = containerRect.height;
+                renderWidth = containerRect.height * videoAspect;
+                offsetX = (containerRect.width - renderWidth) / 2;
+                offsetY = 0;
+            }
+
+            drawingCanvas.style.left = offsetX + 'px';
+            drawingCanvas.style.top = offsetY + 'px';
+            drawingCanvas.style.width = renderWidth + 'px';
+            drawingCanvas.style.height = renderHeight + 'px';
         }
 
         window.addEventListener('resize', () => {
