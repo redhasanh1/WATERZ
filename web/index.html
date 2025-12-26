@@ -1646,7 +1646,7 @@
                                 <!-- Video + Canvas Container -->
                                 <div id="videoWrapper">
                                     <video id="previewVideo" playsinline webkit-playsinline preload="metadata"></video>
-                                    <canvas id="maskCanvas" style="display: none; pointer-events: none;"></canvas>
+                                    <canvas id="maskCanvas" style="pointer-events: none;"></canvas>
                                 </div>
 
                                 <!-- External Scrubber Bar (beneath video) -->
@@ -3918,8 +3918,8 @@ console.log('[INLINE] MaskDrawer class loaded');
             // Set canvas internal resolution to match video native resolution
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            // Canvas display size is handled by CSS (100% width/height)
-            canvas.style.display = 'block';
+            // Canvas visibility is controlled by parent container (professionalPlayer)
+            // Don't set display:block here - it causes canvas to appear in top-left when parent is hidden
             ctx = canvas.getContext('2d');
 
             // Show mask selection controls
