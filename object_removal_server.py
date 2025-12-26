@@ -339,6 +339,7 @@ def track_video():
     """Start full video tracking with SAM2 via Celery queue"""
     data = request.json
     job_id = data.get('job_id')
+    modified_masks = data.get('modified_masks')  # User-drawn mask modifications
 
     if job_id not in jobs:
         return jsonify({'status': 'error', 'message': 'Job not found'}), 404
@@ -382,7 +383,8 @@ def track_video():
                 'points': point_coords,
                 'labels': labels,
                 'frame_idx': frame_idx,
-                'api_base': None
+                'api_base': None,
+                'modified_masks': modified_masks
             },
             queue='wsl_sam2_local'
         )
