@@ -3083,8 +3083,8 @@ console.log('[MaskDrawer] Class loaded');
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         job_id: state.jobId,
-                        estimated_credits: state.estimatedCredits
-                        // modified_masks disabled until WSL worker updated
+                        estimated_credits: state.estimatedCredits,
+                        modified_masks: modifiedMasks.length > 0 ? modifiedMasks : undefined
                     })
                 });
 
