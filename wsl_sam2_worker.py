@@ -269,18 +269,10 @@ def _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, point
         masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
         masks_dir_result = masks_dir_wsl  # Keep local path for simple_effects to use
 
-    # Cleanup temporary files
+    # Cleanup temporary files (but NOT video - simple_effects needs it)
     if os.path.exists(temp_frames_dir):
         shutil.rmtree(temp_frames_dir, ignore_errors=True)
         print(f"[CLEANUP] Removed frames directory: {temp_frames_dir}")
-
-    # Clean downloaded video if it was in /tmp/
-    if video_path_wsl.startswith('/tmp/') and os.path.exists(video_path_wsl):
-        try:
-            os.remove(video_path_wsl)
-            print(f"[CLEANUP] Removed temporary video: {video_path_wsl}")
-        except Exception as e:
-            print(f"[CLEANUP] Could not remove video: {e}")
 
     # Update Redis directly (fixes race condition - export may be called before /status is polled)
     if job_id:
@@ -628,9 +620,9 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         output_path = f"/tmp/simple_fx_output_{int(time.time())}.zip"
         print(f"[GPU-FX] PNG sequence mode - saving frames to {png_output_dir}")
     elif output_format == 'webm':
-        # WebM with VP9 + alpha channel for transparency
+        # WebM with AV1 NVENC + alpha channel for transparency (GPU accelerated!)
         output_path = "/tmp/simple_fx_output.webm"
-        print(f"[GPU-FX] WebM mode with VP9 alpha - starting encoder...")
+        print(f"[GPU-FX] WebM mode with AV1 NVENC alpha - GPU encoding!")
         ffmpeg_encode = subprocess.Popen([
             'ffmpeg', '-y',
             '-f', 'rawvideo',
@@ -639,10 +631,10 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             '-pix_fmt', 'rgba',  # RGBA for transparency
             '-r', str(fps),
             '-i', 'pipe:0',
-            '-c:v', 'libvpx-vp9',
-            '-pix_fmt', 'yuva420p',  # VP9 with alpha
-            '-crf', '18',
-            '-b:v', '0',
+            '-c:v', 'av1_nvenc',      # GPU AV1 encoder (RTX 40 series)
+            '-pix_fmt', 'yuva420p',   # AV1 with alpha
+            '-cq', '23',              # Quality level
+            '-preset', 'p4',          # Speed/quality balance
             output_path
         ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     else:
