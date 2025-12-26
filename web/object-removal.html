@@ -2734,10 +2734,13 @@ console.log('[MaskDrawer] Class loaded');
 
         function updateRemoveButton() {
             removeBtn.disabled = state.objects.length === 0;
-            // Show/hide reset button based on objects count
+            // Show/hide reset button based on objects OR visible masks/markers
             const resetBtn = document.getElementById('resetObjectsBtn');
             if (resetBtn) {
-                resetBtn.style.display = state.objects.length > 0 ? 'inline-flex' : 'none';
+                const hasObjects = state.objects.length > 0;
+                const hasMasks = interactionLayer.querySelectorAll('.mask-tint, .click-marker').length > 0;
+                const hasMaskCanvas = state.maskCanvas !== null;
+                resetBtn.style.display = (hasObjects || hasMasks || hasMaskCanvas) ? 'inline-flex' : 'none';
             }
         }
 
@@ -2745,6 +2748,7 @@ console.log('[MaskDrawer] Class loaded');
         document.getElementById('resetObjectsBtn').addEventListener('click', () => {
             state.objects = [];
             state.currentObjectId = 0;  // Reset to first object
+            state.maskCanvas = null;  // Clear mask canvas reference
             // Remove all mask overlays AND click markers from interaction layer
             interactionLayer.querySelectorAll('.mask-overlay, .mask-tint, .click-marker').forEach(el => el.remove());
             renderObjects();
