@@ -2062,6 +2062,10 @@ console.log('[MaskDrawer] Class loaded');
         const removeBtn = document.getElementById('removeBtn');
         const processingModal = document.getElementById('processingModal');
         const successModal = document.getElementById('successModal');
+        const drawingCanvas = document.getElementById('drawingCanvas');
+
+        // Eraser performance: throttle redraw with requestAnimationFrame
+        let redrawScheduled = false;
 
         // Upload handling
         uploadArea.addEventListener('click', () => fileInput.click());
@@ -2541,34 +2545,29 @@ console.log('[MaskDrawer] Class loaded');
                 maskDrawer.maskCtx.arc(x, y, radius, 0, Math.PI * 2);
                 maskDrawer.maskCtx.fill();
                 maskDrawer.maskCtx.globalCompositeOperation = 'source-over';
-                maskDrawer.redraw();
+
+                // Throttle redraw with RAF for smooth performance
+                if (!redrawScheduled) {
+                    redrawScheduled = true;
+                    requestAnimationFrame(() => {
+                        if (maskDrawer) maskDrawer.redraw();
+                        redrawScheduled = false;
+                    });
+                }
             }
 
-            // Also erase from the visible drawing canvas directly
-            const drawingCanvas = document.getElementById('drawingCanvas');
-            if (drawingCanvas) {
-                const dCtx = drawingCanvas.getContext('2d');
-                dCtx.globalCompositeOperation = 'destination-out';
-                dCtx.beginPath();
-                dCtx.arc(x, y, radius, 0, Math.PI * 2);
-                dCtx.fill();
-                dCtx.globalCompositeOperation = 'source-over';
-            }
-
-            // Also erase any other mask-tint canvases from other objects
-            const interactionLayer = document.getElementById('interactionLayer');
-            if (interactionLayer) {
-                interactionLayer.querySelectorAll('.mask-tint').forEach(canvas => {
-                    if (canvas !== state.maskCanvas) {
-                        const ctx = canvas.getContext('2d');
-                        ctx.globalCompositeOperation = 'destination-out';
-                        ctx.beginPath();
-                        ctx.arc(x, y, radius, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.globalCompositeOperation = 'source-over';
-                    }
-                });
-            }
+            // Erase from any other mask-tint canvases (other objects)
+            // Uses cached interactionLayer from top of script
+            interactionLayer.querySelectorAll('.mask-tint').forEach(canvas => {
+                if (canvas !== state.maskCanvas) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+            });
         }
 
         function updateMaskFromCanvas() {
@@ -3440,17 +3439,19 @@ console.log('[MaskDrawer] Class loaded');
                     interactionLayer.style.pointerEvents = 'auto';  // Allow clicking markers to remove them
 
                     if (state.maskCanvas) {
-                        // SAM2 mask exists - prioritize mask erasing (disable drawingCanvas clicks)
+                        // SAM2 mask exists - use unified eraser via setupMaskEraser()
+                        // eraseAllMasks() handles both SAM2 and MaskDrawer masks
                         drawingCanvas.style.pointerEvents = 'none';
                         setupMaskEraser();
+                        // DISABLE MaskDrawer's own eraser to prevent dual systems conflict
+                        if (maskDrawer) maskDrawer.enabled = false;
                     } else {
-                        // No SAM2 mask - enable shape erasing on drawingCanvas
+                        // No SAM2 mask - use MaskDrawer's eraser directly
                         drawingCanvas.style.pointerEvents = 'auto';
-                    }
-
-                    if (maskDrawer) {
-                        maskDrawer.enabled = true;
-                        maskDrawer.setTool('eraser');
+                        if (maskDrawer) {
+                            maskDrawer.enabled = true;
+                            maskDrawer.setTool('eraser');
+                        }
                     }
                 } else {
                     // Drawing mode - enable drawing canvas, disable SAM2 interaction
