@@ -5514,7 +5514,8 @@ def objrem_track():
         result = s1.apply_async(task_id=task_id)
 
         # Store user_id and estimated credits for deduction on completion
-        user_id = session.get('user_id')
+        # Get user_id from request body first (frontend sends it), fallback to session
+        user_id = data.get('user_id') or session.get('user_id')
         estimated_credits = float(data.get('estimated_credits', 0.5))
 
         redis_client.hset(f"objrem:{job_id}", mapping={
@@ -5524,6 +5525,13 @@ def objrem_track():
             'user_id': user_id or '',
             'estimated_credits': str(estimated_credits)
         })
+
+        # Store credits in format expected by deduct_credit_on_completion()
+        if user_id:
+            redis_client.set(f"task:{task_id}:user_id", user_id)
+            redis_client.set(f"task:{task_id}:credits", int(estimated_credits))
+            redis_client.expire(f"task:{task_id}:user_id", 86400 * 7)  # 7 days
+            redis_client.expire(f"task:{task_id}:credits", 86400 * 7)
 
         print(f"[OBJREM-TRACK] Submitted task {task_id} for job {job_id}, user={user_id}, credits={estimated_credits}")
         print(f"[OBJREM-TRACK] Points: {point_coords}, Object IDs: {object_ids}, Frame: {frame_idx}")
@@ -5728,7 +5736,17 @@ def objrem_export():
 
         redis_client.hset(f"objrem:{job_id}", 'celery_task_id', task_id)
 
-        print(f"[OBJREM-EXPORT] Submitted simple effects task {task_id}")
+        # Store credits in format expected by deduct_credit_on_completion()
+        # Get user_id and credits from the job data (stored during tracking)
+        user_id = job.get('user_id') or session.get('user_id')
+        estimated_credits = float(job.get('estimated_credits', 0.5))
+        if user_id:
+            redis_client.set(f"task:{task_id}:user_id", user_id)
+            redis_client.set(f"task:{task_id}:credits", int(estimated_credits))
+            redis_client.expire(f"task:{task_id}:user_id", 86400 * 7)  # 7 days
+            redis_client.expire(f"task:{task_id}:credits", 86400 * 7)
+
+        print(f"[OBJREM-EXPORT] Submitted simple effects task {task_id}, user={user_id}, credits={estimated_credits}")
         print(f"[OBJREM-EXPORT] Operation: {operation}, Background: {background}, Color: {bg_color}")
 
         return jsonify({
