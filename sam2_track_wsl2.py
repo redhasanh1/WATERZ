@@ -1263,7 +1263,7 @@ def load_frames_as_tensors(frames_dir, start_idx, end_idx, img_mean, img_std, im
     return images
 
 
-def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=None, labels=None, object_ids=None, bbox=None, frame_idx_start=0, video_path=None):
+def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=None, labels=None, object_ids=None, bbox=None, frame_idx_start=0, video_path=None, initial_mask=None):
     """
     SAM2 video tracking using OFFICIAL memory management parameters.
 
@@ -1275,6 +1275,7 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
         labels: List of labels (1=foreground, 0=background) for each point
         object_ids: List of object IDs for each point (each click = separate object)
         video_path: Original video path for DALI streaming (optional)
+        initial_mask: Pre-provided mask numpy array (from user eraser) - if provided, uses mask-based tracking
     """
     import gc
 
@@ -1328,7 +1329,20 @@ def track_video_pytorch_only(frames_dir, total_frames, output_masks_dir, points=
             print(f"[SAM2] WARNING: frame_idx_start {old_idx} out of range, clamped to {frame_idx_start}")
 
         # Add initial prompt
-        if bbox is not None:
+        if initial_mask is not None:
+            # User provided a pre-erased mask - use mask-based propagation
+            print(f"[SAM2-Mask] Using user-provided mask (shape: {initial_mask.shape}) at frame {frame_idx_start}")
+            # Convert to binary mask (threshold at 127)
+            mask_binary = (initial_mask > 127).astype(np.uint8)
+            # SAM2 expects (H, W) mask with values 0 or 1
+            _, out_obj_ids, out_mask_logits = predictor.add_new_mask(
+                inference_state=inference_state,
+                frame_idx=frame_idx_start,
+                obj_id=1,  # Single combined object
+                mask=mask_binary
+            )
+            print(f"[SAM2-Mask] Added mask prompt at frame {frame_idx_start}, obj_ids: {out_obj_ids}")
+        elif bbox is not None:
             box_array = np.array(bbox, dtype=np.float32)
             predictor.add_new_points_or_box(
                 inference_state=inference_state,

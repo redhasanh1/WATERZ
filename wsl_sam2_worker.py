@@ -35,7 +35,7 @@ sys.path.insert(0, BASE_DIR)
 
 
 @celery.task(name='sam2.generate_masks_fullfps', bind=True)
-def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, object_ids=None, bbox=None, frame_idx=0, api_base=None, reid_mode=None):
+def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', points=None, labels=None, object_ids=None, bbox=None, frame_idx=0, api_base=None, reid_mode=None, modified_masks=None):
     """
     Generate SAM2 masks at full FPS inside WSL2.
 
@@ -49,6 +49,7 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
         bbox (list): [x1, y1, x2, y2] if prompt_mode is 'bbox'
         frame_idx (int): starting frame index
         api_base (str): Base URL for downloading video if path is remote
+        modified_masks (list): Pre-erased masks from user [{objectId, mask (base64)}] - if provided, use instead of generating from points
     Returns:
         dict: {status, masks_dir, masks_saved, total_frames}
     """
@@ -59,7 +60,7 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
         job_id = task_id.replace('objrem_', '')
 
     try:
-        return _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id)
+        return _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id, modified_masks)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -92,7 +93,7 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
         raise
 
 
-def _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id):
+def _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id, modified_masks=None):
     """Actual implementation of generate_masks_fullfps (wrapped for error handling)."""
     import os
     import cv2
@@ -164,9 +165,61 @@ def _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, point
     if scale != 1.0:
         print(f"[WSL-SAM2] Scaling coordinates by {scale:.3f} (original {orig_w}x{orig_h} -> {new_w}x{new_h})")
 
+    # Handle user-modified masks (from eraser tool)
+    # If provided, save them as initial mask for frame 0 and use mask-based propagation
+    initial_mask = None
+    if modified_masks and len(modified_masks) > 0:
+        import base64
+        print(f"[WSL-SAM2] Received {len(modified_masks)} modified mask(s) from user")
+
+        # Combine all object masks into one (OR them together)
+        combined_mask = None
+        for mask_info in modified_masks:
+            try:
+                mask_b64 = mask_info.get('mask', '')
+                if not mask_b64:
+                    continue
+
+                # Decode base64 PNG to numpy array
+                mask_bytes = base64.b64decode(mask_b64)
+                mask_arr = np.frombuffer(mask_bytes, np.uint8)
+                mask_img = cv2.imdecode(mask_arr, cv2.IMREAD_GRAYSCALE)
+
+                if mask_img is not None:
+                    # Scale mask to match extracted frames
+                    if scale != 1.0:
+                        mask_img = cv2.resize(mask_img, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+
+                    # Combine with OR
+                    if combined_mask is None:
+                        combined_mask = mask_img
+                    else:
+                        combined_mask = np.maximum(combined_mask, mask_img)
+
+                    print(f"[WSL-SAM2] Decoded mask for objectId {mask_info.get('objectId')}: {mask_img.shape}, nonzero={np.count_nonzero(mask_img)}")
+            except Exception as e:
+                print(f"[WSL-SAM2] Failed to decode mask: {e}")
+
+        if combined_mask is not None:
+            initial_mask = combined_mask
+            # Save as frame 0 mask so it's visible in output
+            mask_path = os.path.join(masks_dir_wsl, f"{frame_idx:05d}.png")
+            cv2.imwrite(mask_path, combined_mask)
+            print(f"[WSL-SAM2] Saved combined initial mask to {mask_path}, shape={combined_mask.shape}")
+
     # Run tracking (PyTorch-only in-process; TensorRT hybrid can be added later)
     self.update_state(state='PROCESSING', meta={'status': 'Tracking SAM2', 'progress': 20})
-    if prompt_mode == 'point' and points is not None and len(points) > 0:
+    if initial_mask is not None:
+        # Use pre-provided mask instead of generating from points
+        print(f"[WSL-SAM2] Using user-modified mask for tracking (skipping point-based generation)")
+        masks_saved = sam2w.track_video_pytorch_only(
+            temp_frames_dir, total_frames, masks_dir_wsl,
+            points=None, labels=None, object_ids=None, bbox=None,
+            frame_idx_start=int(frame_idx),
+            video_path=video_path_wsl,
+            initial_mask=initial_mask  # Pass the pre-erased mask
+        )
+    elif prompt_mode == 'point' and points is not None and len(points) > 0:
         # Convert points to list of (x, y) tuples and scale
         pts = [(int(p[0] * scale), int(p[1] * scale)) for p in points]
         # Labels default to all foreground (1) if not provided

@@ -3073,12 +3073,18 @@ console.log('[MaskDrawer] Class loaded');
 
             try {
                 // Step 1: Start tracking
+                // Include modified masks (user may have erased parts)
+                const modifiedMasks = state.objects
+                    .filter(o => o.mask)  // Only objects with masks
+                    .map(o => ({ objectId: o.objectId, mask: o.mask }));
+
                 const trackResponse = await fetch(`${API_BASE}/api/object-removal/track`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         job_id: state.jobId,
-                        estimated_credits: state.estimatedCredits
+                        estimated_credits: state.estimatedCredits,
+                        modified_masks: modifiedMasks.length > 0 ? modifiedMasks : undefined
                     })
                 });
 

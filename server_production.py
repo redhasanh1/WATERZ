@@ -5487,6 +5487,9 @@ def objrem_track():
         # Extract object_ids - each click is a separate object
         object_ids = [p.get('object_id', 0) for p in points]
 
+        # Check for user-modified masks (from eraser tool)
+        modified_masks = data.get('modified_masks', [])
+
         # WSL-native temp path for masks
         wsl_masks_dir = f"/tmp/sam2_masks/{job_id}"
 
@@ -5503,7 +5506,8 @@ def objrem_track():
                 'labels': labels,
                 'object_ids': object_ids,  # Pass object_ids to SAM2
                 'frame_idx': frame_idx,
-                'api_base': None
+                'api_base': None,
+                'modified_masks': modified_masks if modified_masks else None  # Pre-erased masks from user
             },
             queue='wsl_sam2_local'
         )
