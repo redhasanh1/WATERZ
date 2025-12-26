@@ -2696,6 +2696,12 @@ console.log('[MaskDrawer] Class loaded');
                         <div class="object-frames">${pointCount} point${pointCount !== 1 ? 's' : ''} selected${pointCount > 0 ? ` (${group.includeCount}+ ${group.excludeCount}-)` : ''}</div>
                     </div>
                 `;
+                // Click to switch to this object
+                item.addEventListener('click', () => {
+                    state.currentObjectId = parseInt(oid);
+                    renderObjects();
+                    console.log('[SWITCH] Now selecting object ID:', state.currentObjectId);
+                });
                 list.appendChild(item);
             });
 
