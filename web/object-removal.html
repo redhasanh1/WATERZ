@@ -3382,15 +3382,20 @@ console.log('[MaskDrawer] Class loaded');
                 } else if (tool === 'eraser') {
                     // Eraser works on SAM2 mask, drawing canvas, AND click markers
                     drawingCanvas.classList.remove('hidden');
-                    drawingCanvas.style.pointerEvents = 'auto';
                     interactionLayer.style.pointerEvents = 'auto';  // Allow clicking markers to remove them
+
+                    if (state.maskCanvas) {
+                        // SAM2 mask exists - prioritize mask erasing (disable drawingCanvas clicks)
+                        drawingCanvas.style.pointerEvents = 'none';
+                        setupMaskEraser();
+                    } else {
+                        // No SAM2 mask - enable shape erasing on drawingCanvas
+                        drawingCanvas.style.pointerEvents = 'auto';
+                    }
+
                     if (maskDrawer) {
                         maskDrawer.enabled = true;
                         maskDrawer.setTool('eraser');
-                    }
-                    // Also enable SAM2 mask eraser if mask exists
-                    if (state.maskCanvas) {
-                        setupMaskEraser();
                     }
                 } else {
                     // Drawing mode - enable drawing canvas, disable SAM2 interaction

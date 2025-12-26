@@ -145,6 +145,18 @@ def process_selection_request(request_data):
         frame_img = PILImage.open(BytesIO(frame_bytes))
         frame_array = np.array(frame_img.convert('RGB'))
 
+        # Scale points if frame dimensions differ from sent video dimensions
+        frame_height, frame_width = frame_array.shape[:2]
+        video_width = request_data.get('video_width')
+        video_height = request_data.get('video_height')
+
+        if video_width and video_height:
+            if frame_width != video_width or frame_height != video_height:
+                scale_x = frame_width / video_width
+                scale_y = frame_height / video_height
+                points = [{'x': p['x'] * scale_x, 'y': p['y'] * scale_y, 'label': p['label']} for p in points]
+                print(f"[SAM2] Scaled points by {scale_x:.4f}x{scale_y:.4f} (video {video_width}x{video_height} -> frame {frame_width}x{frame_height})")
+
         # Ensure model is loaded
         predictor = load_sam2_model()
         if not predictor:
