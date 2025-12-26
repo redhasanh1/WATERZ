@@ -196,16 +196,41 @@ class SAM2Selector {
     }
 
     /**
-     * Convert mouse/touch event to canvas coordinates (Theater mode - direct mapping)
+     * Convert mouse/touch event to canvas coordinates (accounts for object-fit: contain letterboxing)
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
-        // Theater mode: direct mapping from display to native video coords
-        const videoX = Math.floor((clickX / rect.width) * this.canvas.width);
-        const videoY = Math.floor((clickY / rect.height) * this.canvas.height);
+        // Calculate actual video render area (accounting for object-fit: contain letterboxing)
+        const containerAspect = rect.width / rect.height;
+        const videoAspect = this.videoWidth / this.videoHeight;
+
+        let renderWidth, renderHeight, offsetX, offsetY;
+        if (videoAspect > containerAspect) {
+            // Video is wider - letterbox on top/bottom
+            renderWidth = rect.width;
+            renderHeight = rect.width / videoAspect;
+            offsetX = 0;
+            offsetY = (rect.height - renderHeight) / 2;
+        } else {
+            // Video is taller - letterbox on sides
+            renderHeight = rect.height;
+            renderWidth = rect.height * videoAspect;
+            offsetX = (rect.width - renderWidth) / 2;
+            offsetY = 0;
+        }
+
+        // Check if click is in letterbox area
+        if (clickX < offsetX || clickX > offsetX + renderWidth ||
+            clickY < offsetY || clickY > offsetY + renderHeight) {
+            return null; // Click in letterbox area, ignore
+        }
+
+        // Map click to video coordinates (accounting for offset)
+        const videoX = Math.floor(((clickX - offsetX) / renderWidth) * this.videoWidth);
+        const videoY = Math.floor(((clickY - offsetY) / renderHeight) * this.videoHeight);
 
         // Clamp to video bounds
         return {
