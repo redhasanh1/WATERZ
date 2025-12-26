@@ -1419,13 +1419,6 @@
                         </svg>
                         New Video
                     </button>
-                    <button class="action-btn action-btn-secondary hidden" id="previewBtn" style="padding: 0.875rem 1.5rem;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
-                            <circle cx="12" cy="12" r="10"/>
-                            <polygon points="10 8 16 12 10 16 10 8"/>
-                        </svg>
-                        Preview
-                    </button>
                     <button class="action-btn action-btn-primary" id="removeBtn" disabled style="padding: 0.875rem 1.5rem;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
                             <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
@@ -2193,7 +2186,6 @@ console.log('[MaskDrawer] Class loaded');
                 state.objects = [];
                 state.isTracked = false;
                 interactionLayer.querySelectorAll('.mask-overlay, .mask-tint, .click-marker').forEach(el => el.remove());
-                document.getElementById('previewBtn').classList.add('hidden');
                 document.getElementById('resetObjectsBtn').style.display = 'none';
                 renderObjects();
                 updateRemoveButton();
@@ -2725,7 +2717,6 @@ console.log('[MaskDrawer] Class loaded');
             updateRemoveButton();
             // Reset tracking state
             state.isTracked = false;
-            document.getElementById('previewBtn').classList.add('hidden');
         });
 
         // Add Object button - static button (before any objects added)
@@ -2987,68 +2978,11 @@ console.log('[MaskDrawer] Class loaded');
             settingsSection.classList.add('hidden');
             document.getElementById('advancedToolsSection').classList.add('hidden');
             document.getElementById('creditEstimate').classList.add('hidden');
-            document.getElementById('previewBtn').classList.add('hidden');
             document.getElementById('newVideoBtn').classList.add('hidden');
             document.getElementById('downloadSection').classList.add('hidden');
 
             console.log('[NEW VIDEO] State reset, ready for new upload');
         });
-
-        // Preview button - show preview button when tracked
-        const previewBtn = document.getElementById('previewBtn');
-        if (previewBtn) {
-            previewBtn.addEventListener('click', async () => {
-                if (!state.jobId || !state.isTracked) {
-                    alert('Please track the object first');
-                    return;
-                }
-
-                showProcessingModal('Generating Preview...', 'Applying operation to current frame...');
-
-                try {
-                    const response = await fetch(`${API_BASE}/api/object-removal/preview`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            job_id: state.jobId,
-                            operation: state.operation,
-                            background: state.background,
-                            bg_color: state.bgColor,
-                            bg_image: state.bgImage,
-                            blur_amount: state.blurAmount,
-                            dilation: state.dilation,
-                            frame_index: Math.floor(videoPlayer.currentTime * 30) // Assume 30fps
-                        })
-                    });
-
-                    const data = await response.json();
-                    hideProcessingModal();
-
-                    if (data.status === 'success' && data.preview_url) {
-                        // Show preview in modal
-                        const previewModal = document.createElement('div');
-                        previewModal.className = 'modal';
-                        previewModal.innerHTML = `
-                            <div class="modal-content" style="max-width: 800px;">
-                                <h3 class="modal-title">Preview</h3>
-                                <img src="${API_BASE}${data.preview_url}" style="max-width: 100%; border-radius: 8px; margin: 1rem 0;">
-                                <div class="modal-actions">
-                                    <button class="modal-btn modal-btn-primary" onclick="this.closest('.modal').remove()">Close</button>
-                                </div>
-                            </div>
-                        `;
-                        document.body.appendChild(previewModal);
-                    } else {
-                        alert('Preview failed: ' + (data.message || 'Unknown error'));
-                    }
-                } catch (error) {
-                    hideProcessingModal();
-                    console.error('Preview error:', error);
-                    alert('Preview failed: ' + error.message);
-                }
-            });
-        }
-
 
         // Export button - tracks + exports in one flow
         removeBtn.addEventListener('click', async () => {
@@ -3223,8 +3157,7 @@ console.log('[MaskDrawer] Class loaded');
                 // Scroll to download section
                 downloadSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-                // Show preview button for re-exports and New Video button
-                document.getElementById('previewBtn').classList.remove('hidden');
+                // Show New Video button for re-exports
                 document.getElementById('newVideoBtn').classList.remove('hidden');
 
                 // Reset state so user can add more objects or start fresh
