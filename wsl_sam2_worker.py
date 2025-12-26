@@ -640,23 +640,23 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         output_path = f"/tmp/simple_fx_output_{int(time.time())}.zip"
         print(f"[GPU-FX] PNG sequence mode - saving frames to {png_output_dir}")
     elif output_format == 'webm':
-        # WebM with AV1 NVENC + alpha channel (RTX 4090 GPU accelerated!)
+        # WebM with VP9 + alpha (ONLY codec that supports alpha in browsers)
+        # Note: VP9 is CPU-only, but AV1 NVENC strips alpha channel
         output_path = "/tmp/simple_fx_output.webm"
-        print(f"[GPU-FX] WebM mode with AV1 NVENC alpha - full GPU encoding!")
-        # Use BtbN FFmpeg build with NVENC support
-        ffmpeg_nvenc = '/home/has/ffmpeg-nvenc/ffmpeg'
+        print(f"[GPU-FX] WebM mode with VP9 alpha encoding")
         ffmpeg_encode = subprocess.Popen([
-            ffmpeg_nvenc, '-y',
+            'ffmpeg', '-y',
             '-f', 'rawvideo',
             '-vcodec', 'rawvideo',
             '-s', f'{width}x{height}',
             '-pix_fmt', 'rgba',
             '-r', str(fps),
             '-i', 'pipe:0',
-            '-c:v', 'av1_nvenc',      # RTX 4090 AV1 hardware encoder
-            '-pix_fmt', 'rgba',       # Preserve alpha channel
-            '-cq', '23',              # Quality level (lower = better)
-            '-preset', 'p4',          # Balanced speed/quality
+            '-c:v', 'libvpx-vp9',
+            '-pix_fmt', 'yuva420p',   # VP9 with alpha
+            '-crf', '23',
+            '-b:v', '0',
+            '-auto-alt-ref', '0',     # Required for alpha channel
             output_path
         ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     else:
