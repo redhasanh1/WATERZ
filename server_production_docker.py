@@ -1650,7 +1650,7 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
             import torch
             use_fp16 = torch.cuda.is_available()
 
-            print(f"   [RUNNING] Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=10, ref_stride=10, subvideo_length=120, raft_iter=10, FP16={use_fp16}")
+            print(f"   [RUNNING] Direct pipeline: segment {seg_idx+1}, resolution={crop_w}x{crop_h}, neighbor_length=10, ref_stride=10, subvideo_length=120, raft_iter=20, FP16={use_fp16}")
 
             # Each process gets its own CUDA context for true parallel processing
             faster_propainter_pipeline(
@@ -1662,7 +1662,7 @@ def _process_propainter_segment(seg_idx, total_segments, segment, context):
                 ref_stride=10,
                 neighbor_length=10,
                 subvideo_length=120,
-                raft_iter=10,
+                raft_iter=20,
                 mode="video_inpainting",
                 save_frames=True,
                 fp16=use_fp16
@@ -3777,10 +3777,10 @@ def process_segment_task(self, segment_data):
                     output=seg_output_dir,
                     resize_ratio=1.0,
                     mask_dilation=4,
-                    ref_stride=15,
+                    ref_stride=10,
                     neighbor_length=10,
                     subvideo_length=120,
-                    raft_iter=10,
+                    raft_iter=20,
                     mode="video_inpainting",
                     save_frames=True,
                     fp16=use_fp16,
@@ -4309,7 +4309,7 @@ def process_image_task(self, image_path):
             import torch
             use_fp16 = torch.cuda.is_available()
             
-            print(f"[RUNNING] Running direct faster-propainter pipeline: FP16={use_fp16} + neighbor_length=20 + ref_stride=10 + subvideo_length=80")
+            print(f"[RUNNING] Running direct faster-propainter pipeline: FP16={use_fp16} + neighbor_length=20 + ref_stride=20 + subvideo_length=80")
             
             # Direct pipeline call - TRUE FASTER-PROPAINTER SETTINGS
             faster_propainter_pipeline(
@@ -4318,10 +4318,10 @@ def process_image_task(self, image_path):
                 output=PROPAINTER_OUTPUT_ROOT,      # Output directory
                 resize_ratio=1.0,                   # Keep original resolution for images
                 mask_dilation=4,                    # faster-propainter: standard mask dilation
-                ref_stride=15,                      # faster-propainter: faster processing
+                ref_stride=10,                      # faster-propainter: faster processing
                 neighbor_length=10,                 # faster-propainter: reduced for speed
                 subvideo_length=60,                 # faster-propainter: reduced for speed
-                raft_iter=10,                       # faster-propainter: reduced for speed
+                raft_iter=20,                       # faster-propainter: reduced for speed
                 mode="video_inpainting",            # Standard inpainting mode
                 save_frames=True,                   # Save individual frames
                 fp16=use_fp16                       # Enable FP16 if available
@@ -4775,7 +4775,7 @@ def process_video_task(self, video_path):
                 dynamic_subvideo, _ = get_dynamic_subvideo_length(width, height)
                 
                 print(f"[RUNNING] Direct faster-propainter pipeline: resolution={width}x{height}, FP16={use_fp16}")
-                print(f"   faster-propainter: neighbor_length=10 + ref_stride=15 + raft_iter=10 + subvideo_length=60 + flow_backend={PROPAINTER_FLOW_BACKEND}")
+                print(f"   faster-propainter: neighbor_length=10 + ref_stride=20 + raft_iter=20 + subvideo_length=60 + flow_backend={PROPAINTER_FLOW_BACKEND}")
 
                 # Direct pipeline call - OPTIMIZED FOR SPEED
                 faster_propainter_pipeline(
@@ -4784,10 +4784,10 @@ def process_video_task(self, video_path):
                     output=PROPAINTER_OUTPUT_ROOT,      # Output directory
                     resize_ratio=1.0,                   # Keep original resolution
                     mask_dilation=4,                    # faster-propainter: standard mask dilation
-                    ref_stride=15,                      # faster-propainter: optimized for speed
+                    ref_stride=10,                      # faster-propainter: optimized for speed
                     neighbor_length=10,                 # faster-propainter: reduced for speed
                     subvideo_length=60,                 # faster-propainter: reduced for speed
-                    raft_iter=10,                       # faster-propainter: reduced for speed
+                    raft_iter=20,                       # faster-propainter: reduced for speed
                     mode="video_inpainting",            # Standard inpainting
                     save_fps=fps,                       # Preserve original FPS
                     save_frames=False,                  # Only save video, not frames

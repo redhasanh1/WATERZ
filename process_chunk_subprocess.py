@@ -94,8 +94,8 @@ def main():
         faster_propainter_pipeline(
             video='dummy', mask='dummy', output=chunk_output_dir,
             resize_ratio=1.0, mask_dilation=mask_dilation,
-            ref_stride=15, neighbor_length=3, subvideo_length=60,
-            raft_iter=10, mode="video_inpainting", save_fps=int(original_fps),
+            ref_stride=10, neighbor_length=10, subvideo_length=80,
+            raft_iter=20, mode="video_inpainting", save_fps=int(original_fps),
             save_frames=True, fp16=False, use_cached_models=False,  # FP32 + no cache (subprocess exits anyway)
             frames_array=frames, masks_array=masks
         )

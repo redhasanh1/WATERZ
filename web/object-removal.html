@@ -2204,12 +2204,12 @@ console.log('[MaskDrawer] Class loaded');
                 state.videoUrl = data.video_url;
                 state.videoWidth = data.width;
                 state.videoHeight = data.height;
-                state.videoDuration = duration;
+                state.videoDuration = videoDuration;
 
                 // Calculate credit cost (HALF PRICE for background removal)
                 const basePixels = 1280 * 720;
                 const baseDuration = 10;
-                const durationFactor = duration / baseDuration;
+                const durationFactor = videoDuration / baseDuration;
                 const resolutionFactor = Math.sqrt((data.width * data.height) / basePixels);
                 const rawCredits = (durationFactor * 0.7) + (resolutionFactor * 0.3);
                 // Divide by 2 for background removal, round to 1 decimal, min 0.5
@@ -2218,7 +2218,7 @@ console.log('[MaskDrawer] Class loaded');
                 // Show credit estimate overlay on video
                 const creditEstimate = document.getElementById('creditEstimate');
                 if (creditEstimate) {
-                    document.getElementById('estDuration').textContent = Math.round(duration) + 's';
+                    document.getElementById('estDuration').textContent = Math.round(videoDuration) + 's';
                     document.getElementById('estResolution').textContent = data.width + '×' + data.height;
                     document.getElementById('estCost').textContent = state.estimatedCredits + (state.estimatedCredits === 1 ? ' credit' : ' credits');
                     creditEstimate.classList.remove('hidden');
