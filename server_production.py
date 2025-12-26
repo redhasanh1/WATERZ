@@ -5506,8 +5506,8 @@ def objrem_track():
                 'labels': labels,
                 'object_ids': object_ids,  # Pass object_ids to SAM2
                 'frame_idx': frame_idx,
-                'api_base': None,
-                'modified_masks': modified_masks if modified_masks else None  # Pre-erased masks from user
+                'api_base': None
+                # modified_masks disabled - worker needs update
             },
             queue='wsl_sam2_local'
         )
