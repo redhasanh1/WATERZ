@@ -1237,7 +1237,7 @@
                     <line x1="12" y1="16" x2="12" y2="12"/>
                     <line x1="12" y1="8" x2="12.01" y2="8"/>
                 </svg>
-                <span style="color: #22c55e;">Click</span> to select object. Use <span style="color: #ef4444;">Eraser</span> tool to refine. Click marker to remove.
+                <span style="color: #22c55e;">Click</span> to select object. Use <span style="color: #ef4444;">Eraser</span> tool to refine.
             </div>
 
             <!-- Controls Panel -->
@@ -1312,14 +1312,14 @@
             <div class="advanced-tools-section hidden" id="advancedToolsSection">
                 <div style="margin-bottom: 1rem;">
                     <button id="advancedSelectionToggle" style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%; padding: 0.75rem 1rem; border-radius: 10px; border: 1px solid rgba(102, 126, 234, 0.2); background: rgba(102, 126, 234, 0.05); color: var(--text-secondary); cursor: pointer; transition: all 0.3s ease; font-size: 0.9rem; font-weight: 600;">
-                        <svg id="advancedArrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.3s ease;">
+                        <svg id="advancedArrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.3s ease; transform: rotate(180deg);">
                             <polyline points="6 9 12 15 18 9"/>
                         </svg>
                         <span>Drawing Tools</span>
                     </button>
                 </div>
 
-                <div id="advancedSelectionContent" style="display: none; padding: 1rem; background: rgba(102, 126, 234, 0.03); border-radius: 12px; border: 1px solid rgba(102, 126, 234, 0.1); margin-bottom: 1rem;">
+                <div id="advancedSelectionContent" style="display: block; padding: 1rem; background: rgba(102, 126, 234, 0.03); border-radius: 12px; border: 1px solid rgba(102, 126, 234, 0.1); margin-bottom: 1rem;">
                     <!-- Shape Drawing Tools -->
                     <div style="display: flex; justify-content: center; gap: 0.6rem; flex-wrap: wrap;">
                         <button id="toolClick" class="tool-btn active" data-tool="click" title="Click Selection (SAM2)" style="display: flex; flex-direction: column; align-items: center; padding: 0.75rem 1rem; border-radius: 10px; border: 2px solid #22c55e; background: rgba(34, 197, 94, 0.15); color: var(--text-primary); cursor: pointer; transition: all 0.2s ease; min-width: 65px;">
@@ -2312,9 +2312,11 @@ console.log('[MaskDrawer] Class loaded');
             marker.style.top = (offsetY + percentY * displayHeight) + 'px';
             marker.style.animation = 'pulse 1s infinite';
 
-            // Store point data on marker for removal
+            // Store point data on marker for removal and resize repositioning
             marker.dataset.videoX = videoX;
             marker.dataset.videoY = videoY;
+            marker.dataset.percentX = percentX;
+            marker.dataset.percentY = percentY;
             marker.dataset.label = label;
             marker.dataset.objectId = state.objects.length;
 
@@ -3279,6 +3281,50 @@ console.log('[MaskDrawer] Class loaded');
         // Initialize when video metadata loads
         videoPlayer.addEventListener('loadedmetadata', () => {
             initMaskDrawer();
+        });
+
+        // Reposition markers and masks on window resize (pixel-perfect scaling)
+        function repositionMarkersAndMasks() {
+            if (!state.videoWidth || !state.videoHeight) return;
+
+            const containerRect = interactionLayer.getBoundingClientRect();
+            const videoAspect = state.videoWidth / state.videoHeight;
+            const containerAspect = containerRect.width / containerRect.height;
+
+            let displayWidth, displayHeight, offsetX, offsetY;
+            if (videoAspect > containerAspect) {
+                displayWidth = containerRect.width;
+                displayHeight = containerRect.width / videoAspect;
+                offsetX = 0;
+                offsetY = (containerRect.height - displayHeight) / 2;
+            } else {
+                displayHeight = containerRect.height;
+                displayWidth = containerRect.height * videoAspect;
+                offsetX = (containerRect.width - displayWidth) / 2;
+                offsetY = 0;
+            }
+
+            // Reposition click markers
+            interactionLayer.querySelectorAll('.click-marker').forEach(marker => {
+                const percentX = parseFloat(marker.dataset.percentX);
+                const percentY = parseFloat(marker.dataset.percentY);
+                if (!isNaN(percentX) && !isNaN(percentY)) {
+                    marker.style.left = (offsetX + percentX * displayWidth) + 'px';
+                    marker.style.top = (offsetY + percentY * displayHeight) + 'px';
+                }
+            });
+
+            // Reposition mask-tint canvases
+            interactionLayer.querySelectorAll('.mask-tint').forEach(canvas => {
+                canvas.style.left = offsetX + 'px';
+                canvas.style.top = offsetY + 'px';
+                canvas.style.width = displayWidth + 'px';
+                canvas.style.height = displayHeight + 'px';
+            });
+        }
+
+        window.addEventListener('resize', () => {
+            requestAnimationFrame(repositionMarkersAndMasks);
         });
 
         // Advanced Selection toggle
