@@ -2866,6 +2866,16 @@ console.log('[MaskDrawer] Class loaded');
             state.maskCanvas = null;  // Clear mask canvas reference
             // Remove all mask overlays AND click markers from interaction layer
             interactionLayer.querySelectorAll('.mask-overlay, .mask-tint, .click-marker').forEach(el => el.remove());
+
+            // Reset MaskDrawer and clear its canvas
+            if (maskDrawer) {
+                maskDrawer.reset();
+                maskDrawer.ctx.clearRect(0, 0, maskDrawer.canvas.width, maskDrawer.canvas.height);
+            }
+
+            // Realign canvas
+            alignDrawingCanvas();
+
             renderObjects();
             updateRemoveButton();
             // Reset tracking state
@@ -3388,6 +3398,11 @@ console.log('[MaskDrawer] Class loaded');
         // Initialize when video metadata loads
         videoPlayer.addEventListener('loadedmetadata', () => {
             initMaskDrawer();
+            // Force canvas realignment after layout completes (fixes small canvas on initial load)
+            setTimeout(() => {
+                alignDrawingCanvas();
+                if (maskDrawer) maskDrawer.updateDimensions();
+            }, 100);
         });
 
         // Reposition markers and masks on window resize (pixel-perfect scaling)
