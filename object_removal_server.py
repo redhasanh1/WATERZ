@@ -430,35 +430,60 @@ def get_status(job_id):
     # If we have a Celery task, poll its status
     celery_task_id = job.get('celery_task_id')
     if celery_task_id and job.get('status') == 'tracking':
-        try:
-            from celery.result import AsyncResult
-            celery = get_celery()
-            result = AsyncResult(celery_task_id, app=celery)
+        completed_via_redis = False
 
-            if result.ready():
-                # Task completed
-                if result.successful():
-                    job['status'] = 'completed'
-                    job['progress'] = 100
-                    job['message'] = 'Tracking complete!'
-                    print(f"[STATUS] Task {celery_task_id} completed successfully")
-                else:
+        # First, check Redis hash for completion (WSL worker updates this directly)
+        try:
+            redis_url = 'redis://:watermarkz_secure_2024@localhost:6379/0'
+            if os.path.exists('redis_url.txt'):
+                with open('redis_url.txt', 'r') as f:
+                    redis_url = f.read().strip()
+            redis_client = redis.from_url(redis_url, decode_responses=True)
+            redis_data = redis_client.hgetall(f"objrem:{job_id}")
+            if redis_data and redis_data.get('masks_dir'):
+                # WSL worker completed! Update local job state
+                job['status'] = 'completed'
+                job['progress'] = 100
+                job['message'] = 'Tracking complete!'
+                job['masks_dir'] = redis_data.get('masks_dir')
+                if redis_data.get('video_path'):
+                    job['video_path'] = redis_data.get('video_path')
+                completed_via_redis = True
+                print(f"[STATUS] Task {celery_task_id} completed (detected via Redis hash)")
+        except Exception as e:
+            print(f"[STATUS] Redis check error: {e}")
+
+        # Fallback: Check Celery AsyncResult
+        if not completed_via_redis:
+            try:
+                from celery.result import AsyncResult
+                celery = get_celery()
+                result = AsyncResult(celery_task_id, app=celery)
+
+                if result.ready():
+                    # Task completed
+                    if result.successful():
+                        job['status'] = 'completed'
+                        job['progress'] = 100
+                        job['message'] = 'Tracking complete!'
+                        print(f"[STATUS] Task {celery_task_id} completed successfully")
+                    else:
+                        job['status'] = 'error'
+                        job['message'] = str(result.result) if result.result else 'Task failed'
+                        print(f"[STATUS] Task {celery_task_id} failed: {result.result}")
+                elif result.state == 'PROCESSING':
+                    # Task in progress - get meta info
+                    meta = result.info or {}
+                    job['progress'] = meta.get('progress', 0)
+                    job['message'] = meta.get('status', 'Processing...')
+                elif result.state == 'PENDING':
+                    job['message'] = 'Waiting for worker...'
+                elif result.state == 'FAILURE':
                     job['status'] = 'error'
                     job['message'] = str(result.result) if result.result else 'Task failed'
-                    print(f"[STATUS] Task {celery_task_id} failed: {result.result}")
-            elif result.state == 'PROCESSING':
-                # Task in progress - get meta info
-                meta = result.info or {}
-                job['progress'] = meta.get('progress', 0)
-                job['message'] = meta.get('status', 'Processing...')
-            elif result.state == 'PENDING':
-                job['message'] = 'Waiting for worker...'
-            elif result.state == 'FAILURE':
-                job['status'] = 'error'
-                job['message'] = str(result.result) if result.result else 'Task failed'
 
-        except Exception as e:
-            print(f"[STATUS] Celery poll error: {e}")
+            except Exception as e:
+                print(f"[STATUS] Celery poll error: {e}")
 
     # Calculate current frame from progress
     progress = job.get('progress', 0)
