@@ -5529,7 +5529,7 @@ def objrem_track():
         # Store credits in format expected by deduct_credit_on_completion()
         if user_id:
             redis_client.set(f"task:{task_id}:user_id", user_id)
-            redis_client.set(f"task:{task_id}:credits", int(estimated_credits))
+            redis_client.set(f"task:{task_id}:credits", max(1, int(estimated_credits)))  # min 1 credit
             redis_client.expire(f"task:{task_id}:user_id", 86400 * 7)  # 7 days
             redis_client.expire(f"task:{task_id}:credits", 86400 * 7)
 
@@ -5727,7 +5727,7 @@ def objrem_export():
         estimated_credits = float(job.get('estimated_credits', 0.5))
         if user_id:
             redis_client.set(f"task:{task_id}:user_id", user_id)
-            redis_client.set(f"task:{task_id}:credits", int(estimated_credits))
+            redis_client.set(f"task:{task_id}:credits", max(1, int(estimated_credits)))  # min 1 credit
             redis_client.expire(f"task:{task_id}:user_id", 86400 * 7)  # 7 days
             redis_client.expire(f"task:{task_id}:credits", 86400 * 7)
 
