@@ -307,12 +307,16 @@
             align-items: center;
             justify-content: center;
             height: 100%;
+            min-height: 400px;
             cursor: pointer;
             transition: all 0.2s;
+            border: 2px dashed var(--border);
+            border-radius: 12px;
         }
 
         .video-placeholder:hover {
             background: rgba(249, 115, 22, 0.05);
+            border-color: var(--accent);
         }
 
         .video-placeholder svg {

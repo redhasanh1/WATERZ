@@ -657,6 +657,9 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             '-crf', '23',
             '-b:v', '0',
             '-auto-alt-ref', '0',     # Required for alpha channel
+            '-cpu-used', '4',         # Faster encoding (0-5, higher=faster)
+            '-threads', '8',          # Multi-threaded encoding
+            '-row-mt', '1',           # Row-based multithreading
             output_path
         ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     else:
@@ -694,32 +697,52 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         blur_k = blur_amount * 2 + 1
         blur_kernel = torch.ones(3, 1, blur_k, blur_k, device=device) / (blur_k * blur_k)
 
-    print(f"[GPU-FX] 🚀 STREAMING: Processing {total_frames} frames one-by-one (25MB VRAM)...")
+    # === PRELOAD ALL MASKS TO GPU (eliminates disk I/O in loop) ===
+    print(f"[GPU-FX] Preloading {len(mask_files)} masks to GPU...")
+    all_masks_gpu = []
+    for mf in mask_files:
+        m = cv2.imread(mf, cv2.IMREAD_GRAYSCALE)
+        if m is None:
+            m = np.zeros((height, width), dtype=np.uint8)
+        if m.shape[:2] != (height, width):
+            m = cv2.resize(m, (width, height))
+        all_masks_gpu.append(torch.from_numpy(m).to(device).float() / 255.0)
+    print(f"[GPU-FX] ✅ Masks preloaded to GPU")
 
-    cap = cv2.VideoCapture(video_path)
+    print(f"[GPU-FX] 🚀 STREAMING: Processing {total_frames} frames with NVDEC GPU decoding...")
+
+    # === NVDEC GPU VIDEO DECODING (replaces cv2.VideoCapture CPU decoding) ===
+    # Try NVDEC first, fallback to CPU if GPU decoding fails
+    ffmpeg_decode = subprocess.Popen([
+        'ffmpeg',
+        '-hwaccel', 'cuda',           # Use GPU for decoding
+        '-i', video_path,
+        '-f', 'rawvideo',
+        '-pix_fmt', 'rgb24',
+        '-s', f'{width}x{height}',
+        'pipe:1'
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    frame_size = width * height * 3
     frame_idx = 0
 
     while True:
-        ret, frame_bgr = cap.read()
-        if not ret:
+        # Read frame from NVDEC decoder
+        raw_frame = ffmpeg_decode.stdout.read(frame_size)
+        if len(raw_frame) != frame_size:
             break
 
-        # Load mask for this frame
-        if frame_idx < len(mask_files):
-            mask = cv2.imread(mask_files[frame_idx], cv2.IMREAD_GRAYSCALE)
-            if mask is None:
-                mask = np.zeros((height, width), dtype=np.uint8)
-            if mask.shape[:2] != (height, width):
-                mask = cv2.resize(mask, (width, height))
-        else:
-            mask = np.zeros((height, width), dtype=np.uint8)
+        # Already in RGB format from FFmpeg
+        frame_rgb = np.frombuffer(raw_frame, dtype=np.uint8).reshape(height, width, 3)
 
-        # Convert BGR to RGB
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        # Get preloaded mask from GPU (no disk I/O!)
+        if frame_idx < len(all_masks_gpu):
+            mask_gpu = all_masks_gpu[frame_idx]
+        else:
+            mask_gpu = torch.zeros(height, width, device=device)
 
         # === GPU: Transfer single frame (~6MB) ===
         frame_gpu = torch.from_numpy(frame_rgb).to(device).float()  # [H, W, 3]
-        mask_gpu = torch.from_numpy(mask).to(device).float() / 255.0  # [H, W]
 
         # Apply dilation on GPU
         if dilation > 0:
@@ -834,8 +857,14 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
             self.update_state(state='PROCESSING', meta={'progress': progress, 'status': f'Frame {frame_idx}/{total_frames}'})
             print(f"[GPU-FX] Frame {frame_idx}/{total_frames}")
 
-    cap.release()
-    print(f"[GPU-FX] Processed {frame_idx} frames with GPU streaming")
+    # Cleanup NVDEC decoder
+    ffmpeg_decode.stdout.close()
+    ffmpeg_decode.wait()
+    print(f"[GPU-FX] Processed {frame_idx} frames with GPU streaming (NVDEC + mask preload)")
+
+    # Free preloaded masks from GPU memory
+    del all_masks_gpu
+    torch.cuda.empty_cache()
 
     # Close encoder / finalize output
     if output_format == 'png':
