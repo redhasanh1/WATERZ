@@ -2356,12 +2356,15 @@ console.log('[MaskDrawer] Class loaded');
                     ctx.drawImage(videoPlayer, 0, 0);
                     const frameData = canvas.toDataURL('image/png').split(',')[1];
 
+                    // Only send current object's points for preview (not all objects)
+                    const currentObjectPoints = allPoints.filter(p => p.object_id === currentObjId);
+
                     const sam2Response = await fetch(`${API_BASE}/api/sam2/select-object`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             frame_data: frameData,
-                            points: allPoints.map(p => ({ x: p.x, y: p.y, label: p.label })),
+                            points: currentObjectPoints.map(p => ({ x: p.x, y: p.y, label: p.label })),
                             video_width: state.videoWidth,
                             video_height: state.videoHeight
                         })
