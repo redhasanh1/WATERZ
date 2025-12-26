@@ -2523,6 +2523,54 @@ console.log('[MaskDrawer] Class loaded');
             ctx.globalCompositeOperation = 'source-over';
         }
 
+        // Unified eraser that erases from ALL mask layers
+        function eraseAllMasks(x, y, radius) {
+            // Erase from SAM2 mask canvas (current object's mask)
+            if (state.maskCanvas) {
+                eraseSam2Mask(x, y, radius);
+            }
+
+            // Erase from MaskDrawer's internal mask (for drawn rectangles/brush/shapes)
+            if (maskDrawer && maskDrawer.maskBitmap) {
+                // Ensure maskCtx is available
+                if (!maskDrawer.maskCtx) {
+                    maskDrawer.maskCtx = maskDrawer.maskBitmap.getContext('2d');
+                }
+                maskDrawer.maskCtx.globalCompositeOperation = 'destination-out';
+                maskDrawer.maskCtx.beginPath();
+                maskDrawer.maskCtx.arc(x, y, radius, 0, Math.PI * 2);
+                maskDrawer.maskCtx.fill();
+                maskDrawer.maskCtx.globalCompositeOperation = 'source-over';
+                maskDrawer.redraw();
+            }
+
+            // Also erase from the visible drawing canvas directly
+            const drawingCanvas = document.getElementById('drawingCanvas');
+            if (drawingCanvas) {
+                const dCtx = drawingCanvas.getContext('2d');
+                dCtx.globalCompositeOperation = 'destination-out';
+                dCtx.beginPath();
+                dCtx.arc(x, y, radius, 0, Math.PI * 2);
+                dCtx.fill();
+                dCtx.globalCompositeOperation = 'source-over';
+            }
+
+            // Also erase any other mask-tint canvases from other objects
+            const interactionLayer = document.getElementById('interactionLayer');
+            if (interactionLayer) {
+                interactionLayer.querySelectorAll('.mask-tint').forEach(canvas => {
+                    if (canvas !== state.maskCanvas) {
+                        const ctx = canvas.getContext('2d');
+                        ctx.globalCompositeOperation = 'destination-out';
+                        ctx.beginPath();
+                        ctx.arc(x, y, radius, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.globalCompositeOperation = 'source-over';
+                    }
+                });
+            }
+        }
+
         function updateMaskFromCanvas() {
             if (!state.maskCanvas) return;
 
@@ -2582,13 +2630,13 @@ console.log('[MaskDrawer] Class loaded');
                 if (state.currentTool !== 'eraser') return;
                 isErasing = true;
                 const coords = getCanvasCoords(canvas, e);
-                eraseSam2Mask(coords.x, coords.y, state.eraserSize);
+                eraseAllMasks(coords.x, coords.y, state.eraserSize);
             };
 
             canvas.onmousemove = (e) => {
                 if (!isErasing || state.currentTool !== 'eraser') return;
                 const coords = getCanvasCoords(canvas, e);
-                eraseSam2Mask(coords.x, coords.y, state.eraserSize);
+                eraseAllMasks(coords.x, coords.y, state.eraserSize);
             };
 
             canvas.onmouseup = () => {
