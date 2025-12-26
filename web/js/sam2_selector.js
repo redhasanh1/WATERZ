@@ -137,8 +137,10 @@ class SAM2Selector {
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        // Canvas display size is handled by CSS (100% width/height of parent)
-        // No need to set style.width/height - it auto-resizes responsively
+        // IMPORTANT: Set CSS dimensions to constrain display size
+        // Without this, canvas displays at intrinsic size (1920x1080) until resize
+        this.canvas.style.width = displayWidth + 'px';
+        this.canvas.style.height = displayHeight + 'px';
 
         // Calculate scale for coordinate conversion
         this.displayScaleX = displayWidth / this.videoWidth;
