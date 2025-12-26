@@ -2997,12 +2997,27 @@ console.log('[MaskDrawer] Class loaded');
                 option.classList.add('selected');
 
                 if (option.dataset.quality) state.quality = option.dataset.quality;
-                if (option.dataset.format) state.format = option.dataset.format;
+                if (option.dataset.format) {
+                    state.format = option.dataset.format;
+                    // MP4 doesn't support transparency - auto-switch to Solid Color
+                    if (option.dataset.format === 'mp4' && state.background === 'transparent') {
+                        state.background = 'color';
+                        document.querySelectorAll('[data-background]').forEach(b => b.classList.remove('selected'));
+                        document.querySelector('[data-background="color"]').classList.add('selected');
+                        document.getElementById('colorPickerRow').classList.remove('hidden');
+                    }
+                }
                 if (option.dataset.operation) state.operation = option.dataset.operation;
 
                 // Handle background options
                 if (option.dataset.background) {
                     state.background = option.dataset.background;
+                    // Transparent requires WebM/PNG - auto-switch format
+                    if (option.dataset.background === 'transparent' && state.format === 'mp4') {
+                        state.format = 'webm';
+                        document.querySelectorAll('[data-format]').forEach(f => f.classList.remove('selected'));
+                        document.querySelector('[data-format="webm"]').classList.add('selected');
+                    }
                     const colorPickerRow = document.getElementById('colorPickerRow');
                     const blurSliderRow = document.getElementById('blurSliderRow');
 
@@ -3047,50 +3062,9 @@ console.log('[MaskDrawer] Class loaded');
             });
         }
 
-        // New Video button - reset everything and show upload area
+        // New Video button - just refresh the page to ensure clean state
         document.getElementById('newVideoBtn').addEventListener('click', () => {
-            // Reset ALL state
-            state.jobId = null;
-            state.objects = [];
-            state.isSelectingObject = false;
-            state.isTracked = false;
-            state.videoFile = null;
-            state.videoUrl = null;
-            state.videoWidth = 0;
-            state.videoHeight = 0;
-            state.videoDuration = 0;
-            state.estimatedCredits = 0;
-
-            // Clear UI elements
-            interactionLayer.querySelectorAll('.mask-overlay, .mask-tint, .click-marker').forEach(el => el.remove());
-            renderObjects();
-            updateRemoveButton();
-
-            // Hide video and panels, show upload area
-            videoPlayer.classList.add('hidden');
-            videoPlayer.src = '';
-            document.getElementById('drawingCanvas').classList.add('hidden');
-            uploadArea.classList.remove('hidden');
-            uploadArea.innerHTML = `
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/>
-                    <line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-                <h3>Upload Your Video</h3>
-                <p>Drag & drop or click to upload (MP4, MOV, WebM, MKV, WMV, and more)</p>
-            `;
-            interactionLayer.classList.add('hidden');
-            instructions.classList.add('hidden');
-            controlsPanel.classList.add('hidden');
-            objectsPanel.classList.add('hidden');
-            settingsSection.classList.add('hidden');
-            document.getElementById('advancedToolsSection').classList.add('hidden');
-            document.getElementById('creditEstimate').classList.add('hidden');
-            document.getElementById('newVideoBtn').classList.add('hidden');
-            document.getElementById('downloadSection').classList.add('hidden');
-
-            console.log('[NEW VIDEO] State reset, ready for new upload');
+            location.reload();
         });
 
         // Export button - tracks + exports in one flow
