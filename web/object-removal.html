@@ -2557,6 +2557,9 @@ console.log('[MaskDrawer] Class loaded');
                 maskDrawer.maskCtx.fill();
                 maskDrawer.maskCtx.globalCompositeOperation = 'source-over';
 
+                // Set tool to eraser so redraw() doesn't draw shape outlines
+                maskDrawer.options.tool = 'eraser';
+
                 // Throttle redraw with RAF for smooth performance
                 if (!redrawScheduled) {
                     redrawScheduled = true;
