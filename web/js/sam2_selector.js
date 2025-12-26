@@ -188,59 +188,24 @@ class SAM2Selector {
         if (!this.enabled) return;
         if (this.isLoading) return;
 
-        // Debug: log raw touch coordinates
-        console.log(`[SAM2Selector] Raw touch: clientX=${touch.clientX}, clientY=${touch.clientY}, pageX=${touch.pageX}, pageY=${touch.pageY}`);
-
         // Touch object has clientX/clientY like mouse events
         const point = this.getCanvasPoint(touch);
-        if (!point) return; // Ignore touches in letterbox area
+        if (!point) return;
         this.addPoint(point.x, point.y, 1);
-        console.log(`[SAM2Selector] Touch mapped to video coords: (${point.x}, ${point.y})`);
     }
 
     /**
-     * Convert mouse/touch event to canvas coordinates (accounts for object-fit: contain letterboxing)
+     * Convert mouse/touch event to canvas coordinates
+     * Uses pre-calculated displayScaleX/Y from updateCanvasSize() for reliability
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
-        // Android fix: use pageX/pageY with scroll offset for more reliable coordinates
-        const scrollX = window.scrollX || window.pageXOffset || 0;
-        const scrollY = window.scrollY || window.pageYOffset || 0;
-        // clientX/clientY are viewport-relative, pageX/pageY are page-relative
-        const clickX = (e.clientX !== undefined ? e.clientX : (e.pageX - scrollX)) - rect.left;
-        const clickY = (e.clientY !== undefined ? e.clientY : (e.pageY - scrollY)) - rect.top;
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
 
-        // Debug: log coordinate calculation details
-        console.log(`[SAM2Selector] getCanvasPoint: rect=(${rect.left.toFixed(1)},${rect.top.toFixed(1)},${rect.width.toFixed(1)}x${rect.height.toFixed(1)}), scroll=(${scrollX},${scrollY}), click=(${clickX.toFixed(1)},${clickY.toFixed(1)})`);
-
-        // Calculate actual video render area (accounting for object-fit: contain letterboxing)
-        const containerAspect = rect.width / rect.height;
-        const videoAspect = this.videoWidth / this.videoHeight;
-
-        let renderWidth, renderHeight, offsetX, offsetY;
-        if (videoAspect > containerAspect) {
-            // Video is wider - letterbox on top/bottom
-            renderWidth = rect.width;
-            renderHeight = rect.width / videoAspect;
-            offsetX = 0;
-            offsetY = (rect.height - renderHeight) / 2;
-        } else {
-            // Video is taller - letterbox on sides
-            renderHeight = rect.height;
-            renderWidth = rect.height * videoAspect;
-            offsetX = (rect.width - renderWidth) / 2;
-            offsetY = 0;
-        }
-
-        // Check if click is in letterbox area
-        if (clickX < offsetX || clickX > offsetX + renderWidth ||
-            clickY < offsetY || clickY > offsetY + renderHeight) {
-            return null; // Click in letterbox area, ignore
-        }
-
-        // Map click to video coordinates (accounting for offset)
-        const videoX = Math.floor(((clickX - offsetX) / renderWidth) * this.videoWidth);
-        const videoY = Math.floor(((clickY - offsetY) / renderHeight) * this.videoHeight);
+        // Use pre-calculated scale (set in updateCanvasSize) - simpler and works on Android
+        const videoX = Math.floor(clickX / this.displayScaleX);
+        const videoY = Math.floor(clickY / this.displayScaleY);
 
         // Clamp to video bounds
         return {
