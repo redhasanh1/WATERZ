@@ -67,8 +67,13 @@ REM ============================================================
 echo [PRODUCTION] UI served by Railway - no local Flask needed
 echo.
 
+REM CLEAR PYTHON CACHE - Prevents stale Celery task signatures!
+echo [CACHE] Clearing Python cache to prevent stale task signatures...
+wsl -e bash -c "find /mnt/d/watermarkz -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; find /mnt/d/watermarkz -name '*.pyc' -delete 2>/dev/null; echo 'Cache cleared!'"
+echo.
+
 REM Start WSL Celery worker
 echo [WSL] Starting SAM2 worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
 echo.
 
-wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export SKIP_B2_UPLOAD='%SKIP_B2_UPLOAD%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export USE_DALI_STREAMING='%USE_DALI_STREAMING%' && export SAM2_MAX_HEIGHT='%SAM2_MAX_HEIGHT%' && export USE_MASK_COMPRESSION='%USE_MASK_COMPRESSION%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"
+wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export PYTHONDONTWRITEBYTECODE=1 && export REDIS_URL='%REDIS_URL%' && export SKIP_B2_UPLOAD='%SKIP_B2_UPLOAD%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export USE_DALI_STREAMING='%USE_DALI_STREAMING%' && export SAM2_MAX_HEIGHT='%SAM2_MAX_HEIGHT%' && export USE_MASK_COMPRESSION='%USE_MASK_COMPRESSION%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"

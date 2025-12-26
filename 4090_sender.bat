@@ -38,8 +38,13 @@ set SD_HARD_REGION_THRESHOLD=0.15
 echo [TGLDP] SD Guidance enabled (v2)
 echo.
 
+REM CLEAR PYTHON CACHE - Prevents stale Celery task signatures!
+echo [CACHE] Clearing Python cache to prevent stale task signatures...
+wsl -e bash -c "find /mnt/d/watermarkz -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; find /mnt/d/watermarkz -name '*.pyc' -delete 2>/dev/null; echo 'Cache cleared!'"
+echo.
+
 REM Start WSL Celery worker
 echo Starting WSL worker on LOCAL queues: wsl_sam2_local, wsl_yolo_local
 echo.
 
-wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export REDIS_URL='%REDIS_URL%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export B2_CDN_URL='%B2_CDN_URL%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"
+wsl -e bash -c "cd /mnt/d/watermarkz && source venv_wsl2/bin/activate && export PYTHONDONTWRITEBYTECODE=1 && export REDIS_URL='%REDIS_URL%' && export B2_KEY_ID='%B2_KEY_ID%' && export B2_APP_KEY='%B2_APP_KEY%' && export B2_BUCKET='%B2_BUCKET%' && export B2_CDN_URL='%B2_CDN_URL%' && export USE_SD_GUIDANCE='%USE_SD_GUIDANCE%' && export SD_INFERENCE_STEPS='%SD_INFERENCE_STEPS%' && export SD_HARD_REGION_THRESHOLD='%SD_HARD_REGION_THRESHOLD%' && celery -A wsl_sam2_worker worker -Q wsl_sam2_local,wsl_yolo_local --loglevel=info --pool=solo"
