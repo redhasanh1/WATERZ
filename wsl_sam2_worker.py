@@ -600,6 +600,17 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         mask_files = sorted(glob.glob(f"{masks_dir}/*.png"))
         print(f"[GPU-FX] Extracted {len(mask_files)} masks")
 
+    # MASKS ONLY mode - just zip up masks, no video processing
+    if output_format == 'masks':
+        output_path = f"/tmp/masks_only_{int(time.time())}.zip"
+        print(f"[GPU-FX] Masks-only mode - zipping {len(mask_files)} masks...")
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'status': 'Zipping masks...'})
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for mask_file in mask_files:
+                zf.write(mask_file, os.path.basename(mask_file))
+        print(f"[GPU-FX] Masks ZIP created: {output_path}")
+        return {'status': 'success', 'output_path': output_path}
+
     # Parse color to RGB
     bg_color_hex = bg_color.lstrip('#')
     color_rgb = [int(bg_color_hex[i:i+2], 16) for i in (0, 2, 4)]

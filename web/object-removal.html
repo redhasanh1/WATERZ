@@ -1398,9 +1398,10 @@
                             <div class="setting-option" data-format="webm">WebM</div>
                             <div class="setting-option" data-format="png">PNG</div>
                             <div class="setting-option" data-format="png_sequence">PNG Seq</div>
+                            <div class="setting-option" data-format="masks" title="Raw tracking masks for manual compositing">Masks</div>
                         </div>
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            WebM, PNG & PNG Seq support transparency
+                            WebM/PNG/PNG Seq = transparency. Masks = raw tracking data for editors.
                         </p>
                     </div>
                 </div>
@@ -3177,9 +3178,9 @@ console.log('[MaskDrawer] Class loaded');
                 const downloadUrl = finalStatus.cdn_url || `${API_BASE}/api/object-removal/download/${state.jobId}`;
                 console.log('[DOWNLOAD] URL:', downloadUrl, finalStatus.cdn_url ? '(CDN)' : '(local)');
 
-                // Determine file extension: png and png_sequence become zip, others use their format
-                const ext = (state.format === 'png' || state.format === 'png_sequence') ? 'zip' : state.format;
-                const filename = `object_removed_${state.jobId}.${ext}`;
+                // Determine file extension: png, png_sequence, masks become zip, others use their format
+                const ext = ['png', 'png_sequence', 'masks'].includes(state.format) ? 'zip' : state.format;
+                const filename = state.format === 'masks' ? `masks_${state.jobId}.zip` : `object_removed_${state.jobId}.${ext}`;
 
                 // Setup inline download button
                 const downloadBtn = document.getElementById('downloadBtn');
