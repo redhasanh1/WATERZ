@@ -640,21 +640,22 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
         output_path = f"/tmp/simple_fx_output_{int(time.time())}.zip"
         print(f"[GPU-FX] PNG sequence mode - saving frames to {png_output_dir}")
     elif output_format == 'webm':
-        # WebM with AV1 NVENC + alpha channel for transparency (GPU accelerated!)
+        # WebM with VP9 + alpha channel for transparency
         output_path = "/tmp/simple_fx_output.webm"
-        print(f"[GPU-FX] WebM mode with AV1 NVENC alpha - GPU encoding!")
+        print(f"[GPU-FX] WebM mode with VP9 alpha encoding")
         ffmpeg_encode = subprocess.Popen([
             'ffmpeg', '-y',
             '-f', 'rawvideo',
             '-vcodec', 'rawvideo',
             '-s', f'{width}x{height}',
-            '-pix_fmt', 'rgba',  # RGBA for transparency
+            '-pix_fmt', 'rgba',
             '-r', str(fps),
             '-i', 'pipe:0',
-            '-c:v', 'av1_nvenc',      # GPU AV1 encoder (RTX 40 series)
-            '-pix_fmt', 'yuva420p',   # AV1 with alpha
-            '-cq', '23',              # Quality level
-            '-preset', 'p4',          # Speed/quality balance
+            '-c:v', 'libvpx-vp9',     # VP9 encoder (widely supported)
+            '-pix_fmt', 'yuva420p',   # VP9 with alpha
+            '-crf', '23',             # Quality (lower = better)
+            '-b:v', '0',              # Use CRF mode
+            '-auto-alt-ref', '0',     # Required for alpha channel
             output_path
         ], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     else:
@@ -848,7 +849,11 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     else:
         # Close ffmpeg encoder
         ffmpeg_encode.stdin.close()
-        ffmpeg_encode.wait()
+        return_code = ffmpeg_encode.wait()
+        if return_code != 0:
+            stderr = ffmpeg_encode.stderr.read().decode() if ffmpeg_encode.stderr else ''
+            print(f"[GPU-FX] FFmpeg error (code {return_code}): {stderr[:500]}")
+            raise RuntimeError(f"FFmpeg encoding failed: {stderr[:200]}")
         print(f"[GPU-FX] Encoded {frame_idx} frames")
 
     self.update_state(state='PROCESSING', meta={'progress': 92, 'status': 'Uploading to CDN...'})
