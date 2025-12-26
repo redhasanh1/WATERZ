@@ -2817,6 +2817,16 @@ console.log('[MaskDrawer] Class loaded');
 
         // Add Object button - static button (before any objects added)
         document.getElementById('addObjectCard').addEventListener('click', () => {
+            // Check if current object has any selection before allowing new object
+            const hasCurrentObjectSelection = state.objects.some(obj => obj.objectId === state.currentObjectId);
+            const hasMaskDrawerContent = maskDrawer && maskDrawer.maskBitmap;
+            const hasSam2Mask = state.maskCanvas;
+
+            if (!hasCurrentObjectSelection && !hasMaskDrawerContent && !hasSam2Mask) {
+                alert('Please select something for the current object first');
+                return;
+            }
+
             state.currentObjectId++;
             state.isSelectingObject = true;
             document.getElementById('selectionInstructions').classList.remove('hidden');
