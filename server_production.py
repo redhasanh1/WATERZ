@@ -5533,7 +5533,8 @@ def objrem_track():
             redis_client.expire(f"task:{task_id}:user_id", 86400 * 7)  # 7 days
             redis_client.expire(f"task:{task_id}:credits", 86400 * 7)
 
-        print(f"[OBJREM-TRACK] Submitted task {task_id} for job {job_id}, user={user_id}, credits={estimated_credits}")
+        print(f"[OBJREM-TRACK] Submitted task {task_id} for job {job_id}")
+        print(f"[OBJREM-TRACK] user_id from request: {data.get('user_id')}, from session: {session.get('user_id')}, final: {user_id}")
         print(f"[OBJREM-TRACK] Points: {point_coords}, Object IDs: {object_ids}, Frame: {frame_idx}")
 
         return jsonify({
@@ -5608,32 +5609,16 @@ def objrem_status(job_id):
         job = redis_client.hgetall(f"objrem:{job_id}")
 
         # Deduct credits when export completes (only once)
+        # Use same deduct_credit_on_completion function as backgroundremover
+        # Export endpoint already stores task:{task_id}:user_id and task:{task_id}:credits
         new_credits = None
         if job.get('status') == 'export_complete' and not job.get('credits_deducted'):
-            user_id = job.get('user_id')
-            estimated_credits = float(job.get('estimated_credits', 0.5))
-
-            if user_id:
-                try:
-                    credits_to_deduct = max(1, int(estimated_credits))  # Minimum 1 credit
-                    conn = get_db_connection()
-                    cur = conn.cursor()
-                    cur.execute(
-                        "UPDATE users SET credits = credits - %s WHERE id = %s RETURNING credits",
-                        (credits_to_deduct, user_id)
-                    )
-                    result = cur.fetchone()
-                    if result:
-                        new_credits = result[0]
-                        print(f"[OBJREM-CREDITS] Deducted {credits_to_deduct} credits for user {user_id}. New balance: {new_credits}")
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-
-                    # Mark as deducted
+            task_id = job.get('celery_task_id')
+            if task_id:
+                new_credits = deduct_credit_on_completion(task_id)
+                if new_credits is not None:
                     redis_client.hset(f"objrem:{job_id}", 'credits_deducted', '1')
-                except Exception as e:
-                    print(f"[OBJREM-CREDITS] Error deducting credits: {e}")
+                    print(f"[OBJREM-CREDITS] Credits deducted via deduct_credit_on_completion for task {task_id}")
 
         response = {
             'status': job.get('status', 'unknown'),
@@ -5746,7 +5731,8 @@ def objrem_export():
             redis_client.expire(f"task:{task_id}:user_id", 86400 * 7)  # 7 days
             redis_client.expire(f"task:{task_id}:credits", 86400 * 7)
 
-        print(f"[OBJREM-EXPORT] Submitted simple effects task {task_id}, user={user_id}, credits={estimated_credits}")
+        print(f"[OBJREM-EXPORT] Submitted simple effects task {task_id}")
+        print(f"[OBJREM-EXPORT] user_id from job: '{job.get('user_id')}', from session: {session.get('user_id')}, final: {user_id}")
         print(f"[OBJREM-EXPORT] Operation: {operation}, Background: {background}, Color: {bg_color}")
 
         return jsonify({
