@@ -516,7 +516,7 @@ def deduct_credit_on_completion(task_id):
 
         # Look up user_id and credits amount from stored task data
         user_id = redis_client.get(f"task:{task_id}:user_id")
-        credits_to_deduct = int(redis_client.get(f"task:{task_id}:credits") or 1)
+        credits_to_deduct = float(redis_client.get(f"task:{task_id}:credits") or 0.1)
 
         if not user_id:
             print(f"[CREDITS] No user_id found for task {task_id}")
@@ -5529,7 +5529,7 @@ def objrem_track():
         # Store credits in format expected by deduct_credit_on_completion()
         if user_id:
             redis_client.set(f"task:{task_id}:user_id", user_id)
-            redis_client.set(f"task:{task_id}:credits", max(1, int(estimated_credits)))  # min 1 credit
+            redis_client.set(f"task:{task_id}:credits", str(max(0.1, round(float(estimated_credits), 1))))  # decimal credits
             redis_client.expire(f"task:{task_id}:user_id", 86400 * 7)  # 7 days
             redis_client.expire(f"task:{task_id}:credits", 86400 * 7)
 
@@ -5727,7 +5727,7 @@ def objrem_export():
         estimated_credits = float(job.get('estimated_credits', 0.5))
         if user_id:
             redis_client.set(f"task:{task_id}:user_id", user_id)
-            redis_client.set(f"task:{task_id}:credits", max(1, int(estimated_credits)))  # min 1 credit
+            redis_client.set(f"task:{task_id}:credits", str(max(0.1, round(float(estimated_credits), 1))))  # decimal credits
             redis_client.expire(f"task:{task_id}:user_id", 86400 * 7)  # 7 days
             redis_client.expire(f"task:{task_id}:credits", 86400 * 7)
 

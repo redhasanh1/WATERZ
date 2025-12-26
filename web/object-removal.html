@@ -2224,8 +2224,8 @@ console.log('[MaskDrawer] Class loaded');
                 const durationFactor = videoDuration / baseDuration;
                 const resolutionFactor = Math.sqrt((data.width * data.height) / basePixels);
                 const rawCredits = (durationFactor * 0.7) + (resolutionFactor * 0.3);
-                // Divide by 2 for background removal, round to 1 decimal, min 0.5
-                state.estimatedCredits = Math.max(0.5, Math.round((rawCredits / 2) * 10) / 10);
+                // Divide by 3 for background removal, round to 1 decimal, min 0.1
+                state.estimatedCredits = Math.max(0.1, Math.round((rawCredits / 3) * 10) / 10);
 
                 // Show credit estimate overlay on video
                 const creditEstimate = document.getElementById('creditEstimate');
