@@ -446,8 +446,7 @@ def get_status(job_id):
                 job['progress'] = 100
                 job['message'] = 'Tracking complete!'
                 job['masks_dir'] = redis_data.get('masks_dir')
-                if redis_data.get('video_path'):
-                    job['video_path'] = redis_data.get('video_path')
+                # DON'T overwrite video_path - Redis has CDN URL but we need local path for cv2
                 completed_via_redis = True
                 print(f"[STATUS] Task {celery_task_id} completed (detected via Redis hash)")
         except Exception as e:
