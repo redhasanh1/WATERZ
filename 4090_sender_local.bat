@@ -69,7 +69,7 @@ echo.
 
 REM CLEAR PYTHON CACHE - Prevents stale Celery task signatures!
 echo [CACHE] Clearing Python cache to prevent stale task signatures...
-wsl -e bash -c "find /mnt/d/watermarkz -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; find /mnt/d/watermarkz -name '*.pyc' -delete 2>/dev/null; echo 'Cache cleared!'"
+wsl -e bash -c "find /mnt/d/watermarkz -maxdepth 2 -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; echo 'Cache cleared!'"
 echo.
 
 REM Start WSL Celery worker
