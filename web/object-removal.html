@@ -1729,7 +1729,7 @@ class MaskDrawer {
             }
             this.redraw(); return;
         }
-        this.isDrawing = true; this.startPoint = point;
+        this.isDrawing = true; this.startPoint = point; this.currentPoint = point;  // Reset currentPoint to prevent ghost outline
         if (this.options.tool === 'brush') {
             this.brushPath = [point];
             this.initMaskBitmap();
@@ -2039,7 +2039,10 @@ console.log('[MaskDrawer] Class loaded');
             dilation: 0,
             isSelectingObject: false,
             isTracked: false,
-            currentObjectId: 0  // Only increments when user clicks "Add Object"
+            currentObjectId: 0,  // Only increments when user clicks "Add Object"
+            maskCanvas: null,    // Reference to SAM2 mask canvas for eraser
+            eraserSize: 20,      // Eraser brush size
+            currentTool: 'click' // Current drawing tool
         };
 
         // Elements
@@ -2468,12 +2471,135 @@ console.log('[MaskDrawer] Class loaded');
 
                 ctx.putImageData(imageData, 0, 0);
                 interactionLayer.appendChild(canvas);
+
+                // Store reference for eraser tool
+                state.maskCanvas = canvas;
+                canvas.dataset.objectId = state.currentObjectId;
+
                 console.log('[SAM2] Mask overlay:', displayWidth.toFixed(0), 'x', displayHeight.toFixed(0), 'at', offsetX.toFixed(0), offsetY.toFixed(0));
             };
             img.onerror = (e) => {
                 console.error('[SAM2] Failed to load mask image:', e);
             };
             img.src = 'data:image/png;base64,' + maskBase64;
+        }
+
+        // Eraser functions for SAM2 masks
+        let isErasing = false;
+
+        function getCanvasCoords(canvas, e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+
+        function eraseSam2Mask(x, y, radius) {
+            if (!state.maskCanvas) return;
+            const ctx = state.maskCanvas.getContext('2d');
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+        }
+
+        function updateMaskFromCanvas() {
+            if (!state.maskCanvas) return;
+
+            const canvas = state.maskCanvas;
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            // Create a new canvas for the grayscale mask
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = canvas.width;
+            maskCanvas.height = canvas.height;
+            const maskCtx = maskCanvas.getContext('2d');
+            const maskImageData = maskCtx.createImageData(canvas.width, canvas.height);
+            const maskData = maskImageData.data;
+
+            // Convert green overlay back to white mask
+            for (let i = 0; i < data.length; i += 4) {
+                // If pixel has alpha (is visible), it's part of mask
+                if (data[i + 3] > 64) {  // Alpha > 25%
+                    maskData[i] = 255;     // White
+                    maskData[i + 1] = 255;
+                    maskData[i + 2] = 255;
+                    maskData[i + 3] = 255;
+                } else {
+                    maskData[i] = 0;       // Black (no mask)
+                    maskData[i + 1] = 0;
+                    maskData[i + 2] = 0;
+                    maskData[i + 3] = 255;
+                }
+            }
+
+            maskCtx.putImageData(maskImageData, 0, 0);
+
+            // Get base64 of the mask (remove data:image/png;base64, prefix)
+            const base64 = maskCanvas.toDataURL('image/png').split(',')[1];
+
+            // Update the mask in state for current object
+            const objectId = parseInt(canvas.dataset.objectId);
+            state.objects.forEach(obj => {
+                if (obj.objectId === objectId) {
+                    obj.mask = base64;
+                }
+            });
+
+            console.log('[ERASER] Updated mask for object', objectId);
+        }
+
+        function setupMaskEraser() {
+            if (!state.maskCanvas) return;
+
+            const canvas = state.maskCanvas;
+            canvas.style.pointerEvents = 'auto';
+            canvas.style.cursor = 'crosshair';
+
+            canvas.onmousedown = (e) => {
+                if (state.currentTool !== 'eraser') return;
+                isErasing = true;
+                const coords = getCanvasCoords(canvas, e);
+                eraseSam2Mask(coords.x, coords.y, state.eraserSize);
+            };
+
+            canvas.onmousemove = (e) => {
+                if (!isErasing || state.currentTool !== 'eraser') return;
+                const coords = getCanvasCoords(canvas, e);
+                eraseSam2Mask(coords.x, coords.y, state.eraserSize);
+            };
+
+            canvas.onmouseup = () => {
+                if (isErasing) {
+                    isErasing = false;
+                    updateMaskFromCanvas();
+                }
+            };
+
+            canvas.onmouseleave = () => {
+                if (isErasing) {
+                    isErasing = false;
+                    updateMaskFromCanvas();
+                }
+            };
+
+            console.log('[ERASER] Mask eraser enabled');
+        }
+
+        function disableMaskEraser() {
+            if (!state.maskCanvas) return;
+            state.maskCanvas.style.pointerEvents = 'none';
+            state.maskCanvas.style.cursor = 'default';
+            state.maskCanvas.onmousedown = null;
+            state.maskCanvas.onmousemove = null;
+            state.maskCanvas.onmouseup = null;
+            state.maskCanvas.onmouseleave = null;
         }
 
         function addObject(x, y, maskData, label = 1, videoX = 0, videoY = 0) {
@@ -3198,7 +3324,14 @@ console.log('[MaskDrawer] Class loaded');
         document.querySelectorAll('.tool-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const tool = btn.dataset.tool;
+                const prevTool = state.currentTool;
                 currentDrawingTool = tool;
+                state.currentTool = tool;
+
+                // Disable SAM2 mask eraser if switching away from eraser
+                if (prevTool === 'eraser' && tool !== 'eraser') {
+                    disableMaskEraser();
+                }
 
                 // Update button styles
                 document.querySelectorAll('.tool-btn').forEach(b => {
@@ -3229,6 +3362,12 @@ console.log('[MaskDrawer] Class loaded');
                     drawingCanvas.style.pointerEvents = 'none';
                     interactionLayer.style.pointerEvents = 'auto';
                     if (maskDrawer) maskDrawer.enabled = false;
+                } else if (tool === 'eraser' && state.maskCanvas) {
+                    // Eraser on SAM2 mask - enable eraser on mask canvas
+                    drawingCanvas.style.pointerEvents = 'none';
+                    interactionLayer.style.pointerEvents = 'none';
+                    if (maskDrawer) maskDrawer.enabled = false;
+                    setupMaskEraser();
                 } else {
                     // Drawing mode - enable drawing canvas, disable SAM2 interaction
                     drawingCanvas.classList.remove('hidden');
@@ -3240,7 +3379,7 @@ console.log('[MaskDrawer] Class loaded');
                     }
                 }
 
-                console.log('[TOOL] Selected:', tool);
+                console.log('[TOOL] Selected:', tool, state.maskCanvas ? '(SAM2 mask exists)' : '(no SAM2 mask)');
             });
         });
 
@@ -3251,6 +3390,7 @@ console.log('[MaskDrawer] Class loaded');
             brushSlider.addEventListener('input', (e) => {
                 const size = parseInt(e.target.value);
                 brushValue.textContent = size + 'px';
+                state.eraserSize = size;  // Update eraser size for SAM2 mask eraser
                 if (maskDrawer) maskDrawer.setBrushSize(size);
             });
         }
