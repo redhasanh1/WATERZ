@@ -402,12 +402,6 @@ def contact_page():
     return send_file('contact.html')
 
 
-@app.route('/background-remover.html')
-def background_remover_page():
-    """Serve the background remover page"""
-    return send_file('background-remover.html')
-
-
 @app.route('/video-tools.html')
 def video_tools_page():
     """Serve the video tools hub page"""
