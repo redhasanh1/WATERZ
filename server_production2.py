@@ -441,7 +441,7 @@ except Exception:
     pass
 
 # [NOTIFY] Send notification when Celery worker is ACTUALLY ready
-from celery.signals import worker_ready, task_postrun
+from celery.signals import worker_ready
 
 @worker_ready.connect
 def on_worker_ready(**kwargs):
@@ -461,14 +461,6 @@ def on_worker_ready(**kwargs):
             print(f"[NOTIFY] Startup notification sent: {msg}")
         except Exception as e:
             print(f"[NOTIFY] Failed to send startup notification: {e}")
-
-@task_postrun.connect
-def cleanup_after_task(sender=None, task_id=None, task=None, args=None, kwargs=None, retval=None, state=None, **kw):
-    """Clean VRAM after EVERY task completes (success or failure)"""
-    try:
-        cleanup_vram(context=f"task_postrun:{sender.name if sender else 'unknown'}")
-    except Exception as e:
-        print(f"[WARN] task_postrun cleanup failed: {e}")
 
 # Get FFmpeg/FFprobe executables
 def get_ffmpeg_executables():
@@ -1286,19 +1278,6 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
         import torch
         use_fp16 = torch.cuda.is_available()
 
-        # Load background reference image if configured (for large watermark blending)
-        BACKGROUND_IMAGE_PATH = os.getenv('BACKGROUND_IMAGE_PATH', '')
-        BACKGROUND_ALPHA = float(os.getenv('BACKGROUND_ALPHA', '0.5'))
-        background_frame = None
-        if BACKGROUND_IMAGE_PATH and os.path.exists(BACKGROUND_IMAGE_PATH):
-            background_frame = cv2.imread(BACKGROUND_IMAGE_PATH)
-            if background_frame is not None:
-                # Resize to match video dimensions
-                background_frame = cv2.resize(background_frame, (width, height))
-                print(f"[BG] Loaded background: {BACKGROUND_IMAGE_PATH} (alpha={BACKGROUND_ALPHA})")
-            else:
-                print(f"[BG] Warning: Could not load background from {BACKGROUND_IMAGE_PATH}")
-
         print(f"[SAM2] ProPainter config:")
         print(f"   - Segments: {len(segments)}")
         print(f"   - Workers: {SEGMENT_WORKERS}")
@@ -1346,9 +1325,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 # Determine optimization level based on movement
                 movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
                 if movement < 10:
-                    neighbor_length, subvideo_length = 5, 60
+                    neighbor_length, subvideo_length = 2, 30
                 else:
-                    neighbor_length, subvideo_length = 10, 80
+                    neighbor_length, subvideo_length = 3, 60
 
                 # Temporal padding for context
                 pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
@@ -1376,11 +1355,6 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 if not seg_frames or not seg_masks:
                     return seg_idx, None, None, (proc_start, proc_end)
 
-                # Crop background to segment region if available
-                bg_cropped = None
-                if background_frame is not None:
-                    bg_cropped = background_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w].copy()
-
                 # Run ProPainter on segment - ZERO DISK I/O with return_frames=True!
                 output_frames = faster_propainter_pipeline(
                     video='dummy',
@@ -1388,7 +1362,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     output=output_dir,  # Not used when return_frames=True
                     resize_ratio=1.0,
                     mask_dilation=SAM2_MASK_DILATION,
-                    ref_stride=10,
+                    ref_stride=15,
                     neighbor_length=neighbor_length,
                     subvideo_length=subvideo_length,
                     raft_iter=20,
@@ -1399,9 +1373,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     use_cached_models=True,
                     frames_array=seg_frames,
                     masks_array=seg_masks,
-                    return_frames=True,  # ZERO DISK I/O!
-                    background_frame=bg_cropped,
-                    background_alpha=BACKGROUND_ALPHA,
+                    return_frames=True  # ZERO DISK I/O!
                 )
 
                 if not output_frames:
@@ -1452,11 +1424,6 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 all_frames_contiguous.append(np.ascontiguousarray(frame))
             all_masks_contiguous = [np.ascontiguousarray(m) for m in all_masks_cropped]
 
-            # Crop background to global crop region if available
-            bg_cropped_single = None
-            if background_frame is not None:
-                bg_cropped_single = background_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w].copy()
-
             # Run ProPainter - ZERO DISK I/O with return_frames=True!
             final_cropped_frames = faster_propainter_pipeline(
                 video=video_path,
@@ -1464,7 +1431,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 output=output_dir,  # Not used when return_frames=True
                 resize_ratio=1.0,
                 mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=10,
+                ref_stride=15,
                 neighbor_length=10,
                 subvideo_length=120,
                 raft_iter=20,
@@ -1475,9 +1442,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 use_cached_models=True,
                 frames_array=all_frames_contiguous,
                 masks_array=all_masks_contiguous,
-                return_frames=True,  # ZERO DISK I/O!
-                background_frame=bg_cropped_single,
-                background_alpha=BACKGROUND_ALPHA,
+                return_frames=True  # ZERO DISK I/O!
             )
 
             if not final_cropped_frames:
@@ -1956,7 +1921,7 @@ def process_yolo_segment_task(self, segment_data):
 
     # Determine neighbor_length based on movement
     movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
-    neighbor_length, subvideo_length = (5, 60) if movement < 10 else (10, 80)
+    neighbor_length, subvideo_length = (2, 30) if movement < 10 else (3, 60)
 
     output_dir = os.path.join(TEMP_DIR, f"{video_id}_seg{seg_idx}_output")
     os.makedirs(output_dir, exist_ok=True)
@@ -1964,7 +1929,7 @@ def process_yolo_segment_task(self, segment_data):
     output_frames = faster_propainter_pipeline(
         video='dummy', mask='dummy', output=output_dir,
         resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-        ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+        ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
         raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
         fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
         return_frames=True
@@ -2213,15 +2178,6 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         masks_url = sam2_result.get('masks_url')
         masks_dir = sam2_result.get('masks_dir')
 
-        # Convert WSL path to Windows path if needed (WSL worker returns /mnt/d/... but Windows needs D:\...)
-        if masks_dir and masks_dir.startswith('/mnt/'):
-            # /mnt/d/watermarkz/... -> D:\watermarkz\...
-            parts = masks_dir.split('/')
-            drive_letter = parts[2].upper()  # 'd' -> 'D'
-            windows_path = drive_letter + ':\\' + '\\'.join(parts[3:])
-            print(f"[PATH] Converting WSL path to Windows: {masks_dir} -> {windows_path}")
-            masks_dir = windows_path
-
         if masks_url and not masks_dir:
             # Download masks from B2 CDN
             print(f"[B2] Downloading masks from {masks_url}...")
@@ -2314,10 +2270,6 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         if track_fps and track_fps > 0 and abs(track_fps - 10.0) < 1.0 and total_frames > len(masks_full) >= 2:
             print(f"[SAM2] Expanding {len(masks_full)} masks (tracking @ ~10fps) to {total_frames} full-FPS frames...")
             all_masks = expand_masks_10fps(masks_full, total_frames, original_fps)
-        elif mode == 'static' and len(masks_full) == 1 and total_frames > 1:
-            # Static mode: replicate single mask across all frames (don't truncate video!)
-            print(f"[STATIC] Replicating 1 mask across {total_frames} frames (static watermark mode)")
-            all_masks = [masks_full[0]] * total_frames  # Same reference, memory efficient
         else:
             # Fallback: strict alignment (truncate to shortest)
             if len(masks_full) != total_frames:
@@ -2583,16 +2535,6 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         output_dir = os.path.join(TEMP_DIR, f"{video_id}_sam2_output")
         # Don't create output_dir - not needed with return_frames=True
 
-        # Load background reference image if configured (for large watermark blending)
-        BACKGROUND_IMAGE_PATH = os.getenv('BACKGROUND_IMAGE_PATH', '')
-        BACKGROUND_ALPHA = float(os.getenv('BACKGROUND_ALPHA', '0.5'))
-        background_frame = None
-        if BACKGROUND_IMAGE_PATH and os.path.exists(BACKGROUND_IMAGE_PATH):
-            background_frame = cv2.imread(BACKGROUND_IMAGE_PATH)
-            if background_frame is not None:
-                background_frame = cv2.resize(background_frame, (width, height))
-                print(f"[BG] Loaded background: {BACKGROUND_IMAGE_PATH} (alpha={BACKGROUND_ALPHA})")
-
         # Track segment metadata (NOT frames - those stay in VRAM!)
         segment_results = {}
         processed_frames = set()  # Track which frames have been processed
@@ -2643,9 +2585,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
             if movement < 10:
-                neighbor_length, subvideo_length = 5, 60
+                neighbor_length, subvideo_length = 2, 30
             else:
-                neighbor_length, subvideo_length = 10, 80
+                neighbor_length, subvideo_length = 3, 60
 
             # For large crops that needed downsampling, reduce subvideo_length to save VRAM
             if scale_factor < 1.0:
@@ -2683,23 +2625,14 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 print(f"[SAM2] WARNING: Segment {seg_idx+1} has no frames/masks! seg_frames={len(seg_frames)}, seg_masks={len(seg_masks)}")
                 return seg_idx, None, None, (proc_start, proc_end)
 
-            # Crop and resize background to segment region if available
-            bg_cropped = None
-            if background_frame is not None:
-                bg_cropped = background_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w].copy()
-                if scale_factor < 1.0:
-                    bg_cropped = cv2.resize(bg_cropped, (proc_w, proc_h), interpolation=cv2.INTER_AREA)
-
             # Run ProPainter - ZERO DISK I/O with return_frames=True!
             output_frames = faster_propainter_pipeline(
                 video='dummy', mask='dummy', output=output_dir,
                 resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
                 raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
                 fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
-                return_frames=True,  # ZERO DISK I/O!
-                background_frame=bg_cropped,
-                background_alpha=BACKGROUND_ALPHA,
+                return_frames=True  # ZERO DISK I/O!
             )
 
             expected_count = proc_end - proc_start
@@ -2748,7 +2681,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 list(seg_bbox), width, height, padding_ratio=0.2, min_size=128
             )
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
-            neighbor_length, subvideo_length = (5, 60) if movement < 10 else (10, 80)
+            neighbor_length, subvideo_length = (2, 30) if movement < 10 else (3, 60)
             pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
             pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
             proc_start = start_f - pad_left
@@ -2775,21 +2708,14 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 print(f"[YOLO] WARNING: Segment {seg_idx+1} has no frames/masks!")
                 return seg_idx, None, None, (proc_start, proc_end)
 
-            # Crop background to segment region if available
-            bg_cropped = None
-            if background_frame is not None:
-                bg_cropped = background_frame[seg_crop_y:seg_crop_y+seg_crop_h, seg_crop_x:seg_crop_x+seg_crop_w].copy()
-
             # Run ProPainter
             output_frames = faster_propainter_pipeline(
                 video='dummy', mask='dummy', output=output_dir,
                 resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
                 raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
                 fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
-                return_frames=True,
-                background_frame=bg_cropped,
-                background_alpha=BACKGROUND_ALPHA,
+                return_frames=True
             )
 
             if not output_frames:
