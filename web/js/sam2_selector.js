@@ -87,12 +87,6 @@ class SAM2Selector {
         // Update on window resize
         window.addEventListener('resize', () => this.updateCanvasSize());
 
-        // Force layout recalculation after display:none→block transition
-        // Double rAF ensures browser has fully computed layout before measuring
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => this.updateCanvasSize());
-        });
-
         console.log('[SAM2Selector] Initialized');
     }
 

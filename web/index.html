@@ -1097,9 +1097,14 @@
 
         #maskCanvas {
             position: absolute;
-            /* Positioning set dynamically via JS to match video letterbox */
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
             cursor: crosshair;
-            pointer-events: auto;
+            object-fit: contain;
         }
 
         /* External scrubber bar beneath video */
@@ -1637,7 +1642,7 @@
                                 <!-- Video + Canvas Container -->
                                 <div id="videoWrapper">
                                     <video id="previewVideo" playsinline webkit-playsinline preload="metadata"></video>
-                                    <canvas id="maskCanvas" style="pointer-events: none;"></canvas>
+                                    <canvas id="maskCanvas" style="display: none; pointer-events: none;"></canvas>
                                 </div>
 
                                 <!-- External Scrubber Bar (beneath video) -->
@@ -3904,49 +3909,13 @@ console.log('[INLINE] MaskDrawer class loaded');
         let sam2Selector = null;
         let videoTimeline = null;
 
-        // Align canvas to video's render area (accounting for letterbox)
-        function alignCanvasToVideo() {
-            const wrapper = document.getElementById('videoWrapper');
-            if (!wrapper || !video.videoWidth) return;
-
-            const wrapperRect = wrapper.getBoundingClientRect();
-            const videoAspect = video.videoWidth / video.videoHeight;
-            const containerAspect = wrapperRect.width / wrapperRect.height;
-
-            let renderWidth, renderHeight, offsetX, offsetY;
-            if (videoAspect > containerAspect) {
-                // Video is wider - letterbox on top/bottom
-                renderWidth = wrapperRect.width;
-                renderHeight = wrapperRect.width / videoAspect;
-                offsetX = 0;
-                offsetY = (wrapperRect.height - renderHeight) / 2;
-            } else {
-                // Video is taller - letterbox on sides
-                renderHeight = wrapperRect.height;
-                renderWidth = wrapperRect.height * videoAspect;
-                offsetX = (wrapperRect.width - renderWidth) / 2;
-                offsetY = 0;
-            }
-
-            canvas.style.left = offsetX + 'px';
-            canvas.style.top = offsetY + 'px';
-            canvas.style.width = renderWidth + 'px';
-            canvas.style.height = renderHeight + 'px';
-            console.log(`[Canvas] Aligned to video: ${renderWidth.toFixed(0)}x${renderHeight.toFixed(0)} at (${offsetX.toFixed(0)}, ${offsetY.toFixed(0)})`);
-        }
-
-        // Re-align on window resize
-        window.addEventListener('resize', alignCanvasToVideo);
-
         // Initialize canvas and timeline when video loads
         video.addEventListener('loadedmetadata', async function() {
             // Set canvas internal resolution to match video native resolution
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            // Align canvas position to match video letterbox
-            alignCanvasToVideo();
-            // Canvas visibility is controlled by parent container (professionalPlayer)
-            // Don't set display:block here - it causes canvas to appear in top-left when parent is hidden
+            // Canvas display size is handled by CSS (100% width/height)
+            canvas.style.display = 'block';
             ctx = canvas.getContext('2d');
 
             // Show mask selection controls
@@ -4001,20 +3970,6 @@ console.log('[INLINE] MaskDrawer class loaded');
                 video.addEventListener('timeupdate', () => {
                     if (sam2Selector) sam2Selector.onVideoTimeUpdate();
                 });
-
-                // AUTO-ENABLE: Select Object mode by default (users can just click)
-                sam2Selector.enabled = true;
-                canvas.style.pointerEvents = 'auto';
-                canvas.style.cursor = 'crosshair';
-                window.currentDrawingTool = 'click';
-                console.log('[SAM2] Auto-enabled Select Object mode');
-
-                // Force canvas size update after layout completes (fixes small canvas on initial load)
-                setTimeout(() => {
-                    if (sam2Selector) {
-                        sam2Selector.updateCanvasSize();
-                    }
-                }, 100);
 
                 video.addEventListener('seeked', () => {
                     if (sam2Selector) {
