@@ -2858,15 +2858,7 @@
             statusDiv.style.display = 'block';
             statusDiv.dataset.completed = '';
             removeExistingDownloadLink();
-            // Calculate and show estimated time (3x video duration)
-            const videoDuration = videoElem.duration || 0;
-            const estimatedSeconds = Math.ceil(videoDuration * 3);
-            const estMins = Math.floor(estimatedSeconds / 60);
-            const estSecs = estimatedSeconds % 60;
-            const timeStr = estMins > 0
-                ? `~${estMins} min ${estSecs > 0 ? estSecs + ' sec' : ''}`
-                : `~${estSecs} sec`;
-            statusText.textContent = `Starting AI processing... (${timeStr})`;
+            statusText.textContent = 'Starting AI processing...';
             statusText.style.color = '#a0a0c0';
             progressBar.style.width = '0%';
             progressPercent.textContent = '0%';
