@@ -4033,6 +4033,12 @@ console.log('[INLINE] MaskDrawer class loaded');
                 window.maskDrawer.init();
             }
 
+            // Auto-select "Select Object" tool by default when video loads
+            const clickToolBtn = document.querySelector('.tool-btn[data-tool="click"]');
+            if (clickToolBtn) {
+                clickToolBtn.click();
+            }
+
             // Advanced Selection toggle function
             window.toggleAdvancedSelection = function() {
                 const content = document.getElementById('advancedSelectionContent');
