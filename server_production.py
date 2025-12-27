@@ -1394,6 +1394,40 @@ def debug_celery():
         import traceback
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
+@app.route('/api/admin/users', methods=['GET'])
+def admin_view_users():
+    """View latest users - protected by secret key"""
+    secret = request.args.get('key')
+    if secret != 'markremover2024admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT id, email, name, credits, email_verified, created_at, google_id
+            FROM users
+            ORDER BY created_at DESC
+            LIMIT 10
+        ''')
+        users = cur.fetchall()
+        cur.close()
+        db_pool.putconn(conn)
+
+        return jsonify({
+            'users': [{
+                'id': u[0],
+                'email': u[1],
+                'name': u[2],
+                'credits': u[3],
+                'verified': u[4],
+                'created': str(u[5]),
+                'google_id': u[6]
+            } for u in users]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # Security headers middleware
 @app.after_request
 def add_security_headers(response):
