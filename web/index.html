@@ -2863,6 +2863,25 @@
             progressBar.style.width = '0%';
             progressPercent.textContent = '0%';
 
+            // Start countdown timer (3x video duration estimate)
+            const videoDuration = videoElem.duration || 60;
+            let remainingSeconds = Math.ceil(videoDuration * 3);
+            const countdownInterval = setInterval(() => {
+                if (statusDiv.dataset.completed === 'true') {
+                    clearInterval(countdownInterval);
+                    return;
+                }
+                remainingSeconds--;
+                if (remainingSeconds <= 0) {
+                    clearInterval(countdownInterval);
+                    return;
+                }
+                const mins = Math.floor(remainingSeconds / 60);
+                const secs = remainingSeconds % 60;
+                const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                statusText.textContent = `Processing... ~${timeStr} remaining`;
+            }, 1000);
+
             try {
                 // Route to appropriate processing mode based on selections AND mode
                 if (hasDrawnShapes && isTrackedMode) {
