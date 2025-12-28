@@ -401,10 +401,14 @@ def transcode_hevc_pipeline(video_url, task_id):
     """
     Complete async pipeline: Download -> Check codec -> Transcode if HEVC -> Upload to B2 -> Store in Redis
     This runs in background thread, doesn't block server.
+
+    OPTIMIZATION: Downloads only 1MB first to check codec. If not HEVC, skips full download!
+    Saves ~99% bandwidth for H.264 videos (Android/Desktop uploads).
     """
     import requests
     temp_input = None
     temp_output = None
+    partial_path = None
 
     try:
         # Connect to Redis
@@ -414,9 +418,52 @@ def transcode_hevc_pipeline(video_url, task_id):
         redis_client.setex(f"preview_status:{task_id}", 86400, "checking")
         print(f"[HEVC] Pipeline started for {task_id}: {video_url}")
 
-        # 1. Download video to secure temp file
+        # 1. OPTIMIZATION: Download ONLY first 1MB to check codec (not full file!)
+        partial_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}_partial.mp4")
+        print(f"[HEVC] Downloading 1MB sample to check codec...")
+
+        try:
+            # Use Range header to get only first 1MB
+            headers = {'Range': 'bytes=0-1048576'}
+            response = requests.get(video_url, headers=headers, timeout=30)
+            # Accept both 200 (full file) and 206 (partial content)
+            if response.status_code not in [200, 206]:
+                response.raise_for_status()
+
+            with open(partial_path, 'wb') as f:
+                f.write(response.content)
+
+            partial_size = os.path.getsize(partial_path) / 1024
+            print(f"[HEVC] Downloaded {partial_size:.0f}KB sample")
+
+        except Exception as range_err:
+            print(f"[HEVC] Range request failed, falling back to full download: {range_err}")
+            partial_path = None
+
+        # 2. Check codec on partial file (ffprobe works with partial files!)
+        if partial_path and os.path.exists(partial_path):
+            codec = check_video_codec(partial_path)
+            print(f"[HEVC] Detected codec from sample: {codec}")
+
+            # Cleanup partial file
+            try:
+                os.remove(partial_path)
+                partial_path = None
+            except:
+                pass
+
+            if codec and codec not in ['hevc', 'h265', 'hev1']:
+                # Not HEVC - no transcode needed, skip full download!
+                redis_client.setex(f"preview_status:{task_id}", 86400, "original")
+                redis_client.setex(f"preview_url:{task_id}", 86400, video_url)
+                print(f"[HEVC] Not HEVC ({codec}), skipping download - saved bandwidth!")
+                return video_url
+        else:
+            codec = None
+
+        # 3. HEVC detected (or couldn't check) - download full file
         temp_input = os.path.join(TEMP_DIR, f"{uuid.uuid4()}_input.mp4")
-        print(f"[HEVC] Downloading video to {temp_input}")
+        print(f"[HEVC] HEVC detected, downloading full video to {temp_input}")
 
         response = requests.get(video_url, stream=True, timeout=120)
         response.raise_for_status()
@@ -428,16 +475,17 @@ def transcode_hevc_pipeline(video_url, task_id):
         file_size = os.path.getsize(temp_input) / (1024 * 1024)
         print(f"[HEVC] Downloaded {file_size:.1f}MB")
 
-        # 2. Check codec
-        codec = check_video_codec(temp_input)
-        print(f"[HEVC] Detected codec: {codec}")
+        # 4. Verify codec if we couldn't check earlier
+        if not codec:
+            codec = check_video_codec(temp_input)
+            print(f"[HEVC] Verified codec: {codec}")
 
-        if codec not in ['hevc', 'h265', 'hev1']:
-            # Not HEVC - no transcode needed, use original URL
-            redis_client.setex(f"preview_status:{task_id}", 86400, "original")
-            redis_client.setex(f"preview_url:{task_id}", 86400, video_url)
-            print(f"[HEVC] Not HEVC ({codec}), using original URL")
-            return video_url
+            if codec not in ['hevc', 'h265', 'hev1']:
+                # Not HEVC after all
+                redis_client.setex(f"preview_status:{task_id}", 86400, "original")
+                redis_client.setex(f"preview_url:{task_id}", 86400, video_url)
+                print(f"[HEVC] Not HEVC ({codec}), using original URL")
+                return video_url
 
         # 3. Transcode HEVC -> H.264
         redis_client.setex(f"preview_status:{task_id}", 86400, "transcoding")
@@ -503,8 +551,8 @@ def transcode_hevc_pipeline(video_url, task_id):
         return video_url
 
     finally:
-        # 6. CRITICAL: Cleanup temp files
-        for f in [temp_input, temp_output]:
+        # 6. CRITICAL: Cleanup temp files (including partial sample)
+        for f in [temp_input, temp_output, partial_path]:
             if f and os.path.exists(f):
                 try:
                     os.remove(f)
