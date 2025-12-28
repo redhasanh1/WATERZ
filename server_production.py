@@ -5718,7 +5718,7 @@ def objrem_track():
                 'api_base': None,
                 'modified_masks': modified_masks
             },
-            queue='wsl_sam2_local'
+            queue='wsl_sam2'
         )
         result = s1.apply_async(task_id=task_id)
 
@@ -5924,7 +5924,7 @@ def objrem_export():
                 'masks_dir_local': masks_dir_local,
                 'video_path_local': video_path_local
             },
-            queue='wsl_sam2_local'
+            queue='wsl_sam2'
         )
         result = s2.apply_async(task_id=task_id)
 
