@@ -144,7 +144,7 @@ REM ============================================================
 REM TGLDP: SD-Guided Latent Diffusion for Hard Regions
 REM ============================================================
 REM Enable SD hallucination for regions ProPainter struggles with
-set USE_SD_GUIDANCE=0
+set USE_SD_GUIDANCE=1
 REM Number of SD denoising steps (3-5 recommended for speed)
 set SD_INFERENCE_STEPS=3
 REM Classifier-free guidance scale (7.5 default)
