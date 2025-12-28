@@ -61,10 +61,6 @@
     <link rel="icon" type="image/svg+xml" href="logo.svg">
     <link rel="apple-touch-icon" href="logo.svg">
 
-    <!-- Google AdSense -->
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5993103018552371"
-     crossorigin="anonymous"></script>
-
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -2272,8 +2268,6 @@
                 // Show process button
                 const processBtn = document.getElementById('processBtn');
                 if (processBtn) processBtn.style.display = 'block';
-                const removeObjBtn = document.getElementById('removeObjectBtn');
-                if (removeObjBtn) removeObjBtn.style.display = 'block';
 
                 // Show scroll hint
                 const scrollHint = document.getElementById('scrollHint');
@@ -2329,7 +2323,6 @@
         const progressBar = document.getElementById('progressBar');
         const progressPercent = document.getElementById('progressPercent');
         const processBtnElem = document.getElementById('processBtn');
-        const removeObjectBtnElem = document.getElementById('removeObjectBtn');
         const ACTIVE_TASK_KEY = 'markremoverai_active_task';
         const videoElem = document.getElementById('previewVideo');
 
@@ -2929,13 +2922,6 @@
             console.log('âœ… Event listener attached to processBtn');
         } else {
             console.error('âŒ processBtn not found!');
-        }
-
-        if (removeObjectBtnElem) {
-            removeObjectBtnElem.addEventListener('click', processVideo);
-            console.log('âœ… Event listener attached to removeObjectBtn');
-        } else {
-            console.error('âŒ removeObjectBtn not found!');
         }
 
         const savedTaskId = localStorage.getItem(ACTIVE_TASK_KEY);
@@ -4347,7 +4333,7 @@ console.log('[INLINE] MaskDrawer class loaded');
       (function() {
         const API = window.API_BASE_URL || '';
         const creditsBtn = document.getElementById('removeObjectCreditsBtn');
-        const queueBtn = document.getElementById('removeObjectBtn');
+        const queueBtn = document.getElementById('processBtn');
         const statusDiv = document.getElementById('processingStatus');
         const statusText = document.getElementById('statusText');
         const progressBar = document.getElementById('progressBar');
