@@ -1325,9 +1325,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 # Determine optimization level based on movement
                 movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
                 if movement < 10:
-                    neighbor_length, subvideo_length = 2, 30
+                    neighbor_length, subvideo_length = 5, 60
                 else:
-                    neighbor_length, subvideo_length = 3, 60
+                    neighbor_length, subvideo_length = 10, 80
 
                 # Temporal padding for context
                 pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
@@ -1362,7 +1362,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     output=output_dir,  # Not used when return_frames=True
                     resize_ratio=1.0,
                     mask_dilation=SAM2_MASK_DILATION,
-                    ref_stride=15,
+                    ref_stride=10,
                     neighbor_length=neighbor_length,
                     subvideo_length=subvideo_length,
                     raft_iter=20,
@@ -1431,7 +1431,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 output=output_dir,  # Not used when return_frames=True
                 resize_ratio=1.0,
                 mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=15,
+                ref_stride=10,
                 neighbor_length=10,
                 subvideo_length=120,
                 raft_iter=20,
@@ -1921,7 +1921,7 @@ def process_yolo_segment_task(self, segment_data):
 
     # Determine neighbor_length based on movement
     movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
-    neighbor_length, subvideo_length = (2, 30) if movement < 10 else (3, 60)
+    neighbor_length, subvideo_length = (5, 60) if movement < 10 else (10, 80)
 
     output_dir = os.path.join(TEMP_DIR, f"{video_id}_seg{seg_idx}_output")
     os.makedirs(output_dir, exist_ok=True)
@@ -1929,7 +1929,7 @@ def process_yolo_segment_task(self, segment_data):
     output_frames = faster_propainter_pipeline(
         video='dummy', mask='dummy', output=output_dir,
         resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-        ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+        ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
         raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
         fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
         return_frames=True
@@ -2177,6 +2177,17 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         # Check for B2 URL (new flow) or local path (legacy)
         masks_url = sam2_result.get('masks_url')
         masks_dir = sam2_result.get('masks_dir')
+
+        # Convert WSL path to Windows path if needed
+        def from_wsl_path(p):
+            if p and p.startswith('/mnt/') and len(p) > 6:
+                drive = p[5].upper()
+                rest = p[7:].replace('/', '\\')
+                return f"{drive}:\\{rest}"
+            return p
+
+        if masks_dir:
+            masks_dir = from_wsl_path(masks_dir)
 
         if masks_url and not masks_dir:
             # Download masks from B2 CDN
@@ -2585,9 +2596,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
             if movement < 10:
-                neighbor_length, subvideo_length = 2, 30
+                neighbor_length, subvideo_length = 5, 60
             else:
-                neighbor_length, subvideo_length = 3, 60
+                neighbor_length, subvideo_length = 10, 80
 
             # For large crops that needed downsampling, reduce subvideo_length to save VRAM
             if scale_factor < 1.0:
@@ -2629,7 +2640,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             output_frames = faster_propainter_pipeline(
                 video='dummy', mask='dummy', output=output_dir,
                 resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
                 raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
                 fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
                 return_frames=True  # ZERO DISK I/O!
@@ -2681,7 +2692,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 list(seg_bbox), width, height, padding_ratio=0.2, min_size=128
             )
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
-            neighbor_length, subvideo_length = (2, 30) if movement < 10 else (3, 60)
+            neighbor_length, subvideo_length = (5, 60) if movement < 10 else (10, 80)
             pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
             pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
             proc_start = start_f - pad_left
@@ -2712,7 +2723,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             output_frames = faster_propainter_pipeline(
                 video='dummy', mask='dummy', output=output_dir,
                 resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
                 raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
                 fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
                 return_frames=True
