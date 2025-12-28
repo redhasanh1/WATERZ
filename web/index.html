@@ -1463,12 +1463,12 @@
                         <h3 style="text-align: center; color: var(--text-primary); font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem;">Upload Your Video</h3>
 
                     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-                        <input type="file" id="fileInput" accept="image/*,video/*" style="display: none;">
+                        <input type="file" id="fileInput" accept="video/*" style="display: none;">
                         <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                         </svg>
-                        <h3 class="upload-title">Drop your file here</h3>
-                        <p class="upload-description">or click to browse</p>
+                        <h3 class="upload-title">Drop your video here</h3>
+                        <p class="upload-description">or click to browse (videos only, no photos)</p>
                     </div>
 
 
@@ -2117,6 +2117,12 @@
         document.getElementById('fileInput').addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
+                // Block image uploads
+                if (file.type.startsWith('image/')) {
+                    alert('Photos are not supported. Please upload a video file (MP4, MOV, etc.)');
+                    e.target.value = '';
+                    return;
+                }
                 uploadFile(file);
             }
         });
@@ -2146,7 +2152,13 @@
 
             const files = e.dataTransfer.files;
             if (files.length > 0) {
-                uploadFile(files[0]);
+                const file = files[0];
+                // Block image uploads
+                if (file.type.startsWith('image/')) {
+                    alert('Photos are not supported. Please upload a video file (MP4, MOV, etc.)');
+                    return;
+                }
+                uploadFile(file);
             }
         });
 
