@@ -264,6 +264,21 @@ def _check_nvenc_available():
     except:
         _NVENC_AVAILABLE = False
     return _NVENC_AVAILABLE
+
+def _get_nvenc_encoder(width, height):
+    """Get appropriate NVENC encoder based on resolution.
+    H.264 max: 4096x4096 (hardware limit), H.265 max: 8192x8192
+    """
+    if not _check_nvenc_available():
+        print("[FFMPEG] NVENC not available, using libx264 (CPU)")
+        return None, ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
+
+    if width > 4096 or height > 4096:
+        print(f"[FFMPEG] Resolution {width}x{height} exceeds H.264 limit (4096), using H.265 NVENC")
+        return 'hevc', ['-c:v', 'hevc_nvenc', '-preset', 'p1', '-b:v', '8M', '-bufsize', '16M']
+    else:
+        return 'h264', ['-c:v', 'h264_nvenc', '-preset', 'p1', '-b:v', '8M', '-bufsize', '16M']
+
 # Parallel segment execution (inside a single video task)
 SAM2_PARALLEL_SEGMENTS = os.getenv('SAM2_PARALLEL_SEGMENTS', '1').lower() in ('1', 'true', 'yes', 'on')
 
@@ -1325,9 +1340,9 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 # Determine optimization level based on movement
                 movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
                 if movement < 10:
-                    neighbor_length, subvideo_length = 2, 30
+                    neighbor_length, subvideo_length = 5, 60
                 else:
-                    neighbor_length, subvideo_length = 3, 60
+                    neighbor_length, subvideo_length = 10, 80
 
                 # Temporal padding for context
                 pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
@@ -1362,7 +1377,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                     output=output_dir,  # Not used when return_frames=True
                     resize_ratio=1.0,
                     mask_dilation=SAM2_MASK_DILATION,
-                    ref_stride=15,
+                    ref_stride=10,
                     neighbor_length=neighbor_length,
                     subvideo_length=subvideo_length,
                     raft_iter=20,
@@ -1431,7 +1446,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 output=output_dir,  # Not used when return_frames=True
                 resize_ratio=1.0,
                 mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=15,
+                ref_stride=10,
                 neighbor_length=10,
                 subvideo_length=120,
                 raft_iter=20,
@@ -1506,7 +1521,10 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
             )
             frame_height, frame_width = first_frame.shape[:2]
 
-            # FFmpeg command: pipe rawvideo → NVENC → MP4 with audio from original
+            # Choose encoder: H.264 NVENC for <=4096, H.265 NVENC for larger, libx264 fallback
+            _, encoder_args = _get_nvenc_encoder(frame_width, frame_height)
+
+            # FFmpeg command: pipe rawvideo → encoder → MP4 with audio from original
             ffmpeg_cmd = [
                 str(FFMPEG_EXE), '-y',
                 '-f', 'rawvideo',
@@ -1518,10 +1536,7 @@ def process_sam2_interactive_task(self, video_path, video_id=None, points=None, 
                 '-i', video_path,  # Audio from original
                 '-map', '0:v:0',
                 '-map', '1:a:0?',
-                '-c:v', 'h264_nvenc',  # GPU encoding!
-                '-preset', 'p1',  # Fastest NVENC preset
-                '-b:v', '8M',
-                '-bufsize', '16M',
+            ] + encoder_args + [
                 '-pix_fmt', 'yuv420p',
                 '-c:a', 'aac',
                 '-b:a', '192k',
@@ -1921,7 +1936,7 @@ def process_yolo_segment_task(self, segment_data):
 
     # Determine neighbor_length based on movement
     movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
-    neighbor_length, subvideo_length = (2, 30) if movement < 10 else (3, 60)
+    neighbor_length, subvideo_length = (5, 60) if movement < 10 else (10, 80)
 
     output_dir = os.path.join(TEMP_DIR, f"{video_id}_seg{seg_idx}_output")
     os.makedirs(output_dir, exist_ok=True)
@@ -1929,7 +1944,7 @@ def process_yolo_segment_task(self, segment_data):
     output_frames = faster_propainter_pipeline(
         video='dummy', mask='dummy', output=output_dir,
         resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-        ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+        ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
         raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
         fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
         return_frames=True
@@ -2033,6 +2048,9 @@ def finalize_yolo_task(self, segment_results, video_data):
     # Encode final video with FFmpeg pipe
     output_path = os.path.join(RESULT_DIR, f"{video_id}_yolo_removed.mp4")
 
+    # Choose encoder: H.264 NVENC for <=4096, H.265 NVENC for larger, libx264 fallback
+    _, encoder_args = _get_nvenc_encoder(width, height)
+
     ffmpeg_cmd = [
         str(FFMPEG_EXE), '-y',
         '-f', 'rawvideo',
@@ -2044,10 +2062,7 @@ def finalize_yolo_task(self, segment_results, video_data):
         '-i', video_path,
         '-map', '0:v:0',
         '-map', '1:a:0?',
-        '-c:v', 'h264_nvenc',
-        '-preset', 'p1',
-        '-b:v', '8M',
-        '-bufsize', '16M',
+    ] + encoder_args + [
         '-pix_fmt', 'yuv420p',
         '-c:a', 'aac',
         '-b:a', '192k',
@@ -2178,8 +2193,17 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         masks_url = sam2_result.get('masks_url')
         masks_dir = sam2_result.get('masks_dir')
 
-        if masks_url and not masks_dir:
-            # Download masks from B2 CDN
+        # Convert WSL path to Windows path if needed (e.g., /mnt/d/... -> D:\...)
+        if masks_dir and masks_dir.startswith('/mnt/'):
+            import re
+            match = re.match(r'/mnt/([a-z])/(.*)', masks_dir)
+            if match:
+                drive, rest = match.groups()
+                masks_dir = f"{drive.upper()}:\\{rest.replace('/', '\\')}"
+                print(f"[PATH] Converted WSL path to Windows: {masks_dir}")
+
+        if masks_url:
+            # Download masks from B2 CDN (always use B2 when URL available - masks_dir is container-local)
             print(f"[B2] Downloading masks from {masks_url}...")
             self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Downloading masks from B2'})
 
@@ -2585,9 +2609,9 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
 
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
             if movement < 10:
-                neighbor_length, subvideo_length = 2, 30
+                neighbor_length, subvideo_length = 5, 60
             else:
-                neighbor_length, subvideo_length = 3, 60
+                neighbor_length, subvideo_length = 10, 80
 
             # For large crops that needed downsampling, reduce subvideo_length to save VRAM
             if scale_factor < 1.0:
@@ -2629,7 +2653,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             output_frames = faster_propainter_pipeline(
                 video='dummy', mask='dummy', output=output_dir,
                 resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
                 raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
                 fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
                 return_frames=True  # ZERO DISK I/O!
@@ -2681,7 +2705,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
                 list(seg_bbox), width, height, padding_ratio=0.2, min_size=128
             )
             movement = max(seg_bbox[2] - seg_bbox[0], seg_bbox[3] - seg_bbox[1])
-            neighbor_length, subvideo_length = (2, 30) if movement < 10 else (3, 60)
+            neighbor_length, subvideo_length = (5, 60) if movement < 10 else (10, 80)
             pad_left = min(SEGMENT_TEMPORAL_PAD, start_f)
             pad_right = min(SEGMENT_TEMPORAL_PAD, total_frames - end_f)
             proc_start = start_f - pad_left
@@ -2712,7 +2736,7 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
             output_frames = faster_propainter_pipeline(
                 video='dummy', mask='dummy', output=output_dir,
                 resize_ratio=1.0, mask_dilation=SAM2_MASK_DILATION,
-                ref_stride=15, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
+                ref_stride=10, neighbor_length=neighbor_length, subvideo_length=subvideo_length,
                 raft_iter=20, mode="video_inpainting", save_fps=int(original_fps), save_frames=False,
                 fp16=use_fp16, use_cached_models=True, frames_array=seg_frames, masks_array=seg_masks,
                 return_frames=True
@@ -2831,13 +2855,8 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         )
         frame_height, frame_width = first_frame.shape[:2]
 
-        # Choose encoder: NVENC (GPU) if available, else libx264 (CPU)
-        use_nvenc = _check_nvenc_available()
-        if use_nvenc:
-            encoder_args = ['-c:v', 'h264_nvenc', '-preset', 'p1', '-b:v', '8M', '-bufsize', '16M']
-        else:
-            print("[WARN] NVENC not available, using libx264 (slower)")
-            encoder_args = ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
+        # Choose encoder: H.264 NVENC for <=4096, H.265 NVENC for larger, libx264 fallback
+        _, encoder_args = _get_nvenc_encoder(frame_width, frame_height)
 
         # FFmpeg command: pipe rawvideo → encoder → MP4 with audio from original
         ffmpeg_cmd = [

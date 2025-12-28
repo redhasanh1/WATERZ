@@ -1951,22 +1951,32 @@
                     console.log('[HEVC] Preview status:', data);
 
                     if (data.status === 'ready' && data.url) {
-                        // Preview ready! Update video source
-                        const currentTime = videoElem.currentTime;
-                        const wasPaused = videoElem.paused;
-
-                        videoElem.src = data.url;
-
-                        // Restore playback position
-                        videoElem.onloadedmetadata = () => {
-                            videoElem.currentTime = currentTime;
-                            if (!wasPaused) videoElem.play();
-                        };
-
-                        if (data.transcoded) {
-                            console.log('[HEVC] Transcoded H.264 preview loaded!');
+                        // Preview ready! But DON'T change src if using local blob
+                        // (CDN URLs cause tainted canvas - breaks SAM2 selector toDataURL)
+                        if (videoElem._localBlobUrl) {
+                            if (data.transcoded) {
+                                console.log('[HEVC] Transcoded ready but keeping local blob for canvas compatibility');
+                            } else {
+                                console.log('[HEVC] Original video OK, using local blob');
+                            }
                         } else {
-                            console.log('[HEVC] Using original video (not HEVC)');
+                            // Fallback: no local blob, use CDN URL
+                            const currentTime = videoElem.currentTime;
+                            const wasPaused = videoElem.paused;
+
+                            videoElem.src = data.url;
+
+                            // Restore playback position
+                            videoElem.onloadedmetadata = () => {
+                                videoElem.currentTime = currentTime;
+                                if (!wasPaused) videoElem.play();
+                            };
+
+                            if (data.transcoded) {
+                                console.log('[HEVC] Transcoded H.264 preview loaded!');
+                            } else {
+                                console.log('[HEVC] Using original video (not HEVC)');
+                            }
                         }
                         return; // Done polling
                     }
@@ -2155,6 +2165,11 @@
                 // Store task_id for processing
                 const videoElem = document.getElementById('previewVideo');
                 videoElem.dataset.taskId = data.task_id;
+
+                // Use LOCAL blob URL for video preview (prevents tainted canvas from CDN cross-origin)
+                // This allows SAM2 selector to capture frames with toDataURL()
+                videoElem.src = URL.createObjectURL(file);
+                videoElem._localBlobUrl = true;  // Flag to prevent pollForPreview from changing src
 
                 // Initialize professional timeline for videos
                 if (file.type.startsWith('video/')) {
