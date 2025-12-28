@@ -1935,6 +1935,70 @@
             }
         }
 
+        // Poll for HEVC transcode preview (iPhone videos)
+        // Server transcodes HEVC to H.264 for browser compatibility
+        async function pollForPreview(taskId, videoElem) {
+            const maxAttempts = 30; // 30 seconds max wait
+            let attempts = 0;
+
+            console.log('[HEVC] Starting preview poll for task:', taskId);
+
+            const poll = async () => {
+                try {
+                    const resp = await apiFetchPath(`/api/preview/${taskId}`);
+                    const data = await parseJsonSafe(resp);
+
+                    console.log('[HEVC] Preview status:', data);
+
+                    if (data.status === 'ready' && data.url) {
+                        // Preview ready! Update video source
+                        const currentTime = videoElem.currentTime;
+                        const wasPaused = videoElem.paused;
+
+                        videoElem.src = data.url;
+
+                        // Restore playback position
+                        videoElem.onloadedmetadata = () => {
+                            videoElem.currentTime = currentTime;
+                            if (!wasPaused) videoElem.play();
+                        };
+
+                        if (data.transcoded) {
+                            console.log('[HEVC] Transcoded H.264 preview loaded!');
+                        } else {
+                            console.log('[HEVC] Using original video (not HEVC)');
+                        }
+                        return; // Done polling
+                    }
+
+                    if (data.status === 'processing') {
+                        // Still transcoding, continue polling
+                        attempts++;
+                        if (attempts < maxAttempts) {
+                            setTimeout(poll, 1000);
+                        } else {
+                            console.log('[HEVC] Max poll attempts reached, keeping original');
+                        }
+                        return;
+                    }
+
+                    // status is 'not_found' or error - stop polling
+                    console.log('[HEVC] Preview not available, using original');
+
+                } catch (err) {
+                    console.error('[HEVC] Poll error:', err);
+                    // Continue polling on error
+                    attempts++;
+                    if (attempts < maxAttempts) {
+                        setTimeout(poll, 1000);
+                    }
+                }
+            };
+
+            // Start polling after 1 second (give server time to start transcode)
+            setTimeout(poll, 1000);
+        }
+
         async function uploadFile(file) {
             // Check if user is logged in
             const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -2108,6 +2172,9 @@
                 // Show processing disclaimer
                 const processingDisclaimer = document.getElementById('processingDisclaimer');
                 if (processingDisclaimer) processingDisclaimer.style.display = 'block';
+
+                // Poll for HEVC transcode preview (iPhone videos show black otherwise)
+                pollForPreview(data.task_id, videoElem);
             } else {
                 alert('Upload failed: ' + (data?.message || 'Unknown error'));
             }

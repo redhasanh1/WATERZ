@@ -338,6 +338,181 @@ except Exception as e:
 
 print("[DEBUG] FFmpeg init complete, creating Flask app...", flush=True)
 
+# [HEVC] Async transcode executor (non-blocking)
+hevc_transcode_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="HEVCTranscode")
+
+# [HEVC] Transcode HEVC to H.264 for browser preview
+def check_video_codec(video_path):
+    """Check if video is HEVC/H.265 codec using ffprobe"""
+    if not FFPROBE_EXE:
+        return None
+    try:
+        import subprocess
+        import json
+        cmd = [FFPROBE_EXE, '-v', 'quiet', '-print_format', 'json', '-show_streams', video_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            for stream in data.get('streams', []):
+                if stream.get('codec_type') == 'video':
+                    codec = stream.get('codec_name', '').lower()
+                    return codec
+    except Exception as e:
+        print(f"[HEVC] Error checking codec: {e}")
+    return None
+
+def transcode_hevc_to_h264(input_path, output_path):
+    """Transcode HEVC to H.264 for browser playback"""
+    if not FFMPEG_EXE:
+        return False
+    try:
+        import subprocess
+        # Use GPU encoding if available, fallback to CPU
+        if GPU_AVAILABLE:
+            cmd = [
+                FFMPEG_EXE, '-y', '-i', input_path,
+                '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23',
+                '-c:a', 'aac', '-b:a', '128k',
+                '-movflags', '+faststart',
+                output_path
+            ]
+        else:
+            cmd = [
+                FFMPEG_EXE, '-y', '-i', input_path,
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                '-c:a', 'aac', '-b:a', '128k',
+                '-movflags', '+faststart',
+                output_path
+            ]
+        print(f"[HEVC] Transcoding to H.264: {input_path}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            print(f"[HEVC] Transcode success: {output_path}")
+            return True
+        else:
+            print(f"[HEVC] Transcode failed: {result.stderr[:500]}")
+            return False
+    except Exception as e:
+        print(f"[HEVC] Transcode error: {e}")
+        return False
+
+
+def transcode_hevc_pipeline(video_url, task_id):
+    """
+    Complete async pipeline: Download -> Check codec -> Transcode if HEVC -> Upload to B2 -> Store in Redis
+    This runs in background thread, doesn't block server.
+    """
+    import requests
+    temp_input = None
+    temp_output = None
+
+    try:
+        # Connect to Redis
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+
+        # Set initial status
+        redis_client.setex(f"preview_status:{task_id}", 86400, "checking")
+        print(f"[HEVC] Pipeline started for {task_id}: {video_url}")
+
+        # 1. Download video to secure temp file
+        temp_input = os.path.join(TEMP_DIR, f"{uuid.uuid4()}_input.mp4")
+        print(f"[HEVC] Downloading video to {temp_input}")
+
+        response = requests.get(video_url, stream=True, timeout=120)
+        response.raise_for_status()
+
+        with open(temp_input, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        file_size = os.path.getsize(temp_input) / (1024 * 1024)
+        print(f"[HEVC] Downloaded {file_size:.1f}MB")
+
+        # 2. Check codec
+        codec = check_video_codec(temp_input)
+        print(f"[HEVC] Detected codec: {codec}")
+
+        if codec not in ['hevc', 'h265', 'hev1']:
+            # Not HEVC - no transcode needed, use original URL
+            redis_client.setex(f"preview_status:{task_id}", 86400, "original")
+            redis_client.setex(f"preview_url:{task_id}", 86400, video_url)
+            print(f"[HEVC] Not HEVC ({codec}), using original URL")
+            return video_url
+
+        # 3. Transcode HEVC -> H.264
+        redis_client.setex(f"preview_status:{task_id}", 86400, "transcoding")
+        temp_output = os.path.join(TEMP_DIR, f"{uuid.uuid4()}_preview.mp4")
+
+        success = transcode_hevc_to_h264(temp_input, temp_output)
+
+        if not success or not os.path.exists(temp_output):
+            print(f"[HEVC] Transcode failed, falling back to original")
+            redis_client.setex(f"preview_status:{task_id}", 86400, "original")
+            redis_client.setex(f"preview_url:{task_id}", 86400, video_url)
+            return video_url
+
+        # 4. Upload transcoded file to B2
+        preview_url = None
+        if B2_ENABLED:
+            try:
+                info = InMemoryAccountInfo()
+                b2_api = B2Api(info)
+                b2_api.authorize_account('production', B2_KEY_ID, B2_APP_KEY)
+                bucket = b2_api.get_bucket_by_name(B2_BUCKET)
+
+                remote_path = f"previews/{task_id}_h264.mp4"
+
+                with open(temp_output, 'rb') as f:
+                    bucket.upload_bytes(
+                        f.read(),
+                        remote_path,
+                        content_type='video/mp4'
+                    )
+
+                preview_url = f"{B2_CDN_URL}/{remote_path}"
+                print(f"[HEVC] Uploaded preview to B2: {preview_url}")
+
+            except Exception as b2_err:
+                print(f"[HEVC] B2 upload failed: {b2_err}")
+                # Fall back to original
+                redis_client.setex(f"preview_status:{task_id}", 86400, "original")
+                redis_client.setex(f"preview_url:{task_id}", 86400, video_url)
+                return video_url
+        else:
+            print(f"[HEVC] B2 not enabled, falling back to original")
+            redis_client.setex(f"preview_status:{task_id}", 86400, "original")
+            redis_client.setex(f"preview_url:{task_id}", 86400, video_url)
+            return video_url
+
+        # 5. Store in Redis
+        redis_client.setex(f"preview_status:{task_id}", 86400, "ready")
+        redis_client.setex(f"preview_url:{task_id}", 86400, preview_url)
+        print(f"[HEVC] Pipeline complete! Preview: {preview_url}")
+
+        return preview_url
+
+    except Exception as e:
+        print(f"[HEVC] Pipeline error: {e}")
+        # Always fallback to original on error
+        try:
+            redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+            redis_client.setex(f"preview_status:{task_id}", 86400, "original")
+            redis_client.setex(f"preview_url:{task_id}", 86400, video_url)
+        except:
+            pass
+        return video_url
+
+    finally:
+        # 6. CRITICAL: Cleanup temp files
+        for f in [temp_input, temp_output]:
+            if f and os.path.exists(f):
+                try:
+                    os.remove(f)
+                    print(f"[HEVC] Cleaned up: {f}")
+                except Exception as cleanup_err:
+                    print(f"[HEVC] Cleanup failed: {cleanup_err}")
+
+
 # [VRAM] Aggressive VRAM cleanup helper - call after every GPU task
 def cleanup_vram(context=""):
     """Force VRAM cleanup to prevent OOM errors between tasks."""
@@ -6864,6 +7039,14 @@ def upload_complete():
         except Exception as sprite_err:
             print(f"[B2-DIRECT] Sprite generation trigger failed: {sprite_err}")
 
+        # Trigger HEVC transcode pipeline in background (for iPhone videos)
+        # This runs async and stores preview URL in Redis when ready
+        try:
+            hevc_transcode_executor.submit(transcode_hevc_pipeline, cdn_url, task_id)
+            print(f"[HEVC] Transcode pipeline triggered for {task_id}")
+        except Exception as hevc_err:
+            print(f"[HEVC] Transcode trigger failed: {hevc_err}")
+
         return jsonify({
             'status': 'success',
             'task_id': task_id,
@@ -6875,6 +7058,65 @@ def upload_complete():
 
     except Exception as e:
         print(f"[B2-DIRECT] Error in upload-complete: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/preview/<task_id>', methods=['GET', 'OPTIONS'])
+def get_preview(task_id):
+    """
+    Get preview URL for video (transcoded H.264 for HEVC videos, original for others)
+    Frontend polls this after upload to get browser-compatible video URL.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+
+        # Check transcode status
+        status = redis_client.get(f"preview_status:{task_id}")
+
+        if status == "ready":
+            # Transcode complete - return H.264 preview URL
+            url = redis_client.get(f"preview_url:{task_id}")
+            return jsonify({
+                'status': 'ready',
+                'transcoded': True,
+                'url': url
+            })
+        elif status == "original":
+            # Not HEVC or transcode failed - return original URL
+            url = redis_client.get(f"preview_url:{task_id}")
+            if not url:
+                # Fallback: get from upload storage
+                url = redis_client.get(f"upload:{task_id}:cdn_url")
+            return jsonify({
+                'status': 'ready',
+                'transcoded': False,
+                'url': url
+            })
+        elif status in ["checking", "transcoding"]:
+            # Still processing
+            return jsonify({
+                'status': 'processing',
+                'stage': status
+            })
+        else:
+            # No status yet - transcode hasn't started or task doesn't exist
+            # Return original URL if available
+            url = redis_client.get(f"upload:{task_id}:cdn_url")
+            if url:
+                return jsonify({
+                    'status': 'ready',
+                    'transcoded': False,
+                    'url': url
+                })
+            return jsonify({
+                'status': 'not_found'
+            }), 404
+
+    except Exception as e:
+        print(f"[HEVC] Error getting preview: {e}")
         return jsonify({'error': str(e)}), 500
 
 
