@@ -2,17 +2,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <!-- Ezoic Privacy Scripts (must load first) -->
-    <script data-cfasync="false" src="https://cmp.gatekeeperconsent.com/min.js"></script>
-    <script data-cfasync="false" src="https://the.gatekeeperconsent.com/cmp.min.js"></script>
-
-    <!-- Ezoic Header Script -->
-    <script async src="//www.ezojs.com/ezoic/sa.min.js"></script>
-    <script>
-        window.ezstandalone = window.ezstandalone || {};
-        ezstandalone.cmd = ezstandalone.cmd || [];
-    </script>
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
@@ -1350,113 +1339,6 @@
                 gap: 1rem;
             }
         }
-        /* Ad zones */
-        .ad-container {
-            background: rgba(26, 26, 46, 0.5);
-            border: 1px solid rgba(102, 126, 234, 0.2);
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 1rem 0;
-            text-align: center;
-            min-height: 100px;
-            width: 100%;
-        }
-        .ad-container ins.adsbygoogle {
-            width: 100%;
-        }
-
-        .ad-sidebar {
-            position: fixed;
-            width: 160px;
-            top: 20px;
-            background: rgba(26, 26, 46, 0.8);
-            border: 1px solid rgba(102, 126, 234, 0.2);
-            border-radius: 8px;
-            padding: 1rem;
-            min-height: 600px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-        }
-
-        .ad-sidebar.left {
-            left: 10px;
-        }
-
-        .ad-sidebar.right {
-            right: 10px;
-        }
-
-        .ad-banner-top {
-            background: rgba(26, 26, 46, 0.8);
-            border-bottom: 1px solid rgba(102, 126, 234, 0.2);
-            padding: 1rem;
-            text-align: center;
-            min-height: 90px;
-            width: 100%;
-        }
-        .ad-banner-top ins.adsbygoogle {
-            width: 100%;
-        }
-
-        .ad-banner-bottom {
-            background: rgba(26, 26, 46, 0.8);
-            border-top: 1px solid rgba(102, 126, 234, 0.2);
-            padding: 1rem;
-            text-align: center;
-            min-height: 90px;
-            margin-top: 2rem;
-            width: 100%;
-        }
-        .ad-banner-bottom ins.adsbygoogle {
-            width: 100%;
-        }
-
-        .ad-placeholder {
-            background: linear-gradient(135deg, #1a1a2e 0%, #2a2a3e 100%);
-            border: 2px dashed rgba(102, 126, 234, 0.3);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .ad-placeholder::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.1), transparent);
-            animation: shimmer 3s infinite;
-        }
-
-        @keyframes shimmer {
-            0% { left: -100%; }
-            100% { left: 100%; }
-        }
-
-        .ad-placeholder span {
-            position: relative;
-            z-index: 1;
-            opacity: 0.6;
-        }
-
-        @media (max-width: 1400px) {
-            .ad-sidebar {
-                display: none;
-            }
-        }
-
         /* Maintenance banner */
         .maintenance-banner {
             position: relative;
@@ -1551,17 +1433,6 @@
     </div>
 
 
-    <!-- Left Sidebar Ad - Ezoic -->
-    <div class="ad-sidebar left">
-        <div id="ezoic-pub-ad-placeholder-107"></div>
-    </div>
-
-    <!-- Right Sidebar Ad - Ezoic -->
-    <div class="ad-sidebar right">
-        <div id="ezoic-pub-ad-placeholder-108"></div>
-        <div id="ezoic-pub-ad-placeholder-106" style="margin-top: 20px;"></div>
-    </div>
-
     <section class="hero" id="remove-objects">
         <div class="hero-background"></div>
         <div class="container">
@@ -1600,8 +1471,6 @@
                         <p class="upload-description">or click to browse</p>
                     </div>
 
-                    <!-- Ezoic: under_second_paragraph -->
-                    <div id="ezoic-pub-ad-placeholder-110" style="margin: 1.5rem 0; text-align: center;"></div>
 
                     <div id="creditEstimate" style="display:none;">
                         <div style="background: rgba(25, 25, 40, 0.9); border-radius: 12px; padding: 16px 24px; max-width: 400px; margin: 15px auto; display: flex; align-items: center; justify-content: space-between; gap: 20px; border: 1px solid rgba(255,255,255,0.08);">
@@ -1840,8 +1709,6 @@
                             </p>
                         </div>
 
-                        <!-- Ezoic: longer_content -->
-                        <div id="ezoic-pub-ad-placeholder-113" style="margin-top: 1.5rem;"></div>
 
                         <button id="processBtn" class="btn-primary" style="display: none; margin-top: 2rem;">Remove Objects</button>
                         <div id="processingStatus" style="display: none; margin-top: 1rem; padding: 1.5rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px; text-align: center;">
@@ -1853,14 +1720,10 @@
                             <p id="progressPercent" style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">0%</p>
                         </div>
 
-                        <!-- Ezoic: under_first_paragraph -->
-                        <div id="ezoic-pub-ad-placeholder-109" style="margin-top: 1.5rem;"></div>
                     </div> <!-- End uploadSection -->
                 </div> <!-- End demo-card -->
                 </div>
 
-                <!-- Ezoic: mid_content -->
-                <div id="ezoic-pub-ad-placeholder-111" style="margin: 2rem auto; max-width: 728px;"></div>
 
                 <!-- Video Demo Section -->
                 <section id="showcase" style="padding: 4rem 0; margin: 3rem 0; background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%); border-top: 1px solid rgba(102, 126, 234, 0.1); border-bottom: 1px solid rgba(102, 126, 234, 0.1); border-radius: 24px;">
@@ -1932,17 +1795,11 @@
                     </div>
                 </div>
 
-                <!-- Ezoic: incontent_5 -->
-                <div id="ezoic-pub-ad-placeholder-115" style="margin: 2rem auto; max-width: 728px;"></div>
 
-                <!-- Ezoic: long_content -->
-                <div id="ezoic-pub-ad-placeholder-112" style="margin: 2rem auto; max-width: 728px;"></div>
             </div>
         </div>
     </section>
 
-    <!-- Ezoic: longest_content -->
-    <div id="ezoic-pub-ad-placeholder-114" style="margin: 1rem auto; max-width: 728px;"></div>
 
     <!-- Simple Footer -->
     <footer style="padding: 3rem; text-align: center; background: rgba(102, 126, 234, 0.03); border-top: 1px solid rgba(102, 126, 234, 0.1);">
@@ -1999,31 +1856,6 @@
                 }
             });
         });
-
-        // --- Deferred Google Ads init helpers ---
-        function initVisibleGoogleAd(ins) {
-            if (!ins || ins.dataset.adInit === 'true') return;
-            var visible = ins.offsetParent !== null && ins.offsetWidth > 0;
-            if (!visible) return;
-            try {
-                (adsbygoogle = window.adsbygoogle || []).push({});
-                ins.dataset.adInit = 'true';
-            } catch (e) {
-                // ignore; will retry on resize/visibility
-            }
-        }
-
-        function initDeferredAdsIn(container) {
-            try {
-                var root = typeof container === 'string' ? document.querySelector(container) : (container || document);
-                if (!root) return;
-                var slots = root.querySelectorAll('ins.adsbygoogle[data-defer="true"]');
-                slots.forEach(initVisibleGoogleAd);
-            } catch (e) { /* ignore */ }
-        }
-
-        window.addEventListener('load', function () { initDeferredAdsIn(document); });
-        window.addEventListener('resize', function () { initDeferredAdsIn(document); });
 
         // --- API health indicator ---
         function fetchWithTimeout(resource, options) {
@@ -4659,13 +4491,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script>
-
-<!-- Ezoic Ad Initialization -->
-<script>
-    ezstandalone.cmd.push(function() {
-        ezstandalone.showAds(106, 107, 108, 109, 110, 111, 112, 113, 114, 115);
-    });
-</script>
 </body>
 </html>
 

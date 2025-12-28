@@ -1440,8 +1440,8 @@ def add_security_headers(response):
     response.headers['X-XSS-Protection'] = '1; mode=block'
     # Referrer policy
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    # Content Security Policy (allow Cloudflare, Ezoic, Fonts, data URIs for videos)
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://markz.humblewoslayer.workers.dev https://*.ezojs.com https://*.ezoic.net https://*.gatekeeperconsent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; media-src 'self' data: blob: https://markz.humblewoslayer.workers.dev; connect-src 'self' https:; frame-src 'self' https://*.ezoic.net;"
+    # Content Security Policy (allow Cloudflare, Fonts, data URIs for videos)
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://markz.humblewoslayer.workers.dev; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; media-src 'self' data: blob: https://markz.humblewoslayer.workers.dev; connect-src 'self' https:; frame-src 'self';"
     # Remove server header
     response.headers.pop('Server', None)
     return response
