@@ -5858,10 +5858,26 @@ def objrem_status(job_id):
                             if task_result.get('masks_url'):
                                 redis_client.hset(f"objrem:{job_id}", 'masks_url', task_result['masks_url'])
                                 status = 'completed'
+                                # Release GPU lock on tracking complete
+                                try:
+                                    current_lock = redis_client.get('gpu:processing')
+                                    if current_lock and (f"objrem_{job_id}" in current_lock or job_id in current_lock):
+                                        redis_client.delete('gpu:processing')
+                                        print(f"[GPU-LOCK] Released lock on objrem tracking complete for job {job_id}")
+                                except Exception as lock_err:
+                                    print(f"[GPU-LOCK] Failed to release lock: {lock_err}")
                             # Check for cdn_url (from simple effects export)
                             if task_result.get('cdn_url'):
                                 redis_client.hset(f"objrem:{job_id}", 'result_cdn_url', task_result['cdn_url'])
                                 status = 'export_complete'
+                                # Release GPU lock on export complete
+                                try:
+                                    current_lock = redis_client.get('gpu:processing')
+                                    if current_lock and (f"objrem_{job_id}" in current_lock or job_id in current_lock):
+                                        redis_client.delete('gpu:processing')
+                                        print(f"[GPU-LOCK] Released lock on objrem export_complete for job {job_id}")
+                                except Exception as lock_err:
+                                    print(f"[GPU-LOCK] Failed to release lock: {lock_err}")
                             redis_client.hset(f"objrem:{job_id}", 'status', status)
                     else:
                         status = 'error'
@@ -5869,6 +5885,14 @@ def objrem_status(job_id):
                             'status': 'error',
                             'message': str(result.result)
                         })
+                        # Release GPU lock on error to prevent deadlock
+                        try:
+                            current_lock = redis_client.get('gpu:processing')
+                            if current_lock and (f"objrem_{job_id}" in current_lock or job_id in current_lock):
+                                redis_client.delete('gpu:processing')
+                                print(f"[GPU-LOCK] Released lock on objrem error for job {job_id}")
+                        except Exception as lock_err:
+                            print(f"[GPU-LOCK] Failed to release lock on error: {lock_err}")
                 else:
                     # Still running - get progress from task meta
                     meta = result.info
@@ -6348,6 +6372,16 @@ def get_status(task_id):
                                     filename = os.path.basename(final_path)
                                     result_url = f'/results/{filename}'
                                 print(f"[POLL] Background encoding COMPLETE for {video_id}! Returning result_url: {result_url}")
+
+                                # Release GPU lock on job completion
+                                try:
+                                    current_lock = redis_client.get('gpu:processing')
+                                    if current_lock and (current_lock == task_id or task_id in current_lock):
+                                        redis_client.delete('gpu:processing')
+                                        print(f"[GPU-LOCK] Released lock on background encoding SUCCESS for task {task_id}")
+                                except Exception as lock_err:
+                                    print(f"[GPU-LOCK] Failed to release lock: {lock_err}")
+
                                 # Deduct credit on successful completion
                                 new_credits = deduct_credit_on_completion(task_id)
                                 response['result'] = {
@@ -6421,6 +6455,17 @@ def get_status(task_id):
             }
             if isinstance(result_data, dict) and 'metadata' in result_data:
                 response['metadata'] = result_data['metadata']
+
+            # Release GPU lock on job completion (not waiting for download!)
+            try:
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                current_lock = redis_client.get('gpu:processing')
+                if current_lock and (current_lock == task_id or task_id in current_lock):
+                    redis_client.delete('gpu:processing')
+                    print(f"[GPU-LOCK] Released lock on job SUCCESS for task {task_id}")
+            except Exception as lock_err:
+                print(f"[GPU-LOCK] Failed to release lock on success: {lock_err}")
+
             # Deduct credit on successful completion
             new_credits = deduct_credit_on_completion(task_id)
             if new_credits is not None:
@@ -6428,6 +6473,16 @@ def get_status(task_id):
         elif task.state == 'FAILURE':
             response['error'] = str(task.info)
             print(f"[ERROR] Task failed: {task.info}")
+
+            # Release GPU lock on failure to prevent deadlock
+            try:
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                current_lock = redis_client.get('gpu:processing')
+                if current_lock and (current_lock == task_id or task_id in current_lock):
+                    redis_client.delete('gpu:processing')
+                    print(f"[GPU-LOCK] Released lock on job FAILURE for task {task_id}")
+            except Exception as lock_err:
+                print(f"[GPU-LOCK] Failed to release lock on failure: {lock_err}")
 
         return jsonify(response)
     except Exception as e:
