@@ -6127,10 +6127,68 @@ def gpu_lock_status():
         holder = redis_client.get('gpu_active_job')
         if holder:
             ttl = redis_client.ttl('gpu_active_job')
-            return jsonify({'locked': True, 'holder': holder, 'ttl': ttl})
+            queue_len = redis_client.llen('gpu_job_queue')
+            return jsonify({'locked': True, 'holder': holder, 'ttl': ttl, 'queue_length': queue_len})
         return jsonify({'locked': False})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/gpu-lock/force-clear', methods=['POST'])
+def gpu_lock_force_clear():
+    """Emergency: Clear GPU lock and queue."""
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        redis_client.delete('gpu_active_job')
+        redis_client.delete('gpu_job_queue')
+        print("[GPU-LOCK] FORCE CLEARED - lock and queue deleted")
+        return jsonify({'cleared': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sam2/status/<job_id>', methods=['GET'])
+def sam2_job_status(job_id):
+    """Get SAM2 job status and auto-release lock on completion."""
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+
+        # Check Celery task status
+        result = celery.AsyncResult(job_id)
+
+        if result.ready():
+            if result.successful():
+                status = 'completed'
+                task_result = result.result
+            else:
+                status = 'error'
+                task_result = str(result.result)
+
+            # Auto-release GPU lock
+            current_holder = redis_client.get('gpu_active_job')
+            if current_holder == job_id:
+                redis_client.delete('gpu_active_job')
+                print(f"[GPU-LOCK] Auto-released by SAM2 job {job_id}")
+
+                # Start next queued job
+                next_job_id = redis_client.lpop('gpu_job_queue')
+                if next_job_id:
+                    print(f"[GPU-QUEUE] Auto-starting next job: {next_job_id}")
+                    _start_next_queued_job(redis_client, next_job_id)
+
+            return jsonify({'status': status, 'result': task_result if isinstance(task_result, dict) else {}})
+        else:
+            # Still running
+            meta = result.info
+            progress = 0
+            message = 'Processing...'
+            if isinstance(meta, dict):
+                progress = meta.get('progress', 0)
+                message = meta.get('message', 'Processing...')
+            return jsonify({'status': 'processing', 'progress': progress, 'message': message})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/api/object-removal/export', methods=['POST', 'OPTIONS'])
