@@ -92,7 +92,7 @@ class SAM2Selector {
 
     /**
      * Update canvas size for coordinate conversion
-     * Uses CANVAS rect consistently (like MaskDrawer in object-removal.html)
+     * Includes letterbox calculation like object-removal.html's handlePointSelection
      */
     updateCanvasSize() {
         if (!this.video.videoWidth) return;
@@ -100,40 +100,44 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Get video size to set canvas CSS
-        const videoRect = this.video.getBoundingClientRect();
+        // Get canvas container rect (like object-removal.html uses interactionLayer)
+        const canvasRect = this.canvas.getBoundingClientRect();
 
         // Guard against invalid rect
-        if (videoRect.width < 10 || videoRect.height < 10) {
-            console.log('[SAM2Selector] Video rect invalid, scheduling retry');
+        if (canvasRect.width < 10 || canvasRect.height < 10) {
+            console.log('[SAM2Selector] Canvas rect invalid, scheduling retry');
             setTimeout(() => this.updateCanvasSize(), 50);
             return;
         }
 
-        // Set canvas CSS to match video
-        this.canvas.style.width = videoRect.width + 'px';
-        this.canvas.style.height = videoRect.height + 'px';
-        this.canvas.style.left = '0px';
-        this.canvas.style.top = '0px';
+        // Calculate letterbox offsets (COPIED FROM object-removal.html lines 2359-2389)
+        // This is critical for correct coordinate conversion!
+        const videoAspect = this.videoWidth / this.videoHeight;
+        const containerAspect = canvasRect.width / canvasRect.height;
+
+        if (videoAspect > containerAspect) {
+            // Video is wider than container - letterbox top/bottom
+            this.renderWidth = canvasRect.width;
+            this.renderHeight = canvasRect.width / videoAspect;
+            this.offsetX = 0;
+            this.offsetY = (canvasRect.height - this.renderHeight) / 2;
+        } else {
+            // Video is taller than container - letterbox left/right
+            this.renderHeight = canvasRect.height;
+            this.renderWidth = canvasRect.height * videoAspect;
+            this.offsetX = (canvasRect.width - this.renderWidth) / 2;
+            this.offsetY = 0;
+        }
+
+        // Calculate scale for coordinate conversion
+        this.displayScaleX = this.renderWidth / this.videoWidth;
+        this.displayScaleY = this.renderHeight / this.videoHeight;
 
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        // NOW get CANVAS rect for scale calculation (AFTER CSS applied)
-        // This ensures scale matches what getCanvasPoint will see
-        // (MaskDrawer in object-removal.html does exactly this)
-        const canvasRect = this.canvas.getBoundingClientRect();
-
-        this.offsetX = 0;
-        this.offsetY = 0;
-        this.displayScaleX = canvasRect.width / this.videoWidth;
-        this.displayScaleY = canvasRect.height / this.videoHeight;
-
-        this.renderWidth = canvasRect.width;
-        this.renderHeight = canvasRect.height;
-
-        console.log(`[SAM2Selector] Canvas: ${canvasRect.width.toFixed(0)}x${canvasRect.height.toFixed(0)}, Scale: ${this.displayScaleX.toFixed(3)}`);
+        console.log(`[SAM2Selector] Container: ${canvasRect.width.toFixed(0)}x${canvasRect.height.toFixed(0)}, Render: ${this.renderWidth.toFixed(0)}x${this.renderHeight.toFixed(0)}, Offset: ${this.offsetX.toFixed(0)},${this.offsetY.toFixed(0)}`);
 
         // Redraw with current mask
         this.draw();
@@ -182,7 +186,7 @@ class SAM2Selector {
 
     /**
      * Convert mouse/touch event to canvas coordinates
-     * Simple direct conversion - no letterbox offset needed with height:auto
+     * Includes letterbox offset compensation (like object-removal.html)
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
@@ -191,9 +195,21 @@ class SAM2Selector {
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
-        // Direct conversion to video coordinates - no letterbox offset
-        const videoX = Math.floor(clickX / this.displayScaleX);
-        const videoY = Math.floor(clickY / this.displayScaleY);
+        // Subtract letterbox offset to get position relative to video content
+        // (COPIED FROM object-removal.html's coordinate conversion)
+        const relativeX = clickX - (this.offsetX || 0);
+        const relativeY = clickY - (this.offsetY || 0);
+
+        // Check if click is in letterbox area (outside video content)
+        if (relativeX < 0 || relativeY < 0 ||
+            relativeX > this.renderWidth || relativeY > this.renderHeight) {
+            console.log('[SAM2Selector] Click in letterbox area, ignoring');
+            return null;
+        }
+
+        // Convert to video coordinates using scale
+        const videoX = Math.floor(relativeX / this.displayScaleX);
+        const videoY = Math.floor(relativeY / this.displayScaleY);
 
         // Clamp to video bounds
         return {
