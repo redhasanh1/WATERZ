@@ -91,8 +91,23 @@ class SAM2Selector {
     }
 
     /**
-     * Update canvas size for coordinate conversion
-     * Includes letterbox calculation like object-removal.html's handlePointSelection
+     * Calculate video render bounds (Theater mode - simplified, no letterbox)
+     */
+    calculateVideoRenderBounds() {
+        if (!this.video.videoWidth) return;
+
+        // In theater mode, canvas matches video display exactly
+        const rect = this.canvas.getBoundingClientRect();
+        this.renderWidth = rect.width;
+        this.renderHeight = rect.height;
+        this.offsetX = 0;
+        this.offsetY = 0;
+
+        console.log(`[SAM2Selector] Theater mode: ${this.renderWidth.toFixed(1)}x${this.renderHeight.toFixed(1)}`);
+    }
+
+    /**
+     * Update canvas size to match video element
      */
     updateCanvasSize() {
         if (!this.video.videoWidth) return;
@@ -100,44 +115,33 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Get canvas container rect (like object-removal.html uses interactionLayer)
+        // Get current display dimensions for scale calculation
         const canvasRect = this.canvas.getBoundingClientRect();
+        const displayWidth = canvasRect.width;
+        const displayHeight = canvasRect.height;
 
-        // Guard against invalid rect
-        if (canvasRect.width < 10 || canvasRect.height < 10) {
-            console.log('[SAM2Selector] Canvas rect invalid, scheduling retry');
+        // Guard against invalid rect (canvas not yet laid out)
+        if (displayWidth < 10 || displayHeight < 10) {
+            console.log('[SAM2Selector] Rect invalid, scheduling retry');
             setTimeout(() => this.updateCanvasSize(), 50);
             return;
         }
-
-        // Calculate letterbox offsets (COPIED FROM object-removal.html lines 2359-2389)
-        // This is critical for correct coordinate conversion!
-        const videoAspect = this.videoWidth / this.videoHeight;
-        const containerAspect = canvasRect.width / canvasRect.height;
-
-        if (videoAspect > containerAspect) {
-            // Video is wider than container - letterbox top/bottom
-            this.renderWidth = canvasRect.width;
-            this.renderHeight = canvasRect.width / videoAspect;
-            this.offsetX = 0;
-            this.offsetY = (canvasRect.height - this.renderHeight) / 2;
-        } else {
-            // Video is taller than container - letterbox left/right
-            this.renderHeight = canvasRect.height;
-            this.renderWidth = canvasRect.height * videoAspect;
-            this.offsetX = (canvasRect.width - this.renderWidth) / 2;
-            this.offsetY = 0;
-        }
-
-        // Calculate scale for coordinate conversion
-        this.displayScaleX = this.renderWidth / this.videoWidth;
-        this.displayScaleY = this.renderHeight / this.videoHeight;
 
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        console.log(`[SAM2Selector] Container: ${canvasRect.width.toFixed(0)}x${canvasRect.height.toFixed(0)}, Render: ${this.renderWidth.toFixed(0)}x${this.renderHeight.toFixed(0)}, Offset: ${this.offsetX.toFixed(0)},${this.offsetY.toFixed(0)}`);
+        // Canvas display size is handled by CSS (100% width/height of parent)
+        // No need to set style.width/height - it auto-resizes responsively
+
+        // Calculate scale for coordinate conversion
+        this.displayScaleX = displayWidth / this.videoWidth;
+        this.displayScaleY = displayHeight / this.videoHeight;
+
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth.toFixed(0)}x${displayHeight.toFixed(0)}`);
+
+        // Calculate video render bounds for letterbox compensation
+        this.calculateVideoRenderBounds();
 
         // Redraw with current mask
         this.draw();
@@ -186,30 +190,16 @@ class SAM2Selector {
 
     /**
      * Convert mouse/touch event to canvas coordinates
-     * Includes letterbox offset compensation (like object-removal.html)
+     * Uses pre-calculated displayScaleX/Y from updateCanvasSize() for reliability
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
-
-        // Get click position relative to canvas element
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
-        // Subtract letterbox offset to get position relative to video content
-        // (COPIED FROM object-removal.html's coordinate conversion)
-        const relativeX = clickX - (this.offsetX || 0);
-        const relativeY = clickY - (this.offsetY || 0);
-
-        // Check if click is in letterbox area (outside video content)
-        if (relativeX < 0 || relativeY < 0 ||
-            relativeX > this.renderWidth || relativeY > this.renderHeight) {
-            console.log('[SAM2Selector] Click in letterbox area, ignoring');
-            return null;
-        }
-
-        // Convert to video coordinates using scale
-        const videoX = Math.floor(relativeX / this.displayScaleX);
-        const videoY = Math.floor(relativeY / this.displayScaleY);
+        // Use pre-calculated scale (set in updateCanvasSize) - simpler and works on Android
+        const videoX = Math.floor(clickX / this.displayScaleX);
+        const videoY = Math.floor(clickY / this.displayScaleY);
 
         // Clamp to video bounds
         return {

@@ -540,17 +540,13 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     import torch
     import torch.nn.functional as F
 
-    # Extract job_id for local masks path
-    task_id = self.request.id
-    job_id = None
-    if task_id and task_id.startswith('simplefx_'):
-        job_id = task_id.replace('simplefx_', '')
-
     print(f"[GPU-FX] 🚀 REVOLUTIONARY GPU Pipeline Starting!")
     print(f"[GPU-FX] Operation: {operation}, bg={background}, color={bg_color}")
 
     # Derive local masks path from task_id
-    if job_id:
+    task_id = self.request.id
+    if task_id and task_id.startswith('simplefx_'):
+        job_id = task_id.replace('simplefx_', '')
         derived_masks_dir = f"/tmp/sam2_masks/{job_id}"
         if os.path.exists(derived_masks_dir):
             masks_dir_local = derived_masks_dir
