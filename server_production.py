@@ -5718,9 +5718,29 @@ def objrem_track():
         lock_acquired = redis_client.set('gpu_active_job', job_id, nx=True, ex=600)
 
         if not lock_acquired:
-            # Lock held by someone else - check if it's our own retry
+            # Lock held - but check if holder's task is actually done
             gpu_active = redis_client.get('gpu_active_job')
-            if gpu_active != job_id:
+            if gpu_active and gpu_active != job_id:
+                # Check if lock holder's Celery task completed
+                try:
+                    holder_result = celery.AsyncResult(gpu_active)
+                    if holder_result.ready():
+                        # Task done! Release stale lock
+                        redis_client.delete('gpu_active_job')
+                        print(f"[GPU-LOCK] Released stale lock from {gpu_active} (task finished)")
+
+                        # Start next queued job if any
+                        next_queued = redis_client.lpop('gpu_job_queue')
+                        if next_queued:
+                            print(f"[GPU-QUEUE] Auto-starting queued job: {next_queued}")
+                            _start_next_queued_job(redis_client, next_queued)
+
+                        # Try to acquire lock again
+                        lock_acquired = redis_client.set('gpu_active_job', job_id, nx=True, ex=600)
+                except Exception as e:
+                    print(f"[GPU-LOCK] Error checking holder task: {e}")
+
+            if not lock_acquired and gpu_active != job_id:
                 # GPU busy with different job - queue this one
                 queue_key = 'gpu_job_queue'
                 queue_members = redis_client.lrange(queue_key, 0, -1)
@@ -8679,9 +8699,29 @@ def sam2_process_video():
         lock_acquired = redis_client.set('gpu_active_job', job_id, nx=True, ex=600)
 
         if not lock_acquired:
-            # Lock held by someone else - add to queue for auto-start later
+            # Lock held - but check if holder's task is actually done
             gpu_active = redis_client.get('gpu_active_job')
-            if gpu_active != job_id:
+            if gpu_active and gpu_active != job_id:
+                # Check if lock holder's Celery task completed
+                try:
+                    holder_result = celery.AsyncResult(gpu_active)
+                    if holder_result.ready():
+                        # Task done! Release stale lock
+                        redis_client.delete('gpu_active_job')
+                        print(f"[GPU-LOCK] Released stale lock from {gpu_active} (task finished)")
+
+                        # Start next queued job if any
+                        next_queued = redis_client.lpop('gpu_job_queue')
+                        if next_queued:
+                            print(f"[GPU-QUEUE] Auto-starting queued job: {next_queued}")
+                            _start_next_queued_job(redis_client, next_queued)
+
+                        # Try to acquire lock again
+                        lock_acquired = redis_client.set('gpu_active_job', job_id, nx=True, ex=600)
+                except Exception as e:
+                    print(f"[GPU-LOCK] Error checking holder task: {e}")
+
+            if not lock_acquired and gpu_active != job_id:
                 # Store job data for later dispatch
                 redis_client.hset(f"sam2job:{job_id}", mapping={
                     'task_id': task_id,
