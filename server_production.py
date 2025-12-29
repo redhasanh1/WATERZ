@@ -5717,11 +5717,30 @@ def objrem_track():
         # Check if GPU is busy with another job
         gpu_active = redis_client.get('gpu_active_job')
         if gpu_active and gpu_active != job_id:
+            # GPU busy - add to queue instead of returning error
+            queue_key = 'gpu_job_queue'
+            queue_members = redis_client.lrange(queue_key, 0, -1)
+            if job_id not in queue_members:
+                redis_client.rpush(queue_key, job_id)
+
+            # Store modified_masks for later (from request body)
+            modified_masks = data.get('modified_masks', [])
+            if modified_masks:
+                redis_client.hset(f"objrem:{job_id}", 'modified_masks_json', json.dumps(modified_masks))
+
+            # Update job status
+            redis_client.hset(f"objrem:{job_id}", mapping={
+                'status': 'queued',
+                'message': 'Waiting in queue...'
+            })
+
+            queue_pos = redis_client.lpos(queue_key, job_id)
+            print(f"[GPU-QUEUE] Job {job_id} added to queue (position {(queue_pos or 0) + 1})")
             return jsonify({
-                'status': 'error',
-                'message': 'GPU is busy with another job. Please wait.',
-                'active_job': gpu_active
-            }), 503
+                'status': 'queued',
+                'queue_position': (queue_pos or 0) + 1,
+                'message': f'Waiting in queue (position {(queue_pos or 0) + 1})'
+            })
 
         job = redis_client.hgetall(f"objrem:{job_id}")
 
@@ -5911,6 +5930,67 @@ def objrem_status(job_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def _start_queued_job(redis_client, job_id):
+    """Start a job that was waiting in queue"""
+    from celery import signature
+
+    job = redis_client.hgetall(f"objrem:{job_id}")
+    if not job:
+        print(f"[GPU-QUEUE] Job {job_id} not found in Redis")
+        return False
+
+    # Get stored data
+    points_str = job.get('points', '[]')
+    points = json.loads(points_str)
+    if not points:
+        print(f"[GPU-QUEUE] Job {job_id} has no points")
+        return False
+
+    video_url = job.get('cdn_url', '') or job.get('local_path', '')
+    frame_idx = int(job.get('frame_index', 0))
+    modified_masks_json = job.get('modified_masks_json', '[]')
+    modified_masks = json.loads(modified_masks_json) if modified_masks_json else []
+
+    # Convert points
+    point_coords = [(p['x'], p['y']) for p in points]
+    labels = [p.get('label', 1) for p in points]
+    object_ids = [p.get('object_id', 0) for p in points]
+
+    wsl_masks_dir = f"/tmp/sam2_masks/{job_id}"
+    task_id = f"objrem_{job_id}"
+
+    # Update status
+    redis_client.hset(f"objrem:{job_id}", mapping={
+        'status': 'tracking',
+        'progress': '0',
+        'message': 'Starting tracking (from queue)...',
+        'celery_task_id': task_id,
+        'wsl_masks_dir': wsl_masks_dir
+    })
+
+    # Set GPU lock
+    redis_client.set('gpu_active_job', job_id, ex=600)
+
+    # Dispatch task
+    s1 = signature(
+        'sam2.generate_masks_fullfps',
+        args=[video_url, wsl_masks_dir],
+        kwargs={
+            'prompt_mode': 'point',
+            'points': point_coords,
+            'labels': labels,
+            'object_ids': object_ids,
+            'frame_idx': frame_idx,
+            'api_base': None,
+            'modified_masks': modified_masks
+        },
+        queue='wsl_sam2'
+    )
+    s1.apply_async(task_id=task_id)
+    print(f"[GPU-QUEUE] Dispatched {task_id} from queue")
+    return True
+
+
 @app.route('/api/gpu-lock/release/<job_id>', methods=['POST', 'OPTIONS'])
 def gpu_lock_release(job_id):
     """Release GPU lock when user acknowledges download."""
@@ -5924,6 +6004,14 @@ def gpu_lock_release(job_id):
         if current_holder == job_id:
             redis_client.delete('gpu_active_job')
             print(f"[GPU-LOCK] Released by {job_id}")
+
+            # Check queue for next job
+            next_job_id = redis_client.lpop('gpu_job_queue')
+            if next_job_id:
+                print(f"[GPU-QUEUE] Starting next job: {next_job_id}")
+                _start_queued_job(redis_client, next_job_id)
+                return jsonify({'released': True, 'job_id': job_id, 'next_job': next_job_id})
+
             return jsonify({'released': True, 'job_id': job_id})
         else:
             print(f"[GPU-LOCK] Cannot release - held by {current_holder}, not {job_id}")
@@ -5966,6 +6054,33 @@ def objrem_export():
             return jsonify({'status': 'error', 'message': 'Missing job_id'}), 400
 
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+
+        # Check if GPU is busy with DIFFERENT job
+        gpu_active = redis_client.get('gpu_active_job')
+        if gpu_active and gpu_active != job_id:
+            # GPU busy with different job - queue this export
+            queue_key = 'gpu_job_queue'
+            queue_members = redis_client.lrange(queue_key, 0, -1)
+            if job_id not in queue_members:
+                redis_client.rpush(queue_key, job_id)
+
+            # Mark as queued for export
+            redis_client.hset(f"objrem:{job_id}", mapping={
+                'status': 'queued',
+                'message': 'Waiting in queue for export...'
+            })
+
+            queue_pos = redis_client.lpos(queue_key, job_id)
+            print(f"[GPU-QUEUE] Export {job_id} added to queue (position {(queue_pos or 0) + 1})")
+            return jsonify({
+                'status': 'queued',
+                'queue_position': (queue_pos or 0) + 1,
+                'message': f'Waiting in queue (position {(queue_pos or 0) + 1})'
+            })
+
+        # Refresh GPU lock timer for this job
+        redis_client.set('gpu_active_job', job_id, ex=600)
+
         job = redis_client.hgetall(f"objrem:{job_id}")
 
         if not job:
