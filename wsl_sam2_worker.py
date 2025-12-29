@@ -95,6 +95,14 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
 
 def _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id, modified_masks=None):
     """Actual implementation of generate_masks_fullfps (wrapped for error handling)."""
+    from gpu_lock import GPULock
+
+    with GPULock(f"sam2_{self.request.id}"):
+        return _generate_masks_fullfps_impl_locked(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id, modified_masks)
+
+
+def _generate_masks_fullfps_impl_locked(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id, modified_masks=None):
+    """Locked implementation - runs while holding GPU lock."""
     import os
     import cv2
     import numpy as np
@@ -389,142 +397,144 @@ def generate_masks_yolo(self, video_path, masks_dir, confidence_threshold=0.3, p
     Returns:
         dict with masks_url, total_frames, etc.
     """
+    from gpu_lock import GPULock
     import cv2
     import numpy as np
     import requests
 
-    video_path_wsl = to_wsl_path(video_path)
-    masks_dir_wsl = to_wsl_path(masks_dir)
-    os.makedirs(masks_dir_wsl, exist_ok=True)
+    with GPULock(f"yolo_{self.request.id}"):
+        video_path_wsl = to_wsl_path(video_path)
+        masks_dir_wsl = to_wsl_path(masks_dir)
+        os.makedirs(masks_dir_wsl, exist_ok=True)
 
-    # If video is a Railway path (/data/...), download it from api_base
-    is_railway_path = video_path.startswith('/data/') or video_path_wsl.startswith('/data/')
-    if (is_railway_path or not os.path.exists(video_path_wsl)) and api_base:
-        filename = os.path.basename(video_path)
-        download_url = f"{api_base}/uploads/{filename}"
-        local_video = f"/tmp/{filename}"
-        print(f"[YOLO] Downloading video from {download_url}...")
-        self.update_state(state='PROCESSING', meta={'status': 'Downloading video', 'progress': 2})
-        r = requests.get(download_url, timeout=300)
-        r.raise_for_status()
-        with open(local_video, 'wb') as f:
-            f.write(r.content)
-        video_path_wsl = local_video
-        print(f"[YOLO] Downloaded {len(r.content) / 1024 / 1024:.1f} MB to {local_video}")
+        # If video is a Railway path (/data/...), download it from api_base
+        is_railway_path = video_path.startswith('/data/') or video_path_wsl.startswith('/data/')
+        if (is_railway_path or not os.path.exists(video_path_wsl)) and api_base:
+            filename = os.path.basename(video_path)
+            download_url = f"{api_base}/uploads/{filename}"
+            local_video = f"/tmp/{filename}"
+            print(f"[YOLO] Downloading video from {download_url}...")
+            self.update_state(state='PROCESSING', meta={'status': 'Downloading video', 'progress': 2})
+            r = requests.get(download_url, timeout=300)
+            r.raise_for_status()
+            with open(local_video, 'wb') as f:
+                f.write(r.content)
+            video_path_wsl = local_video
+            print(f"[YOLO] Downloaded {len(r.content) / 1024 / 1024:.1f} MB to {local_video}")
 
-    self.update_state(state='PROCESSING', meta={'status': 'Loading YOLO model', 'progress': 5})
+        self.update_state(state='PROCESSING', meta={'status': 'Loading YOLO model', 'progress': 5})
 
-    # Check video dimensions first (TensorRT engine needs 640x640, fails on portrait/landscape)
-    cap_check = cv2.VideoCapture(video_path_wsl)
-    vid_w = int(cap_check.get(cv2.CAP_PROP_FRAME_WIDTH))
-    vid_h = int(cap_check.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap_check.release()
-    # Use PyTorch model (TRT batch=64 engine doesn't work with single-frame inference)
-    from ultralytics import YOLO
+        # Check video dimensions first (TensorRT engine needs 640x640, fails on portrait/landscape)
+        cap_check = cv2.VideoCapture(video_path_wsl)
+        vid_w = int(cap_check.get(cv2.CAP_PROP_FRAME_WIDTH))
+        vid_h = int(cap_check.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap_check.release()
+        # Use PyTorch model (TRT batch=64 engine doesn't work with single-frame inference)
+        from ultralytics import YOLO
 
-    pt_model_path = '/mnt/d/watermarkz/runs/detect/sora_watermark_v2/weights/best.pt'
+        pt_model_path = '/mnt/d/watermarkz/runs/detect/sora_watermark_v2/weights/best.pt'
 
-    if not os.path.exists(pt_model_path):
-        raise RuntimeError(f"YOLO model not found: {pt_model_path}")
-    model = YOLO(pt_model_path)
-    print(f"[YOLO] Loaded PyTorch model: {pt_model_path}")
+        if not os.path.exists(pt_model_path):
+            raise RuntimeError(f"YOLO model not found: {pt_model_path}")
+        model = YOLO(pt_model_path)
+        print(f"[YOLO] Loaded PyTorch model: {pt_model_path}")
 
-    # Open video
-    self.update_state(state='PROCESSING', meta={'status': 'Opening video', 'progress': 10})
-    cap = cv2.VideoCapture(video_path_wsl)
-    if not cap.isOpened():
-        raise RuntimeError(f"Failed to open video: {video_path_wsl}")
+        # Open video
+        self.update_state(state='PROCESSING', meta={'status': 'Opening video', 'progress': 10})
+        cap = cv2.VideoCapture(video_path_wsl)
+        if not cap.isOpened():
+            raise RuntimeError(f"Failed to open video: {video_path_wsl}")
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    print(f"[YOLO] Video: {total_frames} frames @ {fps:.1f} fps, {width}x{height}")
+        print(f"[YOLO] Video: {total_frames} frames @ {fps:.1f} fps, {width}x{height}")
 
-    # Process frames
-    masks_saved = 0
-    frame_idx = 0
+        # Process frames
+        masks_saved = 0
+        frame_idx = 0
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        # Update progress every 10 frames
-        if frame_idx % 10 == 0:
-            progress = 10 + int(80 * frame_idx / total_frames)
-            self.update_state(state='PROCESSING', meta={
-                'status': f'Detecting frame {frame_idx}/{total_frames}',
-                'progress': progress
-            })
+            # Update progress every 10 frames
+            if frame_idx % 10 == 0:
+                progress = 10 + int(80 * frame_idx / total_frames)
+                self.update_state(state='PROCESSING', meta={
+                    'status': f'Detecting frame {frame_idx}/{total_frames}',
+                    'progress': progress
+                })
 
-        # Run YOLO detection
-        results = model(frame, conf=confidence_threshold, device='cuda', verbose=False)
+            # Run YOLO detection
+            results = model(frame, conf=confidence_threshold, device='cuda', verbose=False)
 
-        # Create mask from detections
-        mask = np.zeros((height, width), dtype=np.uint8)
+            # Create mask from detections
+            mask = np.zeros((height, width), dtype=np.uint8)
 
-        for result in results:
-            for box in result.boxes:
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            for result in results:
+                for box in result.boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
 
-                # Add padding
-                x1 = max(0, int(x1) - padding)
-                y1 = max(0, int(y1) - padding)
-                x2 = min(width, int(x2) + padding)
-                y2 = min(height, int(y2) + padding)
+                    # Add padding
+                    x1 = max(0, int(x1) - padding)
+                    y1 = max(0, int(y1) - padding)
+                    x2 = min(width, int(x2) + padding)
+                    y2 = min(height, int(y2) + padding)
 
-                # Fill mask
-                mask[y1:y2, x1:x2] = 255
+                    # Fill mask
+                    mask[y1:y2, x1:x2] = 255
 
-        # Save mask
-        mask_path = os.path.join(masks_dir_wsl, f"{frame_idx:05d}.png")
-        cv2.imwrite(mask_path, mask)
-        masks_saved += 1
-        frame_idx += 1
+            # Save mask
+            mask_path = os.path.join(masks_dir_wsl, f"{frame_idx:05d}.png")
+            cv2.imwrite(mask_path, mask)
+            masks_saved += 1
+            frame_idx += 1
 
-    cap.release()
-    print(f"[YOLO] Generated {masks_saved} masks")
+        cap.release()
+        print(f"[YOLO] Generated {masks_saved} masks")
 
-    # Cleanup VRAM
-    import gc
-    gc.collect()
-    try:
-        import torch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except ImportError:
-        pass
-
-    # Upload to B2
-    self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
-    masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
-
-    # Cleanup temporary files
-    frames_dir = "/tmp/sam2_frames"
-    if os.path.exists(frames_dir):
-        import shutil
-        shutil.rmtree(frames_dir, ignore_errors=True)
-        print(f"[CLEANUP] Removed frames directory: {frames_dir}")
-
-    # Clean downloaded video if it was in /tmp/
-    if video_path_wsl.startswith('/tmp/') and os.path.exists(video_path_wsl):
+        # Cleanup VRAM
+        import gc
+        gc.collect()
         try:
-            os.remove(video_path_wsl)
-            print(f"[CLEANUP] Removed temporary video: {video_path_wsl}")
-        except Exception as e:
-            print(f"[CLEANUP] Could not remove video: {e}")
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
-    return {
-        'status': 'success',
-        'masks_url': masks_url,
-        'masks_dir': None,
-        'masks_saved': int(masks_saved),
-        'total_frames': int(total_frames),
-        'fps': float(fps),
-        'mode': 'yolo',  # Tell receiver this was YOLO mode (use 4 workers)
-    }
+        # Upload to B2
+        self.update_state(state='PROCESSING', meta={'status': 'Uploading masks to B2', 'progress': 90})
+        masks_url = upload_masks_to_b2(masks_dir_wsl, video_path)
+
+        # Cleanup temporary files
+        frames_dir = "/tmp/sam2_frames"
+        if os.path.exists(frames_dir):
+            import shutil
+            shutil.rmtree(frames_dir, ignore_errors=True)
+            print(f"[CLEANUP] Removed frames directory: {frames_dir}")
+
+        # Clean downloaded video if it was in /tmp/
+        if video_path_wsl.startswith('/tmp/') and os.path.exists(video_path_wsl):
+            try:
+                os.remove(video_path_wsl)
+                print(f"[CLEANUP] Removed temporary video: {video_path_wsl}")
+            except Exception as e:
+                print(f"[CLEANUP] Could not remove video: {e}")
+
+        return {
+            'status': 'success',
+            'masks_url': masks_url,
+            'masks_dir': None,
+            'masks_saved': int(masks_saved),
+            'total_frames': int(total_frames),
+            'fps': float(fps),
+            'mode': 'yolo',  # Tell receiver this was YOLO mode (use 4 workers)
+        }
 
 
 @celery.task(name='sam2.apply_simple_effects', bind=True)
@@ -533,6 +543,14 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     REVOLUTIONARY GPU-ACCELERATED video effects pipeline.
     ALL processing on GPU - decode, blend, blur, encode. BLAZING FAST!
     """
+    from gpu_lock import GPULock
+
+    with GPULock(f"fx_{self.request.id}"):
+        return _apply_simple_effects_locked(self, video_url, masks_url, operation, background, bg_color, blur_amount, dilation, output_format, masks_dir_local, video_path_local)
+
+
+def _apply_simple_effects_locked(self, video_url, masks_url, operation, background, bg_color, blur_amount, dilation, output_format, masks_dir_local, video_path_local):
+    """Locked implementation - runs while holding GPU lock."""
     import cv2
     import numpy as np
     import requests
