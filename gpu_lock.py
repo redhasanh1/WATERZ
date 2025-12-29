@@ -7,7 +7,13 @@ import redis
 import time
 import os
 
+# Load Redis URL (same logic as workers - check file fallback)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+redis_path = os.path.join(BASE_DIR, 'redis_url.txt')
+if os.path.exists(redis_path):
+    with open(redis_path, 'r') as f:
+        REDIS_URL = f.read().strip()
 GPU_LOCK_KEY = "gpu_lock:exclusive"
 GPU_LOCK_CHANNEL = "gpu_lock:released"
 GPU_LOCK_TIMEOUT = 600  # 10 min max (auto-release if crash)
