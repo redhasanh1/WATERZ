@@ -5925,7 +5925,7 @@ def objrem_status(job_id):
                 next_job_id = redis_client.lpop('gpu_job_queue')
                 if next_job_id:
                     print(f"[GPU-QUEUE] Auto-starting next job: {next_job_id}")
-                    _start_queued_job(redis_client, next_job_id)
+                    _start_next_queued_job(redis_client, next_job_id)
 
         response = {
             'status': job.get('status', 'unknown'),
@@ -6009,6 +6009,87 @@ def _start_queued_job(redis_client, job_id):
     return True
 
 
+def _start_queued_sam2_job(redis_client, job_id):
+    """Start a SAM2 job that was waiting in queue (sam2/process-video flow)"""
+    from celery import signature, chain
+
+    job = redis_client.hgetall(f"sam2job:{job_id}")
+    if not job:
+        print(f"[GPU-QUEUE] SAM2 job {job_id} not found in Redis")
+        return False
+
+    # Get stored data
+    task_id = job.get('task_id', '')
+    video_path = job.get('video_path', '')
+    points = json.loads(job.get('points', '[]'))
+    bbox_str = job.get('bbox', '')
+    bbox = json.loads(bbox_str) if bbox_str else None
+    prompt_mode = job.get('prompt_mode', 'point')
+    video_width = int(job.get('video_width', 0))
+    video_height = int(job.get('video_height', 0))
+    frame_index = int(job.get('frame_index', 0))
+
+    if not video_path:
+        print(f"[GPU-QUEUE] SAM2 job {job_id} has no video_path")
+        return False
+
+    # Get api_base
+    def _current_public_base():
+        env_url = os.getenv('TUNNEL_URL')
+        if env_url:
+            return env_url.strip()
+        try:
+            tunnel_file = os.path.join(SCRIPT_DIR, 'web', 'tunnel_url.txt')
+            if os.path.exists(tunnel_file):
+                with open(tunnel_file, 'r') as f:
+                    return f.read().strip()
+        except Exception:
+            pass
+        return 'http://localhost:9000'
+
+    api_base = _current_public_base()
+    masks_dir = f"/tmp/{task_id}_sam2_masks"
+
+    # Build kwargs based on prompt mode
+    if prompt_mode == 'bbox' and bbox:
+        wsl_bbox = [int(x) for x in bbox]
+        s1_kwargs = {'prompt_mode': 'bbox', 'bbox': wsl_bbox, 'frame_idx': frame_index, 'api_base': api_base}
+    else:
+        wsl_points = [(int(p.get('x', 0)), int(p.get('y', 0))) for p in points]
+        wsl_labels = [int(p.get('label', 1)) for p in points]
+        s1_kwargs = {'prompt_mode': 'point', 'points': wsl_points, 'labels': wsl_labels, 'frame_idx': frame_index, 'api_base': api_base}
+
+    # Update status
+    redis_client.hset(f"sam2job:{job_id}", mapping={
+        'status': 'processing',
+        'message': 'Starting SAM2 (from queue)...'
+    })
+
+    # Set GPU lock
+    redis_client.set('gpu_active_job', job_id, ex=600)
+
+    # Dispatch chain: SAM2 → ProPainter
+    s1 = signature('sam2.generate_masks_fullfps',
+                   args=[video_path, masks_dir],
+                   kwargs=s1_kwargs,
+                   queue='wsl_sam2')
+    s2 = signature('watermark._continue_after_masks',
+                   args=[video_path, task_id, points or [], video_width, video_height, frame_index, api_base],
+                   queue='propainter')
+
+    chain(s1, s2).apply_async(task_id=job_id)
+    print(f"[GPU-QUEUE] Dispatched SAM2 chain {job_id} from queue")
+    return True
+
+
+def _start_next_queued_job(redis_client, next_job_id):
+    """Start the next queued job - determines type and calls appropriate handler"""
+    if next_job_id.startswith('sam2_'):
+        return _start_queued_sam2_job(redis_client, next_job_id)
+    else:
+        return _start_queued_job(redis_client, next_job_id)
+
+
 @app.route('/api/gpu-lock/release/<job_id>', methods=['POST', 'OPTIONS'])
 def gpu_lock_release(job_id):
     """Release GPU lock when user acknowledges download."""
@@ -6027,7 +6108,7 @@ def gpu_lock_release(job_id):
             next_job_id = redis_client.lpop('gpu_job_queue')
             if next_job_id:
                 print(f"[GPU-QUEUE] Starting next job: {next_job_id}")
-                _start_queued_job(redis_client, next_job_id)
+                _start_next_queued_job(redis_client, next_job_id)
                 return jsonify({'released': True, 'job_id': job_id, 'next_job': next_job_id})
 
             return jsonify({'released': True, 'job_id': job_id})
@@ -8540,21 +8621,38 @@ def sam2_process_video():
         lock_acquired = redis_client.set('gpu_active_job', job_id, nx=True, ex=600)
 
         if not lock_acquired:
-            # Lock held by someone else - return queued status (200, not 503)
+            # Lock held by someone else - add to queue for auto-start later
             gpu_active = redis_client.get('gpu_active_job')
             if gpu_active != job_id:
-                # Get queue length for position estimate
-                queue_len = redis_client.llen('gpu_job_queue')
-                queue_position = queue_len + 1  # +1 for the currently running job
+                # Store job data for later dispatch
+                redis_client.hset(f"sam2job:{job_id}", mapping={
+                    'task_id': task_id,
+                    'video_path': video_path,
+                    'points': json.dumps(points) if points else '[]',
+                    'bbox': json.dumps(bbox) if bbox else '',
+                    'prompt_mode': prompt_mode,
+                    'video_width': str(video_width or 0),
+                    'video_height': str(video_height or 0),
+                    'frame_index': str(frame_index),
+                    'status': 'queued'
+                })
 
-                print(f"[GPU-QUEUE] SAM2 job {job_id} blocked, GPU held by {gpu_active}, position {queue_position}")
+                # Add to queue (if not already there)
+                queue_key = 'gpu_job_queue'
+                queue_members = redis_client.lrange(queue_key, 0, -1)
+                if job_id not in queue_members:
+                    redis_client.rpush(queue_key, job_id)
+
+                queue_pos = redis_client.lpos(queue_key, job_id)
+                queue_position = (queue_pos or 0) + 1
+
+                print(f"[GPU-QUEUE] SAM2 job {job_id} queued (position {queue_position}), GPU held by {gpu_active}")
                 return jsonify({
                     'status': 'queued',
                     'job_id': job_id,
                     'queue_position': queue_position,
-                    'message': f'You are #{queue_position} in queue. Please wait and retry.',
-                    'active_job': gpu_active
-                })  # 200 OK, not 503
+                    'message': f'You are #{queue_position} in queue'
+                })  # 200 OK, auto-starts when turn comes
 
         print(f"[GPU-LOCK] SAM2 job {job_id} acquired lock")
 
