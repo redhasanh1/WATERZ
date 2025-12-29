@@ -92,7 +92,7 @@ class SAM2Selector {
 
     /**
      * Update canvas size for coordinate conversion
-     * No letterbox math needed - video uses height:auto so it fills container naturally
+     * Sets canvas CSS size to match video exactly (like object-removal.html's alignDrawingCanvas)
      */
     updateCanvasSize() {
         if (!this.video.videoWidth) return;
@@ -100,30 +100,36 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Get canvas display dimensions (CSS handles 100% sizing)
-        const rect = this.canvas.getBoundingClientRect();
+        // Get VIDEO's actual rendered size (not canvas!)
+        const videoRect = this.video.getBoundingClientRect();
 
-        // Guard against invalid rect (canvas not yet laid out)
-        if (rect.width < 10 || rect.height < 10) {
-            console.log('[SAM2Selector] Canvas rect invalid, scheduling retry');
+        // Guard against invalid rect
+        if (videoRect.width < 10 || videoRect.height < 10) {
+            console.log('[SAM2Selector] Video rect invalid, scheduling retry');
             setTimeout(() => this.updateCanvasSize(), 50);
             return;
         }
 
-        // No letterbox offset - video determines container height naturally
+        // SET canvas CSS to match video EXACTLY (this is what object-removal.html does!)
+        this.canvas.style.width = videoRect.width + 'px';
+        this.canvas.style.height = videoRect.height + 'px';
+        this.canvas.style.left = '0px';
+        this.canvas.style.top = '0px';
+
+        // No offset - canvas now matches video exactly
         this.offsetX = 0;
         this.offsetY = 0;
-        this.displayScaleX = rect.width / this.videoWidth;
-        this.displayScaleY = rect.height / this.videoHeight;
+        this.displayScaleX = videoRect.width / this.videoWidth;
+        this.displayScaleY = videoRect.height / this.videoHeight;
 
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        this.renderWidth = rect.width;
-        this.renderHeight = rect.height;
+        this.renderWidth = videoRect.width;
+        this.renderHeight = videoRect.height;
 
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${rect.width.toFixed(0)}x${rect.height.toFixed(0)}, Scale: ${this.displayScaleX.toFixed(3)}`);
+        console.log(`[SAM2Selector] Canvas aligned to video: ${videoRect.width.toFixed(0)}x${videoRect.height.toFixed(0)}, Scale: ${this.displayScaleX.toFixed(3)}`);
 
         // Redraw with current mask
         this.draw();
