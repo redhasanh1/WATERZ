@@ -5767,13 +5767,25 @@ def objrem_track():
         modified_masks = data.get('modified_masks', [])
 
         # GPU Lock: Only one SAM2/ProPainter job at a time to prevent VRAM choking
-        # ATOMIC lock acquisition - prevents race conditions!
+        # ATOMIC lock acquisition with STALE LOCK DETECTION
         task_id = f"objrem_{job_id}"
         wait_start = time.time()
         max_wait = 600  # 10 minutes max wait
         while not redis_client.set('gpu:processing', task_id, nx=True, ex=900):
             current_job = redis_client.get('gpu:processing')
             elapsed = time.time() - wait_start
+
+            # CHECK IF CURRENT LOCK HOLDER IS ALREADY DONE (stale lock)
+            if current_job:
+                try:
+                    current_result = celery.AsyncResult(current_job)
+                    if current_result.state in ['SUCCESS', 'FAILURE', 'REVOKED']:
+                        redis_client.delete('gpu:processing')
+                        print(f"[GPU-LOCK] Force-released STALE lock for completed job {current_job} (state: {current_result.state})")
+                        continue
+                except Exception as e:
+                    print(f"[GPU-LOCK] Error checking stale lock: {e}")
+
             if elapsed > max_wait:
                 print(f"[GPU-LOCK] Timeout waiting for GPU after {elapsed:.0f}s")
                 return jsonify({
@@ -8538,13 +8550,25 @@ def sam2_process_video():
         job_id = f"sam2_{task_id}_{uuid.uuid4().hex[:8]}"
 
         # GPU Lock: Only one SAM2/ProPainter job at a time to prevent VRAM choking
-        # ATOMIC lock acquisition - prevents race conditions!
-        # Use set(nx=True) which only succeeds if key doesn't exist
+        # ATOMIC lock acquisition with STALE LOCK DETECTION
         wait_start = time.time()
         max_wait = 600  # 10 minutes max wait
         while not redis_client.set('gpu:processing', job_id, nx=True, ex=900):
             current_job = redis_client.get('gpu:processing')
             elapsed = time.time() - wait_start
+
+            # CHECK IF CURRENT LOCK HOLDER IS ALREADY DONE (stale lock)
+            if current_job:
+                try:
+                    current_result = celery.AsyncResult(current_job)
+                    if current_result.state in ['SUCCESS', 'FAILURE', 'REVOKED']:
+                        # Job finished but lock wasn't released - force release!
+                        redis_client.delete('gpu:processing')
+                        print(f"[GPU-LOCK] Force-released STALE lock for completed job {current_job} (state: {current_result.state})")
+                        continue  # Try to acquire immediately
+                except Exception as e:
+                    print(f"[GPU-LOCK] Error checking stale lock: {e}")
+
             if elapsed > max_wait:
                 print(f"[GPU-LOCK] Timeout waiting for GPU after {elapsed:.0f}s")
                 return jsonify({
