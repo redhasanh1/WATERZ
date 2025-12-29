@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /uploads/
+Disallow: /temp/
+
+Sitemap: https://markremoverai.com/sitemap.xml
+
+Crawl-delay: 1
