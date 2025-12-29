@@ -3678,14 +3678,6 @@ def process_segment_task(self, segment_data):
 
     This task can run on ANY available worker with a GPU
     """
-    from gpu_lock import GPULock
-
-    with GPULock(f"propainter_{self.request.id}"):
-        return _process_segment_task_locked(self, segment_data)
-
-
-def _process_segment_task_locked(self, segment_data):
-    """Locked implementation - runs while holding GPU lock."""
     try:
         seg_idx = segment_data['seg_idx']
         total_segments = segment_data.get('total_segments', '?')
