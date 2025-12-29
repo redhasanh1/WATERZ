@@ -5713,6 +5713,16 @@ def objrem_track():
             return jsonify({'status': 'error', 'message': 'Missing job_id'}), 400
 
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+
+        # Check if GPU is busy with another job
+        gpu_active = redis_client.get('gpu_active_job')
+        if gpu_active and gpu_active != job_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'GPU is busy with another job. Please wait.',
+                'active_job': gpu_active
+            }), 503
+
         job = redis_client.hgetall(f"objrem:{job_id}")
 
         if not job:
@@ -5769,6 +5779,9 @@ def objrem_track():
             queue='wsl_sam2'
         )
         result = s1.apply_async(task_id=task_id)
+
+        # Mark GPU as busy with this job (10 min auto-expire for safety)
+        redis_client.set('gpu_active_job', job_id, ex=600)
 
         # Store user_id and estimated credits for deduction on completion
         # Get user_id from request body first (frontend sends it), fallback to session
@@ -5905,9 +5918,16 @@ def gpu_lock_release(job_id):
         return ('', 204)
 
     try:
-        from gpu_lock import release_lock
-        released = release_lock(job_id)
-        return jsonify({'released': released, 'job_id': job_id})
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        current_holder = redis_client.get('gpu_active_job')
+
+        if current_holder == job_id:
+            redis_client.delete('gpu_active_job')
+            print(f"[GPU-LOCK] Released by {job_id}")
+            return jsonify({'released': True, 'job_id': job_id})
+        else:
+            print(f"[GPU-LOCK] Cannot release - held by {current_holder}, not {job_id}")
+            return jsonify({'released': False, 'job_id': job_id, 'holder': current_holder})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -5916,8 +5936,12 @@ def gpu_lock_release(job_id):
 def gpu_lock_status():
     """Get current GPU lock status (for debugging)."""
     try:
-        from gpu_lock import get_lock_status
-        return jsonify(get_lock_status())
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        holder = redis_client.get('gpu_active_job')
+        if holder:
+            ttl = redis_client.ttl('gpu_active_job')
+            return jsonify({'locked': True, 'holder': holder, 'ttl': ttl})
+        return jsonify({'locked': False})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
