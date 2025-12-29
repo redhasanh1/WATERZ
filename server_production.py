@@ -8285,13 +8285,41 @@ def sam2_status(task_id):
             return jsonify({'status': 'processing', 'progress': info.get('progress', 50), 'message': info.get('status', 'Processing...')})
         elif result.state == 'SUCCESS':
             data = result.result or {}
+
+            # Release GPU lock on SAM2 job completion
+            try:
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                current_lock = redis_client.get('gpu:processing')
+                if current_lock and (current_lock == task_id or task_id in current_lock):
+                    redis_client.delete('gpu:processing')
+                    print(f"[GPU-LOCK] Released lock on SAM2 SUCCESS for task {task_id}")
+            except Exception as lock_err:
+                print(f"[GPU-LOCK] Failed to release lock on SAM2 success: {lock_err}")
+
             # Deduct credit on successful completion
             new_credits = deduct_credit_on_completion(task_id)
-            response_data = {'status': 'completed', 'result_url': data.get('output_path') or data.get('result_url')}
+
+            # Check all possible result URL keys (chain returns different keys)
+            result_url = (data.get('output_path') or
+                          data.get('result_url') or
+                          data.get('cdn_url') or
+                          data.get('masks_url'))
+
+            response_data = {'status': 'completed', 'result_url': result_url}
             if new_credits is not None:
                 response_data['new_credits'] = new_credits
             return jsonify(response_data)
         elif result.state == 'FAILURE':
+            # Release GPU lock on failure to prevent deadlock
+            try:
+                redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+                current_lock = redis_client.get('gpu:processing')
+                if current_lock and (current_lock == task_id or task_id in current_lock):
+                    redis_client.delete('gpu:processing')
+                    print(f"[GPU-LOCK] Released lock on SAM2 FAILURE for task {task_id}")
+            except Exception as lock_err:
+                print(f"[GPU-LOCK] Failed to release lock on SAM2 failure: {lock_err}")
+
             return jsonify({'status': 'failed', 'error': str(result.info)})
         else:
             return jsonify({'status': 'processing', 'progress': 25, 'message': f'{result.state}'})
