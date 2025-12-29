@@ -8602,7 +8602,7 @@ def sam2_process_video():
                        kwargs=s1_kwargs,
                        queue='wsl_sam2')
         # Set task_id on s2 with sam2_ prefix so frontend routes to correct status endpoint!
-        actual_task_id = f"sam2_{job_id}"
+        actual_task_id = job_id  # job_id already has sam2_ prefix
         s2 = signature('watermark._continue_after_masks',
                        args=[video_path, task_id, points or [], video_width, video_height, frame_index, api_base],
                        queue='propainter',
