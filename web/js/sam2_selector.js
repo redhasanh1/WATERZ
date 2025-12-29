@@ -91,24 +91,8 @@ class SAM2Selector {
     }
 
     /**
-     * Calculate video render bounds (Theater mode - simplified, no letterbox)
-     */
-    calculateVideoRenderBounds() {
-        if (!this.video.videoWidth) return;
-
-        // In theater mode, canvas matches video display exactly
-        const rect = this.canvas.getBoundingClientRect();
-        this.renderWidth = rect.width;
-        this.renderHeight = rect.height;
-        this.offsetX = 0;
-        this.offsetY = 0;
-
-        console.log(`[SAM2Selector] Theater mode: ${this.renderWidth.toFixed(1)}x${this.renderHeight.toFixed(1)}`);
-    }
-
-    /**
-     * Update canvas size and calculate letterbox offset for coordinate conversion
-     * Canvas stays at 100% via CSS - we just calculate offset for click accuracy
+     * Update canvas size for coordinate conversion
+     * No letterbox math needed - video uses height:auto so it fills container naturally
      */
     updateCanvasSize() {
         if (!this.video.videoWidth) return;
@@ -117,46 +101,29 @@ class SAM2Selector {
         this.videoHeight = this.video.videoHeight;
 
         // Get canvas display dimensions (CSS handles 100% sizing)
-        const canvasRect = this.canvas.getBoundingClientRect();
+        const rect = this.canvas.getBoundingClientRect();
 
         // Guard against invalid rect (canvas not yet laid out)
-        if (canvasRect.width < 10 || canvasRect.height < 10) {
+        if (rect.width < 10 || rect.height < 10) {
             console.log('[SAM2Selector] Canvas rect invalid, scheduling retry');
             setTimeout(() => this.updateCanvasSize(), 50);
             return;
         }
 
+        // No letterbox offset - video determines container height naturally
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.displayScaleX = rect.width / this.videoWidth;
+        this.displayScaleY = rect.height / this.videoHeight;
+
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        // Calculate video's letterbox offset within the container
-        // Video uses object-fit: contain, so it letterboxes within container
-        const videoAspect = this.videoWidth / this.videoHeight;
-        const containerAspect = canvasRect.width / canvasRect.height;
+        this.renderWidth = rect.width;
+        this.renderHeight = rect.height;
 
-        if (videoAspect > containerAspect) {
-            // Video is wider than container - letterbox top/bottom
-            this.renderWidth = canvasRect.width;
-            this.renderHeight = canvasRect.width / videoAspect;
-            this.offsetX = 0;
-            this.offsetY = (canvasRect.height - this.renderHeight) / 2;
-        } else {
-            // Video is taller than container - letterbox left/right
-            this.renderHeight = canvasRect.height;
-            this.renderWidth = canvasRect.height * videoAspect;
-            this.offsetX = (canvasRect.width - this.renderWidth) / 2;
-            this.offsetY = 0;
-        }
-
-        // Calculate scale for coordinate conversion
-        this.displayScaleX = this.renderWidth / this.videoWidth;
-        this.displayScaleY = this.renderHeight / this.videoHeight;
-
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Container: ${canvasRect.width.toFixed(0)}x${canvasRect.height.toFixed(0)}, Offset: ${this.offsetX.toFixed(0)},${this.offsetY.toFixed(0)}`);
-
-        // Calculate video render bounds for letterbox compensation
-        this.calculateVideoRenderBounds();
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${rect.width.toFixed(0)}x${rect.height.toFixed(0)}, Scale: ${this.displayScaleX.toFixed(3)}`);
 
         // Redraw with current mask
         this.draw();
@@ -205,26 +172,16 @@ class SAM2Selector {
 
     /**
      * Convert mouse/touch event to canvas coordinates
-     * Accounts for letterbox offset when video doesn't fill container
+     * Simple direct conversion - no letterbox offset needed with height:auto
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
 
         // Get click position relative to canvas element
-        let clickX = e.clientX - rect.left;
-        let clickY = e.clientY - rect.top;
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
 
-        // Subtract letterbox offset to get position relative to video content
-        clickX -= this.offsetX || 0;
-        clickY -= this.offsetY || 0;
-
-        // Check if click is in letterbox area (outside video content)
-        if (clickX < 0 || clickY < 0 || clickX > this.renderWidth || clickY > this.renderHeight) {
-            console.log('[SAM2Selector] Click in letterbox area, ignoring');
-            return null;
-        }
-
-        // Convert to video coordinates using pre-calculated scale
+        // Direct conversion to video coordinates - no letterbox offset
         const videoX = Math.floor(clickX / this.displayScaleX);
         const videoY = Math.floor(clickY / this.displayScaleY);
 
@@ -232,8 +189,8 @@ class SAM2Selector {
         return {
             x: Math.max(0, Math.min(videoX, this.videoWidth - 1)),
             y: Math.max(0, Math.min(videoY, this.videoHeight - 1)),
-            displayX: clickX + (this.offsetX || 0),
-            displayY: clickY + (this.offsetY || 0)
+            displayX: clickX,
+            displayY: clickY
         };
     }
 
