@@ -5714,34 +5714,40 @@ def objrem_track():
 
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
 
-        # Check if GPU is busy with another job
-        gpu_active = redis_client.get('gpu_active_job')
-        if gpu_active and gpu_active != job_id:
-            # GPU busy - add to queue instead of returning error
-            queue_key = 'gpu_job_queue'
-            queue_members = redis_client.lrange(queue_key, 0, -1)
-            if job_id not in queue_members:
-                redis_client.rpush(queue_key, job_id)
+        # Try to acquire GPU lock atomically (BEFORE any dispatch)
+        lock_acquired = redis_client.set('gpu_active_job', job_id, nx=True, ex=600)
 
-            # Store modified_masks for later (from request body)
-            modified_masks = data.get('modified_masks', [])
-            if modified_masks:
-                redis_client.hset(f"objrem:{job_id}", 'modified_masks_json', json.dumps(modified_masks))
+        if not lock_acquired:
+            # Lock held by someone else - check if it's our own retry
+            gpu_active = redis_client.get('gpu_active_job')
+            if gpu_active != job_id:
+                # GPU busy with different job - queue this one
+                queue_key = 'gpu_job_queue'
+                queue_members = redis_client.lrange(queue_key, 0, -1)
+                if job_id not in queue_members:
+                    redis_client.rpush(queue_key, job_id)
 
-            # Update job status
-            redis_client.hset(f"objrem:{job_id}", mapping={
-                'status': 'queued',
-                'message': 'Waiting in queue...'
-            })
+                # Store modified_masks for later (from request body)
+                modified_masks = data.get('modified_masks', [])
+                if modified_masks:
+                    redis_client.hset(f"objrem:{job_id}", 'modified_masks_json', json.dumps(modified_masks))
 
-            queue_pos = redis_client.lpos(queue_key, job_id)
-            print(f"[GPU-QUEUE] Job {job_id} added to queue (position {(queue_pos or 0) + 1})")
-            return jsonify({
-                'status': 'queued',
-                'queue_position': (queue_pos or 0) + 1,
-                'message': f'Waiting in queue (position {(queue_pos or 0) + 1})'
-            })
+                # Update job status
+                redis_client.hset(f"objrem:{job_id}", mapping={
+                    'status': 'queued',
+                    'message': 'Waiting in queue...'
+                })
 
+                queue_pos = redis_client.lpos(queue_key, job_id)
+                print(f"[GPU-QUEUE] Job {job_id} queued (position {(queue_pos or 0) + 1}), GPU held by {gpu_active}")
+                return jsonify({
+                    'status': 'queued',
+                    'queue_position': (queue_pos or 0) + 1,
+                    'message': f'Waiting in queue (position {(queue_pos or 0) + 1})'
+                })
+            # Else: It's our own lock (retry), proceed
+
+        # We have the lock - proceed with dispatch
         job = redis_client.hgetall(f"objrem:{job_id}")
 
         if not job:
@@ -5798,9 +5804,7 @@ def objrem_track():
             queue='wsl_sam2'
         )
         result = s1.apply_async(task_id=task_id)
-
-        # Mark GPU as busy with this job (10 min auto-expire for safety)
-        redis_client.set('gpu_active_job', job_id, ex=600)
+        print(f"[GPU-LOCK] Job {job_id} dispatched, lock already acquired")
 
         # Store user_id and estimated credits for deduction on completion
         # Get user_id from request body first (frontend sends it), fallback to session
