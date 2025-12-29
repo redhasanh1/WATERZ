@@ -8296,6 +8296,35 @@ def sam2_status(task_id):
     if request.method == 'OPTIONS':
         return ('', 204)
     try:
+        # Check Redis for final result FIRST (written by ProPainter worker)
+        # The chain's task_id points to FIRST task, so we need to check Redis for the real result
+        # task_id format: sam2_{video_id}_{random} or static_{video_id}_{random}
+        parts = task_id.split('_')
+        video_id = parts[1] if len(parts) >= 2 else task_id
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        final_result = redis_client.get(f"sam2:final:{video_id}")
+        if final_result:
+            import json
+            data = json.loads(final_result)
+            print(f"[SAM2-STATUS] Found final result in Redis for {video_id}: {data}")
+
+            # Release GPU lock
+            current_lock = redis_client.get('gpu:processing')
+            if current_lock and (current_lock == task_id or task_id in current_lock):
+                redis_client.delete('gpu:processing')
+                print(f"[GPU-LOCK] Released lock on SAM2 final result for task {task_id}")
+
+            # Deduct credit on successful completion
+            new_credits = deduct_credit_on_completion(task_id)
+            result_url = data.get('cdn_url') or data.get('output_path')
+            response_data = {'status': 'completed', 'result_url': result_url}
+            if new_credits is not None:
+                response_data['new_credits'] = new_credits
+
+            # Delete the Redis key after reading (one-time use)
+            redis_client.delete(f"sam2:final:{video_id}")
+            return jsonify(response_data)
+
         result = celery.AsyncResult(task_id)
         if result.state == 'PENDING':
             return jsonify({'status': 'processing', 'progress': 0, 'message': 'Waiting in queue...'})

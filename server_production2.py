@@ -2956,6 +2956,21 @@ def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=N
         except Exception as e:
             print(f"[B2] Upload failed: {e}")
 
+        # Write final result to Redis for status polling (fixes chain task_id issue!)
+        # The chain's task_id points to FIRST task, so status endpoint can't see this result
+        try:
+            import redis as _redis
+            _redis_client = _redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+            import json as _json
+            _redis_client.setex(f"sam2:final:{video_id}", 86400, _json.dumps({
+                'status': 'completed',
+                'output_path': cdn_url or output_path,
+                'cdn_url': cdn_url
+            }))
+            print(f"[SAM2] Wrote final result to Redis for {video_id}: {cdn_url or output_path}")
+        except Exception as redis_err:
+            print(f"[SAM2] Failed to write result to Redis: {redis_err}")
+
         # 🚀 Return immediately after upload - cleanup happens in finally block!
         # This shaves ~3 seconds off user wait time
         return {
