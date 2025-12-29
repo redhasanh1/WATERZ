@@ -5909,6 +5909,20 @@ def objrem_status(job_id):
                     redis_client.hset(f"objrem:{job_id}", 'credits_deducted', '1')
                     print(f"[OBJREM-CREDITS] Credits deducted via deduct_credit_on_completion for task {task_id}")
 
+        # Auto-release GPU lock when task completes (SAM2 tracking done)
+        job_status = job.get('status', '')
+        if job_status in ('completed', 'error'):
+            current_holder = redis_client.get('gpu_active_job')
+            if current_holder == job_id:
+                redis_client.delete('gpu_active_job')
+                print(f"[GPU-LOCK] Auto-released by {job_id} (task {job_status})")
+
+                # Start next queued job immediately
+                next_job_id = redis_client.lpop('gpu_job_queue')
+                if next_job_id:
+                    print(f"[GPU-QUEUE] Auto-starting next job: {next_job_id}")
+                    _start_queued_job(redis_client, next_job_id)
+
         response = {
             'status': job.get('status', 'unknown'),
             'progress': int(job.get('progress', 0)),
