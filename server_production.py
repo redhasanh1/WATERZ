@@ -8588,26 +8588,32 @@ def sam2_process_video():
                        args=[video_path, task_id, points or [], video_width, video_height, frame_index, api_base],
                        queue='propainter')
 
-        result = chain(s1, s2).apply_async(task_id=job_id)
+        # DON'T specify task_id! Celery returns the LAST task's ID (ProPainter)
+        chain_result = chain(s1, s2).apply_async()
+        actual_task_id = chain_result.id  # This is ProPainter's task ID!
+        print(f"[SAM2] Chain dispatched: job_id={job_id}, actual_task_id={actual_task_id}")
+
+        # Update GPU lock to use actual task ID
+        redis_client.setex('gpu:processing', 900, actual_task_id)
 
         # Store user_id and estimated credits for deduction on completion
         user_id = session.get('user_id')
         estimated_credits = data.get('estimated_credits', 1)
         if user_id:
             try:
-                redis_client.setex(f"task:{job_id}:user_id", 86400 * 7, str(user_id))
-                redis_client.setex(f"task:{job_id}:credits", 86400 * 7, str(estimated_credits))
-                print(f"[CREDITS] Stored user {user_id}, credits {estimated_credits} for SAM2 task {job_id}")
+                redis_client.setex(f"task:{actual_task_id}:user_id", 86400 * 7, str(user_id))
+                redis_client.setex(f"task:{actual_task_id}:credits", 86400 * 7, str(estimated_credits))
+                print(f"[CREDITS] Stored user {user_id}, credits {estimated_credits} for SAM2 task {actual_task_id}")
             except Exception as e:
                 print(f"[CREDITS] Failed to store: {e}")
 
         print(f"[SAM2] Started WSL chain job {job_id} for video {task_id}")
-        print(f"[SAM2] Prompt mode: {prompt_mode}, Video: {video_width}x{video_height}")
+        print(f"[SAM2] Actual ProPainter task: {actual_task_id}")
         print(f"[SAM2] Queue flow: wsl_sam2 -> propainter")
         return jsonify({
             'status': 'success',
             'job_id': job_id,
-            'task_id': job_id,  # For compatibility
+            'task_id': actual_task_id,  # Frontend polls the REAL ProPainter task!
             'message': 'SAM2 processing started'
         })
 
