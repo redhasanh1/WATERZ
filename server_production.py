@@ -5767,11 +5767,11 @@ def objrem_track():
         modified_masks = data.get('modified_masks', [])
 
         # GPU Lock: Only one SAM2/ProPainter job at a time to prevent VRAM choking
-        # Wait in queue until GPU is available (poll every 2 seconds, max 10 min)
+        # ATOMIC lock acquisition - prevents race conditions!
         task_id = f"objrem_{job_id}"
         wait_start = time.time()
         max_wait = 600  # 10 minutes max wait
-        while redis_client.exists('gpu:processing'):
+        while not redis_client.set('gpu:processing', task_id, nx=True, ex=900):
             current_job = redis_client.get('gpu:processing')
             elapsed = time.time() - wait_start
             if elapsed > max_wait:
@@ -5782,9 +5782,6 @@ def objrem_track():
                 }), 503
             print(f"[GPU-LOCK] Waiting for GPU... (current: {current_job}, waited: {elapsed:.0f}s)")
             time.sleep(2)
-
-        # Set GPU lock (15 min expiry as safety)
-        redis_client.setex('gpu:processing', 900, task_id)
         print(f"[GPU-LOCK] Acquired lock for job {task_id}")
 
         # WSL-native temp path for masks
@@ -8541,10 +8538,11 @@ def sam2_process_video():
         job_id = f"sam2_{task_id}_{uuid.uuid4().hex[:8]}"
 
         # GPU Lock: Only one SAM2/ProPainter job at a time to prevent VRAM choking
-        # Wait in queue until GPU is available (poll every 2 seconds, max 10 min)
+        # ATOMIC lock acquisition - prevents race conditions!
+        # Use set(nx=True) which only succeeds if key doesn't exist
         wait_start = time.time()
         max_wait = 600  # 10 minutes max wait
-        while redis_client.exists('gpu:processing'):
+        while not redis_client.set('gpu:processing', job_id, nx=True, ex=900):
             current_job = redis_client.get('gpu:processing')
             elapsed = time.time() - wait_start
             if elapsed > max_wait:
@@ -8555,9 +8553,6 @@ def sam2_process_video():
                 }), 503
             print(f"[GPU-LOCK] Waiting for GPU... (current: {current_job}, waited: {elapsed:.0f}s)")
             time.sleep(2)
-
-        # Set GPU lock (15 min expiry as safety)
-        redis_client.setex('gpu:processing', 900, job_id)
         print(f"[GPU-LOCK] Acquired lock for job {job_id}")
 
         # Get public base URL for video download (same pattern as YOLO from d5443f3d)
@@ -8610,9 +8605,6 @@ def sam2_process_video():
 
         chain_result = chain(s1, s2).apply_async()
         print(f"[SAM2] Chain dispatched: job_id={job_id}, actual_task_id={actual_task_id}")
-
-        # Update GPU lock to use actual task ID
-        redis_client.setex('gpu:processing', 900, actual_task_id)
 
         # Store user_id and estimated credits for deduction on completion
         user_id = session.get('user_id')
