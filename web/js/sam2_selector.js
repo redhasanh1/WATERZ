@@ -107,8 +107,8 @@ class SAM2Selector {
     }
 
     /**
-     * Update canvas size to match video element's actual rendered bounds
-     * This accounts for object-fit: contain letterboxing on the video
+     * Update canvas size and calculate letterbox offset for coordinate conversion
+     * Canvas stays at 100% via CSS - we just calculate offset for click accuracy
      */
     updateCanvasSize() {
         if (!this.video.videoWidth) return;
@@ -116,57 +116,44 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Get video container dimensions
-        const videoRect = this.video.getBoundingClientRect();
+        // Get canvas display dimensions (CSS handles 100% sizing)
+        const canvasRect = this.canvas.getBoundingClientRect();
 
-        // Guard against invalid rect (video not yet laid out)
-        if (videoRect.width < 10 || videoRect.height < 10) {
-            console.log('[SAM2Selector] Video rect invalid, scheduling retry');
+        // Guard against invalid rect (canvas not yet laid out)
+        if (canvasRect.width < 10 || canvasRect.height < 10) {
+            console.log('[SAM2Selector] Canvas rect invalid, scheduling retry');
             setTimeout(() => this.updateCanvasSize(), 50);
             return;
-        }
-
-        // Calculate video's ACTUAL rendered size (accounting for object-fit: contain)
-        const videoAspect = this.videoWidth / this.videoHeight;
-        const containerAspect = videoRect.width / videoRect.height;
-
-        let renderWidth, renderHeight, offsetX, offsetY;
-
-        if (videoAspect > containerAspect) {
-            // Video is wider than container - letterbox top/bottom
-            renderWidth = videoRect.width;
-            renderHeight = videoRect.width / videoAspect;
-            offsetX = 0;
-            offsetY = (videoRect.height - renderHeight) / 2;
-        } else {
-            // Video is taller than container - letterbox left/right
-            renderHeight = videoRect.height;
-            renderWidth = videoRect.height * videoAspect;
-            offsetX = (videoRect.width - renderWidth) / 2;
-            offsetY = 0;
         }
 
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        // Set canvas CSS size to match video's actual rendered size (fixes Android click accuracy!)
-        this.canvas.style.width = renderWidth + 'px';
-        this.canvas.style.height = renderHeight + 'px';
-        this.canvas.style.left = offsetX + 'px';
-        this.canvas.style.top = offsetY + 'px';
+        // Calculate video's letterbox offset within the container
+        // Video uses object-fit: contain, so it letterboxes within container
+        const videoAspect = this.videoWidth / this.videoHeight;
+        const containerAspect = canvasRect.width / canvasRect.height;
+
+        if (videoAspect > containerAspect) {
+            // Video is wider than container - letterbox top/bottom
+            this.renderWidth = canvasRect.width;
+            this.renderHeight = canvasRect.width / videoAspect;
+            this.offsetX = 0;
+            this.offsetY = (canvasRect.height - this.renderHeight) / 2;
+        } else {
+            // Video is taller than container - letterbox left/right
+            this.renderHeight = canvasRect.height;
+            this.renderWidth = canvasRect.height * videoAspect;
+            this.offsetX = (canvasRect.width - this.renderWidth) / 2;
+            this.offsetY = 0;
+        }
 
         // Calculate scale for coordinate conversion
-        this.displayScaleX = renderWidth / this.videoWidth;
-        this.displayScaleY = renderHeight / this.videoHeight;
+        this.displayScaleX = this.renderWidth / this.videoWidth;
+        this.displayScaleY = this.renderHeight / this.videoHeight;
 
-        // Store offset for any future use
-        this.offsetX = offsetX;
-        this.offsetY = offsetY;
-        this.renderWidth = renderWidth;
-        this.renderHeight = renderHeight;
-
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Render: ${renderWidth.toFixed(0)}x${renderHeight.toFixed(0)}, Offset: ${offsetX.toFixed(0)},${offsetY.toFixed(0)}`);
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Container: ${canvasRect.width.toFixed(0)}x${canvasRect.height.toFixed(0)}, Offset: ${this.offsetX.toFixed(0)},${this.offsetY.toFixed(0)}`);
 
         // Calculate video render bounds for letterbox compensation
         this.calculateVideoRenderBounds();
@@ -218,14 +205,26 @@ class SAM2Selector {
 
     /**
      * Convert mouse/touch event to canvas coordinates
-     * Uses pre-calculated displayScaleX/Y from updateCanvasSize() for reliability
+     * Accounts for letterbox offset when video doesn't fill container
      */
     getCanvasPoint(e) {
         const rect = this.canvas.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
 
-        // Use pre-calculated scale (set in updateCanvasSize) - simpler and works on Android
+        // Get click position relative to canvas element
+        let clickX = e.clientX - rect.left;
+        let clickY = e.clientY - rect.top;
+
+        // Subtract letterbox offset to get position relative to video content
+        clickX -= this.offsetX || 0;
+        clickY -= this.offsetY || 0;
+
+        // Check if click is in letterbox area (outside video content)
+        if (clickX < 0 || clickY < 0 || clickX > this.renderWidth || clickY > this.renderHeight) {
+            console.log('[SAM2Selector] Click in letterbox area, ignoring');
+            return null;
+        }
+
+        // Convert to video coordinates using pre-calculated scale
         const videoX = Math.floor(clickX / this.displayScaleX);
         const videoY = Math.floor(clickY / this.displayScaleY);
 
@@ -233,8 +232,8 @@ class SAM2Selector {
         return {
             x: Math.max(0, Math.min(videoX, this.videoWidth - 1)),
             y: Math.max(0, Math.min(videoY, this.videoHeight - 1)),
-            displayX: clickX,
-            displayY: clickY
+            displayX: clickX + (this.offsetX || 0),
+            displayY: clickY + (this.offsetY || 0)
         };
     }
 
