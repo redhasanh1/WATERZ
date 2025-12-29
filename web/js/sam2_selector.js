@@ -92,7 +92,7 @@ class SAM2Selector {
 
     /**
      * Update canvas size for coordinate conversion
-     * Sets canvas CSS size to match video exactly (like object-removal.html's alignDrawingCanvas)
+     * Uses CANVAS rect consistently (like MaskDrawer in object-removal.html)
      */
     updateCanvasSize() {
         if (!this.video.videoWidth) return;
@@ -100,7 +100,7 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Get VIDEO's actual rendered size (not canvas!)
+        // Get video size to set canvas CSS
         const videoRect = this.video.getBoundingClientRect();
 
         // Guard against invalid rect
@@ -110,26 +110,30 @@ class SAM2Selector {
             return;
         }
 
-        // SET canvas CSS to match video EXACTLY (this is what object-removal.html does!)
+        // Set canvas CSS to match video
         this.canvas.style.width = videoRect.width + 'px';
         this.canvas.style.height = videoRect.height + 'px';
         this.canvas.style.left = '0px';
         this.canvas.style.top = '0px';
 
-        // No offset - canvas now matches video exactly
-        this.offsetX = 0;
-        this.offsetY = 0;
-        this.displayScaleX = videoRect.width / this.videoWidth;
-        this.displayScaleY = videoRect.height / this.videoHeight;
-
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        this.renderWidth = videoRect.width;
-        this.renderHeight = videoRect.height;
+        // NOW get CANVAS rect for scale calculation (AFTER CSS applied)
+        // This ensures scale matches what getCanvasPoint will see
+        // (MaskDrawer in object-removal.html does exactly this)
+        const canvasRect = this.canvas.getBoundingClientRect();
 
-        console.log(`[SAM2Selector] Canvas aligned to video: ${videoRect.width.toFixed(0)}x${videoRect.height.toFixed(0)}, Scale: ${this.displayScaleX.toFixed(3)}`);
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.displayScaleX = canvasRect.width / this.videoWidth;
+        this.displayScaleY = canvasRect.height / this.videoHeight;
+
+        this.renderWidth = canvasRect.width;
+        this.renderHeight = canvasRect.height;
+
+        console.log(`[SAM2Selector] Canvas: ${canvasRect.width.toFixed(0)}x${canvasRect.height.toFixed(0)}, Scale: ${this.displayScaleX.toFixed(3)}`);
 
         // Redraw with current mask
         this.draw();
