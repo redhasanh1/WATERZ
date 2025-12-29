@@ -5747,12 +5747,32 @@ def objrem_track():
         # Check for user-modified masks (from eraser tool)
         modified_masks = data.get('modified_masks', [])
 
+        # GPU Lock: Only one SAM2/ProPainter job at a time to prevent VRAM choking
+        # Wait in queue until GPU is available (poll every 2 seconds, max 10 min)
+        task_id = f"objrem_{job_id}"
+        wait_start = time.time()
+        max_wait = 600  # 10 minutes max wait
+        while redis_client.exists('gpu:processing'):
+            current_job = redis_client.get('gpu:processing')
+            elapsed = time.time() - wait_start
+            if elapsed > max_wait:
+                print(f"[GPU-LOCK] Timeout waiting for GPU after {elapsed:.0f}s")
+                return jsonify({
+                    'status': 'error',
+                    'message': 'GPU queue timeout. Please try again.'
+                }), 503
+            print(f"[GPU-LOCK] Waiting for GPU... (current: {current_job}, waited: {elapsed:.0f}s)")
+            time.sleep(2)
+
+        # Set GPU lock (15 min expiry as safety)
+        redis_client.setex('gpu:processing', 900, task_id)
+        print(f"[GPU-LOCK] Acquired lock for job {task_id}")
+
         # WSL-native temp path for masks
         wsl_masks_dir = f"/tmp/sam2_masks/{job_id}"
 
         # Submit to wsl_sam2_local queue
         from celery import signature
-        task_id = f"objrem_{job_id}"
 
         s1 = signature(
             'sam2.generate_masks_fullfps',
@@ -6024,6 +6044,13 @@ def objrem_download(job_id):
             return jsonify({'status': 'error', 'message': 'Job not found'}), 404
 
         result_url = job.get('result_cdn_url', '')
+
+        # Release GPU lock - download is about to complete
+        try:
+            redis_client.delete('gpu:processing')
+            print(f"[GPU-LOCK] Released lock after objrem download for job {job_id}")
+        except Exception as lock_err:
+            print(f"[GPU-LOCK] Failed to release lock: {lock_err}")
 
         if result_url.startswith('http'):
             return redirect(result_url)
@@ -6430,6 +6457,14 @@ def get_result(task_id):
 
     try:
         result = task.result
+
+        # Release GPU lock - download is about to complete
+        try:
+            redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+            redis_client.delete('gpu:processing')
+            print(f"[GPU-LOCK] Released lock after result download for task {task_id}")
+        except Exception as lock_err:
+            print(f"[GPU-LOCK] Failed to release lock: {lock_err}")
 
         if 'data' in result:
             # Image result
@@ -8354,6 +8389,26 @@ def sam2_process_video():
 
         # Create a unique job ID for this SAM2 processing request
         job_id = f"sam2_{task_id}_{uuid.uuid4().hex[:8]}"
+
+        # GPU Lock: Only one SAM2/ProPainter job at a time to prevent VRAM choking
+        # Wait in queue until GPU is available (poll every 2 seconds, max 10 min)
+        wait_start = time.time()
+        max_wait = 600  # 10 minutes max wait
+        while redis_client.exists('gpu:processing'):
+            current_job = redis_client.get('gpu:processing')
+            elapsed = time.time() - wait_start
+            if elapsed > max_wait:
+                print(f"[GPU-LOCK] Timeout waiting for GPU after {elapsed:.0f}s")
+                return jsonify({
+                    'status': 'error',
+                    'message': 'GPU queue timeout. Please try again.'
+                }), 503
+            print(f"[GPU-LOCK] Waiting for GPU... (current: {current_job}, waited: {elapsed:.0f}s)")
+            time.sleep(2)
+
+        # Set GPU lock (15 min expiry as safety)
+        redis_client.setex('gpu:processing', 900, job_id)
+        print(f"[GPU-LOCK] Acquired lock for job {job_id}")
 
         # Get public base URL for video download (same pattern as YOLO from d5443f3d)
         def _current_public_base():
