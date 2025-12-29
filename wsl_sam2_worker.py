@@ -59,6 +59,14 @@ def generate_masks_fullfps(self, video_path, masks_dir, prompt_mode='point', poi
     if task_id and task_id.startswith('objrem_'):
         job_id = task_id.replace('objrem_', '')
 
+    # Acquire GPU lock (released by frontend when user gets download)
+    lock_id = job_id or task_id
+    try:
+        from gpu_lock import acquire_lock
+        acquire_lock(lock_id)
+    except Exception as e:
+        print(f"[SAM2] GPU lock acquire failed: {e}")
+
     try:
         return _generate_masks_fullfps_impl(self, video_path, masks_dir, prompt_mode, points, labels, object_ids, bbox, frame_idx, api_base, reid_mode, job_id, modified_masks)
     except Exception as e:
@@ -540,13 +548,25 @@ def apply_simple_effects(self, video_url, masks_url, operation='keep_object', ba
     import torch
     import torch.nn.functional as F
 
+    # Extract job_id and acquire GPU lock
+    task_id = self.request.id
+    job_id = None
+    if task_id and task_id.startswith('simplefx_'):
+        job_id = task_id.replace('simplefx_', '')
+
+    # Acquire GPU lock (released by frontend when user gets download)
+    lock_id = job_id or task_id
+    try:
+        from gpu_lock import acquire_lock
+        acquire_lock(lock_id)
+    except Exception as e:
+        print(f"[GPU-FX] GPU lock acquire failed: {e}")
+
     print(f"[GPU-FX] 🚀 REVOLUTIONARY GPU Pipeline Starting!")
     print(f"[GPU-FX] Operation: {operation}, bg={background}, color={bg_color}")
 
     # Derive local masks path from task_id
-    task_id = self.request.id
-    if task_id and task_id.startswith('simplefx_'):
-        job_id = task_id.replace('simplefx_', '')
+    if job_id:
         derived_masks_dir = f"/tmp/sam2_masks/{job_id}"
         if os.path.exists(derived_masks_dir):
             masks_dir_local = derived_masks_dir

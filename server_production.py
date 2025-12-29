@@ -5898,6 +5898,30 @@ def objrem_status(job_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/gpu-lock/release/<job_id>', methods=['POST', 'OPTIONS'])
+def gpu_lock_release(job_id):
+    """Release GPU lock when user acknowledges download."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    try:
+        from gpu_lock import release_lock
+        released = release_lock(job_id)
+        return jsonify({'released': released, 'job_id': job_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/gpu-lock/status', methods=['GET'])
+def gpu_lock_status():
+    """Get current GPU lock status (for debugging)."""
+    try:
+        from gpu_lock import get_lock_status
+        return jsonify(get_lock_status())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/object-removal/export', methods=['POST', 'OPTIONS'])
 def objrem_export():
     """Apply simple effects (blur, greenscreen, color) and export video"""
