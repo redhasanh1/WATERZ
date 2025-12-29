@@ -107,7 +107,8 @@ class SAM2Selector {
     }
 
     /**
-     * Update canvas size to match video element
+     * Update canvas size to match video element's actual rendered bounds
+     * This accounts for object-fit: contain letterboxing on the video
      */
     updateCanvasSize() {
         if (!this.video.videoWidth) return;
@@ -115,30 +116,57 @@ class SAM2Selector {
         this.videoWidth = this.video.videoWidth;
         this.videoHeight = this.video.videoHeight;
 
-        // Get current display dimensions for scale calculation
-        const canvasRect = this.canvas.getBoundingClientRect();
-        const displayWidth = canvasRect.width;
-        const displayHeight = canvasRect.height;
+        // Get video container dimensions
+        const videoRect = this.video.getBoundingClientRect();
 
-        // Guard against invalid rect (canvas not yet laid out)
-        if (displayWidth < 10 || displayHeight < 10) {
-            console.log('[SAM2Selector] Rect invalid, scheduling retry');
+        // Guard against invalid rect (video not yet laid out)
+        if (videoRect.width < 10 || videoRect.height < 10) {
+            console.log('[SAM2Selector] Video rect invalid, scheduling retry');
             setTimeout(() => this.updateCanvasSize(), 50);
             return;
+        }
+
+        // Calculate video's ACTUAL rendered size (accounting for object-fit: contain)
+        const videoAspect = this.videoWidth / this.videoHeight;
+        const containerAspect = videoRect.width / videoRect.height;
+
+        let renderWidth, renderHeight, offsetX, offsetY;
+
+        if (videoAspect > containerAspect) {
+            // Video is wider than container - letterbox top/bottom
+            renderWidth = videoRect.width;
+            renderHeight = videoRect.width / videoAspect;
+            offsetX = 0;
+            offsetY = (videoRect.height - renderHeight) / 2;
+        } else {
+            // Video is taller than container - letterbox left/right
+            renderHeight = videoRect.height;
+            renderWidth = videoRect.height * videoAspect;
+            offsetX = (videoRect.width - renderWidth) / 2;
+            offsetY = 0;
         }
 
         // Set canvas internal resolution to native video resolution
         this.canvas.width = this.videoWidth;
         this.canvas.height = this.videoHeight;
 
-        // Canvas display size is handled by CSS (100% width/height of parent)
-        // No need to set style.width/height - it auto-resizes responsively
+        // Set canvas CSS size to match video's actual rendered size (fixes Android click accuracy!)
+        this.canvas.style.width = renderWidth + 'px';
+        this.canvas.style.height = renderHeight + 'px';
+        this.canvas.style.left = offsetX + 'px';
+        this.canvas.style.top = offsetY + 'px';
 
         // Calculate scale for coordinate conversion
-        this.displayScaleX = displayWidth / this.videoWidth;
-        this.displayScaleY = displayHeight / this.videoHeight;
+        this.displayScaleX = renderWidth / this.videoWidth;
+        this.displayScaleY = renderHeight / this.videoHeight;
 
-        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Display: ${displayWidth.toFixed(0)}x${displayHeight.toFixed(0)}`);
+        // Store offset for any future use
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+        this.renderWidth = renderWidth;
+        this.renderHeight = renderHeight;
+
+        console.log(`[SAM2Selector] Canvas: ${this.canvas.width}x${this.canvas.height}, Render: ${renderWidth.toFixed(0)}x${renderHeight.toFixed(0)}, Offset: ${offsetX.toFixed(0)},${offsetY.toFixed(0)}`);
 
         // Calculate video render bounds for letterbox compensation
         this.calculateVideoRenderBounds();
