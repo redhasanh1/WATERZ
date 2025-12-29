@@ -8540,16 +8540,21 @@ def sam2_process_video():
         lock_acquired = redis_client.set('gpu_active_job', job_id, nx=True, ex=600)
 
         if not lock_acquired:
-            # Lock held by someone else - return queued status
+            # Lock held by someone else - return queued status (200, not 503)
             gpu_active = redis_client.get('gpu_active_job')
             if gpu_active != job_id:
-                print(f"[GPU-QUEUE] SAM2 job {job_id} blocked, GPU held by {gpu_active}")
+                # Get queue length for position estimate
+                queue_len = redis_client.llen('gpu_job_queue')
+                queue_position = queue_len + 1  # +1 for the currently running job
+
+                print(f"[GPU-QUEUE] SAM2 job {job_id} blocked, GPU held by {gpu_active}, position {queue_position}")
                 return jsonify({
                     'status': 'queued',
                     'job_id': job_id,
-                    'message': 'GPU is busy with another job. Please wait and retry.',
+                    'queue_position': queue_position,
+                    'message': f'You are #{queue_position} in queue. Please wait and retry.',
                     'active_job': gpu_active
-                }), 503
+                })  # 200 OK, not 503
 
         print(f"[GPU-LOCK] SAM2 job {job_id} acquired lock")
 
