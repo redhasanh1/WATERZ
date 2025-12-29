@@ -8346,14 +8346,31 @@ def sam2_status(task_id):
             except Exception as lock_err:
                 print(f"[GPU-LOCK] Failed to release lock on SAM2 success: {lock_err}")
 
-            # Deduct credit on successful completion
-            new_credits = deduct_credit_on_completion(task_id)
-
             # Check all possible result URL keys (chain returns different keys)
             result_url = (data.get('output_path') or
                           data.get('result_url') or
                           data.get('cdn_url') or
                           data.get('masks_url'))
+
+            # If result_url is empty, wait and retry (result may not be written yet)
+            if not result_url:
+                print(f"[SAM2-STATUS] No result_url yet for {task_id}, waiting 2s and retrying...")
+                time.sleep(2)
+                result = celery.AsyncResult(task_id)
+                data = result.result or {}
+                result_url = (data.get('output_path') or
+                              data.get('result_url') or
+                              data.get('cdn_url') or
+                              data.get('masks_url'))
+                print(f"[SAM2-STATUS] After retry: result_url={result_url}")
+
+            # If STILL no result_url, return processing (keep polling)
+            if not result_url:
+                print(f"[SAM2-STATUS] Still no result_url for {task_id}, returning processing")
+                return jsonify({'status': 'processing', 'progress': 95, 'message': 'Finalizing video...'})
+
+            # Deduct credit on successful completion (only when we have result_url)
+            new_credits = deduct_credit_on_completion(task_id)
 
             response_data = {'status': 'completed', 'result_url': result_url}
             if new_credits is not None:
