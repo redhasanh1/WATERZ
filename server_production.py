@@ -8304,6 +8304,8 @@ def sam2_status(task_id):
             return jsonify({'status': 'processing', 'progress': info.get('progress', 50), 'message': info.get('status', 'Processing...')})
         elif result.state == 'SUCCESS':
             data = result.result or {}
+            print(f"[SAM2-STATUS] Task {task_id} SUCCESS, result keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+            print(f"[SAM2-STATUS] Result data: {data}")
 
             # Release GPU lock on SAM2 job completion
             try:
