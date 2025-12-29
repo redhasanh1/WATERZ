@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <!-- SEO Optimization -->
     <title>Remove Objects from Video Free - AI Editor No Watermark, 8K Support | MarkRemoverAI</title>
@@ -1115,6 +1115,7 @@
             height: 100%;
             cursor: crosshair;
             touch-action: none;  /* Prevent zoom/pan gestures on mobile */
+            z-index: 15;  /* Matches object-removal.html - ensures proper event capture */
         }
 
         /* External scrubber bar beneath video */
@@ -1532,7 +1533,7 @@
                                 <!-- Video + Canvas Container -->
                                 <div id="videoWrapper">
                                     <video id="previewVideo" playsinline webkit-playsinline preload="metadata"></video>
-                                    <canvas id="maskCanvas" style="display: none; pointer-events: none;"></canvas>
+                                    <canvas id="maskCanvas" class="hidden" style="pointer-events: none;"></canvas>
                                 </div>
 
                                 <!-- External Scrubber Bar (beneath video) -->
