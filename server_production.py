@@ -8584,13 +8584,14 @@ def sam2_process_video():
                        args=[video_path, masks_dir],
                        kwargs=s1_kwargs,
                        queue='wsl_sam2')
+        # Set task_id on s2 with sam2_ prefix so frontend routes to correct status endpoint!
+        actual_task_id = f"sam2_{job_id}"
         s2 = signature('watermark._continue_after_masks',
                        args=[video_path, task_id, points or [], video_width, video_height, frame_index, api_base],
-                       queue='propainter')
+                       queue='propainter',
+                       options={'task_id': actual_task_id})
 
-        # DON'T specify task_id! Celery returns the LAST task's ID (ProPainter)
         chain_result = chain(s1, s2).apply_async()
-        actual_task_id = chain_result.id  # This is ProPainter's task ID!
         print(f"[SAM2] Chain dispatched: job_id={job_id}, actual_task_id={actual_task_id}")
 
         # Update GPU lock to use actual task ID
