@@ -1651,6 +1651,25 @@ def admin_view_users():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/clear-gpu-lock', methods=['POST', 'GET'])
+def admin_clear_gpu_lock():
+    """Emergency endpoint to clear stuck GPU lock"""
+    secret = request.args.get('key')
+    if secret != 'markremover2024admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        current_lock = redis_client.get('gpu:processing')
+        if current_lock:
+            redis_client.delete('gpu:processing')
+            print(f"[GPU-LOCK] ADMIN cleared stuck lock: {current_lock}")
+            return jsonify({'status': 'success', 'cleared': current_lock})
+        else:
+            return jsonify({'status': 'success', 'message': 'No lock to clear'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # Security headers middleware
 @app.after_request
 def add_security_headers(response):
