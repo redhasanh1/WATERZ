@@ -8536,6 +8536,23 @@ def sam2_process_video():
         # Create a unique job ID for this SAM2 processing request
         job_id = f"sam2_{task_id}_{uuid.uuid4().hex[:8]}"
 
+        # Try to acquire GPU lock atomically (BEFORE any dispatch)
+        lock_acquired = redis_client.set('gpu_active_job', job_id, nx=True, ex=600)
+
+        if not lock_acquired:
+            # Lock held by someone else - return queued status
+            gpu_active = redis_client.get('gpu_active_job')
+            if gpu_active != job_id:
+                print(f"[GPU-QUEUE] SAM2 job {job_id} blocked, GPU held by {gpu_active}")
+                return jsonify({
+                    'status': 'queued',
+                    'job_id': job_id,
+                    'message': 'GPU is busy with another job. Please wait and retry.',
+                    'active_job': gpu_active
+                }), 503
+
+        print(f"[GPU-LOCK] SAM2 job {job_id} acquired lock")
+
         # Get public base URL for video download (same pattern as YOLO from d5443f3d)
         def _current_public_base():
             env_url = os.getenv('TUNNEL_URL')
