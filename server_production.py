@@ -5615,7 +5615,9 @@ def objrem_select():
         return ('', 204)
 
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON payload'}), 400
         job_id = data.get('job_id')
         points = data.get('points', [])
         frame_index = data.get('frame_index', 0)
@@ -5659,7 +5661,9 @@ def objrem_auto_detect():
         return ('', 204)
 
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON payload'}), 400
         job_id = data.get('job_id')
 
         if not job_id:
@@ -5706,7 +5710,9 @@ def objrem_track():
         return ('', 204)
 
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON payload'}), 400
         job_id = data.get('job_id')
 
         if not job_id:
@@ -5905,7 +5911,9 @@ def objrem_export():
         return ('', 204)
 
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON payload'}), 400
         job_id = data.get('job_id')
         operation = data.get('operation', 'keep_object')  # keep_object, remove_object, blur_inside, blur_outside
         background = data.get('background', 'color')  # transparent, color, blur
@@ -7997,7 +8005,9 @@ def notify_result():
     if request.method == 'OPTIONS':
         return ('', 204)
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON payload'}), 400
         video_id = data.get('video_id')
         cdn_url = data.get('cdn_url')
 
@@ -8232,7 +8242,9 @@ def sam2_get_result(request_id):
 def sam2_select_object():
     """Interactive SAM2 object selection - uses local worker via Redis"""
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON payload'}), 400
         frame_base64 = data.get('frame_data')
         points = data.get('points', [])
         video_width = data.get('video_width')
@@ -8312,7 +8324,9 @@ def sam2_process_video():
     Points are passed directly to the SAM2 worker to generate masks.
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Invalid or missing JSON payload'}), 400
         task_id = data.get('task_id')
         points = data.get('points', [])
         bbox = data.get('bbox')  # [x1, y1, x2, y2] for bbox mode
