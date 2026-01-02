@@ -408,16 +408,11 @@ def video_tools_page():
     return send_file('video-tools.html')
 
 
-@app.route('/tracking-editor.html')
-def tracking_editor_page():
-    """Serve the interactive tracking editor page"""
-    return send_file('tracking-editor.html')
-
-
 @app.route('/redaction.html')
+@app.route('/redaction')
 def redaction_page():
-    """Serve the video redaction page"""
-    return send_file('redaction.html')
+    """Serve backgroundremover page"""
+    return send_file('object-removal.html')
 
 
 @app.route('/object-removal.html')
@@ -433,9 +428,10 @@ def backgroundremover_page():
 
 
 @app.route('/content-moderation.html')
+@app.route('/content-moderation')
 def content_moderation_page():
-    """Serve the content moderation page"""
-    return send_file('content-moderation.html')
+    """Serve backgroundremover page"""
+    return send_file('object-removal.html')
 
 
 @app.route('/ads.txt')
