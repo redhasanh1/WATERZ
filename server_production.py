@@ -5465,20 +5465,6 @@ def backgroundremover_page():
     return send_file('web/object-removal.html')
 
 
-@app.route('/redaction')
-@app.route('/redaction.html')
-def redaction_page():
-    """Serve background remover for redaction URL"""
-    return send_file('web/object-removal.html')
-
-
-@app.route('/content-moderation')
-@app.route('/content-moderation.html')
-def content_moderation_page():
-    """Serve background remover for content-moderation URL"""
-    return send_file('web/object-removal.html')
-
-
 @app.route('/video-tools')
 @app.route('/video-tools.html')
 def video_tools_page():
