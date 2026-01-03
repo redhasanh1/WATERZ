@@ -53,6 +53,25 @@ def terms():
 def contact():
     return send_file('web/contact.html')
 
+@app.route('/redaction')
+@app.route('/redaction.html')
+def redaction():
+    return send_file('web/object-removal.html')
+
+@app.route('/content-moderation')
+@app.route('/content-moderation.html')
+def content_moderation():
+    return send_file('web/object-removal.html')
+
+@app.route('/backgroundremover')
+def backgroundremover():
+    return send_file('web/object-removal.html')
+
+@app.route('/video-tools')
+@app.route('/video-tools.html')
+def video_tools():
+    return send_file('web/video-tools.html')
+
 @app.route('/web/<path:path>')
 def serve_static(path):
     return send_from_directory('web', path)
