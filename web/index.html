@@ -53,6 +53,48 @@
     }
     </script>
 
+    <!-- FAQ Schema for Rich Snippets -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "What video formats are supported?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "We support MP4, MOV, WebM, MKV, WMV, and most common video formats. Videos from phones, cameras, and screen recordings work perfectly."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What's the maximum video length?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Videos can be up to 1.5 minutes (90 seconds) long for object removal."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How does object removal work?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Our AI tracks the object you select across all frames, removes it completely, and intelligently fills in the background to restore the video seamlessly."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Can I use this for commercial projects?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes! All processed videos can be used for personal and commercial projects. You own full rights to your output files."
+                }
+            }
+        ]
+    }
+    </script>
+
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="logo.svg">
     <link rel="apple-touch-icon" href="logo.svg">
@@ -1381,6 +1423,78 @@
             animation: pulse 2s ease-in-out infinite;
         }
 
+        /* FAQ Section */
+        .faq-section {
+            padding: 4rem 1.5rem;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .faq-title {
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 2rem;
+            color: var(--text-primary);
+        }
+
+        .faq-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .faq-item {
+            border-bottom: 1px solid rgba(102, 126, 234, 0.15);
+        }
+
+        .faq-question {
+            width: 100%;
+            padding: 1.25rem 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 1.05rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .faq-question:hover {
+            color: var(--primary);
+        }
+
+        .faq-question svg {
+            width: 20px;
+            height: 20px;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .faq-item.open .faq-question svg {
+            transform: rotate(180deg);
+        }
+
+        .faq-answer {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .faq-item.open .faq-answer {
+            max-height: 200px;
+        }
+
+        .faq-answer p {
+            padding-bottom: 1.25rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
     </style>
 </head>
 <body>
@@ -1807,6 +1921,56 @@
         </div>
     </section>
 
+    <!-- FAQ Section -->
+    <section class="faq-section">
+        <h2 class="faq-title">Frequently Asked Questions</h2>
+        <div class="faq-list">
+            <div class="faq-item">
+                <button class="faq-question">
+                    What video formats are supported?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>We support MP4, MOV, WebM, MKV, WMV, and most common video formats. Videos from phones, cameras, and screen recordings work perfectly.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    What's the maximum video length?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>Videos can be up to 1.5 minutes (90 seconds) long for object removal.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    How does object removal work?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>Our AI tracks the object you select across all frames, removes it completely, and intelligently fills in the background to restore the video seamlessly.</p>
+                </div>
+            </div>
+            <div class="faq-item">
+                <button class="faq-question">
+                    Can I use this for commercial projects?
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+                <div class="faq-answer">
+                    <p>Yes! All processed videos can be used for personal and commercial projects. You own full rights to your output files.</p>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <!-- Simple Footer -->
     <footer style="padding: 3rem; text-align: center; background: rgba(102, 126, 234, 0.03); border-top: 1px solid rgba(102, 126, 234, 0.1);">
@@ -4592,6 +4756,17 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script>try{window.addEventListener("load", function(){ if (typeof updateApiChip === "function") updateApiChip(); });}catch(e){}</script>
+<script>
+// FAQ accordion
+document.querySelectorAll('.faq-question').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const item = btn.parentElement;
+        const isOpen = item.classList.contains('open');
+        document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+        if (!isOpen) item.classList.add('open');
+    });
+});
+</script>
 </body>
 </html>
 
