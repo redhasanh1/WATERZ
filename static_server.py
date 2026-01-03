@@ -90,7 +90,7 @@ def add_security_headers(response):
         "img-src 'self' data: https:; "
         "media-src 'self' data: blob: https://markz.humblewoslayer.workers.dev; "
         "connect-src 'self' https:; "
-        "frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net;"
+        "frame-src https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net https://www.youtube.com https://youtube.com;"
     )
     return response
 

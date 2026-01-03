@@ -95,6 +95,51 @@
     }
     </script>
 
+    <!-- BreadcrumbList Schema -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Home",
+                "item": "https://markremoverai.com/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Video Masker",
+                "item": "https://markremoverai.com/backgroundremover"
+            }
+        ]
+    }
+    </script>
+
+    <!-- VideoObject Schema for YouTube Tutorial -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "VideoObject",
+        "name": "How to Remove Video Backgrounds - AI Tutorial",
+        "description": "Step-by-step tutorial showing how to use MarkRemoverAI Video Masker to remove backgrounds, blur faces, and mask objects in videos.",
+        "thumbnailUrl": "https://img.youtube.com/vi/nBmZL52s5es/maxresdefault.jpg",
+        "uploadDate": "2024-12-01",
+        "embedUrl": "https://www.youtube.com/embed/nBmZL52s5es",
+        "contentUrl": "https://www.youtube.com/watch?v=nBmZL52s5es",
+        "duration": "PT2M",
+        "publisher": {
+            "@type": "Organization",
+            "name": "MarkRemoverAI",
+            "logo": {
+                "@type": "ImageObject",
+                "url": "https://markremoverai.com/emblem.png"
+            }
+        }
+    }
+    </script>
+
     <link rel="icon" type="image/svg+xml" href="logo.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1579,6 +1624,27 @@
                 <div class="example-info">
                     <span class="example-type">Blur Effect</span>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- YouTube Tutorial Section -->
+    <section style="padding: 4rem 2rem; background: linear-gradient(135deg, rgba(249, 115, 22, 0.05) 0%, rgba(234, 88, 12, 0.05) 100%);">
+        <div style="max-width: 900px; margin: 0 auto; text-align: center;">
+            <h2 style="font-size: 2rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-primary);">
+                📺 Watch How It Works
+            </h2>
+            <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 1.1rem;">
+                See our AI video masker in action - step-by-step tutorial
+            </p>
+            <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+                <iframe
+                    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;"
+                    src="https://www.youtube.com/embed/nBmZL52s5es"
+                    title="How to Remove Video Backgrounds - AI Tutorial"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowfullscreen
+                ></iframe>
             </div>
         </div>
     </section>

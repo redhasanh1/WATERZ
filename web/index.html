@@ -97,6 +97,45 @@
     }
     </script>
 
+    <!-- BreadcrumbList Schema -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Home",
+                "item": "https://markremoverai.com/"
+            }
+        ]
+    }
+    </script>
+
+    <!-- VideoObject Schema for YouTube Tutorial -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "VideoObject",
+        "name": "How to Remove Objects from Video - AI Tutorial",
+        "description": "Step-by-step tutorial showing how to use MarkRemoverAI to remove objects, logos, people, and text from videos using AI.",
+        "thumbnailUrl": "https://img.youtube.com/vi/1pVaN0WpoOo/maxresdefault.jpg",
+        "uploadDate": "2024-12-01",
+        "embedUrl": "https://www.youtube.com/embed/1pVaN0WpoOo",
+        "contentUrl": "https://www.youtube.com/watch?v=1pVaN0WpoOo",
+        "duration": "PT2M",
+        "publisher": {
+            "@type": "Organization",
+            "name": "MarkRemoverAI",
+            "logo": {
+                "@type": "ImageObject",
+                "url": "https://markremoverai.com/emblem.png"
+            }
+        }
+    }
+    </script>
+
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="logo.svg">
     <link rel="apple-touch-icon" href="logo.svg">
@@ -1882,6 +1921,27 @@
                                     </p>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- YouTube Tutorial Section -->
+                <section style="padding: 3rem 2rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(240, 147, 251, 0.05) 100%);">
+                    <div style="max-width: 900px; margin: 0 auto; text-align: center;">
+                        <h2 style="font-size: 2rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-primary);">
+                            📺 Watch How It Works
+                        </h2>
+                        <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 1.1rem;">
+                            See our AI object remover in action - step-by-step tutorial
+                        </p>
+                        <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+                            <iframe
+                                style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;"
+                                src="https://www.youtube.com/embed/1pVaN0WpoOo"
+                                title="How to Remove Objects from Video - AI Tutorial"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowfullscreen
+                            ></iframe>
                         </div>
                     </div>
                 </section>
