@@ -5461,8 +5461,15 @@ def index():
 
 @app.route('/backgroundremover')
 def backgroundremover_page():
-    """Secret route for background remover UI"""
+    """Background remover UI"""
     return send_file('web/object-removal.html')
+
+
+@app.route('/object-removal')
+@app.route('/object-removal.html')
+def object_removal_page():
+    """Object removal tool - serves main index"""
+    return send_file('web/index.html')
 
 
 @app.route('/video-tools')

@@ -57,6 +57,11 @@ def contact():
 def backgroundremover():
     return send_file('web/object-removal.html')
 
+@app.route('/object-removal')
+@app.route('/object-removal.html')
+def object_removal():
+    return send_file('web/index.html')
+
 @app.route('/video-tools')
 @app.route('/video-tools.html')
 def video_tools():
