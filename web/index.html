@@ -1661,8 +1661,6 @@
 
                         <!-- Professional Video Timeline with Thumbnails -->
                         <div id="videoTimelineContainer" class="timeline-section" style="display: none;">
-                            <div class="timeline-label">Select a frame to edit</div>
-
                             <div class="timeline-nav-row">
                                 <!-- Left Arrow -->
                                 <button class="timeline-nav-btn" id="timelinePrevBtn" title="Previous frame">
@@ -1675,8 +1673,8 @@
                                 <div class="thumbnail-strip" id="thumbnailStrip">
                                     <!-- Loading hint -->
                                     <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem;">
-                                        <span style="background: linear-gradient(90deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 1.1rem; font-weight: 600;">
-                                            Select a frame to edit
+                                        <span style="background: linear-gradient(90deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 1.3rem; font-weight: 600;">
+                                            Step 1: Select a frame to edit
                                         </span>
                                     </div>
                                 </div>
@@ -4413,11 +4411,6 @@ console.log('[INLINE] MaskDrawer class loaded');
             const shapeCount = (window.maskDrawer && window.maskDrawer.shapes) ? window.maskDrawer.shapes.length : 0;
             const totalCount = points.length + shapeCount;
             pointCount.textContent = totalCount;
-            if (totalCount === 0) {
-                scrollHint.style.display = 'none';
-                const processingDisclaimer = document.getElementById('processingDisclaimer');
-                if (processingDisclaimer) processingDisclaimer.style.display = 'none';
-            }
         }
 
         // Window resize - redraw points (handled by SAM2Selector)
