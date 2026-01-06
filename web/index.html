@@ -1676,7 +1676,7 @@
                                     <!-- Loading hint -->
                                     <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem;">
                                         <span style="background: linear-gradient(90deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 1.1rem; font-weight: 600;">
-                                            Click on video to select objects
+                                            Select a frame to edit
                                         </span>
                                     </div>
                                 </div>
@@ -1732,7 +1732,7 @@
 
                             <!-- Advanced Selection Toggle -->
                             <div style="margin-top: 1.5rem; margin-bottom: 1rem;">
-                                <button id="advancedSelectionToggle" onclick="toggleAdvancedSelection()" style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%; padding: 0.75rem 1rem; border-radius: 10px; border: 1px solid rgba(102, 126, 234, 0.2); background: rgba(102, 126, 234, 0.05); color: var(--text-secondary); cursor: pointer; transition: all 0.3s ease; font-size: 0.9rem; font-weight: 600;">
+                                <button id="advancedSelectionToggle" onclick="toggleAdvancedSelection()" style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%; padding: 0.85rem 1rem; border-radius: 10px; border: 1px solid rgba(102, 126, 234, 0.35); background: rgba(102, 126, 234, 0.08); color: #667eea; cursor: pointer; transition: all 0.3s ease; font-size: 0.95rem; font-weight: 600;">
                                     <svg id="advancedArrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.3s ease;">
                                         <polyline points="6 9 12 15 18 9"/>
                                     </svg>
@@ -1820,8 +1820,8 @@
                                 </div>
                             </div>
 
-                            <div id="pointsList" style="display: none; text-align: center; padding: 1rem; background: rgba(255, 255, 255, 0.5); border-radius: 12px; margin-top: 1rem; border: 1px solid rgba(102, 126, 234, 0.15);">
-                                <p style="font-weight: 600; color: var(--text-primary); margin: 0;">Review Selection — Selected Points: <span id="pointCount">0</span></p>
+                            <div id="pointsList" style="display: none; text-align: center; padding: 1rem; background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.08) 100%); border-radius: 12px; margin-top: 1rem; border: 1px solid rgba(102, 126, 234, 0.25);">
+                                <p style="font-weight: 600; color: #667eea; margin: 0;">Review Selection — Selected Points: <span id="pointCount">0</span></p>
                             </div>
                         </div>
 
@@ -2261,8 +2261,8 @@
                             const durationFactor = duration / baseDuration;
                             const resolutionFactor = Math.sqrt(videoPixels / basePixels);
 
-                            // Weighted formula: 70% duration, 30% resolution (less aggressive)
-                            const estimatedCredits = Math.max(1, Math.ceil((durationFactor * 0.7) + (resolutionFactor * 0.3)));
+                            // Always 1 credit per video
+                            const estimatedCredits = 1;
 
                             // Store for backend processing
                             videoElem.dataset.estimatedCredits = estimatedCredits;
@@ -2270,7 +2270,7 @@
                             if (creditEstimate) {
                                 document.getElementById('creditDuration').textContent = `${Math.round(duration)}s`;
                                 document.getElementById('creditResolution').textContent = `${width}×${height}`;
-                                document.getElementById('creditCost').textContent = estimatedCredits;
+                                document.getElementById('creditCost').textContent = '1';
                                 creditEstimate.style.display = 'block';
                             }
                         } catch (err) {

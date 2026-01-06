@@ -8,7 +8,7 @@
 #   - 1 x Celery Sender Worker (mask generation + B2 upload)
 # ============================================================
 
-FROM nvcr.io/nvidia/tensorrt:24.12-py3
+FROM nvcr.io/nvidia/tensorrt:25.03-py3
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
