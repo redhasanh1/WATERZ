@@ -5466,14 +5466,12 @@ def backgroundremover_page():
 
 
 @app.route('/object-removal')
-@app.route('/object-removal.html')
 def object_removal_page():
     """Object removal tool - serves main index"""
     return send_file('web/index.html')
 
 
 @app.route('/video-tools')
-@app.route('/video-tools.html')
 def video_tools_page():
     """Serve video tools page"""
     return send_file('web/video-tools.html')
@@ -6061,13 +6059,13 @@ def objrem_download(job_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@app.route('/login.html')
+@app.route('/login')
 def login_page():
     """Serve login page"""
     return send_file('web/login.html')
 
 
-@app.route('/reset-password.html')
+@app.route('/reset-password')
 def reset_password_page():
     """Serve password reset page"""
     return send_file('web/reset-password.html')
@@ -8117,7 +8115,6 @@ def terms_of_service():
 
 
 @app.route('/premium')
-@app.route('/premium.html')
 def premium_page():
     """Serve Premium/Pricing page"""
     return send_file(os.path.join(app.static_folder, 'premium.html'))
@@ -8134,9 +8131,10 @@ def serve_static_files(filename):
         print(f"[CDN] Redirecting static asset: {filename} -> {cdn_url}")
         return redirect(cdn_url)
 
-    # If already has .html extension, serve directly
+    # SEO: 301 redirect .html URLs to clean URLs (avoid duplicate content)
     if filename.endswith('.html'):
-        return send_file(os.path.join(app.static_folder, filename))
+        clean_url = '/' + filename[:-5]  # Remove .html extension
+        return redirect(clean_url, code=301)
 
     # Try adding .html extension for clean URLs (e.g., /contact -> contact.html)
     html_file = filename + '.html'
