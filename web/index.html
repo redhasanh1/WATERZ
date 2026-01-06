@@ -1428,41 +1428,6 @@
                 gap: 1rem;
             }
         }
-        /* Maintenance banner */
-        .maintenance-banner {
-            position: relative;
-            z-index: 999; /* under fixed nav (1000) */
-            background: linear-gradient(135deg, rgba(102,126,234,0.25) 0%, rgba(118,75,162,0.25) 100%);
-            border-bottom: 1px solid rgba(102, 126, 234, 0.25);
-            padding: 14px 16px;
-            text-align: center;
-            backdrop-filter: blur(6px);
-        }
-
-        .maintenance-banner .badge {
-            display: inline-block;
-            margin-right: 10px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            background: var(--gradient-primary);
-            color: #fff;
-            font-size: 0.75rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
-
-        .maintenance-banner .msg {
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .maintenance-banner .sparkle {
-            display: inline-block;
-            margin-left: 8px;
-            color: #a78bfa;
-            animation: pulse 2s ease-in-out infinite;
-        }
-
         /* FAQ Section */
         .faq-section {
             padding: 4rem 1.5rem;
@@ -1538,55 +1503,6 @@
     </style>
 </head>
 <body>
-    <!-- MAINTENANCE BANNER -->
-    <div id="maintenanceBanner" style="
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(135deg, #0b1120 0%, #1a1a3a 100%);
-        z-index: 99999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        padding: 2rem;
-    ">
-        <div style="
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-            border: 2px solid rgba(102, 126, 234, 0.3);
-            border-radius: 24px;
-            padding: 3rem 4rem;
-            max-width: 600px;
-        ">
-            <div style="font-size: 4rem; margin-bottom: 1rem;">🔧</div>
-            <h1 style="
-                font-size: 2.5rem;
-                font-weight: 800;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                margin-bottom: 1rem;
-            ">Under Maintenance</h1>
-            <p style="
-                font-size: 1.25rem;
-                color: #9aa4b2;
-                margin-bottom: 1.5rem;
-                line-height: 1.6;
-            ">We're currently performing scheduled maintenance to improve your experience. We'll be back shortly!</p>
-            <div style="
-                display: inline-block;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 0.75rem 2rem;
-                border-radius: 12px;
-                color: white;
-                font-weight: 600;
-            ">Check back soon</div>
-        </div>
-    </div>
-
     <!-- Navigation Header -->
     <nav class="nav-header">
         <div class="nav-container">
