@@ -43,6 +43,7 @@ COPY segment-anything-2/ ./segment-anything-2/
 RUN cd /app/segment-anything-2 && rm -rf build *.egg-info && find . -name "*.so" -delete && pip install -e .
 
 # ---- Worker Scripts ----
+COPY gpu_coordinator.py .
 COPY wsl_sam2_worker.py .
 COPY sam2_track_wsl2.py .
 COPY start_object_server.py .
@@ -74,6 +75,14 @@ ENV PYTHONPATH=/app:/app/sam2_trt_inference:/app/segment-anything-2
 # B2 defaults (credentials passed at runtime via -e)
 ENV B2_BUCKET=watermarkz \
     B2_CDN_URL=https://markz.humblewoslayer.workers.dev
+
+# DALI GPU-direct video streaming
+ENV USE_DALI_STREAMING=1 \
+    SAM2_MAX_HEIGHT=480
+
+# GPU Coordination (distributed lock)
+ENV GPU_LOCK_TTL=120 \
+    GPU_HEARTBEAT_INTERVAL=30
 
 # Worker config - NUM_WORKERS controls TensorRT clicker count
 # Set to 0 for sender-only mode

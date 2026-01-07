@@ -43,6 +43,7 @@ RUN pip install --no-cache-dir \
     && pip install --no-cache-dir -r requirements.docker.notrt.txt
 
 # ---- Core Python Files ----
+COPY gpu_coordinator.py .
 COPY server_production.py .
 COPY server_production2.py .
 COPY segment_detector.py .
@@ -104,6 +105,10 @@ ENV ENABLE_SAGE_ATTENTION=0 \
 ENV CELERY_POOL=threads \
     CELERY_CONCURRENCY=4 \
     SEGMENT_WORKERS=2
+
+# GPU Coordination (distributed lock)
+ENV GPU_LOCK_TTL=120 \
+    GPU_HEARTBEAT_INTERVAL=30
 
 # Python path
 ENV PYTHONPATH=/app:/app/faster-propainter-main

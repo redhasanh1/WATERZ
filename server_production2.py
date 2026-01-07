@@ -16,6 +16,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
 import numpy as np
+from gpu_coordinator import GPUCoordinator
 
 # Enable TensorRT optimizations for 4090 (MUST be set before watermark.py import)
 os.environ['USE_NEUFLOW'] = '1'        # NeuFlow TRT optical flow (~3GB vs ~11GB VRAM)
@@ -454,6 +455,9 @@ try:
         celery.conf.worker_concurrency = int(_conc)
 except Exception:
     pass
+
+# GPU Coordinator for exclusive GPU access (prevents SAM2/ProPainter conflicts)
+_gpu_coord = GPUCoordinator(worker_type='propainter')
 
 # [NOTIFY] Send notification when Celery worker is ACTUALLY ready
 from celery.signals import worker_ready
@@ -2164,6 +2168,15 @@ def finalize_yolo_task(self, segment_results, video_data):
 
 @celery.task(bind=True, name='watermark._continue_after_masks')
 def _continue_after_masks(self, sam2_result, video_path, video_id=None, points=None, video_width=None, video_height=None, frame_index=0, api_base=None):
+    task_id = self.request.id
+
+    # Acquire GPU lock (waits if SAM2 is using GPU)
+    with _gpu_coord.gpu_exclusive(task_id):
+        return _continue_after_masks_impl(self, sam2_result, video_path, video_id, points, video_width, video_height, frame_index, api_base)
+
+
+def _continue_after_masks_impl(self, sam2_result, video_path, video_id=None, points=None, video_width=None, video_height=None, frame_index=0, api_base=None):
+    """Actual implementation of _continue_after_masks (wrapped with GPU lock)."""
     try:
         import cv2, glob, numpy as np, os, json, zipfile, requests
         from watermark import expand_masks_10fps  # not used but keep import parity
