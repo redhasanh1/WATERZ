@@ -166,46 +166,123 @@ def main():
     mask_files = [f for f in os.listdir(masks_folder) if f.endswith('.png')]
     print(f"Masks: {len(mask_files)} files found")
 
-    # Setup GPU-accelerated video encoder (FFmpeg with NVENC)
-    ffmpeg_cmd = [
-        'ffmpeg', '-y',
-        '-f', 'rawvideo',
-        '-vcodec', 'rawvideo',
-        '-s', f'{width}x{height}',
-        '-pix_fmt', 'bgr24',
-        '-r', str(fps),
-        '-i', '-',
-        '-c:v', 'hevc_nvenc', '-cq', '18', '-preset', 'p4',
-        '-pix_fmt', 'yuv420p',
-        output_path
-    ]
-    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    # --- Video Writer Setup ---
+    video_writer = None
+    encoder_used = None
 
-    print(f"\nRendering overlay video (GPU encoding)...")
+    # Try using OpenCV's VideoWriter first (more reliable, no ffmpeg dependency)
+    print("\nAttempting to use built-in OpenCV writer (CPU)...")
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-    # Process frames
+    if video_writer.isOpened():
+        encoder_used = "OpenCV (mp4v)"
+        print(f"Success! Using reliable OpenCV writer.")
+    else:
+        print("OpenCV writer failed. Falling back to FFmpeg pipe...")
+        video_writer = None # Explicitly set to None
+
+        # --- Fallback to FFmpeg ---
+        ffmpeg_exe = 'ffmpeg'
+        if os.path.exists('ffmpeg.exe'):
+            ffmpeg_exe = 'ffmpeg.exe'
+
+        ffmpeg_cmd_gpu = [
+            ffmpeg_exe, '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-s', f'{width}x{height}',
+            '-pix_fmt', 'bgr24', '-r', str(fps), '-i', '-',
+            '-c:v', 'hevc_nvenc', '-cq', '18', '-preset', 'p4', '-pix_fmt', 'yuv420p', output_path
+        ]
+        ffmpeg_cmd_cpu = [
+            ffmpeg_exe, '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-s', f'{width}x{height}',
+            '-pix_fmt', 'bgr24', '-r', str(fps), '-i', '-',
+            '-c:v', 'libx264', '-crf', '23', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', output_path
+        ]
+
+        ffmpeg_proc = None
+        # Try GPU
+        try:
+            ffmpeg_proc = subprocess.Popen(ffmpeg_cmd_gpu, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            # Check if it terminated immediately with an error
+            time.sleep(0.1) # Give it a moment to start and potentially fail
+            if ffmpeg_proc.poll() is not None:
+                if "Unknown encoder 'hevc_nvenc'" in ffmpeg_proc.stderr.read().decode('utf-8', errors='ignore'):
+                    ffmpeg_proc = None # Force fallback
+        except (FileNotFoundError, OSError):
+            ffmpeg_proc = None # GPU failed, try CPU
+
+        # Fallback to CPU
+        if ffmpeg_proc is None:
+            print("GPU FFmpeg failed. Trying CPU FFmpeg...")
+            try:
+                ffmpeg_proc = subprocess.Popen(ffmpeg_cmd_cpu, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                encoder_used = "FFmpeg (libx264)"
+            except FileNotFoundError:
+                print("\nFATAL: FFmpeg not found and OpenCV writer failed.")
+                input("Press Enter to exit...")
+                return
+        else:
+            encoder_used = "FFmpeg (hevc_nvenc)"
+
+        if not ffmpeg_proc:
+            print("\nFATAL: All encoding methods failed.")
+            input("\nPress Enter to exit...")
+            return
+
+    print(f"\nRendering overlay video ({encoder_used})...")
+
+    # --- Frame Processing Loop ---
     frame_idx = 0
-    for frame_idx in tqdm(range(total_frames), desc="Rendering"):
-        ret, frame = cap.read()
-        if not ret:
-            break
+    error_occurred = False
+    try:
+        for frame_idx in tqdm(range(total_frames), desc="Rendering"):
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        # Load and overlay mask
-        mask = load_mask(masks_folder, frame_idx)
-        result = overlay_mask(frame, mask, color=(0, 255, 0), alpha=0.4)
+            mask = load_mask(masks_folder, frame_idx)
+            result = overlay_mask(frame, mask, color=(0, 255, 0), alpha=0.4)
 
-        # Write frame to FFmpeg
-        ffmpeg_proc.stdin.write(result.tobytes())
+            # Write frame
+            if video_writer:
+                video_writer.write(result)
+            elif ffmpeg_proc:
+                ffmpeg_proc.stdin.write(result.tobytes())
 
-    cap.release()
-    ffmpeg_proc.stdin.close()
-    ffmpeg_proc.wait()
+    except (BrokenPipeError, IOError) as e:
+        print(f"\nError during frame writing: {e}")
+        error_occurred = True
+    finally:
+        cap.release()
+        if video_writer:
+            video_writer.release()
+        if 'ffmpeg_proc' in locals() and ffmpeg_proc and ffmpeg_proc.stdin:
+            ffmpeg_proc.stdin.close()
+            ffmpeg_proc.wait()
 
-    print(f"\n{'=' * 60}")
-    print(f"Done! Output saved to: {output_path}")
-    print(f"Frames rendered: {frame_idx + 1}")
-    print(f"{'=' * 60}")
-
+    # --- Final Verification ---
+    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        print(f"\n{'=' * 60}")
+        print("Error: Failed to create a valid output file.")
+        print(f"Encoder used: {encoder_used}")
+        if 'ffmpeg_proc' in locals() and ffmpeg_proc:
+            stderr_output = ffmpeg_proc.stderr.read().decode('utf-8', errors='ignore')
+            print(f"FFmpeg exit code: {ffmpeg_proc.returncode}")
+            if stderr_output:
+                print("\n--- FFmpeg Error Output ---")
+                print(stderr_output)
+        print(f"{'=' * 60}")
+    else:
+        print(f"\n{'=' * 60}")
+        print(f"Done! Output saved to: {output_path}")
+        print(f"Frames rendered: {frame_idx + 1 if not error_occurred else frame_idx}")
+        print(f"{'=' * 60}")
 
 if __name__ == "__main__":
-    main()
+    import time # Import time for the sleep hack
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print(f"\nAn unexpected error occurred: {e}")
+        traceback.print_exc()
+        input("\nPress Enter to exit.")

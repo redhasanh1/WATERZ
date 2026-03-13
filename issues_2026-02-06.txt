@@ -1,0 +1,186 @@
+WATERMARKZ ISSUES LOG - 2026-02-06
+===================================
+
+ISSUE 1: GPU Coordinator Infinite Yield Bug
+-------------------------------------------
+SYMPTOM:
+  SAM2 worker hangs forever, then crashes with _queue.Empty after 30 seconds.
+
+ROOT CAUSE:
+  Fair scheduling in gpu_coordinator.py yields forever when there's a stale
+  `gpu:lock:waiting:propainter` counter in Redis but no actual ProPainter task waiting.
+  The counter gets incremented but not always decremented (race condition or crash).
+
+QUICK FIX:
+  Clear stale Redis keys:
+  ```
+  python3 -c "import redis; r=redis.from_url('redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930'); r.delete('gpu:lock:waiting:propainter','gpu:lock:waiting:sam2','gpu:lock:last_type'); print('Cleared!')"
+  ```
+
+PERMANENT FIX:
+  Already applied to gpu_coordinator.py - only yield for max 10 seconds, then proceed.
+  Needs Docker image rebuild to deploy:
+  ```
+  docker build -f Dockerfile.4090worker.notrt -t humblewoslayer/watermarkz-celery:v13 .
+  docker push humblewoslayer/watermarkz-celery:v13
+  ```
+
+
+ISSUE 2: DALI Async Loader Queue Timeout (Backward Pass)
+--------------------------------------------------------
+SYMPTOM:
+  [DALI-ASYNC] Queue timeout for chunk 0
+  _queue.Empty error during video processing
+
+ROOT CAUSE:
+  max_cached_chunks = 3 in sam2_track_wsl2.py line 346.
+  For long videos:
+  - Forward pass loads chunks 0, 1, 2, 3... 49
+  - Cache only keeps last 3 chunks (47, 48, 49)
+  - Chunk 0 gets evicted
+  - Backward pass needs chunk 0 -> not in cache -> queue empty -> crash
+
+FIX:
+  Edit sam2_track_wsl2.py line 604-607, change:
+  ```python
+  if oldest != queued_start and oldest != chunk_start:
+  ```
+  To:
+  ```python
+  if oldest != queued_start and oldest != chunk_start and oldest != 0:
+  ```
+  This prevents chunk 0 from being evicted (always needed for backward pass).
+
+DEPLOY WITHOUT REBUILD:
+  ```
+  sed -i 's/if oldest != queued_start and oldest != chunk_start:/if oldest != queued_start and oldest != chunk_start and oldest != 0:/' /mnt/d/watermarkz/sam2_track_wsl2.py
+  ```
+  Then restart container with volume mount:
+  ```
+  -v /mnt/d/watermarkz/sam2_track_wsl2.py:/app/sam2_track_wsl2.py:ro
+  ```
+
+
+ISSUE 3: NVENC Not Available Warning
+------------------------------------
+SYMPTOM:
+  [FFMPEG] NVENC not available, using libx264 (CPU)
+
+ROOT CAUSE:
+  FFmpeg has NVENC support (verified with ffmpeg -encoders | grep nvenc),
+  but the code's NVENC detection is failing. Not a critical issue - encoding
+  still works but slower (CPU instead of GPU).
+
+STATUS:
+  Low priority. Video encoding works, just slower.
+  TODO: Fix NVENC detection in code.
+
+
+ISSUE 4: Mask Resize Breaking Masks
+-----------------------------------
+SYMPTOM:
+  [SAM2] Resizing 1292 masks from 270x480 to 720x1280...
+  [SAM2] Mask validation: 0/1292 frames have mask content
+  RuntimeError: No mask content generated - SAM2 tracking failed
+
+ROOT CAUSE:
+  SAM2 generates masks at processing resolution (270x480).
+  ProPainter worker resizes masks to original video resolution (720x1280).
+  The resize operation is producing empty masks (all zeros).
+
+FIX:
+  Investigate mask resize code in server_production2.py.
+  Likely using wrong interpolation mode or threshold for binary masks.
+  Binary masks need NEAREST interpolation, not bilinear/bicubic.
+
+FILE TO CHECK:
+  server_production2.py - search for "Resizing" or resize mask logic
+
+
+ISSUE 5: Frame Count Validation Too Strict
+------------------------------------------
+SYMPTOM:
+  ValueError: Could not read all video frames: got 114/115
+  ValueError: Could not read all video frames: got 3488/3489
+
+ROOT CAUSE:
+  server_production2.py line 2603 requires EXACT frame count match.
+  Videos often have last frame unreadable or metadata lies about frame count.
+  Being off by 1 frame crashes the entire task.
+
+FIX:
+  Edit server_production2.py around line 2603.
+  Change from exact match to allow 1-2 frame tolerance:
+  ```python
+  # OLD (too strict):
+  if len(preloaded_frames) != total_frames:
+      raise ValueError(...)
+
+  # NEW (allow tolerance):
+  if len(preloaded_frames) < total_frames - 2:  # Allow up to 2 frames short
+      raise ValueError(...)
+  # If only 1-2 frames short, just use what we got
+  total_frames = len(preloaded_frames)
+  ```
+
+
+ISSUE 6: Disk Space Full (tmpfs)
+--------------------------------
+SYMPTOM:
+  OSError: [Errno 28] No space left on device
+
+ROOT CAUSE:
+  Docker container uses tmpfs with size limits:
+  --tmpfs /tmp:rw,exec,size=4g
+  --tmpfs /app/temp:rw,exec,size=2g
+  Total 6GB fills up with large videos or accumulated temp files.
+
+QUICK FIX:
+  Restart container to clear tmpfs:
+  ```
+  docker restart sam2-workers
+  ```
+
+LONG-TERM FIXES:
+  1. Increase tmpfs sizes: --tmpfs /tmp:rw,exec,size=8g --tmpfs /app/temp:rw,exec,size=4g
+  2. Add cleanup between tasks (delete temp files after each job)
+  3. Add disk space monitoring and auto-cleanup when low
+
+
+ISSUE 7: Google Search / SEO
+----------------------------
+SYMPTOM:
+  Site not ranking for "remove object from video" searches.
+  Competitors like Fotor ranking higher.
+
+ROOT CAUSE:
+  Only homepage (markremoverai.com) is indexed by Google.
+  Inner pages (/object-removal, /backgroundremover) not indexed yet.
+
+FIX:
+  1. Submit sitemap to Google Search Console:
+     https://search.google.com/search-console
+  2. Verify site ownership
+  3. Submit sitemap: https://markremoverai.com/sitemap.xml
+  4. Request indexing for individual pages
+  5. Build backlinks for domain authority
+
+
+===================================
+DOCKER RUN COMMANDS REFERENCE
+===================================
+
+SAM2 Workers:
+```
+docker run --gpus all --name sam2-workers --read-only --user 10001:10001 --cap-drop=ALL --cap-add=SYS_NICE --security-opt no-new-privileges:true --tmpfs /tmp:rw,exec,size=4g,uid=10001,gid=10001 --tmpfs /app/temp:rw,exec,size=2g,uid=10001,gid=10001 --memory=20g --cpus=8 --pids-limit=512 --restart=unless-stopped -v /mnt/d/watermarkz/engines_5090_backup:/app/sam2_trt_inference/engines -e NUM_WORKERS=4 -e REDIS_URL="redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930" -e B2_KEY_ID="00539db5c1104b50000000003" -e B2_APP_KEY="K005384b8lPoBT11wScxkZ2Gx0fszus" -e B2_BUCKET="watermarkz" -e NOTIFY_WEBHOOK_URL="https://ntfy.sh/watermarkz-workers-9f31c" -e NOTIFY_WORKER_NAME="Local-SAM2" -p 5555-5562:5555-5562 humblewoslayer/watermarkz-celery:sam2workers-v11
+```
+
+Main Worker:
+```
+docker run -it --gpus all --name watermarkz-worker --read-only --cap-drop=ALL --cap-add=SYS_NICE --security-opt no-new-privileges:true --tmpfs /tmp:rw,exec,size=4g --tmpfs /app/temp:rw,exec,size=4g --tmpfs /app/uploads:rw,exec,size=4g --tmpfs /app/results:rw,exec,size=4g --tmpfs /app/cache:rw,exec,size=2g --memory=20g --cpus=8 --pids-limit=512 -e REDIS_URL="redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930" -e B2_KEY_ID="00539db5c1104b50000000003" -e B2_APP_KEY="K005384b8lPoBT11wScxkZ2Gx0fszus" -e B2_BUCKET="watermarkz" -e NOTIFY_WEBHOOK_URL="https://ntfy.sh/watermarkz-workers-9f31c" -e NOTIFY_WORKER_NAME="Local-4090" -e CELERY_CONCURRENCY=1 humblewoslayer/watermarkz-celery:v12
+```
+
+Clear Redis Locks:
+```
+python3 -c "import redis; r=redis.from_url('redis://default:bwQmxUCQEXUlYTWACmPbbkpnHPVpoiIa@tramway.proxy.rlwy.net:48930'); r.delete('gpu:lock:waiting:propainter','gpu:lock:waiting:sam2','gpu:lock:last_type'); print('Cleared!')"
+```

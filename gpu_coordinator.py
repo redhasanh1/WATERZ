@@ -92,18 +92,37 @@ class GPUCoordinator:
         start_time = time.time()
         log_interval = 10  # Log waiting status every 10 seconds
         last_log_time = 0
+        yield_start_time = None  # Track how long we've been yielding
+        MAX_YIELD_TIME = 10  # Stop yielding after 10 seconds if lock is free
 
         # Register in waiting queue
         self.redis.incr(f'gpu:lock:waiting:{self.worker_type}')
 
         try:
             while time.time() - start_time < timeout:
+                # Check if lock is currently held
+                lock_is_free = self.redis.get(LOCK_KEY) is None
+
                 # Check fair scheduling - yield if we just ran and other type is waiting
                 last_holder = self.redis.get(LAST_TYPE_KEY)
+                other_waiting = self._other_type_waiting()
                 should_yield = (
                     last_holder == self.worker_type and
-                    self._other_type_waiting()
+                    other_waiting and
+                    lock_is_free  # Only yield if lock is actually free
                 )
+
+                # Track yield time - if we've been yielding too long, stop
+                if should_yield:
+                    if yield_start_time is None:
+                        yield_start_time = time.time()
+                    elif time.time() - yield_start_time > MAX_YIELD_TIME:
+                        # Other type isn't taking the lock, stop yielding
+                        print(f"[GPU-LOCK] Stopped yielding after {MAX_YIELD_TIME}s - other type not responding")
+                        should_yield = False
+                        yield_start_time = None
+                else:
+                    yield_start_time = None
 
                 if not should_yield:
                     # Try to acquire lock with SETNX
