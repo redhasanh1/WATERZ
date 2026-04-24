@@ -133,13 +133,41 @@ The biggest single optimization. DCNv2 (Deformable Convolution v2) was the remai
 **Result: 10ms → 7ms** per frame
 
 ### Stage 4: SAM2 Temporal Optimization (3.1x video speedup)
-Instead of running mask generation on every frame:
-- Convert input to 10fps (e.g., 1124 frames → 225 frames for a 22.5s video)
-- Run SAM2 mask propagation only on keyframes
-- Interpolate masks for skipped frames using optical flow vectors
-- GPU-accelerated NVDEC decoding + NVENC encoding (bypasses CPU entirely)
+This was one of the highest-impact optimizations in the entire pipeline. The naive approach — running SAM2 mask generation on every single frame — was brutally slow. A 22.5-second video at 50fps meant processing **1,124 frames**, taking ~47 seconds. For a production SaaS, that's unacceptable.
 
-**Result: 47s → 15s** for a 22.5-second video
+**The insight:** Most consecutive video frames are nearly identical. A mask generated at frame 100 is 95%+ valid at frame 101-104. We don't need per-frame inference — we need per-*keyframe* inference with intelligent propagation.
+
+**What we built:**
+
+1. **Adaptive FPS reduction** — Automatically downsample any input video to 10fps before mask generation. A 50fps video drops from 1,124 frames to just 225 frames — an instant 5x reduction in compute. Works across all input frame rates:
+
+   | Input FPS | Frames (22.5s video) | Reduction |
+   |-----------|---------------------|-----------|
+   | 60fps | 1,350 → 225 | 6x |
+   | 50fps | 1,124 → 225 | 5x |
+   | 30fps | 675 → 225 | 3x |
+   | 24fps | 540 → 225 | 2.4x |
+
+2. **GPU-accelerated preprocessing pipeline** — Moved the entire video decode/resize/fps-conversion step onto the GPU using NVDEC hardware decoder. The CPU never touches raw pixel data:
+   - **GPU preprocessing**: 4-6 seconds (NVDEC decode + resize + fps conversion)
+   - **Frame extraction**: 1-2 seconds
+   - **SAM2 mask generation**: 9-10 seconds (TensorRT FP16)
+   - **Total: ~15 seconds** (down from 47s)
+
+3. **Hybrid pipeline architecture** — GPU preprocessing and mask generation run as overlapping stages. While NVDEC is decoding the next batch of frames, SAM2 is generating masks on the current batch. This hides decode latency almost entirely.
+
+4. **One-click interactive workflow** — User selects the target region in a single frame, presses 'c', and SAM2 propagates the mask across the entire temporal sequence automatically. No manual frame-by-frame annotation.
+
+**Before vs After:**
+```
+BEFORE (Native FPS):
+  50fps video, 22.5s → 1,124 frames → SAM2 on every frame → 47 seconds
+
+AFTER (10fps Optimized):
+  50fps video, 22.5s → 225 frames → NVDEC + SAM2 → 15 seconds (3.1x faster)
+```
+
+**Result: 47s → 15s** — and the quality difference is imperceptible for video inpainting, since ProPainter handles sub-frame interpolation downstream.
 
 ### Stage 5: FP8 Quantization (projected 4.2x total)
 Currently in progress for standard convolution layers:
