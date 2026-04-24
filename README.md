@@ -1,5 +1,5 @@
-<h1 align="center">WATERZ</h1>
-<h3 align="center">GPU-Accelerated Neural Video Inpainting Engine</h3>
+<h1 align="center">Neural Video Inpainting</h1>
+<h3 align="center">GPU-Accelerated Video Object Removal & Restoration Engine</h3>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" />
@@ -17,7 +17,7 @@
 
 ## Overview
 
-WATERZ is an end-to-end deep learning pipeline for automated video object detection and removal. The system processes video frame-by-frame using a multi-model architecture: a custom YOLOv8 detector localizes target regions, SAM2 propagates segmentation masks across temporal sequences, and a ProPainter-based inpainting network reconstructs the removed areas with temporal consistency.
+Neural Video Inpainting is an end-to-end deep learning pipeline for automated video object detection and removal. The system processes video frame-by-frame using a multi-model architecture: a custom YOLOv8 detector localizes target regions, SAM2 propagates segmentation masks across temporal sequences, and a ProPainter-based inpainting network reconstructs the removed areas with temporal consistency.
 
 The entire pipeline is optimized for production throughput with TensorRT FP16/FP8 quantization, custom DCNv4 CUDA kernels, and horizontal scaling across distributed GPU workers.
 
@@ -226,7 +226,7 @@ Moved video decode/encode off the CPU entirely:
 ## Project Structure
 
 ```
-WATERZ/
+neural-video-inpainting/
 ├── backend/              # Flask production server
 ├── web/                  # Frontend application
 ├── yolo_training/        # Custom YOLO dataset & training
@@ -253,8 +253,8 @@ python server_production.py
 
 ### Docker (GPU Cloud)
 ```bash
-docker build -f Dockerfile.celery -t waterz:latest .
-docker push your-registry/waterz:latest
+docker build -f Dockerfile.celery -t neural-video-inpainting:latest .
+docker push your-registry/neural-video-inpainting:latest
 # Deploy to Salad.com, RunPod, or any GPU cloud
 ```
 
