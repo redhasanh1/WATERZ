@@ -1553,28 +1553,6 @@
         </div>
     </nav>
 
-    <!-- Service disruption banner. Delete this block (and its script) when GPU capacity is back.
-         .nav-header is position:fixed, so anything at the top of normal flow renders
-         underneath it — the margin-top below is measured from the real nav height at
-         runtime so the banner always sits just beneath the bar at any width. -->
-    <div id="gpuOutageBanner" role="status" style="margin-top:84px;background:#B3261E;color:#fff;padding:18px 20px;text-align:center;font-weight:800;font-size:clamp(18px,3.2vw,26px);line-height:1.35;letter-spacing:-0.01em;">
-        WE'RE NOT AVAILABLE RIGHT NOW
-        <div style="font-weight:600;font-size:clamp(13px,1.9vw,16px);opacity:.95;margin-top:6px;">
-            Temporary disruption to our GPU capacity — we're working on it. Please check back soon.
-        </div>
-    </div>
-    <script>
-        (function () {
-            var nav = document.querySelector('.nav-header');
-            var banner = document.getElementById('gpuOutageBanner');
-            if (!nav || !banner) return;
-            var place = function () { banner.style.marginTop = nav.offsetHeight + 'px'; };
-            place();
-            window.addEventListener('resize', place);
-            window.addEventListener('load', place);
-        })();
-    </script>
-
     <!-- Email Verification Banner (hidden by default) -->
     <div id="emailVerificationBanner" style="display: none; background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(251, 191, 36, 0.15) 100%); border-bottom: 1px solid rgba(245, 158, 11, 0.3); padding: 0.75rem 1rem; text-align: center;">
         <span style="color: var(--text-primary); font-size: 0.9rem;">
