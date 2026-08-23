@@ -928,6 +928,10 @@ def auth_google():
 
         # Store state in session for verification
         session['oauth_state'] = state
+        # Store PKCE code_verifier so the callback can complete the token
+        # exchange (google-auth-oauthlib enables PKCE by default; without this
+        # Google rejects the exchange with "Missing code verifier").
+        session['code_verifier'] = flow.code_verifier
 
         return redirect(authorization_url)
 
@@ -967,6 +971,8 @@ def auth_google_callback():
         )
 
         flow.redirect_uri = redirect_uri
+        # Restore the PKCE code_verifier saved when the flow was initiated.
+        flow.code_verifier = session.get('code_verifier')
 
         # Exchange authorization code for tokens
         # Fix: request.url may have http:// behind reverse proxy, force https://
