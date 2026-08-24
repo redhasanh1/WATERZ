@@ -74,13 +74,17 @@ struct MainTabs: View {
                 .tabItem { Label("Create", systemImage: "wand.and.stars") }
                 .tag(0)
 
+            BackgroundView()
+                .tabItem { Label("Background", systemImage: "person.and.background.dotted") }
+                .tag(1)
+
             GuideView()
                 .tabItem { Label("Guide", systemImage: "questionmark.circle") }
-                .tag(1)
+                .tag(2)
 
             ProfileView(embedded: true)
                 .tabItem { Label("Account", systemImage: "person.crop.circle") }
-                .tag(2)
+                .tag(3)
                 .badge(appState.credits < 1 ? "!" : nil)
         }
     }

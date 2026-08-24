@@ -84,7 +84,7 @@ actor APIClient {
 
     // MARK: - Core
 
-    private func request(
+    func request(
         _ path: String,
         method: String = "GET",
         json: [String: Any]? = nil
@@ -213,7 +213,7 @@ actor APIClient {
         }
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         do { return try JSONDecoder().decode(T.self, from: data) }
         catch { throw APIError.decoding }
     }
@@ -310,16 +310,32 @@ actor APIClient {
     }
 
     private func uploadToB2(fileURL: URL, ticket: UploadURLResponse, contentType: String) async throws {
-        guard let url = URL(string: ticket.uploadURL) else { throw APIError.decoding }
+        try await uploadToB2(
+            fileURL: fileURL,
+            uploadURL: ticket.uploadURL,
+            authToken: ticket.authToken,
+            remotePath: ticket.remotePath,
+            contentType: contentType
+        )
+    }
+
+    func uploadToB2(
+        fileURL: URL,
+        uploadURL: String,
+        authToken: String,
+        remotePath: String,
+        contentType: String
+    ) async throws {
+        guard let url = URL(string: uploadURL) else { throw APIError.decoding }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue(ticket.authToken, forHTTPHeaderField: "Authorization")
+        req.setValue(authToken, forHTTPHeaderField: "Authorization")
         req.setValue(contentType, forHTTPHeaderField: "Content-Type")
         // B2 wants the path percent-encoded, and the backend opts out of the
         // checksum the same way the web client does.
-        let encodedPath = ticket.remotePath
-            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ticket.remotePath
+        let encodedPath = remotePath
+            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remotePath
         req.setValue(encodedPath, forHTTPHeaderField: "X-Bz-File-Name")
         req.setValue("do_not_verify", forHTTPHeaderField: "X-Bz-Content-Sha1")
 
