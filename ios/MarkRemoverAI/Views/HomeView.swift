@@ -318,7 +318,8 @@ struct HomeView: View {
     }
 
     private var selector: some View {
-        VStack(spacing: 0) {
+        ScrollView {
+            VStack(spacing: 0) {
             Picker("Mode", selection: $model.mode) {
                 ForEach(EditorModel.Mode.allCases) { mode in
                     Text(mode.title).tag(mode)
@@ -355,6 +356,7 @@ struct HomeView: View {
                         }
                     }
                 )
+                .frame(maxHeight: 300)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
@@ -437,8 +439,6 @@ struct HomeView: View {
                     .padding(.top, 6)
             }
 
-            Spacer(minLength: 12)
-
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
                     if model.mode == .moving {
@@ -461,7 +461,15 @@ struct HomeView: View {
                 .font(.subheadline)
                 .buttonStyle(.bordered)
 
-                if appState.credits < 1 {
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            // Pinned so the primary action is never scrolled off screen.
+            Group {
+                if appState.credits < model.estimatedCredits {
                     Button("Get credits to continue") { showPaywall = true }
                         .buttonStyle(PrimaryButtonStyle())
                 } else {
@@ -473,7 +481,8 @@ struct HomeView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
         }
     }
 

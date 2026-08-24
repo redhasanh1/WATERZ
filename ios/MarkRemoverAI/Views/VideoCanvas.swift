@@ -102,7 +102,13 @@ struct VideoCanvas: View {
             .scaleEffect(scale)
             .offset(offset)
             .contentShape(Rectangle())
-            .gesture(primaryGesture(geo: geo, rect: rect))
+            // Pinch is safe to leave attached; a drag is not. While neither
+            // drawing nor zoomed the canvas has no use for a drag, and keeping
+            // one attached steals the scroll from the surrounding ScrollView.
+            .gesture(pinchGesture)
+            .applyIf(isDrawing || scale > 1) {
+                $0.gesture(dragGesture(geo: geo, rect: rect))
+            }
             .onTapGesture(count: 2) { location in
                 withAnimation(.easeOut(duration: 0.22)) { toggleZoom(at: location, in: geo.size) }
                 Haptics.tick()
@@ -129,10 +135,11 @@ struct VideoCanvas: View {
 
     // MARK: - Gestures
 
-    /// Dragging paints while a draw tool is active, otherwise it pans. Pinch
-    /// stays available in both, so you can zoom in before painting detail.
-    private func primaryGesture(geo: GeometryProxy, rect: CGRect) -> some Gesture {
-        let drag = DragGesture(minimumDistance: 0)
+    /// Dragging paints while a draw tool is active, otherwise it pans.
+    private func dragGesture(geo: GeometryProxy, rect: CGRect) -> some Gesture {
+        // minimumDistance 0 is required to paint from a single touch, but it
+        // also swallows taps — so only drawing mode gets it.
+        DragGesture(minimumDistance: isDrawing ? 0 : 12)
             .onChanged { value in
                 if isDrawing {
                     guard let onDraw,
@@ -155,16 +162,16 @@ struct VideoCanvas: View {
                     committedOffset = offset
                 }
             }
+    }
 
-        let pinch = MagnificationGesture()
+    private var pinchGesture: some Gesture {
+        MagnificationGesture()
             .onChanged { zoom = committedZoom * $0 }
             .onEnded { _ in
                 committedZoom = scale
                 zoom = scale
                 if scale == 1 { resetPan() }
             }
-
-        return pinch.simultaneously(with: drag)
     }
 
     private func toggleZoom(at location: CGPoint, in size: CGSize) {
@@ -359,5 +366,15 @@ struct FrameScrubber: View {
             }
         }
         thumbnails = images
+    }
+}
+
+
+extension View {
+    /// Applies a modifier only when a condition holds. Used to keep a drag
+    /// gesture off the canvas unless it actually needs one.
+    @ViewBuilder
+    func applyIf<T: View>(_ condition: Bool, _ transform: (Self) -> T) -> some View {
+        if condition { transform(self) } else { self }
     }
 }

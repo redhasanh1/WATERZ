@@ -287,6 +287,7 @@ struct BackgroundView: View {
                         model.addPoint(normalized: location, label: markMode)
                     }
                 )
+                .frame(maxHeight: 300)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
@@ -369,18 +370,25 @@ struct BackgroundView: View {
                 .font(.subheadline)
                 .buttonStyle(.bordered)
 
-                Button((model.settings.operation == .keepObject ? "Replace background" : "Remove selection")
-                       + " — \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
-                    Task { await model.run(appState: appState) }
-                }
-                .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess, gradient: Theme.orangeGradient))
-                .disabled(!model.canProcess)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+            .padding(.bottom, 12)
             }
         }
         .background(Color(.systemGroupedBackground))
+        .safeAreaInset(edge: .bottom) {
+            // Pinned: the thing you came here to press should never require
+            // scrolling to find.
+            Button((model.settings.operation == .keepObject ? "Replace background" : "Remove selection")
+                   + " — \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
+                Task { await model.run(appState: appState) }
+            }
+            .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess, gradient: Theme.orangeGradient))
+            .disabled(!model.canProcess)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
+        }
     }
 
     /// Everything the website exposes: what survives, what fills the rest, and

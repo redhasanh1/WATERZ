@@ -77,7 +77,6 @@ struct MainTabs: View {
             BackgroundView()
                 .tabItem { Label("Background", systemImage: "person.and.background.dotted") }
                 .tag(1)
-                .tint(Theme.orange)
 
             GuideView()
                 .tabItem { Label("Guide", systemImage: "questionmark.circle") }
@@ -88,5 +87,8 @@ struct MainTabs: View {
                 .tag(3)
                 .badge(appState.credits < 1 ? "!" : nil)
         }
+        // The selected tab's label follows the tool's colour, so the accent
+        // matches whichever screen you're actually on.
+        .tint(selection == 1 ? Theme.orange : Theme.accent)
     }
 }
