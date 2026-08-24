@@ -12,6 +12,7 @@ struct MarkRemoverAIApp: App {
                 .environmentObject(store)
                 .tint(Theme.accent)
                 .task {
+                    APIClient.bootstrap()
                     // Transactions that land while the app was closed need a
                     // place to write the new balance.
                     Store.activeAppState = appState
@@ -30,7 +31,7 @@ struct RootView: View {
             // `-show_paywall 1` opens the store without a login, so the
             // StoreKit config can be exercised on a simulator.
             if UserDefaults.standard.bool(forKey: "show_paywall") {
-                PaywallView()
+                PaywallView(isPresented: false)
             } else {
                 content
             }

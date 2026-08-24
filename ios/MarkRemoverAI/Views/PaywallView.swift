@@ -2,6 +2,10 @@ import StoreKit
 import SwiftUI
 
 struct PaywallView: View {
+    /// False when the paywall is the root view (the debug entry point), where
+    /// `dismiss()` has nothing to dismiss and a Done button would do nothing.
+    var isPresented = true
+
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
@@ -53,8 +57,10 @@ struct PaywallView: View {
             .navigationTitle("Get credits")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                if isPresented {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
         }

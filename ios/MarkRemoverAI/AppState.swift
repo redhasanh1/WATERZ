@@ -19,6 +19,10 @@ final class AppState: ObservableObject {
     var credits: Double { user?.credits ?? 0 }
 
     func restoreSession() async {
+        // Settle on a reachable host first - on filtered Wi-Fi the marketing
+        // domain does not resolve, and that must not take the app down with it.
+        await APIClient.resolveHost()
+
         // The Flask session cookie survives launches, so this is the whole
         // "am I still logged in" check. It is bounded so a stalled network
         // can never leave the app sitting on the splash screen.
@@ -27,8 +31,10 @@ final class AppState: ObservableObject {
         }
 
         if let status, status.authenticated, let user = status.user {
+            AppLog.info(.auth, "Restored session for \(user.email)")
             phase = .signedIn(user)
         } else {
+            AppLog.info(.auth, "No stored session")
             phase = .signedOut
         }
         await refreshHealth()
@@ -39,6 +45,7 @@ final class AppState: ObservableObject {
             try await APIClient.shared.health()
         }
         workerOnline = health?.status == "ok"
+        AppLog.info(.net, "Health: \(workerOnline == true ? "online" : "unreachable")")
     }
 
     func signIn(email: String, password: String) async throws {
@@ -51,8 +58,16 @@ final class AppState: ObservableObject {
     }
 
     func signInWithGoogle() async throws {
-        let code = try await GoogleSignIn().start(baseURL: APIClient.shared.baseURL)
+        // The OAuth page opens in Safari, which can't use our host failover, so
+        // settle on a host that actually resolves before handing the URL over.
+        await refreshHealth()
+
+        let base = APIClient.shared.baseURL
+        AppLog.info(.auth, "Starting Google sign-in against \(base.absoluteString)")
+
+        let code = try await GoogleSignIn().start(baseURL: base)
         let user = try await APIClient.shared.exchangeGoogleCode(code)
+        AppLog.info(.auth, "Google sign-in succeeded for \(user.email)")
         phase = .signedIn(user)
     }
 
@@ -60,6 +75,7 @@ final class AppState: ObservableObject {
         let user = try await APIClient.shared.signInWithApple(
             identityToken: identityToken, email: email, name: name
         )
+        AppLog.info(.auth, "Apple sign-in succeeded for \(user.email)")
         phase = .signedIn(user)
     }
 

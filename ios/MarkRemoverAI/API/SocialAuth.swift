@@ -15,6 +15,8 @@ final class GoogleSignIn: NSObject, ASWebAuthenticationPresentationContextProvid
             .appendingPathComponent("auth/google")
             .appending(queryItems: [URLQueryItem(name: "native", value: "1")])
 
+        AppLog.info(.auth, "Opening \(url.absoluteString)")
+
         let callback: URL = try await withCheckedThrowingContinuation { continuation in
             let session = ASWebAuthenticationSession(
                 url: url,
@@ -23,6 +25,7 @@ final class GoogleSignIn: NSObject, ASWebAuthenticationPresentationContextProvid
                 if let callbackURL {
                     continuation.resume(returning: callbackURL)
                 } else if let error {
+                    AppLog.error(.auth, "Google web session failed: \(error.localizedDescription)")
                     continuation.resume(throwing: error)
                 } else {
                     continuation.resume(throwing: SocialAuthError.cancelled)

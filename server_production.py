@@ -900,8 +900,15 @@ def auth_google():
         return jsonify({'error': 'Google OAuth not configured'}), 503
 
     try:
-        # Use configured redirect URI or fallback to request host
-        redirect_uri = GOOGLE_REDIRECT_URI or f"{request.host_url}auth/google/callback"
+        native = request.args.get('native') == '1'
+        # GOOGLE_REDIRECT_URI pins the callback to markremoverai.com, which is
+        # exactly the host filtered Wi-Fi refuses to resolve. The app reaches
+        # Railway directly, so send the callback back to whichever host it
+        # actually used. That URI must also be registered in Google Cloud.
+        redirect_uri = (
+            f"{request.host_url}auth/google/callback" if native
+            else (GOOGLE_REDIRECT_URI or f"{request.host_url}auth/google/callback")
+        )
 
         # Create flow instance
         flow = Flow.from_client_config(
@@ -955,8 +962,12 @@ def auth_google_callback():
         if not state or state != request.args.get('state'):
             return jsonify({'error': 'Invalid state parameter'}), 400
 
-        # Use configured redirect URI or fallback to request host
-        redirect_uri = GOOGLE_REDIRECT_URI or f"{request.host_url}auth/google/callback"
+        # Must match the URI used to start the flow exactly.
+        native = session.get('native_auth', False)
+        redirect_uri = (
+            f"{request.host_url}auth/google/callback" if native
+            else (GOOGLE_REDIRECT_URI or f"{request.host_url}auth/google/callback")
+        )
 
         # Create flow instance with same config
         flow = Flow.from_client_config(

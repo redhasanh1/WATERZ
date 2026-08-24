@@ -25,11 +25,18 @@ enum APIError: LocalizedError {
 actor APIClient {
     static let shared = APIClient()
 
-    /// Overridable so a build can be pointed at the Railway host directly —
-    /// some networks (school/library filters) refuse to resolve the apex domain.
     static let baseURLDefaultsKey = "api_base_url"
-    static let productionBase = "https://markremoverai.com"
+
+    /// The app talks to Railway directly rather than through the marketing
+    /// domain. Public and school Wi-Fi filters routinely refuse to resolve
+    /// `markremoverai.com` - it is a young, uncategorised domain - while the
+    /// Railway host answers fine. The website being unreachable is not a
+    /// reason for the app to stop working, so the apex is only a fallback.
     static let railwayBase = "https://user-interface-ui-production.up.railway.app"
+    static let productionBase = "https://markremoverai.com"
+
+    /// Probed in order at launch; the first that answers is remembered.
+    static var candidateHosts: [String] { [railwayBase, productionBase] }
 
     private let session: URLSession
 
@@ -50,7 +57,7 @@ actor APIClient {
 
     nonisolated var baseURL: URL {
         let stored = UserDefaults.standard.string(forKey: Self.baseURLDefaultsKey)
-        return URL(string: stored ?? Self.productionBase)!
+        return URL(string: stored ?? Self.railwayBase)!
     }
 
     /// Some networks (school and library DNS filters) refuse to resolve the
@@ -60,7 +67,19 @@ actor APIClient {
     }
 
     nonisolated static var currentBaseURL: String {
-        UserDefaults.standard.string(forKey: baseURLDefaultsKey) ?? productionBase
+        UserDefaults.standard.string(forKey: baseURLDefaultsKey) ?? railwayBase
+    }
+
+    /// A `-api_base_url` launch argument only lives for that one launch, which
+    /// makes it look like the setting "forgot" as soon as the app is opened
+    /// from the home screen. Persist it so it survives.
+    nonisolated static func bootstrap() {
+        if let launchValue = UserDefaults.standard.string(forKey: baseURLDefaultsKey) {
+            UserDefaults.standard.set(launchValue, forKey: baseURLDefaultsKey)
+            AppLog.info(.app, "API host: \(launchValue)")
+        } else {
+            AppLog.info(.app, "API host: \(railwayBase) (default)")
+        }
     }
 
     // MARK: - Core
@@ -78,19 +97,106 @@ actor APIClient {
             req.httpBody = try JSONSerialization.data(withJSONObject: json)
         }
 
+        let started = Date()
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: req)
         } catch {
+            AppLog.error(.net, "\(method) \(path) failed: \(error.localizedDescription)")
+
+            if Self.isHostUnreachable(error), await switchToFallbackHost() {
+                AppLog.info(.net, "Retrying \(path) on \(Self.currentBaseURL)")
+                return try await request(path, method: method, json: json)
+            }
             throw APIError.transport(error)
         }
 
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+
         guard (200..<300).contains(code) else {
-            throw Self.mapFailure(code: code, data: data)
+            let failure = Self.mapFailure(code: code, data: data)
+            AppLog.error(.net, "\(method) \(path) → \(code) (\(ms)ms): \(failure.localizedDescription)")
+            throw failure
         }
+
+        AppLog.debug(.net, "\(method) \(path) → \(code) (\(ms)ms)")
         return data
+    }
+
+    /// DNS refusing the apex domain is the failure mode on filtered networks,
+    /// and it is indistinguishable from the site being down to the user. Swap
+    /// to the Railway host once and remember it.
+    nonisolated static func isHostUnreachable(_ error: Error) -> Bool {
+        let code = (error as NSError).code
+        return (error as NSError).domain == NSURLErrorDomain
+            && (code == NSURLErrorCannotFindHost
+                || code == NSURLErrorDNSLookupFailed
+                || code == NSURLErrorCannotConnectToHost)
+    }
+
+    private func switchToFallbackHost() async -> Bool {
+        let current = Self.currentBaseURL
+        guard let winner = await Self.firstReachableHost(excluding: current) else {
+            AppLog.error(.net, "No API host is reachable from this network")
+            return false
+        }
+        AppLog.info(.net, "\(current) is unreachable - switching to \(winner)")
+        Self.setBaseURL(winner)
+        return true
+    }
+
+    /// Probes the known hosts at once and returns whichever answers
+    /// `/api/health` first. Racing rather than trying them in sequence means a
+    /// blackholed DNS lookup on one host cannot hold up a host that works.
+    static func firstReachableHost(excluding: String? = nil) async -> String? {
+        let hosts = candidateHosts.filter { $0 != excluding }
+        guard !hosts.isEmpty else { return nil }
+
+        return await withTaskGroup(of: String?.self) { group in
+            for host in hosts {
+                group.addTask { await probe(host) ? host : nil }
+            }
+            for await result in group {
+                if let result {
+                    group.cancelAll()
+                    return result
+                }
+            }
+            return nil
+        }
+    }
+
+    private static func probe(_ host: String) async -> Bool {
+        guard let url = URL(string: host)?.appendingPathComponent("api/health") else { return false }
+
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 8
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            let ok = ((response as? HTTPURLResponse)?.statusCode ?? 0) == 200
+            AppLog.debug(.net, "Probe \(host): \(ok ? "reachable" : "no")")
+            return ok
+        } catch {
+            AppLog.debug(.net, "Probe \(host): \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Called once at launch so the app settles on a host that works before the
+    /// user touches anything.
+    static func resolveHost() async {
+        if let stored = UserDefaults.standard.string(forKey: baseURLDefaultsKey), await probe(stored) {
+            AppLog.info(.net, "Using \(stored)")
+            return
+        }
+        if let winner = await firstReachableHost() {
+            setBaseURL(winner)
+            AppLog.info(.net, "Resolved API host: \(winner)")
+        }
     }
 
     private static func mapFailure(code: Int, data: Data) -> APIError {

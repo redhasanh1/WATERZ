@@ -13,6 +13,7 @@ struct LoginView: View {
     @State private var busy = false
     @State private var showHostPicker = false
     @State private var host = APIClient.currentBaseURL
+    @State private var showConsole = false
 
     private var canSubmit: Bool {
         !busy && email.contains("@") && password.count >= 6
@@ -81,13 +82,17 @@ struct LoginView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
-                Button("Can't connect?") { showHostPicker = true }
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 18) {
+                    Button("Can't connect?") { showHostPicker = true }
+                    Button("Console") { showConsole = true }
+                }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
             }
             .padding(24)
         }
         .background(Color(.systemGroupedBackground))
+        .sheet(isPresented: $showConsole) { ConsoleView() }
         .confirmationDialog(
             "Server",
             isPresented: $showHostPicker,

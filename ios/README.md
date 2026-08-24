@@ -47,16 +47,43 @@ object to erase and `label: 0` for something to protect. `VideoFrameExtractor`
 applies the track's preferred transform first, so portrait iPhone clips report
 their upright size — that is what the worker sees after it decodes.
 
-## Switching hosts
+## Connecting
 
-Some school and library networks refuse to resolve `markremoverai.com`. The
-login screen has a "Can't connect?" option that switches the client to the
-Railway host. For a debug run you can also pass it at launch:
+**The app talks to Railway directly, not through `markremoverai.com`.** Public
+and school Wi-Fi filters routinely refuse to resolve the apex domain — it is a
+young, uncategorised domain — and the website being unreachable must not take
+the app down with it. So:
+
+- Default host is `user-interface-ui-production.up.railway.app`.
+- At launch the app probes every known host **concurrently** and keeps the first
+  that answers `/api/health`. Racing rather than trying them in order means a
+  blackholed DNS lookup can't hold up a host that works.
+- If the chosen host dies mid-session, a `cannotFindHost` / `dnsLookupFailed` /
+  `cannotConnectToHost` failure triggers one automatic re-probe and the request
+  is retried on the winner.
+- "Can't connect?" on the login screen still lets you pin one by hand, and
+  `-api_base_url <url>` overrides it at launch (now persisted, so it survives
+  being reopened from the home screen).
+
+Keep the Railway-generated domain alive on the `USER INTERFACE (UI)` service —
+removing it would strip the app of its filter-proof route.
+
+## Console
+
+Every request, sign-in and job step is logged through `AppLog` to the unified
+log **and** an in-app ring buffer, because the failures that matter happen on a
+real phone on a real network with no Xcode attached. Open it from **Console** on
+the login screen or in the account menu: filter by category, show errors only,
+share the transcript.
+
+From a Mac:
 
 ```bash
-xcrun simctl launch booted com.markremoverai.app \
-  -api_base_url "https://user-interface-ui-production.up.railway.app"
+xcrun simctl spawn booted log stream --level debug \
+  --predicate 'subsystem == "com.markremoverai.app"'
 ```
+
+`log show` needs `--info --debug` to include anything below error level.
 
 ## Sign-in
 
@@ -73,6 +100,12 @@ Three ways in, matching the website:
   first use) and redirects to `markremoverai://auth?code=…`. The app trades it at
   `POST /api/auth/exchange` for a real session. **No new Google OAuth client is
   needed** — this reuses the web credentials already configured.
+
+  One wrinkle: `GOOGLE_REDIRECT_URI` on Railway pins the callback to
+  `https://markremoverai.com/auth/google/callback`, which is precisely the host
+  filtered Wi-Fi blocks. For `native=1` the server now ignores that pin and
+  sends the callback back to whichever host the app reached, so the whole flow
+  stays on Railway.
 - **Email + password** — the existing `/api/auth/login`.
 
 Sign in with Apple is not optional: offering Google without it is an App Store
@@ -124,5 +157,9 @@ start a StoreKit test session, so products will read as unavailable there.
    IDs above.
 3. **Apple Developer portal** — enable the Sign in with Apple capability on the
    `com.markremoverai.app` App ID.
-4. App icon, launch screen art, and a privacy nutrition label covering the email
+4. **Google Cloud Console** — add
+   `https://user-interface-ui-production.up.railway.app/auth/google/callback`
+   to the OAuth client's authorised redirect URIs. Without it Google refuses the
+   native flow with `redirect_uri_mismatch`.
+5. App icon, launch screen art, and a privacy nutrition label covering the email
    address and the uploaded video.

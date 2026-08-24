@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var saveMessage: String?
     @State private var showSignOutConfirm = false
     @State private var showPaywall = false
+    @State private var showConsole = false
 
     var body: some View {
         NavigationStack {
@@ -28,6 +29,7 @@ struct HomeView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .sheet(isPresented: $showPaywall) { PaywallView() }
+            .sheet(isPresented: $showConsole) { ConsoleView() }
             .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { Task { await appState.signOut() } }
                 Button("Cancel", role: .cancel) {}
@@ -58,6 +60,7 @@ struct HomeView: View {
             Menu {
                 Text(appState.user?.email ?? "")
                 Button("Get credits") { showPaywall = true }
+                Button("Console") { showConsole = true }
                 Button("Sign out", role: .destructive) { showSignOutConfirm = true }
             } label: {
                 Label("\(Int(appState.credits))", systemImage: "bolt.fill")
