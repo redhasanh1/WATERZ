@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r requirements_web.txt
 COPY server_production.py .
 COPY email_utils.py .
 COPY web ./web
+# Apple's root CAs, used to verify StoreKit signed transactions. Without these
+# the purchase endpoint fails closed and grants nothing.
+COPY certs ./certs
 
 # Create necessary directories
 RUN mkdir -p temp uploads results cache
