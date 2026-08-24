@@ -20,6 +20,11 @@ final class BackgroundModel: ObservableObject {
     @Published var settings = BackgroundSettings()
     @Published private(set) var sourceURL: URL?
 
+    /// The background pipeline allows ten minutes and ten seconds, matching
+    /// the website's own pre-upload check.
+    static let maxDuration: Double = 610
+
+    @Published private(set) var estimatedCredits: Double = 1
     private var duration: Double = 0
     private var pollTask: Task<Void, Never>?
 
@@ -33,10 +38,19 @@ final class BackgroundModel: ObservableObject {
         sourceURL = videoURL
         duration = await VideoFrameExtractor.duration(of: videoURL)
 
+        guard duration <= Self.maxDuration else {
+            let seconds = Int(duration.rounded())
+            stage = .failed("That clip is \(seconds / 60)m \(seconds % 60)s. The limit here is 10 minutes 10 seconds.")
+            return
+        }
+
         do {
             let first = try await VideoFrameExtractor.frame(from: videoURL)
             frame = first
             maskBuilder.begin(videoSize: first.pixelSize)
+            estimatedCredits = CreditEstimate.credits(
+                duration: duration, size: first.pixelSize, isBackground: true
+            )
             stage = .selecting
         } catch {
             stage = .failed(error.localizedDescription)
@@ -79,7 +93,7 @@ final class BackgroundModel: ObservableObject {
 
     func run(appState: AppState) async {
         guard let sourceURL, let frame else { return }
-        guard appState.credits >= 1 else {
+        guard appState.credits >= estimatedCredits else {
             stage = .failed(APIError.outOfCredits.localizedDescription)
             return
         }
@@ -221,11 +235,7 @@ struct BackgroundView: View {
             VStack(spacing: 20) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: [Color(red: 0.20, green: 0.65, blue: 0.75),
-                                     Color(red: 0.42, green: 0.36, blue: 0.90)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
+                        .fill(Theme.orangeGradient)
                     VStack(spacing: 12) {
                         Image(systemName: "person.and.background.dotted")
                             .font(.system(size: 46))
@@ -243,10 +253,10 @@ struct BackgroundView: View {
                 PhotosPicker(selection: $pickerItem, matching: .videos, photoLibrary: .shared()) {
                     Label("Choose a video", systemImage: "photo.on.rectangle.angled")
                 }
-                .buttonStyle(PrimaryButtonStyle())
+                .buttonStyle(PrimaryButtonStyle(gradient: Theme.orangeGradient))
                 .padding(.horizontal, 16)
 
-                Text("1 credit per clip · any length")
+                Text("Up to 10 minutes · from 0.1 credits")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -295,9 +305,9 @@ struct BackgroundView: View {
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(tool == option ? Theme.accentSoft : Color(.tertiarySystemFill))
+                                .fill(tool == option ? Theme.orangeSoft : Color(.tertiarySystemFill))
                         )
-                        .foregroundStyle(tool == option ? Theme.accent : .primary)
+                        .foregroundStyle(tool == option ? Theme.orange : .primary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -316,7 +326,7 @@ struct BackgroundView: View {
             } else {
                 HStack(spacing: 10) {
                     Image(systemName: "circle.fill").font(.system(size: 7))
-                    Slider(value: $brushSize, in: 0.01...0.25).tint(Theme.accent)
+                    Slider(value: $brushSize, in: 0.01...0.25).tint(Theme.orange)
                     Image(systemName: "circle.fill").font(.system(size: 15))
                     Button("Clear") { model.maskBuilder.clear() }
                         .font(.caption)
@@ -359,12 +369,11 @@ struct BackgroundView: View {
                 .font(.subheadline)
                 .buttonStyle(.bordered)
 
-                Button(model.settings.operation == .keepObject
-                       ? "Replace background — 1 credit"
-                       : "Remove selection — 1 credit") {
+                Button((model.settings.operation == .keepObject ? "Replace background" : "Remove selection")
+                       + " — \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
                     Task { await model.run(appState: appState) }
                 }
-                .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess))
+                .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess, gradient: Theme.orangeGradient))
                 .disabled(!model.canProcess)
             }
             .padding(.horizontal, 16)
@@ -401,9 +410,9 @@ struct BackgroundView: View {
                         .frame(maxWidth: .infinity, minHeight: 62)
                         .background(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(model.settings.fill == option ? Theme.accentSoft : Color(.tertiarySystemFill))
+                                .fill(model.settings.fill == option ? Theme.orangeSoft : Color(.tertiarySystemFill))
                         )
-                        .foregroundStyle(model.settings.fill == option ? Theme.accent : .primary)
+                        .foregroundStyle(model.settings.fill == option ? Theme.orange : .primary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -431,7 +440,7 @@ struct BackgroundView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 68, alignment: .leading)
-            Slider(value: value, in: range, step: 1).tint(Theme.accent)
+            Slider(value: value, in: range, step: 1).tint(Theme.orange)
             Text("\(Int(value.wrappedValue))")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -442,7 +451,7 @@ struct BackgroundView: View {
     private func busy(_ message: String) -> some View {
         VStack(spacing: 16) {
             Spacer()
-            ProgressView().scaleEffect(1.5).tint(Theme.accent)
+            ProgressView().scaleEffect(1.5).tint(Theme.orange)
             Text(message).font(.subheadline).foregroundStyle(.secondary)
             Spacer()
         }
@@ -483,7 +492,7 @@ struct BackgroundView: View {
                 .font(.subheadline).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 30)
             Button("Start over") { model.reset(); pickerItem = nil }
-                .buttonStyle(PrimaryButtonStyle())
+                .buttonStyle(PrimaryButtonStyle(gradient: Theme.orangeGradient))
                 .padding(.horizontal, 30)
             Spacer()
         }

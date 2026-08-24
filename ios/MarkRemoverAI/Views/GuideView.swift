@@ -112,8 +112,8 @@ struct GuideView: View {
             sectionTitle("Good to know")
 
             HStack(spacing: 10) {
-                fact("Any", "clip length")
-                fact("1", "credit per clip")
+                fact("90s", "removal")
+                fact("10m", "background")
                 fact("4K+", "quality kept")
             }
         }
@@ -187,13 +187,15 @@ struct GuideView: View {
         ("What video formats work?",
          "MP4, MOV, WebM, MKV, WMV and most common formats. Phone footage, camera files and screen recordings all work."),
         ("How long can a video be?",
-         "There's no hard cap on the paths this app uses. Longer clips simply take longer on the GPU, so a few minutes is a sensible ceiling if you're in a hurry."),
+         "Removal takes up to 90 seconds. Background replacement is a lighter job and allows 10 minutes 10 seconds."),
         ("How does the removal actually work?",
          "The object you mark is tracked across every frame, removed, and the background behind it is rebuilt so the result looks untouched."),
         ("Can I use the results commercially?",
          "Yes. Personal and commercial projects both. You own full rights to what comes out."),
         ("What's the difference between the two modes?",
          "Moves around follows something across the frame. Stays in place holds one area for the whole clip — faster, and it can't drift."),
+        ("How many credits does a clip cost?",
+         "It scales with length and resolution — 720p for 10 seconds is the baseline. Background replacement costs about a third of a removal. The exact figure is shown on the button before you commit."),
         ("When is a credit taken?",
          "Only when a render finishes. Failed jobs don't charge you.")
     ]

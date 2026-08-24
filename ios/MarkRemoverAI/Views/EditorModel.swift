@@ -37,6 +37,7 @@ final class EditorModel: ObservableObject {
     @Published var duration: Double = 0
     @Published var currentTime: Double = 0
     @Published private(set) var sourceURL: URL?
+    @Published private(set) var estimatedCredits: Double = 1
 
     private var pollTask: Task<Void, Never>?
     private var seekTask: Task<Void, Never>?
@@ -68,11 +69,9 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Loading
 
-    /// Only the legacy /api/process endpoint enforces a duration cap. The
-    /// paths this app uses — sam2/process-video, process-static-mask and the
-    /// object-removal pipeline — accept any length, so nothing is blocked.
-    /// Past this, a render just takes a while and is worth warning about.
-    static let longVideoAdvisory: Double = 180
+    /// The removal editor caps clips at 90 seconds, same as the website.
+    /// Background replacement is a different pipeline with its own, longer cap.
+    static let maxDuration: Double = 90
 
     func load(videoURL: URL) async {
         reset()
@@ -81,10 +80,20 @@ final class EditorModel: ObservableObject {
             duration = await VideoFrameExtractor.duration(of: videoURL)
             currentTime = 0
 
+            guard duration <= Self.maxDuration else {
+                let seconds = Int(duration.rounded())
+                AppLog.error(.editor, "Rejected \(seconds)s clip (removal limit 90s)")
+                stage = .failed("That clip is \(seconds)s. Removal takes up to 90 seconds — trim it, or use the Background tab, which allows 10 minutes.")
+                return
+            }
+
 
             let first = try await VideoFrameExtractor.frame(from: videoURL)
             frame = first
             maskBuilder.begin(videoSize: first.pixelSize)
+            estimatedCredits = CreditEstimate.credits(
+                duration: duration, size: first.pixelSize, isBackground: false
+            )
             stage = .selecting
             AppLog.info(.editor, "Loaded \(Int(first.pixelSize.width))×\(Int(first.pixelSize.height)) @ \(String(format: "%.0f", first.fps))fps, \(String(format: "%.1f", duration))s")
         } catch {
@@ -237,7 +246,7 @@ final class EditorModel: ObservableObject {
 
     func process(appState: AppState) async {
         guard let sourceURL, let frame else { return }
-        guard appState.credits >= 1 else {
+        guard appState.credits >= estimatedCredits else {
             stage = .failed(APIError.outOfCredits.localizedDescription)
             return
         }

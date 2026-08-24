@@ -77,6 +77,7 @@ struct MainTabs: View {
             BackgroundView()
                 .tabItem { Label("Background", systemImage: "person.and.background.dotted") }
                 .tag(1)
+                .tint(Theme.orange)
 
             GuideView()
                 .tabItem { Label("Guide", systemImage: "questionmark.circle") }

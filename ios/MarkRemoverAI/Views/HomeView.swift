@@ -219,7 +219,7 @@ struct HomeView: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "clock").font(.caption2)
-                    Text("1 credit per clip · any length")
+                    Text("Up to 90 seconds · from 0.1 credits")
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
@@ -465,7 +465,7 @@ struct HomeView: View {
                     Button("Get credits to continue") { showPaywall = true }
                         .buttonStyle(PrimaryButtonStyle())
                 } else {
-                    Button("Remove it — 1 credit") {
+                    Button("Remove it — \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
                         Task { await model.process(appState: appState) }
                     }
                     .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess))
