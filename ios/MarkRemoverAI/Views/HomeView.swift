@@ -9,6 +9,8 @@ struct HomeView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var markMode = 1          // 1 = erase this, 0 = keep this
     @State private var maskOpacity: Double = 0.55
+    @State private var peeking = false
+    @State private var showCompare = true
     @State private var saveMessage: String?
     @State private var showSignOutConfirm = false
     @State private var showPaywall = false
@@ -174,6 +176,7 @@ struct HomeView: View {
                     activeSelectionID: model.activeSelectionID,
                     isBusy: model.isPreviewingMask,
                     maskOpacity: maskOpacity,
+                    peeking: peeking,
                     onTap: { model.addPoint(normalized: $0, label: markMode) }
                 )
                 .padding(.horizontal, 16)
@@ -218,6 +221,21 @@ struct HomeView: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 34, alignment: .trailing)
+
+                    // Hold to drop the overlays and check what is underneath.
+                    Image(systemName: peeking ? "eye.fill" : "eye")
+                        .font(.subheadline)
+                        .foregroundStyle(peeking ? Theme.accent : .secondary)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { _ in
+                                    if !peeking { Haptics.tick(); peeking = true }
+                                }
+                                .onEnded { _ in peeking = false }
+                        )
+                        .accessibilityLabel("Hold to hide the mask")
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -298,10 +316,25 @@ struct HomeView: View {
 
     private func result(_ url: URL) -> some View {
         VStack(spacing: 16) {
-            VideoPlayer(player: AVPlayer(url: url))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Group {
+                if showCompare, let original = model.sourceURL {
+                    CompareView(beforeURL: original, afterURL: url)
+                } else {
+                    VideoPlayer(player: AVPlayer(url: url))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            if model.sourceURL != nil {
+                Picker("View", selection: $showCompare) {
+                    Text("Compare").tag(true)
+                    Text("Result").tag(false)
+                }
+                .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
+            }
 
             if let saveMessage {
                 Text(saveMessage)
@@ -316,8 +349,10 @@ struct HomeView: View {
                     Task {
                         do {
                             try await PhotoSaver.saveVideo(at: url)
+                            Haptics.success()
                             saveMessage = "Saved to your library."
                         } catch {
+                            Haptics.failure()
                             saveMessage = error.localizedDescription
                         }
                     }

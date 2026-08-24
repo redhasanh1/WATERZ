@@ -10,6 +10,8 @@ struct VideoCanvas: View {
     let activeSelectionID: Int?
     let isBusy: Bool
     var maskOpacity: Double = 0.55
+    /// Hold the peek control to drop the overlays and see the untouched frame.
+    var peeking: Bool = false
     var onTap: (CGPoint) -> Void
 
     @State private var zoom: CGFloat = 1
@@ -34,7 +36,7 @@ struct VideoCanvas: View {
                 // a plain composite — no per-pixel work, and it lands in the
                 // identical fitted rect as the frame, which is what keeps it
                 // pixel-aligned at any resolution.
-                ForEach(selections) { selection in
+                ForEach(peeking ? [] : selections) { selection in
                     if let mask = selection.mask {
                         Image(uiImage: mask)
                             .resizable()
@@ -45,7 +47,7 @@ struct VideoCanvas: View {
                     }
                 }
 
-                ForEach(selections) { selection in
+                ForEach(peeking ? [] : selections) { selection in
                     ForEach(selection.points) { point in
                         marker(for: point, selection: selection, in: rect)
                     }
@@ -54,6 +56,25 @@ struct VideoCanvas: View {
             .scaleEffect(scale)
             .offset(offset)
             .contentShape(Rectangle())
+            .onTapGesture(count: 2) { location in
+                // Double tap zooms toward the spot you hit, or back out again.
+                withAnimation(.easeOut(duration: 0.22)) {
+                    if scale > 1.01 {
+                        zoom = 1; committedZoom = 1; resetPan()
+                    } else {
+                        let target: CGFloat = 3
+                        let centre = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+                        zoom = target
+                        committedZoom = target
+                        offset = CGSize(
+                            width: (centre.x - location.x) * target,
+                            height: (centre.y - location.y) * target
+                        )
+                        committedOffset = offset
+                    }
+                }
+                Haptics.tick()
+            }
             .onTapGesture { location in
                 // Undo the zoom/pan so the tap maps back to the frame.
                 let centre = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -62,6 +83,7 @@ struct VideoCanvas: View {
                     y: (location.y - centre.y - offset.height) / scale + centre.y
                 )
                 guard rect.contains(unscaled) else { return }
+                Haptics.tap()
                 onTap(CGPoint(
                     x: (unscaled.x - rect.minX) / rect.width,
                     y: (unscaled.y - rect.minY) / rect.height
