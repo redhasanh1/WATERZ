@@ -1215,7 +1215,7 @@ def auth_login():
                     'id': user_id,
                     'email': email,
                     'name': name,
-                    'credits': credits,
+                    'credits': float(credits or 0),
                     'email_verified': email_verified or False,
                     'created_at': created_at.isoformat() if created_at else None
                 }
@@ -1387,7 +1387,9 @@ def auth_status():
                     'id': user_id,
                     'email': email,
                     'name': name,
-                    'credits': credits,
+                    # float(), not the raw Decimal: Flask serialises Decimal as
+                    # a JSON string, which clients then read as zero.
+                    'credits': float(credits or 0),
                     'email_verified': email_verified or False,
                     'created_at': created_at.isoformat() if created_at else None
                 }

@@ -27,8 +27,16 @@ struct User: Codable, Equatable {
         id = try c.decode(Int.self, forKey: .id)
         email = try c.decode(String.self, forKey: .email)
         name = try c.decodeIfPresent(String.self, forKey: .name)
-        // The server has handed back credits as both Int and Double over its life.
-        credits = (try? c.decode(Double.self, forKey: .credits)) ?? 0
+        // Postgres stores credits as NUMERIC, which reaches Python as a Decimal
+        // and is serialised by Flask as a JSON *string* ("12.0"), not a number.
+        // Decoding only as Double silently produced a balance of zero.
+        if let number = try? c.decode(Double.self, forKey: .credits) {
+            credits = number
+        } else if let text = try? c.decode(String.self, forKey: .credits) {
+            credits = Double(text) ?? 0
+        } else {
+            credits = 0
+        }
         emailVerified = (try? c.decode(Bool.self, forKey: .emailVerified)) ?? false
     }
 }

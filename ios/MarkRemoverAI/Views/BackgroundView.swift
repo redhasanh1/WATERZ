@@ -11,7 +11,7 @@ final class BackgroundModel: ObservableObject {
     @Published var stage: Stage = .picking
     @Published var frame: VideoFrame?
     @Published var points: [SelectionPoint] = []
-    @Published var style: BackgroundStyle = .transparent
+    @Published var settings = BackgroundSettings()
     @Published private(set) var sourceURL: URL?
 
     private var duration: Double = 0
@@ -86,9 +86,9 @@ final class BackgroundModel: ObservableObject {
             try await APIClient.shared.backgroundTrack(jobId: jobId)
 
             stage = .working("Applying the background…")
-            try await APIClient.shared.backgroundExport(jobId: jobId, style: style)
+            try await APIClient.shared.backgroundExport(jobId: jobId, settings: settings)
 
-            AppLog.info(.editor, "Background job \(jobId) as \(style.rawValue)")
+            AppLog.info(.editor, "Background job \(jobId): \(settings.operation.rawValue) / \(settings.fill.rawValue), dilation \(Int(settings.dilation))")
             poll(jobId: jobId, appState: appState)
         } catch {
             AppLog.error(.editor, "Background failed: \(error.localizedDescription)")
@@ -199,7 +199,8 @@ struct BackgroundView: View {
     }
 
     private var selector: some View {
-        VStack(spacing: 0) {
+        ScrollView {
+            VStack(spacing: 0) {
             if let frame = model.frame {
                 VideoCanvas(
                     frame: frame,
@@ -216,43 +217,18 @@ struct BackgroundView: View {
             }
 
             Text(model.points.isEmpty
-                 ? "Tap the person or object you want to keep."
-                 : "\(model.points.count) tap\(model.points.count == 1 ? "" : "s") — everything else becomes the background.")
+                 ? (model.settings.operation == .keepObject
+                    ? "Tap what you want to keep."
+                    : "Tap what you want gone.")
+                 : "\(model.points.count) tap\(model.points.count == 1 ? "" : "s") placed.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
                 .padding(.top, 12)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(BackgroundStyle.allCases) { option in
-                        Button {
-                            model.style = option
-                            Haptics.tick()
-                        } label: {
-                            VStack(spacing: 5) {
-                                Image(systemName: option.symbol).font(.title3)
-                                Text(option.title).font(.caption2.weight(.medium))
-                            }
-                            .frame(width: 88, height: 68)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(model.style == option ? Theme.accentSoft : Color(.tertiarySystemFill))
-                            )
-                            .foregroundStyle(model.style == option ? Theme.accent : .primary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .padding(.top, 14)
-
-            Text(model.style.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 6)
+            options
+                .padding(.top, 12)
 
             Spacer(minLength: 12)
 
@@ -264,7 +240,9 @@ struct BackgroundView: View {
                 .font(.subheadline)
                 .buttonStyle(.bordered)
 
-                Button("Replace background — 1 credit") {
+                Button(model.settings.operation == .keepObject
+                       ? "Replace background — 1 credit"
+                       : "Remove selection — 1 credit") {
                     Task { await model.run(appState: appState) }
                 }
                 .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess))
@@ -272,6 +250,73 @@ struct BackgroundView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    /// Everything the website exposes: what survives, what fills the rest, and
+    /// the two sliders that decide how clean the cut-out looks.
+    private var options: some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 6) {
+                Picker("Operation", selection: $model.settings.operation) {
+                    ForEach(BackgroundOperation.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text(model.settings.operation.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(BackgroundFill.allCases) { option in
+                    Button {
+                        model.settings.fill = option
+                        Haptics.tick()
+                    } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: option.symbol).font(.title3)
+                            Text(option.title).font(.caption2.weight(.medium))
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 62)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(model.settings.fill == option ? Theme.accentSoft : Color(.tertiarySystemFill))
+                        )
+                        .foregroundStyle(model.settings.fill == option ? Theme.accent : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if model.settings.fill == .color {
+                ColorPicker("Background colour", selection: $model.settings.color, supportsOpacity: false)
+                    .font(.subheadline)
+            }
+
+            if model.settings.fill == .blur {
+                slider("Blur", value: $model.settings.blurAmount, range: 5...50)
+            }
+
+            // Dilation grows the mask outward. A pixel or two removes the halo
+            // of old background that otherwise clings to the edges.
+            slider("Edge grow", value: $model.settings.dilation, range: 0...20)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func slider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 68, alignment: .leading)
+            Slider(value: value, in: range, step: 1).tint(Theme.accent)
+            Text("\(Int(value.wrappedValue))")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 24, alignment: .trailing)
         }
     }
 
@@ -291,7 +336,7 @@ struct BackgroundView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-            if model.style == .transparent {
+            if model.settings.fill == .transparent {
                 Label("WebM with alpha — MP4 can't carry transparency.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
