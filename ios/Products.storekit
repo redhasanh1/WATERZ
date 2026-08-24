@@ -1,0 +1,61 @@
+{
+  "identifier" : "B1A7C3D2",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "internalID" : "C0000001",
+      "localizations" : [
+        {
+          "description" : "5 credits. Each one removes an object from a video.",
+          "displayName" : "Starter Pack",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.markremoverai.app.credits5",
+      "referenceName" : "Starter Pack",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "6.99",
+      "familyShareable" : false,
+      "internalID" : "C0000002",
+      "localizations" : [
+        {
+          "description" : "15 credits. Each one removes an object from a video.",
+          "displayName" : "Basic Pack",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.markremoverai.app.credits15",
+      "referenceName" : "Basic Pack",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "24.99",
+      "familyShareable" : false,
+      "internalID" : "C0000003",
+      "localizations" : [
+        {
+          "description" : "60 credits. Each one removes an object from a video.",
+          "displayName" : "Pro Pack",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.markremoverai.app.credits60",
+      "referenceName" : "Pro Pack",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6000000000",
+    "_developerTeamID" : "KD3JCFB7N4",
+    "_lastSynchronizedDate" : 0
+  },
+  "subscriptionGroups" : [],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

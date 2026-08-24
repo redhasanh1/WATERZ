@@ -14,6 +14,14 @@ struct User: Codable, Equatable {
         case emailVerified = "email_verified"
     }
 
+    init(id: Int, email: String, name: String?, credits: Double, emailVerified: Bool) {
+        self.id = id
+        self.email = email
+        self.name = name
+        self.credits = credits
+        self.emailVerified = emailVerified
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int.self, forKey: .id)
@@ -22,6 +30,14 @@ struct User: Codable, Equatable {
         // The server has handed back credits as both Int and Double over its life.
         credits = (try? c.decode(Double.self, forKey: .credits)) ?? 0
         emailVerified = (try? c.decode(Bool.self, forKey: .emailVerified)) ?? false
+    }
+}
+
+extension User {
+    /// Rebuilds the value with a fresh balance — used after a purchase so the
+    /// UI updates without refetching the whole profile.
+    func withCredits(_ balance: Double) -> User {
+        User(id: id, email: email, name: name, credits: balance, emailVerified: emailVerified)
     }
 }
 
@@ -134,5 +150,20 @@ struct JobStatusResponse: Codable {
         case status, progress, message, error
         case resultURL = "result_url"
         case newCredits = "new_credits"
+    }
+}
+
+// MARK: - Purchases
+
+struct RedeemResponse: Codable {
+    let status: String
+    let credits: Double
+    let creditsAdded: Int?
+    let alreadyRedeemed: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case status, credits
+        case creditsAdded = "credits_added"
+        case alreadyRedeemed = "already_redeemed"
     }
 }

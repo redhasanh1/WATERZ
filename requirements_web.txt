@@ -14,3 +14,5 @@ psycopg2-binary
 stripe
 Flask-Session
 b2sdk
+app-store-server-library
+PyJWT[crypto]

@@ -10,6 +10,7 @@ struct HomeView: View {
     @State private var markMode = 1          // 1 = erase this, 0 = keep this
     @State private var saveMessage: String?
     @State private var showSignOutConfirm = false
+    @State private var showPaywall = false
 
     var body: some View {
         NavigationStack {
@@ -26,6 +27,7 @@ struct HomeView: View {
             .navigationTitle("MarkRemoverAI")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
+            .sheet(isPresented: $showPaywall) { PaywallView() }
             .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { Task { await appState.signOut() } }
                 Button("Cancel", role: .cancel) {}
@@ -55,6 +57,7 @@ struct HomeView: View {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Text(appState.user?.email ?? "")
+                Button("Get credits") { showPaywall = true }
                 Button("Sign out", role: .destructive) { showSignOutConfirm = true }
             } label: {
                 Label("\(Int(appState.credits))", systemImage: "bolt.fill")
@@ -151,11 +154,16 @@ struct HomeView: View {
                 .font(.subheadline)
                 .buttonStyle(.bordered)
 
-                Button("Remove it — 1 credit") {
-                    Task { await model.process(appState: appState) }
+                if appState.credits < 1 {
+                    Button("Get credits to continue") { showPaywall = true }
+                        .buttonStyle(PrimaryButtonStyle())
+                } else {
+                    Button("Remove it — 1 credit") {
+                        Task { await model.process(appState: appState) }
+                    }
+                    .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess))
+                    .disabled(!model.canProcess)
                 }
-                .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess))
-                .disabled(!model.canProcess)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
@@ -248,11 +256,25 @@ struct HomeView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
-            Button("Start over") {
-                model.reset()
-                pickerItem = nil
+            let outOfCredits = message.localizedCaseInsensitiveContains("credit")
+
+            VStack(spacing: 10) {
+                if outOfCredits {
+                    Button("Get credits") { showPaywall = true }
+                        .buttonStyle(PrimaryButtonStyle())
+                    Button("Start over") {
+                        model.reset()
+                        pickerItem = nil
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button("Start over") {
+                        model.reset()
+                        pickerItem = nil
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
             }
-            .buttonStyle(PrimaryButtonStyle())
             .padding(.horizontal, 32)
             Spacer()
         }

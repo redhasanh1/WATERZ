@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		AA0000000000000000000005 /* MarkRemoverAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MarkRemoverAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000010 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Products.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -29,6 +30,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000006 /* MarkRemoverAI */,
+				AA0000000000000000000010 /* Products.storekit */,
 				AA0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -180,6 +182,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MarkRemoverAI/MarkRemoverAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = KD3JCFB7N4;
@@ -207,6 +210,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MarkRemoverAI/MarkRemoverAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = KD3JCFB7N4;

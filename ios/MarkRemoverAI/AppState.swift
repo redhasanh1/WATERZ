@@ -50,9 +50,28 @@ final class AppState: ObservableObject {
         try await APIClient.shared.register(email: email, password: password, name: name)
     }
 
+    func signInWithGoogle() async throws {
+        let code = try await GoogleSignIn().start(baseURL: APIClient.shared.baseURL)
+        let user = try await APIClient.shared.exchangeGoogleCode(code)
+        phase = .signedIn(user)
+    }
+
+    func signInWithApple(identityToken: String, email: String?, name: String?) async throws {
+        let user = try await APIClient.shared.signInWithApple(
+            identityToken: identityToken, email: email, name: name
+        )
+        phase = .signedIn(user)
+    }
+
     func signOut() async {
         await APIClient.shared.logout()
         phase = .signedOut
+    }
+
+    /// Applies a balance the server just confirmed, without a second round trip.
+    func applyCredits(_ balance: Double) {
+        guard case .signedIn(let user) = phase else { return }
+        phase = .signedIn(user.withCredits(balance))
     }
 
     /// Called after a job finishes so the balance on screen matches the server.

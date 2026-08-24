@@ -58,13 +58,71 @@ xcrun simctl launch booted com.markremoverai.app \
   -api_base_url "https://user-interface-ui-production.up.railway.app"
 ```
 
-## Before it can ship to the App Store
+## Sign-in
 
-Selling credits for digital content inside an iOS app has to go through
-StoreKit in-app purchase — routing to Stripe Checkout is a guideline 3.1.1
-rejection. This build deliberately ships **no purchase UI**: it shows the
-balance and lets people spend credits they already have. Buying stays on the
-website until StoreKit products exist.
+Three ways in, matching the website:
 
-Still to do: app icon, launch screen art, and a privacy nutrition label
-covering the email address and the uploaded video.
+- **Sign in with Apple** — native, `ASAuthorizationAppleIDProvider`. The app
+  posts the identity token to `POST /api/auth/apple`, which validates it against
+  Apple's published keys and links or creates the account. Apple only reveals
+  the name and address on the *first* authorization, so those are forwarded with
+  the token rather than looked up later.
+- **Google** — no SDK. `ASWebAuthenticationSession` runs the site's existing
+  `/auth/google` flow with `?native=1`. The cookie that web view receives is not
+  ours to keep, so the server mints a one-time code (Redis, 5 minutes, deleted on
+  first use) and redirects to `markremoverai://auth?code=…`. The app trades it at
+  `POST /api/auth/exchange` for a real session. **No new Google OAuth client is
+  needed** — this reuses the web credentials already configured.
+- **Email + password** — the existing `/api/auth/login`.
+
+Sign in with Apple is not optional: offering Google without it is an App Store
+rejection under guideline 4.8.
+
+## In-app purchase
+
+Apple requires digital goods to be sold through StoreKit, so Stripe Checkout is
+not an option inside the app — that is a 3.1.1 rejection. Credits are sold as
+**consumables** priced to match the web packs:
+
+| Product ID | Credits | Price |
+|---|---|---|
+| `com.markremoverai.app.credits5` | 5 | $2.99 |
+| `com.markremoverai.app.credits15` | 15 | $6.99 |
+| `com.markremoverai.app.credits60` | 60 | $24.99 |
+
+The flow is StoreKit 2: buy → post `Transaction.jwsRepresentation` to
+`POST /api/billing/apple/redeem` → the server verifies the signature against
+Apple's root certificates (`certs/apple/`), banks the credits on the same
+`users.credits` column Stripe writes to, and only then does the app call
+`transaction.finish()`.
+
+Two deliberate choices there:
+
+- **Fail closed.** If the verifier can't load — library missing, certificates
+  absent — the endpoint refuses to grant anything rather than trusting a string
+  from the internet. It says so plainly to the customer.
+- **Unfinished on failure.** If redeeming fails, the transaction is left
+  unfinished so StoreKit replays it, instead of someone paying for credits that
+  never arrive. `Transaction.unfinished` is drained at launch and by "Restore
+  purchases".
+
+Idempotency is the `apple_purchases.transaction_id` unique index — a replayed
+receipt collides instead of paying out twice.
+
+`Products.storekit` drives the simulator. It is wired into the scheme, so the
+packs appear when you **Run from Xcode** (⌘R); `simctl launch` alone does not
+start a StoreKit test session, so products will read as unavailable there.
+
+## Still to do before submitting
+
+1. **Deploy the server half.** `/api/auth/apple`, `/api/auth/exchange` and
+   `/api/billing/apple/redeem` live on this branch only. Railway deploys
+   `finalbranch`, so they must be merged there to go live, along with the two
+   new requirements (`PyJWT[crypto]`, `app-store-server-library`) and the
+   `certs/apple/` directory.
+2. **App Store Connect** — create the three consumable products with exactly the
+   IDs above.
+3. **Apple Developer portal** — enable the Sign in with Apple capability on the
+   `com.markremoverai.app` App ID.
+4. App icon, launch screen art, and a privacy nutrition label covering the email
+   address and the uploaded video.

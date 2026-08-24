@@ -141,6 +141,28 @@ actor APIClient {
         )
     }
 
+    /// Trades the one-time code from the native Google flow for a real session
+    /// cookie on this URLSession.
+    func exchangeGoogleCode(_ code: String) async throws -> User {
+        let data = try await request(
+            "api/auth/exchange",
+            method: "POST",
+            json: ["code": code]
+        )
+        return try decode(AuthSuccessResponse.self, from: data).user
+    }
+
+    /// Apple only reveals the name and address on the first authorization, so
+    /// they are forwarded alongside the token rather than looked up later.
+    func signInWithApple(identityToken: String, email: String?, name: String?) async throws -> User {
+        var payload: [String: Any] = ["identity_token": identityToken]
+        if let email, !email.isEmpty { payload["email"] = email }
+        if let name, !name.isEmpty { payload["name"] = name }
+
+        let data = try await request("api/auth/apple", method: "POST", json: payload)
+        return try decode(AuthSuccessResponse.self, from: data).user
+    }
+
     func logout() async {
         _ = try? await request("api/auth/logout", method: "POST")
         // Clear the jar too, so a stale cookie can't resurrect the session.
@@ -253,6 +275,19 @@ actor APIClient {
             throw APIError.http(500, result.message ?? "The server didn't return a job id.")
         }
         return jobId
+    }
+
+    // MARK: - Purchases
+
+    /// Hands a StoreKit signed transaction to the backend, which verifies it
+    /// against Apple's roots and moves the credits. Returns the new balance.
+    func redeemApplePurchase(signedTransaction jws: String) async throws -> Double {
+        let data = try await request(
+            "api/billing/apple/redeem",
+            method: "POST",
+            json: ["signed_transaction": jws]
+        )
+        return try decode(RedeemResponse.self, from: data).credits
     }
 
     func jobStatus(jobId: String) async throws -> JobStatusResponse {

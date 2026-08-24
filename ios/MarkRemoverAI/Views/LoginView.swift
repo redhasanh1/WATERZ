@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 struct LoginView: View {
@@ -22,6 +23,17 @@ struct LoginView: View {
         ScrollView {
             VStack(spacing: 22) {
                 header
+
+                socialButtons
+
+                HStack(spacing: 10) {
+                    line
+                    Text("or")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    line
+                }
+                .padding(.vertical, 2)
 
                 VStack(spacing: 12) {
                     if isRegistering {
@@ -94,6 +106,101 @@ struct LoginView: View {
         host = value
         error = nil
         notice = "Now using \(value)."
+    }
+
+    private var socialButtons: some View {
+        VStack(spacing: 10) {
+            SignInWithAppleButton(.signIn) { request in
+                request.requestedScopes = [.fullName, .email]
+            } onCompletion: { result in
+                Task { await handleApple(result) }
+            }
+            .signInWithAppleButtonStyle(.black)
+            .frame(height: 50)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Button {
+                Task { await handleGoogle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "globe")
+                        .font(.headline)
+                    Text("Continue with Google")
+                        .font(.headline)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(Color(.secondarySystemGroupedBackground))
+                .foregroundStyle(.primary)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color(.separator), lineWidth: 1)
+                )
+            }
+            .disabled(busy)
+        }
+    }
+
+    private var line: some View {
+        Rectangle()
+            .fill(Color(.separator))
+            .frame(height: 1)
+    }
+
+    private func handleGoogle() async {
+        busy = true
+        error = nil
+        notice = nil
+        defer { busy = false }
+
+        do {
+            try await appState.signInWithGoogle()
+        } catch {
+            guard !SocialAuthError.isCancellation(error) else { return }
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func handleApple(_ result: Result<ASAuthorization, Error>) async {
+        error = nil
+        notice = nil
+
+        switch result {
+        case .failure(let failure):
+            guard !SocialAuthError.isCancellation(failure) else { return }
+            let nsError = failure as NSError
+            // A user tapping Cancel on the Apple sheet is not a failure.
+            guard nsError.code != ASAuthorizationError.canceled.rawValue else { return }
+            error = failure.localizedDescription
+
+        case .success(let authorization):
+            guard
+                let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                let tokenData = credential.identityToken,
+                let token = String(data: tokenData, encoding: .utf8)
+            else {
+                error = SocialAuthError.missingToken.localizedDescription
+                return
+            }
+
+            let fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+                .compactMap { $0 }
+                .joined(separator: " ")
+
+            busy = true
+            defer { busy = false }
+
+            do {
+                try await appState.signInWithApple(
+                    identityToken: token,
+                    email: credential.email,
+                    name: fullName
+                )
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 
     private var header: some View {

@@ -928,6 +928,9 @@ def auth_google():
 
         # Store state in session for verification
         session['oauth_state'] = state
+        # The iOS app starts this same flow inside a web view. Remember that so
+        # the callback hands back a one-time code instead of rendering the site.
+        session['native_auth'] = request.args.get('native') == '1'
         # Store PKCE code_verifier so the callback can complete the token
         # exchange (google-auth-oauthlib enables PKCE by default; without this
         # Google rejects the exchange with "Missing code verifier").
@@ -1028,6 +1031,14 @@ def auth_google_callback():
             session['email'] = email
             session['name'] = name
             session.permanent = True
+
+        # The app cannot read the cookie this web view just received, so give
+        # it a short-lived code it can trade for a session of its own.
+        if session.pop('native_auth', False):
+            code = _mint_native_auth_code(user_id)
+            if code:
+                return redirect(f'{NATIVE_AUTH_SCHEME}://auth?code={code}')
+            return redirect(f'{NATIVE_AUTH_SCHEME}://auth?error=code_unavailable')
 
         # Redirect to main page with user data for frontend localStorage
         from urllib.parse import urlencode
@@ -8963,6 +8974,359 @@ def get_purchase_history():
 
 
 # Explicit CORS preflight catch-all for /api/* (helps when proxies strip headers)
+# ============================================================================
+# Native sign-in (iOS)
+# ============================================================================
+
+NATIVE_AUTH_SCHEME = os.getenv('NATIVE_AUTH_SCHEME', 'markremoverai')
+APPLE_SIGNIN_BUNDLE_IDS = [
+    b.strip() for b in os.getenv(
+        'APPLE_SIGNIN_BUNDLE_IDS', 'com.markremoverai.app'
+    ).split(',') if b.strip()
+]
+
+
+def _mint_native_auth_code(user_id):
+    """One-time code the app trades for a session. Lives in Redis for 5 minutes
+    and is deleted on first use, so intercepting the redirect buys nothing after
+    the app has already redeemed it."""
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        code = secrets.token_urlsafe(32)
+        redis_client.setex(f'nativeauth:{code}', 300, str(user_id))
+        return code
+    except Exception as exc:
+        print(f"[NATIVE-AUTH] Could not mint code: {exc}")
+        return None
+
+
+def _session_for_user(cur, user_id):
+    """Loads a user and installs them into the Flask session."""
+    cur.execute(
+        'SELECT email, name, credits, email_verified, created_at FROM users WHERE id = %s',
+        (user_id,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+
+    email, name, credits, email_verified, created_at = row
+    session['user_id'] = user_id
+    session['email'] = email
+    session['name'] = name
+    session.permanent = True
+
+    return {
+        'id': user_id,
+        'email': email,
+        'name': name,
+        'credits': float(credits or 0),
+        'email_verified': bool(email_verified),
+        'created_at': created_at.isoformat() if created_at else None
+    }
+
+
+@app.route('/api/auth/exchange', methods=['POST', 'OPTIONS'])
+def auth_exchange():
+    """Trades the one-time code from the native Google flow for a session."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED or not db_pool:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    code = (request.get_json(silent=True) or {}).get('code', '')
+    if not code:
+        return jsonify({'error': 'Missing code'}), 400
+
+    try:
+        redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
+        key = f'nativeauth:{code}'
+        user_id = redis_client.get(key)
+        # Burn it immediately - a code is good for exactly one exchange.
+        redis_client.delete(key)
+    except Exception as exc:
+        print(f"[NATIVE-AUTH] Redis lookup failed: {exc}")
+        return jsonify({'error': 'Sign-in temporarily unavailable'}), 503
+
+    if not user_id:
+        return jsonify({'error': 'That sign-in link expired. Try again.'}), 401
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        user = _session_for_user(cur, int(user_id))
+
+    if not user:
+        return jsonify({'error': 'Account not found'}), 404
+
+    print(f"[NATIVE-AUTH] Exchanged code for user {user_id}")
+    return jsonify({'status': 'success', 'user': user})
+
+
+def _verify_apple_identity_token(identity_token):
+    """Validates a Sign in with Apple JWT against Apple's published keys."""
+    import jwt
+    from jwt import PyJWKClient
+
+    jwk_client = PyJWKClient('https://appleid.apple.com/auth/keys')
+    signing_key = jwk_client.get_signing_key_from_jwt(identity_token)
+
+    return jwt.decode(
+        identity_token,
+        signing_key.key,
+        algorithms=['RS256'],
+        audience=APPLE_SIGNIN_BUNDLE_IDS,
+        issuer='https://appleid.apple.com'
+    )
+
+
+@app.route('/api/auth/apple', methods=['POST', 'OPTIONS'])
+def auth_apple():
+    """Sign in with Apple. The app sends the identity token it got natively."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED or not db_pool:
+        return jsonify({'error': 'Authentication not enabled'}), 503
+
+    data = request.get_json(silent=True) or {}
+    identity_token = data.get('identity_token')
+    if not identity_token:
+        return jsonify({'error': 'Missing identity_token'}), 400
+
+    try:
+        claims = _verify_apple_identity_token(identity_token)
+    except Exception as exc:
+        print(f"[APPLE-SIGNIN] Token rejected: {exc}")
+        return jsonify({'error': 'Could not verify that Apple sign-in.'}), 401
+
+    apple_id = claims.get('sub')
+    # Apple only sends the address on the very first authorization, and it may
+    # be a private relay one. The app forwards what it was given.
+    email = (claims.get('email') or data.get('email') or '').strip().lower()
+    name = (data.get('name') or '').strip()
+
+    if not apple_id:
+        return jsonify({'error': 'Apple token was missing a subject'}), 400
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_id TEXT')
+
+            cur.execute('SELECT id FROM users WHERE apple_id = %s', (apple_id,))
+            row = cur.fetchone()
+
+            if row:
+                user_id = row[0]
+            else:
+                user_id = None
+                if email:
+                    cur.execute('SELECT id FROM users WHERE email = %s', (email,))
+                    existing = cur.fetchone()
+                    if existing:
+                        # Same person arriving by a new door - link, don't fork.
+                        user_id = existing[0]
+                        cur.execute('UPDATE users SET apple_id = %s WHERE id = %s', (apple_id, user_id))
+                        print(f"[APPLE-SIGNIN] Linked Apple to existing user {email}")
+
+                if user_id is None:
+                    if not email:
+                        return jsonify({'error': 'Apple did not share an email address.'}), 400
+                    # Apple has already verified the address, so skip our own
+                    # verification mail and match the Google signup grant.
+                    cur.execute(
+                        '''INSERT INTO users (apple_id, email, name, credits, email_verified)
+                           VALUES (%s, %s, %s, %s, TRUE) RETURNING id''',
+                        (apple_id, email, name or email.split('@')[0], 2)
+                    )
+                    user_id = cur.fetchone()[0]
+                    print(f"[APPLE-SIGNIN] New user {email} (2 free credits)")
+
+            user = _session_for_user(cur, user_id)
+
+        return jsonify({'status': 'success', 'user': user})
+
+    except Exception as exc:
+        print(f"[APPLE-SIGNIN] Failed: {exc}")
+        return jsonify({'error': 'Sign-in failed'}), 500
+
+
+# ============================================================================
+# Apple In-App Purchase
+# ============================================================================
+# iOS cannot sell credits through Stripe - Apple requires StoreKit for digital
+# goods. The app buys a consumable, then posts the signed transaction here so
+# the credits land on the same `users.credits` column Stripe writes to.
+
+APPLE_BUNDLE_ID = os.getenv('APPLE_BUNDLE_ID', 'com.markremoverai.app')
+
+# Product id -> credits. Priced to match the web packs.
+APPLE_PRODUCT_CREDITS = {
+    'com.markremoverai.app.credits5': 5,
+    'com.markremoverai.app.credits15': 15,
+    'com.markremoverai.app.credits60': 60,
+}
+
+# Apple's root CAs, PEM or DER, used to anchor the x5c chain on a signed
+# transaction. Without them we cannot prove a payload came from Apple, so the
+# endpoint refuses to grant anything.
+APPLE_ROOT_CERT_DIR = os.getenv('APPLE_ROOT_CERT_DIR', os.path.join(SCRIPT_DIR, 'certs', 'apple'))
+
+_apple_verifier = None
+_apple_verifier_error = None
+
+
+def _load_apple_verifier():
+    """Build the App Store signed-data verifier once, or record why we can't."""
+    global _apple_verifier, _apple_verifier_error
+    if _apple_verifier is not None or _apple_verifier_error is not None:
+        return _apple_verifier
+
+    try:
+        from appstoreserverlibrary.signed_data_verifier import SignedDataVerifier
+        from appstoreserverlibrary.models.Environment import Environment
+    except ImportError:
+        _apple_verifier_error = 'app-store-server-library is not installed'
+        print(f"[APPLE-IAP] {_apple_verifier_error}")
+        return None
+
+    roots = []
+    try:
+        for name in sorted(os.listdir(APPLE_ROOT_CERT_DIR)):
+            if name.lower().endswith(('.cer', '.der', '.pem')):
+                with open(os.path.join(APPLE_ROOT_CERT_DIR, name), 'rb') as fh:
+                    roots.append(fh.read())
+    except FileNotFoundError:
+        pass
+
+    if not roots:
+        _apple_verifier_error = f'no Apple root certificates in {APPLE_ROOT_CERT_DIR}'
+        print(f"[APPLE-IAP] {_apple_verifier_error}")
+        return None
+
+    environment = (Environment.SANDBOX
+                   if os.getenv('APPLE_IAP_ENVIRONMENT', 'production').lower() == 'sandbox'
+                   else Environment.PRODUCTION)
+
+    try:
+        _apple_verifier = SignedDataVerifier(
+            roots, True, environment, APPLE_BUNDLE_ID
+        )
+        print(f"[APPLE-IAP] Verifier ready ({environment}, bundle {APPLE_BUNDLE_ID})")
+    except Exception as exc:
+        _apple_verifier_error = f'verifier init failed: {exc}'
+        print(f"[APPLE-IAP] {_apple_verifier_error}")
+
+    return _apple_verifier
+
+
+def _ensure_apple_purchase_table(cur):
+    """One row per Apple transaction id. The unique key is what makes redeeming
+    idempotent - a replayed receipt collides instead of paying out twice."""
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS apple_purchases (
+            id SERIAL PRIMARY KEY,
+            transaction_id TEXT UNIQUE NOT NULL,
+            original_transaction_id TEXT,
+            user_id INTEGER NOT NULL,
+            product_id TEXT NOT NULL,
+            credits_awarded INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+
+
+@app.route('/api/billing/apple/redeem', methods=['POST', 'OPTIONS'])
+@require_auth
+def apple_redeem():
+    """Verify a StoreKit 2 signed transaction and credit the signed-in user."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    if not AUTH_ENABLED or not db_pool:
+        return jsonify({'status': 'error', 'message': 'Accounts are unavailable right now.'}), 503
+
+    data = request.get_json(silent=True) or {}
+    jws = data.get('signed_transaction')
+    if not jws:
+        return jsonify({'status': 'error', 'message': 'Missing signed_transaction'}), 400
+
+    verifier = _load_apple_verifier()
+    if verifier is None:
+        # Fail closed. An unverified payload is just a string from the internet.
+        print(f"[APPLE-IAP] Refusing to redeem: {_apple_verifier_error}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Purchase verification is unavailable. Your purchase is safe and will be credited once this is fixed.'
+        }), 503
+
+    try:
+        payload = verifier.verify_and_decode_signed_transaction(jws)
+    except Exception as exc:
+        print(f"[APPLE-IAP] Verification failed: {exc}")
+        return jsonify({'status': 'error', 'message': 'Could not verify that purchase.'}), 400
+
+    product_id = getattr(payload, 'productId', None)
+    transaction_id = getattr(payload, 'transactionId', None)
+    original_transaction_id = getattr(payload, 'originalTransactionId', None)
+    bundle_id = getattr(payload, 'bundleId', None)
+
+    if bundle_id and bundle_id != APPLE_BUNDLE_ID:
+        return jsonify({'status': 'error', 'message': 'That purchase belongs to a different app.'}), 400
+
+    credits_to_add = APPLE_PRODUCT_CREDITS.get(product_id, 0)
+    if not credits_to_add or not transaction_id:
+        return jsonify({'status': 'error', 'message': f'Unknown product {product_id}'}), 400
+
+    user_id = session.get('user_id')
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            _ensure_apple_purchase_table(cur)
+
+            # Claim the transaction first. If it is already claimed this is a
+            # replay or a retry, so report the current balance and stop.
+            cur.execute(
+                '''INSERT INTO apple_purchases
+                       (transaction_id, original_transaction_id, user_id, product_id, credits_awarded)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (transaction_id) DO NOTHING
+                   RETURNING id''',
+                (str(transaction_id), str(original_transaction_id or ''), user_id, product_id, credits_to_add)
+            )
+            claimed = cur.fetchone()
+
+            if not claimed:
+                cur.execute('SELECT credits FROM users WHERE id = %s', (user_id,))
+                row = cur.fetchone()
+                print(f"[APPLE-IAP] Transaction {transaction_id} already redeemed")
+                return jsonify({
+                    'status': 'success',
+                    'already_redeemed': True,
+                    'credits': float(row[0]) if row else 0
+                })
+
+            cur.execute(
+                'UPDATE users SET credits = credits + %s WHERE id = %s RETURNING credits',
+                (credits_to_add, user_id)
+            )
+            row = cur.fetchone()
+            new_balance = float(row[0]) if row else 0
+
+            print(f"[APPLE-IAP] User {user_id} redeemed {product_id}: +{credits_to_add} -> {new_balance}")
+            return jsonify({
+                'status': 'success',
+                'credits_added': credits_to_add,
+                'credits': new_balance
+            })
+
+    except Exception as exc:
+        print(f"[APPLE-IAP] Redeem failed: {exc}")
+        return jsonify({'status': 'error', 'message': 'Could not apply that purchase.'}), 500
+
+
 @app.route('/api/<path:subpath>', methods=['OPTIONS'])
 def cors_preflight(subpath):
     return ('', 204)
