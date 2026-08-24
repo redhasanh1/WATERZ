@@ -11,6 +11,23 @@ final class EditorModel: ObservableObject {
         case failed(String)
     }
 
+    /// Two ways to say what should go, matching the website's split.
+    enum Mode: String, CaseIterable, Identifiable {
+        /// SAM2 tracks something that moves.
+        case moving
+        /// A fixed logo: draw it once, replicated to every frame, no tracking.
+        case fixed
+
+        var id: String { rawValue }
+        var title: String { self == .moving ? "Moving object" : "Fixed watermark" }
+        var hint: String {
+            self == .moving
+                ? "Tap the thing you want gone — it gets tracked through the clip."
+                : "Draw over the logo. It's held in the same spot for every frame."
+        }
+    }
+
+    @Published var mode: Mode = .moving
     @Published var stage: Stage = .picking
     @Published var frame: VideoFrame?
     @Published var selections: [Selection] = []
@@ -26,8 +43,17 @@ final class EditorModel: ObservableObject {
     private var previewTask: Task<Void, Never>?
     private var nextSelectionID = 0
 
+    let maskBuilder = StaticMaskBuilder()
+
     var allPoints: [SelectionPoint] { selections.flatMap(\.points) }
-    var canProcess: Bool { frame != nil && allPoints.contains { $0.label == 1 } }
+
+    var canProcess: Bool {
+        guard frame != nil else { return false }
+        switch mode {
+        case .moving: return allPoints.contains { $0.label == 1 }
+        case .fixed: return !maskBuilder.isEmpty
+        }
+    }
 
     var activeSelection: Selection? {
         guard let activeSelectionID else { return nil }
@@ -50,6 +76,7 @@ final class EditorModel: ObservableObject {
             currentTime = 0
             let first = try await VideoFrameExtractor.frame(from: videoURL)
             frame = first
+            maskBuilder.begin(videoSize: first.pixelSize)
             stage = .selecting
             AppLog.info(.editor, "Loaded \(Int(first.pixelSize.width))×\(Int(first.pixelSize.height)) @ \(String(format: "%.0f", first.fps))fps, \(String(format: "%.1f", duration))s")
         } catch {
@@ -64,6 +91,7 @@ final class EditorModel: ObservableObject {
         previewTask?.cancel(); previewTask = nil
         stage = .picking
         frame = nil
+        maskBuilder.clear()
         selections = []
         activeSelectionID = nil
         nextSelectionID = 0
@@ -215,16 +243,33 @@ final class EditorModel: ObservableObject {
                 contentType: contentType(for: sourceURL)
             )
 
-            // Full-resolution coordinates here — this is the run that matters.
-            let jobId = try await APIClient.shared.processVideo(
-                taskId: taskId,
-                points: allPoints,
-                videoWidth: Int(frame.pixelSize.width),
-                videoHeight: Int(frame.pixelSize.height),
-                frameIndex: frame.frameIndex
-            )
+            let jobId: String
+            switch mode {
+            case .moving:
+                // Full-resolution coordinates here — this is the run that matters.
+                jobId = try await APIClient.shared.processVideo(
+                    taskId: taskId,
+                    points: allPoints,
+                    videoWidth: Int(frame.pixelSize.width),
+                    videoHeight: Int(frame.pixelSize.height),
+                    frameIndex: frame.frameIndex
+                )
+                AppLog.info(.editor, "Job \(jobId): tracking \(selections.count) object(s), \(allPoints.count) point(s), frame \(frame.frameIndex)")
 
-            AppLog.info(.editor, "Job \(jobId): \(selections.count) object(s), \(allPoints.count) point(s), frame \(frame.frameIndex)")
+            case .fixed:
+                guard let mask = maskBuilder.exportBase64PNG() else {
+                    stage = .failed("Couldn't build the mask.")
+                    return
+                }
+                jobId = try await APIClient.shared.processStaticMask(
+                    taskId: taskId,
+                    maskBase64PNG: mask,
+                    videoWidth: Int(frame.pixelSize.width),
+                    videoHeight: Int(frame.pixelSize.height),
+                    frameCount: max(1, Int((duration * frame.fps).rounded()))
+                )
+                AppLog.info(.editor, "Job \(jobId): static mask over \(Int((duration * frame.fps).rounded())) frames")
+            }
             stage = .processing(progress: 0, message: "Waiting for a GPU…")
             startPolling(jobId: jobId, appState: appState)
         } catch {

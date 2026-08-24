@@ -396,6 +396,30 @@ actor APIClient {
         return try decode(RedeemResponse.self, from: data).credits
     }
 
+    /// Fixed-watermark path: the drawn mask is replicated across every frame
+    /// server-side, so SAM2 never runs.
+    func processStaticMask(
+        taskId: String,
+        maskBase64PNG: String,
+        videoWidth: Int,
+        videoHeight: Int,
+        frameCount: Int
+    ) async throws -> String {
+        let payload: [String: Any] = [
+            "task_id": taskId,
+            "mask_base64": maskBase64PNG,
+            "video_width": videoWidth,
+            "video_height": videoHeight,
+            "frame_count": frameCount
+        ]
+        let data = try await request("api/process-static-mask", method: "POST", json: payload)
+        let result = try decode(ProcessVideoResponse.self, from: data)
+        guard let jobId = result.jobId else {
+            throw APIError.http(500, result.message ?? "The server didn't return a job id.")
+        }
+        return jobId
+    }
+
     func jobStatus(jobId: String) async throws -> JobStatusResponse {
         try decode(JobStatusResponse.self, from: try await request("api/sam2/status/\(jobId)"))
     }

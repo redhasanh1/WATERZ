@@ -10,6 +10,8 @@ struct HomeView: View {
     @State private var markMode = 1          // 1 = erase this, 0 = keep this
     @State private var maskOpacity: Double = 0.55
     @State private var peeking = false
+    @State private var tool: StaticMaskBuilder.Tool = .rectangle
+    @State private var brushSize: Double = 0.04
     @State private var showCompare = true
     @State private var saveMessage: String?
     @State private var showSignOutConfirm = false
@@ -82,6 +84,45 @@ struct HomeView: View {
                                 .foregroundStyle(.white)
                         )
                 }
+            }
+        }
+    }
+
+    /// Tools for the fixed-watermark mode. Box covers most logos in one drag;
+    /// brush handles anything irregular.
+    private var drawTools: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                ForEach(StaticMaskBuilder.Tool.allCases) { option in
+                    Button {
+                        tool = option
+                        Haptics.tick()
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: option.symbol).font(.subheadline)
+                            Text(option.title).font(.caption2)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(tool == option ? Theme.accentSoft : Color(.tertiarySystemFill))
+                        )
+                        .foregroundStyle(tool == option ? Theme.accent : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            if tool == .brush || tool == .eraser {
+                HStack(spacing: 10) {
+                    Image(systemName: "circle.fill").font(.system(size: 7))
+                    Slider(value: $brushSize, in: 0.01...0.25).tint(Theme.accent)
+                    Image(systemName: "circle.fill").font(.system(size: 15))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
             }
         }
     }
@@ -169,6 +210,16 @@ struct HomeView: View {
 
     private var selector: some View {
         VStack(spacing: 0) {
+            Picker("Mode", selection: $model.mode) {
+                ForEach(EditorModel.Mode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .onChange(of: model.mode) { _, _ in Haptics.tick() }
+
             if let frame = model.frame {
                 VideoCanvas(
                     frame: frame,
@@ -177,6 +228,13 @@ struct HomeView: View {
                     isBusy: model.isPreviewingMask,
                     maskOpacity: maskOpacity,
                     peeking: peeking,
+                    drawnMask: model.mode == .fixed ? model.maskBuilder.preview : nil,
+                    isDrawing: model.mode == .fixed,
+                    onDraw: { from, to in
+                        model.maskBuilder.stroke(
+                            from: from, to: to, tool: tool, brushFraction: brushSize
+                        )
+                    },
                     onTap: { model.addPoint(normalized: $0, label: markMode) }
                 )
                 .padding(.horizontal, 16)
@@ -194,22 +252,34 @@ struct HomeView: View {
                 }
             }
 
-            Picker("Tap mode", selection: $markMode) {
-                Text("Erase this").tag(1)
-                Text("Keep this").tag(0)
+            if model.mode == .moving {
+                Picker("Tap mode", selection: $markMode) {
+                    Text("Erase this").tag(1)
+                    Text("Keep this").tag(0)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+            } else {
+                drawTools
+                    .padding(.top, 12)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
 
-            if model.selections.isEmpty {
+            if model.mode == .fixed {
+                Text(EditorModel.Mode.fixed.hint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 10)
+            } else if model.selections.isEmpty {
                 Text("Tap what you want gone. Pinch to zoom in first if it's small.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                     .padding(.top, 10)
-            } else {
+            } else if model.mode == .moving {
                 objectChips
                     .padding(.top, 10)
 
@@ -253,16 +323,21 @@ struct HomeView: View {
 
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
-                    Button("Undo") { model.undoLastPoint() }
-                        .disabled(model.selections.isEmpty)
-                    Button("Clear") { model.clearAll() }
-                        .disabled(model.selections.isEmpty)
-                    Button {
-                        model.startNewObject()
-                    } label: {
-                        Label("Next object", systemImage: "plus.circle")
+                    if model.mode == .moving {
+                        Button("Undo") { model.undoLastPoint() }
+                            .disabled(model.selections.isEmpty)
+                        Button("Clear") { model.clearAll() }
+                            .disabled(model.selections.isEmpty)
+                        Button {
+                            model.startNewObject()
+                        } label: {
+                            Label("Next object", systemImage: "plus.circle")
+                        }
+                        .disabled(model.activeSelection?.points.isEmpty != false)
+                    } else {
+                        Button("Clear mask") { model.maskBuilder.clear() }
+                            .disabled(model.maskBuilder.isEmpty)
                     }
-                    .disabled(model.activeSelection?.points.isEmpty != false)
                     Button("New video") { model.reset(); pickerItem = nil }
                 }
                 .font(.subheadline)

@@ -1,9 +1,12 @@
 import AVFoundation
 import SwiftUI
 
-/// The editing surface: the chosen frame, the taps on it, the SAM2 mask, and a
-/// scrubber for picking which frame to mark up. Pinch to zoom, drag to pan —
-/// a watermark in a corner is often too small to hit accurately at fit-scale.
+/// The editing surface: the frame, whatever marks it up, and the gestures for
+/// getting close enough to be accurate.
+///
+/// The website binds a single-finger tap and calls `preventDefault()`, which
+/// disables pinch-zoom outright — a small corner watermark is then nearly
+/// impossible to hit on a phone. Here you can pinch, drag, and double-tap in.
 struct VideoCanvas: View {
     let frame: VideoFrame
     let selections: [Selection]
@@ -12,6 +15,12 @@ struct VideoCanvas: View {
     var maskOpacity: Double = 0.55
     /// Hold the peek control to drop the overlays and see the untouched frame.
     var peeking: Bool = false
+    /// Painted mask for the fixed-watermark mode.
+    var drawnMask: UIImage? = nil
+    /// When true, dragging paints instead of panning.
+    var isDrawing: Bool = false
+    var onDraw: ((CGPoint, CGPoint) -> Void)? = nil
+    var onDrawEnded: (() -> Void)? = nil
     var onTap: (CGPoint) -> Void
 
     @State private var zoom: CGFloat = 1
@@ -32,99 +41,52 @@ struct VideoCanvas: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
 
-                // Each mask is already tinted and alpha-cut, so drawing it is
-                // a plain composite — no per-pixel work, and it lands in the
-                // identical fitted rect as the frame, which is what keeps it
-                // pixel-aligned at any resolution.
-                ForEach(peeking ? [] : selections) { selection in
-                    if let mask = selection.mask {
-                        Image(uiImage: mask)
+                if !peeking {
+                    // Masks are pre-tinted and alpha-cut, so this is a plain
+                    // composite into the identical fitted rect as the frame —
+                    // which is what keeps them aligned at any resolution.
+                    if let drawnMask {
+                        Image(uiImage: drawnMask)
                             .resizable()
                             .interpolation(.none)
                             .aspectRatio(contentMode: .fit)
                             .opacity(maskOpacity)
                             .allowsHitTesting(false)
                     }
-                }
 
-                ForEach(peeking ? [] : selections) { selection in
-                    ForEach(selection.points) { point in
-                        marker(for: point, selection: selection, in: rect)
+                    ForEach(selections) { selection in
+                        if let mask = selection.mask {
+                            Image(uiImage: mask)
+                                .resizable()
+                                .interpolation(.none)
+                                .aspectRatio(contentMode: .fit)
+                                .opacity(maskOpacity)
+                                .allowsHitTesting(false)
+                        }
+                    }
+
+                    ForEach(selections) { selection in
+                        ForEach(selection.points) { point in
+                            marker(for: point, selection: selection, in: rect)
+                        }
                     }
                 }
             }
             .scaleEffect(scale)
             .offset(offset)
             .contentShape(Rectangle())
+            .gesture(primaryGesture(geo: geo, rect: rect))
             .onTapGesture(count: 2) { location in
-                // Double tap zooms toward the spot you hit, or back out again.
-                withAnimation(.easeOut(duration: 0.22)) {
-                    if scale > 1.01 {
-                        zoom = 1; committedZoom = 1; resetPan()
-                    } else {
-                        let target: CGFloat = 3
-                        let centre = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-                        zoom = target
-                        committedZoom = target
-                        offset = CGSize(
-                            width: (centre.x - location.x) * target,
-                            height: (centre.y - location.y) * target
-                        )
-                        committedOffset = offset
-                    }
-                }
+                withAnimation(.easeOut(duration: 0.22)) { toggleZoom(at: location, in: geo.size) }
                 Haptics.tick()
             }
             .onTapGesture { location in
-                // Undo the zoom/pan so the tap maps back to the frame.
-                let centre = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-                let unscaled = CGPoint(
-                    x: (location.x - centre.x - offset.width) / scale + centre.x,
-                    y: (location.y - centre.y - offset.height) / scale + centre.y
-                )
-                guard rect.contains(unscaled) else { return }
+                guard !isDrawing else { return }
+                guard let normalized = normalize(location, geo: geo, rect: rect) else { return }
                 Haptics.tap()
-                onTap(CGPoint(
-                    x: (unscaled.x - rect.minX) / rect.width,
-                    y: (unscaled.y - rect.minY) / rect.height
-                ))
+                onTap(normalized)
             }
-            .gesture(
-                MagnificationGesture()
-                    .onChanged { zoom = committedZoom * $0 }
-                    .onEnded { _ in
-                        committedZoom = scale
-                        zoom = scale
-                        if scale == 1 { resetPan() }
-                    }
-                    .simultaneously(with:
-                        DragGesture()
-                            .onChanged { value in
-                                guard scale > 1 else { return }
-                                offset = CGSize(
-                                    width: committedOffset.width + value.translation.width,
-                                    height: committedOffset.height + value.translation.height
-                                )
-                            }
-                            .onEnded { _ in committedOffset = offset }
-                    )
-            )
-            .overlay(alignment: .topTrailing) {
-                if scale > 1.01 {
-                    Button {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            zoom = 1; committedZoom = 1; resetPan()
-                        }
-                    } label: {
-                        Label("\(String(format: "%.1f", scale))×", systemImage: "arrow.down.right.and.arrow.up.left")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(.ultraThinMaterial, in: Capsule())
-                    }
-                    .padding(8)
-                }
-            }
+            .overlay(alignment: .topTrailing) { zoomBadge }
             .overlay {
                 if isBusy {
                     ProgressView()
@@ -138,9 +100,103 @@ struct VideoCanvas: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
+    // MARK: - Gestures
+
+    /// Dragging paints while a draw tool is active, otherwise it pans. Pinch
+    /// stays available in both, so you can zoom in before painting detail.
+    private func primaryGesture(geo: GeometryProxy, rect: CGRect) -> some Gesture {
+        let drag = DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if isDrawing {
+                    guard let onDraw,
+                          let from = normalize(value.startLocation, geo: geo, rect: rect, clamped: true),
+                          let to = normalize(value.location, geo: geo, rect: rect, clamped: true)
+                    else { return }
+                    onDraw(from, to)
+                } else if scale > 1 {
+                    offset = CGSize(
+                        width: committedOffset.width + value.translation.width,
+                        height: committedOffset.height + value.translation.height
+                    )
+                }
+            }
+            .onEnded { _ in
+                if isDrawing {
+                    Haptics.tap()
+                    onDrawEnded?()
+                } else {
+                    committedOffset = offset
+                }
+            }
+
+        let pinch = MagnificationGesture()
+            .onChanged { zoom = committedZoom * $0 }
+            .onEnded { _ in
+                committedZoom = scale
+                zoom = scale
+                if scale == 1 { resetPan() }
+            }
+
+        return pinch.simultaneously(with: drag)
+    }
+
+    private func toggleZoom(at location: CGPoint, in size: CGSize) {
+        if scale > 1.01 {
+            zoom = 1; committedZoom = 1; resetPan()
+        } else {
+            let target: CGFloat = 3
+            let centre = CGPoint(x: size.width / 2, y: size.height / 2)
+            zoom = target
+            committedZoom = target
+            offset = CGSize(
+                width: (centre.x - location.x) * target,
+                height: (centre.y - location.y) * target
+            )
+            committedOffset = offset
+        }
+    }
+
     private func resetPan() {
         offset = .zero
         committedOffset = .zero
+    }
+
+    /// Undoes the zoom/pan transform so a screen point maps back onto the frame.
+    private func normalize(
+        _ location: CGPoint, geo: GeometryProxy, rect: CGRect, clamped: Bool = false
+    ) -> CGPoint? {
+        let centre = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+        let unprojected = CGPoint(
+            x: (location.x - centre.x - offset.width) / scale + centre.x,
+            y: (location.y - centre.y - offset.height) / scale + centre.y
+        )
+        if !clamped && !rect.contains(unprojected) { return nil }
+
+        let x = (unprojected.x - rect.minX) / rect.width
+        let y = (unprojected.y - rect.minY) / rect.height
+        return clamped
+            ? CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+            : CGPoint(x: x, y: y)
+    }
+
+    // MARK: - Pieces
+
+    @ViewBuilder
+    private var zoomBadge: some View {
+        if scale > 1.01 {
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    zoom = 1; committedZoom = 1; resetPan()
+                }
+            } label: {
+                Label("\(String(format: "%.1f", scale))×", systemImage: "arrow.down.right.and.arrow.up.left")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+            .padding(8)
+        }
     }
 
     /// Where the aspect-fit image actually sits inside the container.
@@ -163,7 +219,6 @@ struct VideoCanvas: View {
         )
     }
 
-    @ViewBuilder
     private func marker(for point: SelectionPoint, selection: Selection, in rect: CGRect) -> some View {
         let x = rect.minX + CGFloat(point.x) / frame.pixelSize.width * rect.width
         let y = rect.minY + CGFloat(point.y) / frame.pixelSize.height * rect.height
@@ -172,14 +227,14 @@ struct VideoCanvas: View {
         let size = max(8, 17 / scale)
         let isActive = selection.id == activeSelectionID
 
-        ZStack {
+        return ZStack {
             if keep {
-                // A "keep" mark reads as a cut-out, not another object.
+                // A "keep" mark should read as a cut-out, not another object.
                 Circle()
-                    .fill(.black.opacity(0.55))
+                    .fill(.black.opacity(0.6))
                     .overlay(
                         Image(systemName: "minus")
-                            .font(.system(size: size * 0.7, weight: .black))
+                            .font(.system(size: size * 0.66, weight: .black))
                             .foregroundStyle(.white)
                     )
             } else {
@@ -187,9 +242,7 @@ struct VideoCanvas: View {
             }
         }
         .frame(width: size, height: size)
-        .overlay(
-            Circle().stroke(.white, lineWidth: max(1, (isActive ? 2.5 : 1.5) / scale))
-        )
+        .overlay(Circle().stroke(.white, lineWidth: max(1, (isActive ? 2.5 : 1.5) / scale)))
         .shadow(color: .black.opacity(0.5), radius: max(1, 2 / scale))
         .position(x: x, y: y)
         .allowsHitTesting(false)
@@ -197,8 +250,8 @@ struct VideoCanvas: View {
 }
 
 /// Frame picker. Thumbnails are generated on device rather than pulled from the
-/// server's sprite endpoint — the video is already local, so this needs no
-/// round trip and works before the upload happens.
+/// server's sprite endpoint — the clip is already local, so this costs no round
+/// trip and works before the upload happens.
 struct FrameScrubber: View {
     let videoURL: URL
     let duration: Double
@@ -206,7 +259,6 @@ struct FrameScrubber: View {
     var onCommit: (Double) -> Void
 
     @State private var thumbnails: [UIImage] = []
-    @State private var isScrubbing = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -217,7 +269,7 @@ struct FrameScrubber: View {
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 46)
+                            .frame(height: 44)
                             .clipped()
                     }
                 }
@@ -231,16 +283,15 @@ struct FrameScrubber: View {
                     let x = duration > 0 ? CGFloat(time / duration) * geo.size.width : 0
                     RoundedRectangle(cornerRadius: 2)
                         .fill(.white)
-                        .frame(width: 3, height: 52)
+                        .frame(width: 3, height: 50)
                         .shadow(radius: 2)
-                        .position(x: min(max(x, 2), geo.size.width - 2), y: 23)
+                        .position(x: min(max(x, 2), max(geo.size.width - 2, 2)), y: 22)
                 }
-                .frame(height: 46)
+                .frame(height: 44)
             }
-            .frame(height: 46)
+            .frame(height: 44)
 
             Slider(value: $time, in: 0...max(duration, 0.1)) { editing in
-                isScrubbing = editing
                 if !editing { onCommit(time) }
             }
             .tint(Theme.accent)
@@ -267,17 +318,16 @@ struct FrameScrubber: View {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 120, height: 120)
-        // Tolerance is fine here: these are 46pt tall and only need to suggest
+        // Tolerance is fine here: these are 44pt tall and only need to suggest
         // roughly where you are in the clip.
         generator.requestedTimeToleranceBefore = CMTime(seconds: 0.3, preferredTimescale: 600)
         generator.requestedTimeToleranceAfter = CMTime(seconds: 0.3, preferredTimescale: 600)
 
-        let count = 8
         var images: [UIImage] = []
+        let count = 8
         for index in 0..<count {
             let seconds = duration * Double(index) / Double(count)
-            let time = CMTime(seconds: seconds, preferredTimescale: 600)
-            if let cg = try? await generator.image(at: time).image {
+            if let cg = try? await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image {
                 images.append(UIImage(cgImage: cg))
             }
         }
