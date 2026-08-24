@@ -9216,15 +9216,30 @@ def _load_apple_verifier():
         print(f"[APPLE-IAP] {_apple_verifier_error}")
         return None
 
-    environment = (Environment.SANDBOX
-                   if os.getenv('APPLE_IAP_ENVIRONMENT', 'production').lower() == 'sandbox'
-                   else Environment.PRODUCTION)
+    # Sandbox by default: the App Store Connect app record - and therefore the
+    # numeric app id below - does not exist until the app is submitted, and
+    # Production without it raises rather than verifying anything.
+    env_name = os.getenv('APPLE_IAP_ENVIRONMENT', 'sandbox').lower()
+    environment = Environment.PRODUCTION if env_name == 'production' else Environment.SANDBOX
+
+    # Required by the library for Production, ignored for Sandbox. It is the
+    # numeric "Apple ID" on the App Store Connect app record, not the bundle id.
+    raw_app_id = os.getenv('APPLE_APP_APPLE_ID', '').strip()
+    app_apple_id = int(raw_app_id) if raw_app_id.isdigit() else None
+
+    if environment == Environment.PRODUCTION and app_apple_id is None:
+        _apple_verifier_error = (
+            'APPLE_IAP_ENVIRONMENT=production requires APPLE_APP_APPLE_ID '
+            '(the numeric app id from App Store Connect)'
+        )
+        print(f"[APPLE-IAP] {_apple_verifier_error}")
+        return None
 
     try:
         _apple_verifier = SignedDataVerifier(
-            roots, True, environment, APPLE_BUNDLE_ID
+            roots, True, environment, APPLE_BUNDLE_ID, app_apple_id
         )
-        print(f"[APPLE-IAP] Verifier ready ({environment}, bundle {APPLE_BUNDLE_ID})")
+        print(f"[APPLE-IAP] Verifier ready ({environment.name}, bundle {APPLE_BUNDLE_ID})")
     except Exception as exc:
         _apple_verifier_error = f'verifier init failed: {exc}'
         print(f"[APPLE-IAP] {_apple_verifier_error}")
