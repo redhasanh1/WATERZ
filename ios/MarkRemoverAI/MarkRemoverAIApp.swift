@@ -55,8 +55,33 @@ struct RootView: View {
             case .signedOut:
                 LoginView()
             case .signedIn:
-                HomeView()
+                MainTabs()
             }
+        }
+    }
+}
+
+
+/// Bottom tabs so the app isn't a single dead-end screen. Create is the job;
+/// the other two are the things people reach for when it doesn't go smoothly.
+struct MainTabs: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var selection = 0
+
+    var body: some View {
+        TabView(selection: $selection) {
+            HomeView()
+                .tabItem { Label("Create", systemImage: "wand.and.stars") }
+                .tag(0)
+
+            GuideView()
+                .tabItem { Label("Guide", systemImage: "questionmark.circle") }
+                .tag(1)
+
+            ProfileView(embedded: true)
+                .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                .tag(2)
+                .badge(appState.credits < 1 ? "!" : nil)
         }
     }
 }

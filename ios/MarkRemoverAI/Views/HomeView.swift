@@ -175,37 +175,130 @@ struct HomeView: View {
     // MARK: - Stages
 
     private var picker: some View {
-        VStack(spacing: 24) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: 22) {
+                heroCard
 
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Theme.accentSoft)
-                .frame(width: 120, height: 120)
-                .overlay(
-                    Image(systemName: "video.badge.waveform")
-                        .font(.system(size: 46))
-                        .foregroundStyle(Theme.accent)
-                )
+                HStack(spacing: 12) {
+                    modeCard(
+                        title: "Moving object",
+                        detail: "A person, a car, anything that shifts around the frame.",
+                        symbol: "figure.walk.motion",
+                        tint: Theme.accent
+                    )
+                    modeCard(
+                        title: "Fixed watermark",
+                        detail: "A logo parked in one corner the whole way through.",
+                        symbol: "seal",
+                        tint: Color(red: 0.85, green: 0.42, blue: 0.68)
+                    )
+                }
+                .padding(.horizontal, 16)
 
-            VStack(spacing: 8) {
-                Text("Remove anything from a video")
-                    .font(.title2.bold())
-                    .multilineTextAlignment(.center)
-                Text("Pick a clip, tap what you want gone, and the GPU does the rest — original quality preserved.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                PhotosPicker(selection: $pickerItem, matching: .videos, photoLibrary: .shared()) {
+                    Label("Choose a video", systemImage: "photo.on.rectangle.angled")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .padding(.horizontal, 16)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "clock").font(.caption2)
+                    Text("Up to 90 seconds · 1 credit per clip")
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
+
+                if appState.credits < 1 {
+                    Button {
+                        showPaywall = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bolt.slash.fill")
+                            Text("You're out of credits — top up")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .background(Theme.warning.opacity(0.15))
+                        .foregroundStyle(Theme.warning)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .padding(.horizontal, 16)
+                }
             }
-            .padding(.horizontal, 28)
-
-            PhotosPicker(selection: $pickerItem, matching: .videos, photoLibrary: .shared()) {
-                Label("Choose a video", systemImage: "photo.on.rectangle.angled")
-            }
-            .buttonStyle(PrimaryButtonStyle())
-            .padding(.horizontal, 28)
-
-            Spacer()
+            .padding(.vertical, 14)
         }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    /// The landing screen carries the whole first impression, so it shows the
+    /// before/after idea rather than describing it.
+    private var heroCard: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Theme.heroGradient)
+
+            VStack(spacing: 14) {
+                HStack(spacing: 18) {
+                    heroTile(struck: true, label: "Before")
+                    Image(systemName: "arrow.right")
+                        .font(.headline.bold())
+                        .foregroundStyle(.white.opacity(0.9))
+                    heroTile(struck: false, label: "After")
+                }
+
+                Text("Remove anything from a video")
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+                Text("Original quality preserved")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            .padding(.vertical, 24)
+        }
+        .frame(height: 230)
+        .padding(.horizontal, 16)
+    }
+
+    private func heroTile(struck: Bool, label: String) -> some View {
+        VStack(spacing: 7) {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(.white.opacity(0.22))
+                .frame(width: 72, height: 72)
+                .overlay(
+                    Image(systemName: struck ? "person.fill" : "sparkles")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                        .opacity(struck ? 0.6 : 1)
+                )
+                .overlay(
+                    struck
+                        ? Rectangle().fill(.white).frame(height: 2).rotationEffect(.degrees(-38))
+                        : nil
+                )
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.9))
+        }
+    }
+
+    private func modeCard(title: String, detail: String, symbol: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
+        .padding(13)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var selector: some View {

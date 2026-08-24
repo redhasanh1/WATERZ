@@ -68,12 +68,23 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Loading
 
+    /// The backend rejects anything longer, so catch it here rather than after
+    /// an upload that would have failed and confused everyone.
+    static let maxDuration: Double = 90
+
     func load(videoURL: URL) async {
         reset()
         sourceURL = videoURL
         do {
             duration = await VideoFrameExtractor.duration(of: videoURL)
             currentTime = 0
+
+            guard duration <= Self.maxDuration else {
+                let seconds = Int(duration.rounded())
+                AppLog.error(.editor, "Rejected \(seconds)s clip (limit \(Int(Self.maxDuration))s)")
+                stage = .failed("That clip is \(seconds)s. The limit is 90 seconds — trim it and try again.")
+                return
+            }
             let first = try await VideoFrameExtractor.frame(from: videoURL)
             frame = first
             maskBuilder.begin(videoSize: first.pixelSize)

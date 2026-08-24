@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct ProfileView: View {
+    /// As a tab there's nothing to dismiss, so the Done button is dropped.
+    var embedded = false
+
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
@@ -103,15 +106,20 @@ struct ProfileView: View {
             .navigationTitle("Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
             .sheet(isPresented: $showPaywall) { PaywallView() }
             .sheet(isPresented: $showConsole) { ConsoleView() }
             .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) {
-                    Task { await appState.signOut(); dismiss() }
+                    Task {
+                        await appState.signOut()
+                        if !embedded { dismiss() }
+                    }
                 }
                 Button("Cancel", role: .cancel) {}
             }
