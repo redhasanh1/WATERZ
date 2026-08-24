@@ -893,6 +893,15 @@ SMTP_FROM = "markremoverai@gmail.com"
 # Authentication Routes (Google OAuth + Email/Password)
 # ----------------------------------------------------------------------------
 
+def _external_callback_uri():
+    """Railway terminates TLS at the proxy, so request.host_url reports http://.
+    Google rejects any non-https redirect URI, so force the scheme."""
+    host_url = request.host_url
+    if host_url.startswith('http://'):
+        host_url = 'https://' + host_url[len('http://'):]
+    return f"{host_url}auth/google/callback"
+
+
 @app.route('/auth/google')
 def auth_google():
     """Initiate Google OAuth flow."""
@@ -906,8 +915,8 @@ def auth_google():
         # Railway directly, so send the callback back to whichever host it
         # actually used. That URI must also be registered in Google Cloud.
         redirect_uri = (
-            f"{request.host_url}auth/google/callback" if native
-            else (GOOGLE_REDIRECT_URI or f"{request.host_url}auth/google/callback")
+            _external_callback_uri() if native
+            else (GOOGLE_REDIRECT_URI or _external_callback_uri())
         )
 
         # Create flow instance
@@ -965,8 +974,8 @@ def auth_google_callback():
         # Must match the URI used to start the flow exactly.
         native = session.get('native_auth', False)
         redirect_uri = (
-            f"{request.host_url}auth/google/callback" if native
-            else (GOOGLE_REDIRECT_URI or f"{request.host_url}auth/google/callback")
+            _external_callback_uri() if native
+            else (GOOGLE_REDIRECT_URI or _external_callback_uri())
         )
 
         # Create flow instance with same config
