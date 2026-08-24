@@ -62,18 +62,22 @@ extension APIClient {
             method: "POST",
             json: [
                 "job_id": jobId,
-                "points": points.map { ["x": $0.x, "y": $0.y, "label": $0.label] },
+                "points": points.map(\.payload),
                 "frame_index": frameIndex
             ]
         )
     }
 
-    func backgroundTrack(jobId: String) async throws {
-        _ = try await request(
-            "api/object-removal/track",
-            method: "POST",
-            json: ["job_id": jobId]
-        )
+    /// `modifiedMasks` are hand-corrected masks keyed by object id; the SAM2
+    /// worker uses them in place of what it generated.
+    func backgroundTrack(jobId: String, modifiedMasks: [(objectId: Int, base64: String)] = []) async throws {
+        var payload: [String: Any] = ["job_id": jobId]
+        if !modifiedMasks.isEmpty {
+            payload["modified_masks"] = modifiedMasks.map {
+                ["objectId": $0.objectId, "mask": $0.base64]
+            }
+        }
+        _ = try await request("api/object-removal/track", method: "POST", json: payload)
     }
 
     func backgroundExport(jobId: String, settings: BackgroundSettings) async throws {

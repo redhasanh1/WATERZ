@@ -6,13 +6,14 @@ import UIKit
 @MainActor
 final class StaticMaskBuilder: ObservableObject {
     enum Tool: String, CaseIterable, Identifiable {
-        case rectangle, ellipse, brush, eraser
+        case rectangle, ellipse, polygon, brush, eraser
         var id: String { rawValue }
 
         var symbol: String {
             switch self {
             case .rectangle: return "rectangle"
             case .ellipse: return "circle"
+            case .polygon: return "skew"
             case .brush: return "paintbrush.pointed"
             case .eraser: return "eraser"
             }
@@ -22,6 +23,7 @@ final class StaticMaskBuilder: ObservableObject {
             switch self {
             case .rectangle: return "Box"
             case .ellipse: return "Oval"
+            case .polygon: return "Shape"
             case .brush: return "Brush"
             case .eraser: return "Erase"
             }
@@ -34,6 +36,8 @@ final class StaticMaskBuilder: ObservableObject {
 
     @Published private(set) var preview: UIImage?
     @Published private(set) var isEmpty = true
+    /// Vertices of the polygon being drawn, 0…1 in frame space.
+    @Published private(set) var pendingPolygon: [CGPoint] = []
 
     private var context: CGContext?
     private(set) var size: CGSize = .zero
@@ -69,7 +73,37 @@ final class StaticMaskBuilder: ObservableObject {
         refresh()
     }
 
+    /// Polygon is tap-to-place rather than drag, so it gets its own entry point.
+    func addPolygonVertex(_ normalized: CGPoint) {
+        pendingPolygon.append(normalized)
+    }
+
+    func undoPolygonVertex() {
+        if !pendingPolygon.isEmpty { pendingPolygon.removeLast() }
+    }
+
+    /// Closes the shape and fills it. Fewer than three vertices isn't an area.
+    func closePolygon() {
+        guard let context, pendingPolygon.count >= 3 else {
+            pendingPolygon = []
+            return
+        }
+        context.setFillColor(UIColor.white.cgColor)
+        context.beginPath()
+        context.move(to: point(pendingPolygon[0]))
+        for vertex in pendingPolygon.dropFirst() {
+            context.addLine(to: point(vertex))
+        }
+        context.closePath()
+        context.fillPath()
+
+        pendingPolygon = []
+        isEmpty = false
+        refresh()
+    }
+
     func clear() {
+        pendingPolygon = []
         guard let context else { return }
         context.setFillColor(UIColor.black.cgColor)
         context.fill(CGRect(origin: .zero, size: size))
@@ -93,6 +127,10 @@ final class StaticMaskBuilder: ObservableObject {
         case .ellipse:
             context.fillEllipse(in: CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
                                            width: abs(b.x - a.x), height: abs(b.y - a.y)))
+        case .polygon:
+            // Placed by tap, not drag — nothing to do on a stroke.
+            return
+
         case .brush, .eraser:
             let width = max(2, brushFraction * size.width)
             context.setLineWidth(width)

@@ -368,7 +368,7 @@ actor APIClient {
         let payload: [String: Any] = [
             "frame_data": frameBase64PNG,
             "frame_index": frameIndex,
-            "points": points.map { ["x": $0.x, "y": $0.y, "label": $0.label] },
+            "points": points.map(\.payload),
             "video_width": videoWidth,
             "video_height": videoHeight
         ]
@@ -386,7 +386,7 @@ actor APIClient {
         let payload: [String: Any] = [
             "task_id": taskId,
             "prompt_mode": "point",
-            "points": points.map { ["x": $0.x, "y": $0.y, "label": $0.label] },
+            "points": points.map(\.payload),
             "video_width": videoWidth,
             "video_height": videoHeight,
             "frame_index": frameIndex

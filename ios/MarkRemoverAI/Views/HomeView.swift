@@ -115,6 +115,22 @@ struct HomeView: View {
             }
             .padding(.horizontal, 16)
 
+            if tool == .polygon {
+                HStack(spacing: 10) {
+                    Text("\(model.maskBuilder.pendingPolygon.count) point\(model.maskBuilder.pendingPolygon.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Undo point") { model.maskBuilder.undoPolygonVertex() }
+                        .disabled(model.maskBuilder.pendingPolygon.isEmpty)
+                    Button("Close shape") { model.maskBuilder.closePolygon(); Haptics.tap() }
+                        .disabled(model.maskBuilder.pendingPolygon.count < 3)
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+                .padding(.horizontal, 16)
+            }
+
             if tool == .brush || tool == .eraser {
                 HStack(spacing: 10) {
                     Image(systemName: "circle.fill").font(.system(size: 7))
@@ -322,13 +338,22 @@ struct HomeView: View {
                     maskOpacity: maskOpacity,
                     peeking: peeking,
                     drawnMask: model.mode == .fixed ? model.maskBuilder.preview : nil,
-                    isDrawing: model.mode == .fixed,
+                    isDrawing: model.mode == .fixed && tool != .polygon,
+                    polygonVertices: model.mode == .fixed && tool == .polygon
+                        ? model.maskBuilder.pendingPolygon : [],
                     onDraw: { from, to in
                         model.maskBuilder.stroke(
                             from: from, to: to, tool: tool, brushFraction: brushSize
                         )
                     },
-                    onTap: { model.addPoint(normalized: $0, label: markMode) }
+                    onTap: { location in
+                        if model.mode == .fixed {
+                            guard tool == .polygon else { return }
+                            model.maskBuilder.addPolygonVertex(location)
+                        } else {
+                            model.addPoint(normalized: location, label: markMode)
+                        }
+                    }
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)

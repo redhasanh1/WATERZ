@@ -11,6 +11,9 @@ final class BackgroundModel: ObservableObject {
     @Published var stage: Stage = .picking
     @Published var frame: VideoFrame?
     @Published var points: [SelectionPoint] = []
+    /// The pipeline tracks each object_id separately, so a second subject needs
+    /// its own id rather than more points on the first.
+    @Published var currentObject = 0
     @Published var settings = BackgroundSettings()
     @Published private(set) var sourceURL: URL?
 
@@ -43,20 +46,33 @@ final class BackgroundModel: ObservableObject {
         stage = .picking
         frame = nil
         points = []
+        currentObject = 0
         sourceURL = nil
         duration = 0
     }
 
-    func addPoint(normalized: CGPoint) {
+    func addPoint(normalized: CGPoint, label: Int = 1) {
         guard let frame else { return }
         points.append(SelectionPoint(
             x: Int((normalized.x * frame.pixelSize.width).rounded()),
             y: Int((normalized.y * frame.pixelSize.height).rounded()),
-            label: 1
+            label: label,
+            objectId: currentObject
         ))
     }
 
-    func undo() { if !points.isEmpty { points.removeLast() } }
+    func nextObject() {
+        guard points.contains(where: { $0.objectId == currentObject }) else { return }
+        currentObject += 1
+    }
+
+    func undo() {
+        guard !points.isEmpty else { return }
+        points.removeLast()
+        currentObject = points.map(\.objectId).max() ?? 0
+    }
+
+    var objectCount: Int { Set(points.map(\.objectId)).count }
 
     func run(appState: AppState) async {
         guard let sourceURL, let frame else { return }
@@ -132,6 +148,7 @@ struct BackgroundView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var model = BackgroundModel()
     @State private var pickerItem: PhotosPickerItem?
+    @State private var markMode = 1
 
     var body: some View {
         NavigationStack {
@@ -207,20 +224,25 @@ struct BackgroundView: View {
                     selections: [],
                     activeSelectionID: nil,
                     isBusy: false,
-                    onTap: { model.addPoint(normalized: $0) }
+                    onTap: { model.addPoint(normalized: $0, label: markMode) }
                 )
-                .overlay(alignment: .topLeading) {
-                    ForEach(Array(model.points.enumerated()), id: \.offset) { _, _ in EmptyView() }
-                }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
+
+            Picker("Tap mode", selection: $markMode) {
+                Text("Include").tag(1)
+                Text("Exclude").tag(0)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
 
             Text(model.points.isEmpty
                  ? (model.settings.operation == .keepObject
                     ? "Tap what you want to keep."
                     : "Tap what you want gone.")
-                 : "\(model.points.count) tap\(model.points.count == 1 ? "" : "s") placed.")
+                 : "\(model.points.count) tap\(model.points.count == 1 ? "" : "s") across \(model.objectCount) subject\(model.objectCount == 1 ? "" : "s").")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -235,6 +257,13 @@ struct BackgroundView: View {
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
                     Button("Undo") { model.undo() }.disabled(model.points.isEmpty)
+                    Button {
+                        model.nextObject()
+                        Haptics.tick()
+                    } label: {
+                        Label("Next subject", systemImage: "plus.circle")
+                    }
+                    .disabled(model.points.isEmpty)
                     Button("New video") { model.reset(); pickerItem = nil }
                 }
                 .font(.subheadline)

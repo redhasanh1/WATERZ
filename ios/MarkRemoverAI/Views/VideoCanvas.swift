@@ -19,6 +19,8 @@ struct VideoCanvas: View {
     var drawnMask: UIImage? = nil
     /// When true, dragging paints instead of panning.
     var isDrawing: Bool = false
+    /// Vertices of a polygon still being placed, 0…1 in frame space.
+    var polygonVertices: [CGPoint] = []
     var onDraw: ((CGPoint, CGPoint) -> Void)? = nil
     var onDrawEnded: (() -> Void)? = nil
     var onTap: (CGPoint) -> Void
@@ -69,6 +71,31 @@ struct VideoCanvas: View {
                         ForEach(selection.points) { point in
                             marker(for: point, selection: selection, in: rect)
                         }
+                    }
+
+                    if polygonVertices.count > 1 {
+                        Path { path in
+                            let pts = polygonVertices.map {
+                                CGPoint(x: rect.minX + $0.x * rect.width,
+                                        y: rect.minY + $0.y * rect.height)
+                            }
+                            path.addLines(pts)
+                            if polygonVertices.count > 2 { path.closeSubpath() }
+                        }
+                        .stroke(SelectionPalette.color(0), style: StrokeStyle(lineWidth: max(1, 2 / scale), dash: [max(3, 5 / scale)]))
+                        .allowsHitTesting(false)
+                    }
+
+                    ForEach(Array(polygonVertices.enumerated()), id: \.offset) { _, vertex in
+                        Circle()
+                            .fill(SelectionPalette.color(0))
+                            .frame(width: max(6, 12 / scale), height: max(6, 12 / scale))
+                            .overlay(Circle().stroke(.white, lineWidth: max(1, 2 / scale)))
+                            .position(
+                                x: rect.minX + vertex.x * rect.width,
+                                y: rect.minY + vertex.y * rect.height
+                            )
+                            .allowsHitTesting(false)
                     }
                 }
             }

@@ -122,8 +122,16 @@ struct SelectionPoint: Codable, Identifiable, Equatable {
     let x: Int
     let y: Int
     let label: Int
+    /// Which object this click belongs to. The background pipeline tracks each
+    /// id separately, so without it every click collapses into one object.
+    var objectId: Int = 0
 
-    enum CodingKeys: String, CodingKey { case x, y, label }
+    enum CodingKeys: String, CodingKey {
+        case x, y, label
+        case objectId = "object_id"
+    }
+
+    var payload: [String: Any] { ["x": x, "y": y, "label": label, "object_id": objectId] }
 }
 
 struct SelectObjectResponse: Codable {
