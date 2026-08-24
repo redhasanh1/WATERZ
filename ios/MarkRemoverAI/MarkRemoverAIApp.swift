@@ -50,7 +50,7 @@ struct RootView: View {
             case .launching:
                 VStack(spacing: 16) {
                     ProgressView().tint(Theme.accent)
-                    Text("MarkRemoverAI").font(.headline).foregroundStyle(.secondary)
+                    Text("ObjectRemoverAI").font(.headline).foregroundStyle(.secondary)
                 }
             case .signedOut:
                 LoginView()

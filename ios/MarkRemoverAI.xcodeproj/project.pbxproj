@@ -188,7 +188,7 @@
 				DEVELOPMENT_TEAM = KD3JCFB7N4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = MarkRemoverAI;
+				INFOPLIST_KEY_CFBundleDisplayName = ObjectRemoverAI;
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save your cleaned-up videos back to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose a video to remove objects from.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -216,7 +216,7 @@
 				DEVELOPMENT_TEAM = KD3JCFB7N4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = MarkRemoverAI;
+				INFOPLIST_KEY_CFBundleDisplayName = ObjectRemoverAI;
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save your cleaned-up videos back to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose a video to remove objects from.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

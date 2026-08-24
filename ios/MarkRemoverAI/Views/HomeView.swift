@@ -8,6 +8,7 @@ struct HomeView: View {
 
     @State private var pickerItem: PhotosPickerItem?
     @State private var markMode = 1          // 1 = erase this, 0 = keep this
+    @State private var maskOpacity: Double = 0.55
     @State private var saveMessage: String?
     @State private var showSignOutConfirm = false
     @State private var showPaywall = false
@@ -26,7 +27,7 @@ struct HomeView: View {
                 case .failed(let message): failure(message)
                 }
             }
-            .navigationTitle("MarkRemoverAI")
+            .navigationTitle("ObjectRemoverAI")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .sheet(isPresented: $showPaywall) { PaywallView() }
@@ -83,6 +84,45 @@ struct HomeView: View {
         }
     }
 
+    /// One chip per object, in its own colour, so it stays obvious which taps
+    /// belong together and which one the next tap will extend.
+    private var objectChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(model.selections) { selection in
+                    let isActive = selection.id == model.activeSelectionID
+                    Button {
+                        model.activeSelectionID = isActive ? nil : selection.id
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(selection.color)
+                                .frame(width: 10, height: 10)
+                            Text("Object \(selection.id + 1)")
+                                .font(.caption.weight(.medium))
+                            Text("\(selection.points.count)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(isActive ? selection.color.opacity(0.18) : Color(.tertiarySystemFill))
+                        )
+                        .overlay(
+                            Capsule().stroke(isActive ? selection.color : .clear, lineWidth: 1.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Delete", role: .destructive) { model.removeSelection(selection.id) }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
     private var initials: String {
         let name = appState.user?.name?.trimmingCharacters(in: .whitespaces)
         let source = (name?.isEmpty == false ? name! : appState.user?.email) ?? "?"
@@ -130,9 +170,10 @@ struct HomeView: View {
             if let frame = model.frame {
                 VideoCanvas(
                     frame: frame,
-                    points: model.points,
-                    maskImage: model.maskImage,
+                    selections: model.selections,
+                    activeSelectionID: model.activeSelectionID,
                     isBusy: model.isPreviewingMask,
+                    maskOpacity: maskOpacity,
                     onTap: { model.addPoint(normalized: $0, label: markMode) }
                 )
                 .padding(.horizontal, 16)
@@ -158,15 +199,29 @@ struct HomeView: View {
             .padding(.horizontal, 16)
             .padding(.top, 14)
 
-            Text(model.points.isEmpty
-                 ? "Tap what you want gone. Pinch to zoom in first if it's small."
-                 : "\(model.points.count) tap\(model.points.count == 1 ? "" : "s") on this frame."
-            )
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 24)
-            .padding(.top, 10)
+            if model.selections.isEmpty {
+                Text("Tap what you want gone. Pinch to zoom in first if it's small.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 10)
+            } else {
+                objectChips
+                    .padding(.top, 10)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "circle.lefthalf.filled").font(.caption)
+                    Slider(value: $maskOpacity, in: 0...1)
+                        .tint(Theme.accent)
+                    Text("\(Int(maskOpacity * 100))%")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .trailing)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+            }
 
             if model.maskUnavailable {
                 Label("Live preview is unavailable, but processing will still work.",
@@ -179,11 +234,17 @@ struct HomeView: View {
             Spacer(minLength: 12)
 
             VStack(spacing: 10) {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Button("Undo") { model.undoLastPoint() }
-                        .disabled(model.points.isEmpty)
-                    Button("Clear") { model.clearPoints() }
-                        .disabled(model.points.isEmpty)
+                        .disabled(model.selections.isEmpty)
+                    Button("Clear") { model.clearAll() }
+                        .disabled(model.selections.isEmpty)
+                    Button {
+                        model.startNewObject()
+                    } label: {
+                        Label("Next object", systemImage: "plus.circle")
+                    }
+                    .disabled(model.activeSelection?.points.isEmpty != false)
                     Button("New video") { model.reset(); pickerItem = nil }
                 }
                 .font(.subheadline)

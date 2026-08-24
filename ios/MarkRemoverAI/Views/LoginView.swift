@@ -215,7 +215,7 @@ struct LoginView: View {
                 .frame(width: 68, height: 68)
                 .overlay(Image(systemName: "wand.and.stars").font(.system(size: 30)).foregroundStyle(.white))
 
-            Text("MarkRemoverAI")
+            Text("ObjectRemoverAI")
                 .font(.largeTitle.bold())
             Text("Erase anything from your videos.")
                 .font(.subheadline)

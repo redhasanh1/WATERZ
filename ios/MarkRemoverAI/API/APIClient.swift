@@ -12,7 +12,7 @@ enum APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .http(_, let message): return message
-        case .transport: return "Can't reach MarkRemoverAI. Check your connection."
+        case .transport: return "Can't reach ObjectRemoverAI. Check your connection."
         case .decoding: return "The server sent something unexpected."
         case .needsVerification(let email): return "Verify \(email) first — check your inbox."
         case .notAuthenticated: return "Sign in to keep going."

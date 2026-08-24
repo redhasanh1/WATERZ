@@ -6,9 +6,10 @@ import SwiftUI
 /// a watermark in a corner is often too small to hit accurately at fit-scale.
 struct VideoCanvas: View {
     let frame: VideoFrame
-    let points: [SelectionPoint]
-    let maskImage: UIImage?
+    let selections: [Selection]
+    let activeSelectionID: Int?
     let isBusy: Bool
+    var maskOpacity: Double = 0.55
     var onTap: (CGPoint) -> Void
 
     @State private var zoom: CGFloat = 1
@@ -29,17 +30,25 @@ struct VideoCanvas: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
 
-                if let maskImage {
-                    Image(uiImage: maskImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .blendMode(.screen)
-                        .opacity(0.5)
-                        .allowsHitTesting(false)
+                // Each mask is already tinted and alpha-cut, so drawing it is
+                // a plain composite — no per-pixel work, and it lands in the
+                // identical fitted rect as the frame, which is what keeps it
+                // pixel-aligned at any resolution.
+                ForEach(selections) { selection in
+                    if let mask = selection.mask {
+                        Image(uiImage: mask)
+                            .resizable()
+                            .interpolation(.none)
+                            .aspectRatio(contentMode: .fit)
+                            .opacity(maskOpacity)
+                            .allowsHitTesting(false)
+                    }
                 }
 
-                ForEach(points) { point in
-                    marker(for: point, in: rect)
+                ForEach(selections) { selection in
+                    ForEach(selection.points) { point in
+                        marker(for: point, selection: selection, in: rect)
+                    }
                 }
             }
             .scaleEffect(scale)
@@ -132,19 +141,36 @@ struct VideoCanvas: View {
         )
     }
 
-    private func marker(for point: SelectionPoint, in rect: CGRect) -> some View {
+    @ViewBuilder
+    private func marker(for point: SelectionPoint, selection: Selection, in rect: CGRect) -> some View {
         let x = rect.minX + CGFloat(point.x) / frame.pixelSize.width * rect.width
         let y = rect.minY + CGFloat(point.y) / frame.pixelSize.height * rect.height
         let keep = point.label == 0
-        // Shrink the marker as you zoom in so it stops covering what you aimed at.
-        let size = max(9, 18 / scale)
+        // Shrink markers as you zoom so they stop covering what you aimed at.
+        let size = max(8, 17 / scale)
+        let isActive = selection.id == activeSelectionID
 
-        return Circle()
-            .fill(keep ? Color.red : Theme.positive)
-            .frame(width: size, height: size)
-            .overlay(Circle().stroke(.white, lineWidth: max(1, 2.5 / scale)))
-            .position(x: x, y: y)
-            .allowsHitTesting(false)
+        ZStack {
+            if keep {
+                // A "keep" mark reads as a cut-out, not another object.
+                Circle()
+                    .fill(.black.opacity(0.55))
+                    .overlay(
+                        Image(systemName: "minus")
+                            .font(.system(size: size * 0.7, weight: .black))
+                            .foregroundStyle(.white)
+                    )
+            } else {
+                Circle().fill(selection.color)
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(
+            Circle().stroke(.white, lineWidth: max(1, (isActive ? 2.5 : 1.5) / scale))
+        )
+        .shadow(color: .black.opacity(0.5), radius: max(1, 2 / scale))
+        .position(x: x, y: y)
+        .allowsHitTesting(false)
     }
 }
 

@@ -13,25 +13,34 @@ final class EditorModel: ObservableObject {
 
     @Published var stage: Stage = .picking
     @Published var frame: VideoFrame?
-    @Published var points: [SelectionPoint] = []
-    @Published var maskImage: UIImage?
+    @Published var selections: [Selection] = []
+    @Published var activeSelectionID: Int?
     @Published var isPreviewingMask = false
     @Published var maskUnavailable = false
-
     @Published var duration: Double = 0
     @Published var currentTime: Double = 0
     @Published private(set) var sourceURL: URL?
 
     private var pollTask: Task<Void, Never>?
     private var seekTask: Task<Void, Never>?
+    private var previewTask: Task<Void, Never>?
+    private var nextSelectionID = 0
 
-    var canProcess: Bool {
-        frame != nil && points.contains { $0.label == 1 }
+    var allPoints: [SelectionPoint] { selections.flatMap(\.points) }
+    var canProcess: Bool { frame != nil && allPoints.contains { $0.label == 1 } }
+
+    var activeSelection: Selection? {
+        guard let activeSelectionID else { return nil }
+        return selections.first { $0.id == activeSelectionID }
     }
 
-    deinit { pollTask?.cancel(); seekTask?.cancel() }
+    deinit {
+        pollTask?.cancel()
+        seekTask?.cancel()
+        previewTask?.cancel()
+    }
 
-    // MARK: - Picking
+    // MARK: - Loading
 
     func load(videoURL: URL) async {
         reset()
@@ -39,100 +48,152 @@ final class EditorModel: ObservableObject {
         do {
             duration = await VideoFrameExtractor.duration(of: videoURL)
             currentTime = 0
-            frame = try await VideoFrameExtractor.frame(from: videoURL)
+            let first = try await VideoFrameExtractor.frame(from: videoURL)
+            frame = first
             stage = .selecting
-            AppLog.info(.editor, "Loaded \(Int(frame?.pixelSize.width ?? 0))x\(Int(frame?.pixelSize.height ?? 0)), \(String(format: "%.1f", duration))s")
+            AppLog.info(.editor, "Loaded \(Int(first.pixelSize.width))×\(Int(first.pixelSize.height)) @ \(String(format: "%.0f", first.fps))fps, \(String(format: "%.1f", duration))s")
         } catch {
             AppLog.error(.editor, "Load failed: \(error.localizedDescription)")
             stage = .failed(error.localizedDescription)
         }
     }
 
-    /// Moves to another frame. Points belong to the frame they were placed on,
+    func reset() {
+        pollTask?.cancel(); pollTask = nil
+        seekTask?.cancel(); seekTask = nil
+        previewTask?.cancel(); previewTask = nil
+        stage = .picking
+        frame = nil
+        selections = []
+        activeSelectionID = nil
+        nextSelectionID = 0
+        maskUnavailable = false
+        duration = 0
+        currentTime = 0
+        sourceURL = nil
+    }
+
+    /// Moves to another frame. Marks belong to the frame they were placed on,
     /// so they are dropped rather than silently applied to the wrong one.
     func seek(to seconds: Double) {
         guard let sourceURL else { return }
         seekTask?.cancel()
-        seekTask = Task {
+        seekTask = Task { [weak self] in
             guard let newFrame = try? await VideoFrameExtractor.frame(from: sourceURL, at: seconds) else { return }
             guard !Task.isCancelled else { return }
-            frame = newFrame
-            currentTime = seconds
-            if !points.isEmpty || maskImage != nil {
-                points = []
-                maskImage = nil
-                maskUnavailable = false
-                AppLog.debug(.editor, "Frame \(newFrame.frameIndex): cleared previous marks")
+            await MainActor.run {
+                guard let self else { return }
+                self.frame = newFrame
+                self.currentTime = seconds
+                if !self.selections.isEmpty {
+                    self.selections = []
+                    self.activeSelectionID = nil
+                    self.nextSelectionID = 0
+                    self.maskUnavailable = false
+                    AppLog.debug(.editor, "Frame \(newFrame.frameIndex): cleared previous marks")
+                }
             }
         }
     }
 
-    func reset() {
-        pollTask?.cancel()
-        pollTask = nil
-        seekTask?.cancel()
-        seekTask = nil
-        duration = 0
-        currentTime = 0
-        stage = .picking
-        frame = nil
-        points = []
-        maskImage = nil
-        maskUnavailable = false
-        sourceURL = nil
-    }
+    // MARK: - Marking
 
-    // MARK: - Points
-
-    /// `normalized` is the tap expressed 0…1 across the displayed frame, so the
-    /// caller doesn't need to know the video's pixel size.
+    /// `normalized` is 0…1 across the displayed frame; converting here means the
+    /// view never needs to know the video's pixel size.
     func addPoint(normalized: CGPoint, label: Int) {
         guard let frame else { return }
         let x = Int((normalized.x * frame.pixelSize.width).rounded())
         let y = Int((normalized.y * frame.pixelSize.height).rounded())
-        points.append(SelectionPoint(x: x, y: y, label: label))
-        Task { await refreshMaskPreview() }
+        let point = SelectionPoint(x: x, y: y, label: label)
+
+        if let id = activeSelectionID, let index = selections.firstIndex(where: { $0.id == id }) {
+            selections[index].points.append(point)
+        } else {
+            var selection = Selection(id: nextSelectionID)
+            selection.points = [point]
+            selections.append(selection)
+            activeSelectionID = selection.id
+            nextSelectionID += 1
+        }
+        refreshPreview()
+    }
+
+    /// Ends the current object so the next tap starts a fresh one in a new colour.
+    func startNewObject() {
+        guard activeSelection?.points.isEmpty == false else { return }
+        activeSelectionID = nil
     }
 
     func undoLastPoint() {
-        guard !points.isEmpty else { return }
-        points.removeLast()
-        if points.isEmpty {
-            maskImage = nil
+        guard let id = activeSelectionID ?? selections.last?.id,
+              let index = selections.firstIndex(where: { $0.id == id }) else { return }
+
+        selections[index].points.removeLast()
+        if selections[index].points.isEmpty {
+            selections.remove(at: index)
+            activeSelectionID = selections.last?.id
+            nextSelectionID = max(0, nextSelectionID - 1)
         } else {
-            Task { await refreshMaskPreview() }
+            activeSelectionID = id
+            refreshPreview()
         }
     }
 
-    func clearPoints() {
-        points = []
-        maskImage = nil
+    func removeSelection(_ id: Int) {
+        selections.removeAll { $0.id == id }
+        if activeSelectionID == id { activeSelectionID = selections.last?.id }
+    }
+
+    func clearAll() {
+        selections = []
+        activeSelectionID = nil
+        nextSelectionID = 0
         maskUnavailable = false
     }
 
-    /// Best-effort: the preview needs the interactive SAM2 worker, which isn't
-    /// always up. A miss shouldn't block the actual job.
-    private func refreshMaskPreview() async {
-        guard let frame, !points.isEmpty else { return }
-        guard let base64 = VideoFrameExtractor.base64PNG(frame.image) else { return }
+    /// Best-effort preview. It needs the interactive SAM2 worker, which isn't
+    /// always up — a miss must never block the actual job.
+    private func refreshPreview() {
+        guard let frame, let id = activeSelectionID,
+              let selection = selections.first(where: { $0.id == id }),
+              !selection.points.isEmpty else { return }
 
-        isPreviewingMask = true
-        defer { isPreviewingMask = false }
+        previewTask?.cancel()
+        previewTask = Task { [weak self] in
+            await MainActor.run { self?.isPreviewingMask = true }
+            defer { Task { @MainActor in self?.isPreviewingMask = false } }
 
-        do {
-            let mask = try await APIClient.shared.previewMask(
-                frameBase64PNG: base64,
-                frameIndex: frame.frameIndex,
-                points: points,
-                videoWidth: Int(frame.pixelSize.width),
-                videoHeight: Int(frame.pixelSize.height)
-            )
-            if let mask, let image = VideoFrameExtractor.maskImage(fromBase64: mask) {
-                maskImage = image
-                maskUnavailable = false
+            // An 8K frame as base64 PNG is well over 100 MB and would stall the
+            // request. The preview only has to look right, so send a capped
+            // copy with the points rescaled to match; the real job further down
+            // still gets full-resolution coordinates.
+            guard let payload = VideoFrameExtractor.previewPayload(
+                frame: frame, points: selection.points
+            ) else { return }
+
+            do {
+                let mask = try await APIClient.shared.previewMask(
+                    frameBase64PNG: payload.base64PNG,
+                    frameIndex: frame.frameIndex,
+                    points: payload.points,
+                    videoWidth: Int(payload.size.width),
+                    videoHeight: Int(payload.size.height)
+                )
+                guard !Task.isCancelled, let mask else { return }
+
+                let tinted = MaskRenderer.tinted(
+                    base64: mask, color: SelectionPalette.uiColor(selection.colorIndex)
+                )
+                await MainActor.run {
+                    guard let self, let index = self.selections.firstIndex(where: { $0.id == id }) else { return }
+                    self.selections[index].mask = tinted
+                    self.maskUnavailable = false
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                AppLog.debug(.editor, "Mask preview unavailable: \(error.localizedDescription)")
+                await MainActor.run { self?.maskUnavailable = true }
             }
-        } catch {
-            maskUnavailable = true
         }
     }
 
@@ -154,15 +215,16 @@ final class EditorModel: ObservableObject {
                 contentType: contentType(for: sourceURL)
             )
 
+            // Full-resolution coordinates here — this is the run that matters.
             let jobId = try await APIClient.shared.processVideo(
                 taskId: taskId,
-                points: points,
+                points: allPoints,
                 videoWidth: Int(frame.pixelSize.width),
                 videoHeight: Int(frame.pixelSize.height),
                 frameIndex: frame.frameIndex
             )
 
-            AppLog.info(.editor, "Job \(jobId) queued with \(points.count) point(s) on frame \(frame.frameIndex)")
+            AppLog.info(.editor, "Job \(jobId): \(selections.count) object(s), \(allPoints.count) point(s), frame \(frame.frameIndex)")
             stage = .processing(progress: 0, message: "Waiting for a GPU…")
             startPolling(jobId: jobId, appState: appState)
         } catch {
@@ -174,7 +236,7 @@ final class EditorModel: ObservableObject {
     private func startPolling(jobId: String, appState: AppState) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
-            // Renders run minutes, not seconds — poll gently and give up after
+            // Renders run minutes, not seconds. Poll gently, and give up after
             // 20 minutes rather than spinning forever.
             let deadline = Date().addingTimeInterval(20 * 60)
 
@@ -183,7 +245,7 @@ final class EditorModel: ObservableObject {
                 guard !Task.isCancelled else { return }
 
                 guard let status = try? await APIClient.shared.jobStatus(jobId: jobId) else {
-                    continue // a blip in the tunnel shouldn't kill the job
+                    continue // a blip shouldn't kill the job
                 }
 
                 switch status.status {
@@ -191,6 +253,7 @@ final class EditorModel: ObservableObject {
                     await self?.finish(status: status, appState: appState)
                     return
                 case "failed", "error":
+                    AppLog.error(.editor, "Job failed: \(status.error ?? "unknown")")
                     await MainActor.run {
                         self?.stage = .failed(status.error ?? "Processing failed on the worker.")
                     }
@@ -220,6 +283,7 @@ final class EditorModel: ObservableObject {
 
         do {
             let local = try await APIClient.shared.download(url)
+            AppLog.info(.editor, "Result downloaded")
             stage = .done(local)
         } catch {
             stage = .failed(error.localizedDescription)
