@@ -14,6 +14,9 @@ final class BackgroundModel: ObservableObject {
     /// The pipeline tracks each object_id separately, so a second subject needs
     /// its own id rather than more points on the first.
     @Published var currentObject = 0
+    /// Hand-corrections to the SAM2 mask. The worker takes these in place of
+    /// what it generated, so a bad edge can be fixed before tracking runs.
+    let maskBuilder = StaticMaskBuilder()
     @Published var settings = BackgroundSettings()
     @Published private(set) var sourceURL: URL?
 
@@ -22,6 +25,7 @@ final class BackgroundModel: ObservableObject {
 
     var canProcess: Bool { frame != nil && !points.isEmpty }
 
+
     deinit { pollTask?.cancel() }
 
     func load(videoURL: URL) async {
@@ -29,12 +33,10 @@ final class BackgroundModel: ObservableObject {
         sourceURL = videoURL
         duration = await VideoFrameExtractor.duration(of: videoURL)
 
-        guard duration <= EditorModel.maxDuration else {
-            stage = .failed("That clip is \(Int(duration.rounded()))s. The limit is 90 seconds.")
-            return
-        }
         do {
-            frame = try await VideoFrameExtractor.frame(from: videoURL)
+            let first = try await VideoFrameExtractor.frame(from: videoURL)
+            frame = first
+            maskBuilder.begin(videoSize: first.pixelSize)
             stage = .selecting
         } catch {
             stage = .failed(error.localizedDescription)
@@ -47,6 +49,7 @@ final class BackgroundModel: ObservableObject {
         frame = nil
         points = []
         currentObject = 0
+        maskBuilder.clear()
         sourceURL = nil
         duration = 0
     }
@@ -99,7 +102,12 @@ final class BackgroundModel: ObservableObject {
             )
 
             stage = .working("Following it through the clip…")
-            try await APIClient.shared.backgroundTrack(jobId: jobId)
+            var corrections: [(objectId: Int, base64: String)] = []
+            if !maskBuilder.isEmpty, let drawn = maskBuilder.exportBase64PNG() {
+                corrections.append((objectId: currentObject, base64: drawn))
+                AppLog.info(.editor, "Sending a hand-corrected mask for object \(currentObject)")
+            }
+            try await APIClient.shared.backgroundTrack(jobId: jobId, modifiedMasks: corrections)
 
             stage = .working("Applying the background…")
             try await APIClient.shared.backgroundExport(jobId: jobId, settings: settings)
@@ -149,6 +157,38 @@ struct BackgroundView: View {
     @StateObject private var model = BackgroundModel()
     @State private var pickerItem: PhotosPickerItem?
     @State private var markMode = 1
+    @State private var tool: BackgroundTool = .click
+    @State private var brushSize: Double = 0.04
+
+    /// Click places SAM2 points; the rest paint a correction over the mask.
+    enum BackgroundTool: String, CaseIterable, Identifiable {
+        case click, rectangle, brush, eraser
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .click: return "Click"
+            case .rectangle: return "Box"
+            case .brush: return "Brush"
+            case .eraser: return "Erase"
+            }
+        }
+        var symbol: String {
+            switch self {
+            case .click: return "hand.tap"
+            case .rectangle: return "rectangle"
+            case .brush: return "paintbrush.pointed"
+            case .eraser: return "eraser"
+            }
+        }
+        var drawTool: StaticMaskBuilder.Tool? {
+            switch self {
+            case .click: return nil
+            case .rectangle: return .rectangle
+            case .brush: return .brush
+            case .eraser: return .eraser
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -206,7 +246,7 @@ struct BackgroundView: View {
                 .buttonStyle(PrimaryButtonStyle())
                 .padding(.horizontal, 16)
 
-                Text("Up to 90 seconds · 1 credit per clip")
+                Text("1 credit per clip · any length")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -224,19 +264,69 @@ struct BackgroundView: View {
                     selections: [],
                     activeSelectionID: nil,
                     isBusy: false,
-                    onTap: { model.addPoint(normalized: $0, label: markMode) }
+                    drawnMask: model.maskBuilder.preview,
+                    isDrawing: tool != .click,
+                    onDraw: { from, to in
+                        guard let drawTool = tool.drawTool else { return }
+                        model.maskBuilder.stroke(
+                            from: from, to: to, tool: drawTool, brushFraction: brushSize
+                        )
+                    },
+                    onTap: { location in
+                        guard tool == .click else { return }
+                        model.addPoint(normalized: location, label: markMode)
+                    }
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
 
-            Picker("Tap mode", selection: $markMode) {
-                Text("Include").tag(1)
-                Text("Exclude").tag(0)
+            HStack(spacing: 8) {
+                ForEach(BackgroundTool.allCases) { option in
+                    Button {
+                        tool = option
+                        Haptics.tick()
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: option.symbol).font(.subheadline)
+                            Text(option.title).font(.caption2)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(tool == option ? Theme.accentSoft : Color(.tertiarySystemFill))
+                        )
+                        .foregroundStyle(tool == option ? Theme.accent : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.top, 12)
+
+            if tool == .click {
+                Picker("Tap mode", selection: $markMode) {
+                    Text("Include").tag(1)
+                    Text("Exclude").tag(0)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            } else {
+                HStack(spacing: 10) {
+                    Image(systemName: "circle.fill").font(.system(size: 7))
+                    Slider(value: $brushSize, in: 0.01...0.25).tint(Theme.accent)
+                    Image(systemName: "circle.fill").font(.system(size: 15))
+                    Button("Clear") { model.maskBuilder.clear() }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .disabled(model.maskBuilder.isEmpty)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            }
 
             Text(model.points.isEmpty
                  ? (model.settings.operation == .keepObject

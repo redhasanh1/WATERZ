@@ -219,7 +219,7 @@ struct HomeView: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "clock").font(.caption2)
-                    Text("Up to 90 seconds · 1 credit per clip")
+                    Text("1 credit per clip · any length")
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)

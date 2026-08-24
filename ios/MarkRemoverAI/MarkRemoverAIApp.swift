@@ -83,7 +83,7 @@ struct MainTabs: View {
                 .tag(2)
 
             ProfileView(embedded: true)
-                .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                 .tag(3)
                 .badge(appState.credits < 1 ? "!" : nil)
         }

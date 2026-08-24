@@ -112,7 +112,7 @@ struct GuideView: View {
             sectionTitle("Good to know")
 
             HStack(spacing: 10) {
-                fact("90s", "max length")
+                fact("Any", "clip length")
                 fact("1", "credit per clip")
                 fact("4K+", "quality kept")
             }
@@ -187,7 +187,7 @@ struct GuideView: View {
         ("What video formats work?",
          "MP4, MOV, WebM, MKV, WMV and most common formats. Phone footage, camera files and screen recordings all work."),
         ("How long can a video be?",
-         "Up to 90 seconds. Longer clips are rejected before they cost you a credit — trim it first."),
+         "There's no hard cap on the paths this app uses. Longer clips simply take longer on the GPU, so a few minutes is a sensible ceiling if you're in a hurry."),
         ("How does the removal actually work?",
          "The object you mark is tracked across every frame, removed, and the background behind it is rebuilt so the result looks untouched."),
         ("Can I use the results commercially?",

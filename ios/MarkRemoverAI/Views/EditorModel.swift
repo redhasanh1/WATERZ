@@ -68,9 +68,11 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Loading
 
-    /// The backend rejects anything longer, so catch it here rather than after
-    /// an upload that would have failed and confused everyone.
-    static let maxDuration: Double = 90
+    /// Only the legacy /api/process endpoint enforces a duration cap. The
+    /// paths this app uses — sam2/process-video, process-static-mask and the
+    /// object-removal pipeline — accept any length, so nothing is blocked.
+    /// Past this, a render just takes a while and is worth warning about.
+    static let longVideoAdvisory: Double = 180
 
     func load(videoURL: URL) async {
         reset()
@@ -79,12 +81,7 @@ final class EditorModel: ObservableObject {
             duration = await VideoFrameExtractor.duration(of: videoURL)
             currentTime = 0
 
-            guard duration <= Self.maxDuration else {
-                let seconds = Int(duration.rounded())
-                AppLog.error(.editor, "Rejected \(seconds)s clip (limit \(Int(Self.maxDuration))s)")
-                stage = .failed("That clip is \(seconds)s. The limit is 90 seconds — trim it and try again.")
-                return
-            }
+
             let first = try await VideoFrameExtractor.frame(from: videoURL)
             frame = first
             maskBuilder.begin(videoSize: first.pixelSize)

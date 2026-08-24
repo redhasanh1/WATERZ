@@ -115,7 +115,7 @@ struct ProfileView: View {
                     }
                 }
             }
-            .navigationTitle("Account")
+            .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !embedded {
