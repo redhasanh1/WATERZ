@@ -5,7 +5,7 @@ import SwiftUI
 /// getting close enough to be accurate.
 ///
 /// The website binds a single-finger tap and calls `preventDefault()`, which
-/// disables pinch-zoom outright — a small corner watermark is then nearly
+/// disables pinch-zoom outright — a small detail in a corner is then nearly
 /// impossible to hit on a phone. Here you can pinch, drag, and double-tap in.
 struct VideoCanvas: View {
     let frame: VideoFrame
@@ -15,7 +15,7 @@ struct VideoCanvas: View {
     var maskOpacity: Double = 0.55
     /// Hold the peek control to drop the overlays and see the untouched frame.
     var peeking: Bool = false
-    /// Painted mask for the fixed-watermark mode.
+    /// Painted area for the stationary mode.
     var drawnMask: UIImage? = nil
     /// When true, dragging paints instead of panning.
     var isDrawing: Bool = false

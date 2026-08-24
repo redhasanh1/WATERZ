@@ -15,15 +15,15 @@ final class EditorModel: ObservableObject {
     enum Mode: String, CaseIterable, Identifiable {
         /// SAM2 tracks something that moves.
         case moving
-        /// A fixed logo: draw it once, replicated to every frame, no tracking.
+        /// Something stationary: draw it once, repeated on every frame, no tracking.
         case fixed
 
         var id: String { rawValue }
-        var title: String { self == .moving ? "Moving object" : "Fixed watermark" }
+        var title: String { self == .moving ? "Moves around" : "Stays in place" }
         var hint: String {
             self == .moving
-                ? "Tap the thing you want gone — it gets tracked through the clip."
-                : "Draw over the logo. It's held in the same spot for every frame."
+                ? "Tap it once. It gets followed through the whole clip."
+                : "Draw over it once. The same area is cleared on every frame."
         }
     }
 

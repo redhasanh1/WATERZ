@@ -86,6 +86,18 @@ struct ProfileView: View {
                     }
                 }
 
+                Section("Help") {
+                    Button {
+                        openSupportMail()
+                    } label: {
+                        Label("Email support", systemImage: "envelope")
+                    }
+                    Text(SupportMail.address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
                 Section {
                     Link(destination: URL(string: "https://markremoverai.com/terms")!) {
                         Label("Terms of service", systemImage: "doc.text")
@@ -139,6 +151,19 @@ struct ProfileView: View {
             ? appState.user!.name!
             : (appState.user?.email ?? "?")
         return String(source.prefix(1)).uppercased()
+    }
+
+    /// Pre-fills the details we'd otherwise have to ask for. Nothing is sent
+    /// until the user hits send in Mail — this only composes a draft.
+    private func openSupportMail() {
+        let url = SupportMail.composeURL(
+            email: appState.user?.email,
+            credits: appState.credits,
+            host: host,
+            recentErrors: LogStore.shared.recentErrors(limit: 6)
+        )
+        guard let url else { return }
+        UIApplication.shared.open(url)
     }
 
     private func select(_ value: String) {

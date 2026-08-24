@@ -396,7 +396,7 @@ actor APIClient {
         return try decode(RedeemResponse.self, from: data).credits
     }
 
-    /// Fixed-watermark path: the drawn mask is replicated across every frame
+    /// Static path: the drawn area is repeated on every frame
     /// server-side, so SAM2 never runs.
     func processStaticMask(
         taskId: String,

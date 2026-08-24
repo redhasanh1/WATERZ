@@ -75,7 +75,7 @@ struct GuideView: View {
             sectionTitle("Three steps")
 
             step(1, "Pick a clip", "Anything from your library — phone footage, a screen recording, a download.", "photo.on.rectangle.angled")
-            step(2, "Mark what goes", "Tap a moving object to have it tracked, or draw a box over a logo that stays put.", "hand.tap")
+            step(2, "Mark what goes", "Tap something that moves to have it followed, or draw a box over anything that stays put.", "hand.tap")
             step(3, "Let it render", "One credit. A minute or two later you get the clean version back.", "wand.and.stars")
         }
         .padding(.horizontal, 16)
@@ -193,7 +193,7 @@ struct GuideView: View {
         ("Can I use the results commercially?",
          "Yes. Personal and commercial projects both. You own full rights to what comes out."),
         ("What's the difference between the two modes?",
-         "Moving object tracks something that shifts around the frame. Fixed watermark holds one mask in place for the whole clip — faster, and it can't drift off a stationary logo."),
+         "Moves around follows something across the frame. Stays in place holds one area for the whole clip — faster, and it can't drift."),
         ("When is a credit taken?",
          "Only when a render finishes. Failed jobs don't charge you.")
     ]

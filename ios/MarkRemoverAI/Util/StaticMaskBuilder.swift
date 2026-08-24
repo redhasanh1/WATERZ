@@ -1,8 +1,8 @@
 import UIKit
 
-/// A hand-drawn mask for a fixed watermark. The whole bitmap is replicated to
+/// A hand-drawn area for something that never moves. The bitmap is repeated on
 /// every frame server-side, so no tracking runs at all — faster than SAM2 and
-/// it can't drift off a logo that never moves.
+/// it cannot drift off something stationary.
 @MainActor
 final class StaticMaskBuilder: ObservableObject {
     enum Tool: String, CaseIterable, Identifiable {

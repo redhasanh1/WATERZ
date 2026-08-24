@@ -88,7 +88,7 @@ struct HomeView: View {
         }
     }
 
-    /// Tools for the fixed-watermark mode. Box covers most logos in one drag;
+    /// Tools for the stationary mode. Box covers most shapes in one drag;
     /// brush handles anything irregular.
     private var drawTools: some View {
         VStack(spacing: 10) {
@@ -181,14 +181,14 @@ struct HomeView: View {
 
                 HStack(spacing: 12) {
                     modeCard(
-                        title: "Moving object",
-                        detail: "A person, a car, anything that shifts around the frame.",
+                        title: "Moves around",
+                        detail: "A person, a car, anything that travels across the frame.",
                         symbol: "figure.walk.motion",
                         tint: Theme.accent
                     )
                     modeCard(
-                        title: "Fixed watermark",
-                        detail: "A logo parked in one corner the whole way through.",
+                        title: "Stays in place",
+                        detail: "Anything sitting in the same spot the whole way through.",
                         symbol: "seal",
                         tint: Color(red: 0.85, green: 0.42, blue: 0.68)
                     )
