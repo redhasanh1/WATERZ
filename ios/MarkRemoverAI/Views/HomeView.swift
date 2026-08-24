@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var showSignOutConfirm = false
     @State private var showPaywall = false
     @State private var showConsole = false
+    @State private var showProfile = false
 
     var body: some View {
         NavigationStack {
@@ -30,6 +31,7 @@ struct HomeView: View {
             .toolbar { toolbarContent }
             .sheet(isPresented: $showPaywall) { PaywallView() }
             .sheet(isPresented: $showConsole) { ConsoleView() }
+            .sheet(isPresented: $showProfile) { ProfileView() }
             .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { Task { await appState.signOut() } }
                 Button("Cancel", role: .cancel) {}
@@ -47,27 +49,44 @@ struct HomeView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(appState.workerOnline == true ? Theme.positive : Theme.warning)
-                    .frame(width: 8, height: 8)
-                Text(appState.workerOnline == true ? "Online" : "Checking")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            // Dot only - the toolbar truncates a label here, and "O..." says nothing.
+            Circle()
+                .fill(appState.workerOnline == true ? Theme.positive : Theme.warning)
+                .frame(width: 9, height: 9)
+                .accessibilityLabel(appState.workerOnline == true ? "Service online" : "Service unreachable")
         }
         ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Text(appState.user?.email ?? "")
-                Button("Get credits") { showPaywall = true }
-                Button("Console") { showConsole = true }
-                Button("Sign out", role: .destructive) { showSignOutConfirm = true }
-            } label: {
-                Label("\(Int(appState.credits))", systemImage: "bolt.fill")
-                    .font(.subheadline.weight(.semibold))
+            HStack(spacing: 10) {
+                Button { showPaywall = true } label: {
+                    // An HStack, not a Label - the toolbar renders Label as
+                    // icon-only and the number vanishes.
+                    HStack(spacing: 3) {
+                        Image(systemName: "bolt.fill").font(.caption)
+                        Text("\(Int(appState.credits))")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                    }
                     .foregroundStyle(Theme.accent)
+                }
+
+                Button { showProfile = true } label: {
+                    Circle()
+                        .fill(Theme.heroGradient)
+                        .frame(width: 28, height: 28)
+                        .overlay(
+                            Text(initials)
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                        )
+                }
             }
         }
+    }
+
+    private var initials: String {
+        let name = appState.user?.name?.trimmingCharacters(in: .whitespaces)
+        let source = (name?.isEmpty == false ? name! : appState.user?.email) ?? "?"
+        return String(source.prefix(1)).uppercased()
     }
 
     // MARK: - Stages
@@ -109,7 +128,7 @@ struct HomeView: View {
     private var selector: some View {
         VStack(spacing: 0) {
             if let frame = model.frame {
-                FrameCanvas(
+                VideoCanvas(
                     frame: frame,
                     points: model.points,
                     maskImage: model.maskImage,
@@ -118,6 +137,17 @@ struct HomeView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+
+                if let url = model.sourceURL, model.duration > 0 {
+                    FrameScrubber(
+                        videoURL: url,
+                        duration: model.duration,
+                        time: $model.currentTime,
+                        onCommit: { model.seek(to: $0) }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                }
             }
 
             Picker("Tap mode", selection: $markMode) {
@@ -129,11 +159,13 @@ struct HomeView: View {
             .padding(.top, 14)
 
             Text(model.points.isEmpty
-                 ? "Tap the object you want removed. Add more taps to refine it."
-                 : "\(model.points.count) tap\(model.points.count == 1 ? "" : "s") placed."
+                 ? "Tap what you want gone. Pinch to zoom in first if it's small."
+                 : "\(model.points.count) tap\(model.points.count == 1 ? "" : "s") on this frame."
             )
             .font(.footnote)
             .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 24)
             .padding(.top, 10)
 
             if model.maskUnavailable {

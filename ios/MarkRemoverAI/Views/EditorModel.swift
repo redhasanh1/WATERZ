@@ -18,14 +18,18 @@ final class EditorModel: ObservableObject {
     @Published var isPreviewingMask = false
     @Published var maskUnavailable = false
 
-    private var sourceURL: URL?
+    @Published var duration: Double = 0
+    @Published var currentTime: Double = 0
+    @Published private(set) var sourceURL: URL?
+
     private var pollTask: Task<Void, Never>?
+    private var seekTask: Task<Void, Never>?
 
     var canProcess: Bool {
         frame != nil && points.contains { $0.label == 1 }
     }
 
-    deinit { pollTask?.cancel() }
+    deinit { pollTask?.cancel(); seekTask?.cancel() }
 
     // MARK: - Picking
 
@@ -33,16 +37,43 @@ final class EditorModel: ObservableObject {
         reset()
         sourceURL = videoURL
         do {
+            duration = await VideoFrameExtractor.duration(of: videoURL)
+            currentTime = 0
             frame = try await VideoFrameExtractor.frame(from: videoURL)
             stage = .selecting
+            AppLog.info(.editor, "Loaded \(Int(frame?.pixelSize.width ?? 0))x\(Int(frame?.pixelSize.height ?? 0)), \(String(format: "%.1f", duration))s")
         } catch {
+            AppLog.error(.editor, "Load failed: \(error.localizedDescription)")
             stage = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Moves to another frame. Points belong to the frame they were placed on,
+    /// so they are dropped rather than silently applied to the wrong one.
+    func seek(to seconds: Double) {
+        guard let sourceURL else { return }
+        seekTask?.cancel()
+        seekTask = Task {
+            guard let newFrame = try? await VideoFrameExtractor.frame(from: sourceURL, at: seconds) else { return }
+            guard !Task.isCancelled else { return }
+            frame = newFrame
+            currentTime = seconds
+            if !points.isEmpty || maskImage != nil {
+                points = []
+                maskImage = nil
+                maskUnavailable = false
+                AppLog.debug(.editor, "Frame \(newFrame.frameIndex): cleared previous marks")
+            }
         }
     }
 
     func reset() {
         pollTask?.cancel()
         pollTask = nil
+        seekTask?.cancel()
+        seekTask = nil
+        duration = 0
+        currentTime = 0
         stage = .picking
         frame = nil
         points = []
@@ -115,6 +146,7 @@ final class EditorModel: ObservableObject {
         }
 
         stage = .uploading
+        AppLog.info(.editor, "Uploading \(sourceURL.lastPathComponent)")
         do {
             let taskId = try await APIClient.shared.upload(
                 fileURL: sourceURL,
@@ -130,9 +162,11 @@ final class EditorModel: ObservableObject {
                 frameIndex: frame.frameIndex
             )
 
+            AppLog.info(.editor, "Job \(jobId) queued with \(points.count) point(s) on frame \(frame.frameIndex)")
             stage = .processing(progress: 0, message: "Waiting for a GPU…")
             startPolling(jobId: jobId, appState: appState)
         } catch {
+            AppLog.error(.editor, "Processing failed: \(error.localizedDescription)")
             stage = .failed(error.localizedDescription)
         }
     }
