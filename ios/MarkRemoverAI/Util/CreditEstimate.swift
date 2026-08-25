@@ -24,3 +24,17 @@ enum CreditEstimate {
             : String(format: "%.1f", credits)
     }
 }
+
+
+extension CreditEstimate {
+    /// Balances can run to nine digits, which pushes the title out of the bar.
+    /// Abbreviate anything over a thousand.
+    static func compact(_ credits: Double) -> String {
+        switch credits {
+        case 1_000_000_000...: return String(format: "%.0fB", credits / 1_000_000_000)
+        case 1_000_000...:  return String(format: "%.0fM", credits / 1_000_000)
+        case 1_000...:      return String(format: "%.0fK", credits / 1_000)
+        default:            return label(credits)
+        }
+    }
+}

@@ -201,6 +201,7 @@ final class BackgroundModel: ObservableObject {
             AppLog.info(.editor, "Background job \(jobId): \(settings.operation.rawValue) / \(settings.fill.rawValue), dilation \(Int(settings.dilation))")
             try await APIClient.shared.backgroundExport(jobId: jobId, settings: settings)
 
+            JobStore.shared.record(id: jobId, kind: .background)
             poll(jobId: jobId, appState: appState)
         } catch {
             AppLog.error(.editor, "Background failed: \(error.localizedDescription)")
@@ -248,6 +249,7 @@ final class BackgroundModel: ObservableObject {
                 switch status.status {
                 case "export_complete":
                     let url = APIClient.shared.backgroundDownloadURL(jobId: jobId)
+                    await MainActor.run { JobStore.shared.finish(id: jobId, resultURL: url.absoluteString) }
                     if let local = try? await APIClient.shared.download(url) {
                         await MainActor.run { self?.stage = .done(local) }
                     } else {
@@ -256,7 +258,10 @@ final class BackgroundModel: ObservableObject {
                     await appState.refreshUser()
                     return
                 case "failed", "error":
-                    await MainActor.run { self?.stage = .failed(status.error ?? "The worker rejected it.") }
+                    await MainActor.run {
+                        JobStore.shared.fail(id: jobId, reason: status.error)
+                        self?.stage = .failed(status.error ?? "The worker rejected it.")
+                    }
                     return
                 default:
                     await MainActor.run {
@@ -320,6 +325,16 @@ struct BackgroundView: View {
             }
             .navigationTitle("Background")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if model.frame != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        PhotosPicker(selection: $pickerItem, matching: .videos, photoLibrary: .shared()) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.subheadline)
+                        }
+                    }
+                }
+            }
         }
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
@@ -397,8 +412,9 @@ struct BackgroundView: View {
             }
 
             stepHeader(1, "Mark the subject", "Point at what matters. This only builds a selection.")
-                .padding(.top, 14)
+                .padding(.top, 16)
 
+            VStack(spacing: 12) {
             HStack(spacing: 8) {
                 ForEach(BackgroundTool.allCases) { option in
                     Button {
@@ -473,6 +489,13 @@ struct BackgroundView: View {
                 .padding(.top, 10)
             }
 
+            }
+            .padding(13)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+
             Text(model.points.isEmpty
                  ? (model.settings.operation == .keepObject
                     ? "Tap what you want to keep."
@@ -531,6 +554,7 @@ struct BackgroundView: View {
         VStack(spacing: 14) {
             stepHeader(2, "Choose the result", "What the finished video looks like.")
 
+            VStack(spacing: 14) {
             VStack(spacing: 6) {
                 Text("The thing you marked")
                     .font(.caption.weight(.medium))
@@ -578,6 +602,10 @@ struct BackgroundView: View {
             // Dilation grows the mask outward. A pixel or two removes the halo
             // of old background that otherwise clings to the edges.
             slider("Edge grow", value: $model.settings.dilation, range: 0...20)
+            }
+            .padding(13)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .padding(.horizontal, 16)
     }

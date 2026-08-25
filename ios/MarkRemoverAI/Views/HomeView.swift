@@ -54,11 +54,20 @@ struct HomeView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            // Dot only - the toolbar truncates a label here, and "O..." says nothing.
-            Circle()
-                .fill(appState.workerOnline == true ? Theme.positive : Theme.warning)
-                .frame(width: 9, height: 9)
-                .accessibilityLabel(appState.workerOnline == true ? "Service online" : "Service unreachable")
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(appState.workerOnline == true ? Theme.positive : Theme.warning)
+                    .frame(width: 9, height: 9)
+                    .accessibilityLabel(appState.workerOnline == true ? "Service online" : "Service unreachable")
+
+                // Swap clips without backing out to the start screen.
+                if model.frame != nil {
+                    PhotosPicker(selection: $pickerItem, matching: .videos, photoLibrary: .shared()) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.subheadline)
+                    }
+                }
+            }
         }
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 10) {
@@ -67,7 +76,7 @@ struct HomeView: View {
                     // icon-only and the number vanishes.
                     HStack(spacing: 3) {
                         Image(systemName: "bolt.fill").font(.caption)
-                        Text("\(Int(appState.credits))")
+                        Text(CreditEstimate.compact(appState.credits))
                             .font(.subheadline.weight(.semibold))
                             .monospacedDigit()
                     }

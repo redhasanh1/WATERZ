@@ -306,6 +306,7 @@ final class EditorModel: ObservableObject {
                 )
                 AppLog.info(.editor, "Job \(jobId): static mask over \(Int((duration * frame.fps).rounded())) frames")
             }
+            JobStore.shared.record(id: jobId, kind: .removal)
             stage = .processing(progress: 0, message: "Waiting for a GPU…")
             startPolling(jobId: jobId, appState: appState)
         } catch {
@@ -331,10 +332,11 @@ final class EditorModel: ObservableObject {
 
                 switch status.status {
                 case "completed":
-                    await self?.finish(status: status, appState: appState)
+                    await self?.finish(status: status, jobId: jobId, appState: appState)
                     return
                 case "failed", "error":
                     AppLog.error(.editor, "Job failed: \(status.error ?? "unknown")")
+                    await MainActor.run { JobStore.shared.fail(id: jobId, reason: status.error) }
                     await MainActor.run {
                         self?.stage = .failed(status.error ?? "Processing failed on the worker.")
                     }
@@ -355,13 +357,14 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    private func finish(status: JobStatusResponse, appState: AppState) async {
+    private func finish(status: JobStatusResponse, jobId: String, appState: AppState) async {
         guard let raw = status.resultURL,
               let url = APIClient.shared.absoluteResultURL(raw) else {
             stage = .failed("The job finished but returned no video.")
             return
         }
 
+        JobStore.shared.finish(id: jobId, resultURL: raw)
         do {
             let local = try await APIClient.shared.download(url)
             AppLog.info(.editor, "Result downloaded")

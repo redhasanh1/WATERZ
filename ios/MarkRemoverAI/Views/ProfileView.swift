@@ -9,6 +9,7 @@ struct ProfileView: View {
 
     @State private var showPaywall = false
     @State private var showConsole = false
+    @State private var showJobs = false
     @State private var showSignOutConfirm = false
     @State private var showHostPicker = false
     @State private var host = APIClient.currentBaseURL
@@ -86,6 +87,27 @@ struct ProfileView: View {
                     }
                 }
 
+                Section("Renders") {
+                    Button { showJobs = true } label: {
+                        HStack {
+                            Label("Your renders", systemImage: "tray.full")
+                            Spacer()
+                            if !JobStore.shared.unfinished.isEmpty {
+                                Text("\(JobStore.shared.unfinished.count) running")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.warning)
+                            } else if !JobStore.shared.collectable.isEmpty {
+                                Text("\(JobStore.shared.collectable.count) ready")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.positive)
+                            }
+                        }
+                    }
+                    Text("Renders keep going if you close the app. Collect them here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Help") {
                     Button {
                         openSupportMail()
@@ -126,6 +148,7 @@ struct ProfileView: View {
             }
             .sheet(isPresented: $showPaywall) { PaywallView() }
             .sheet(isPresented: $showConsole) { ConsoleView() }
+            .sheet(isPresented: $showJobs) { JobsView() }
             .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) {
                     Task {

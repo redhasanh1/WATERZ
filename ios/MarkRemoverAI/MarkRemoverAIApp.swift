@@ -17,6 +17,8 @@ struct MarkRemoverAIApp: App {
                     // place to write the new balance.
                     Store.activeAppState = appState
                     await store.redeemUnfinished(appState: appState)
+                    // A render outlives the app; pick up anything left behind.
+                    await JobStore.shared.refreshUnfinished()
                 }
         }
     }
