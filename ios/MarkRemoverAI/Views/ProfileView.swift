@@ -10,6 +10,10 @@ struct ProfileView: View {
     @State private var showPaywall = false
     @State private var showConsole = false
     @State private var showJobs = false
+    @State private var showDeleteAccount = false
+    @State private var deleteConfirmation = ""
+    @State private var deleting = false
+    @State private var deleteError: String?
     @State private var showSignOutConfirm = false
     @State private var showHostPicker = false
     @State private var host = APIClient.currentBaseURL
@@ -136,6 +140,18 @@ struct ProfileView: View {
                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
+
+                Section {
+                    Button(role: .destructive) {
+                        deleteConfirmation = ""
+                        deleteError = nil
+                        showDeleteAccount = true
+                    } label: {
+                        Label("Delete account", systemImage: "trash")
+                    }
+                } footer: {
+                    Text("Removes your account, your uploads and your results. Any remaining credits are lost. This cannot be undone.")
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 // The floating tab bar sits over the final row otherwise.
@@ -153,6 +169,33 @@ struct ProfileView: View {
             .sheet(isPresented: $showPaywall) { PaywallView() }
             .sheet(isPresented: $showConsole) { ConsoleView() }
             .sheet(isPresented: $showJobs) { JobsView() }
+            .alert("Delete account?", isPresented: $showDeleteAccount) {
+                // Typed confirmation rather than a single tap: this destroys
+                // the account, its files and any remaining balance.
+                TextField("Type DELETE", text: $deleteConfirmation)
+                    .textInputAutocapitalization(.characters)
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    guard deleteConfirmation.uppercased() == "DELETE" else { return }
+                    Task {
+                        deleting = true
+                        defer { deleting = false }
+                        do {
+                            try await appState.deleteAccount()
+                            if !embedded { dismiss() }
+                        } catch {
+                            deleteError = error.localizedDescription
+                        }
+                    }
+                }
+            } message: {
+                Text("This removes your account, uploads and results permanently. Type DELETE to confirm.")
+            }
+            .alert("Couldn't delete the account", isPresented: .constant(deleteError != nil)) {
+                Button("OK") { deleteError = nil }
+            } message: {
+                Text(deleteError ?? "")
+            }
             .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) {
                     Task {

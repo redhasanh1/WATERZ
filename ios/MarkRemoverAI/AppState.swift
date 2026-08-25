@@ -79,6 +79,12 @@ final class AppState: ObservableObject {
         phase = .signedIn(user)
     }
 
+    func deleteAccount() async throws {
+        try await APIClient.shared.deleteAccount()
+        AppLog.info(.auth, "Account deleted")
+        phase = .signedOut
+    }
+
     func signOut() async {
         await APIClient.shared.logout()
         phase = .signedOut

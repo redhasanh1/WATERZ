@@ -269,6 +269,16 @@ actor APIClient {
         return try decode(AuthSuccessResponse.self, from: data).user
     }
 
+    /// Apple requires an in-app way to delete an account wherever one can be
+    /// created (guideline 5.1.1(v)). The server removes the user record along
+    /// with their uploads and results.
+    func deleteAccount() async throws {
+        _ = try await request("api/auth/delete-account", method: "POST")
+        HTTPCookieStorage.shared.cookies(for: baseURL)?.forEach {
+            HTTPCookieStorage.shared.deleteCookie($0)
+        }
+    }
+
     func logout() async {
         _ = try? await request("api/auth/logout", method: "POST")
         // Clear the jar too, so a stale cookie can't resurrect the session.
