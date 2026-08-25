@@ -407,11 +407,23 @@ struct BackgroundView: View {
             .padding(.top, 12)
 
             if tool == .click {
-                Picker("Tap mode", selection: $markMode) {
-                    Text("Include").tag(1)
-                    Text("Exclude").tag(0)
+                VStack(spacing: 5) {
+                    Picker("Tap mode", selection: $markMode) {
+                        Label("Add", systemImage: "plus.circle.fill").tag(1)
+                        Label("Take away", systemImage: "minus.circle.fill").tag(0)
+                    }
+                    .pickerStyle(.segmented)
+
+                    // Both modes refine the same selection; saying so stops
+                    // this reading as a second Keep/Remove choice.
+                    Text(markMode == 1
+                         ? "Tap the subject. Tap again to add more of it."
+                         : "Tap a bit it grabbed by mistake to cut it back out.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
                 }
-                .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
             } else {

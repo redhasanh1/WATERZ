@@ -373,11 +373,21 @@ struct HomeView: View {
             }
 
             if model.mode == .moving {
-                Picker("Tap mode", selection: $markMode) {
-                    Text("Erase this").tag(1)
-                    Text("Keep this").tag(0)
+                VStack(spacing: 5) {
+                    Picker("Tap mode", selection: $markMode) {
+                        Label("Add", systemImage: "plus.circle.fill").tag(1)
+                        Label("Take away", systemImage: "minus.circle.fill").tag(0)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(markMode == 1
+                         ? "Tap what should disappear. Tap again to add more of it."
+                         : "Tap a bit it grabbed by mistake to cut it back out.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
                 }
-                .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
             } else {
