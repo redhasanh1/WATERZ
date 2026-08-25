@@ -39,7 +39,7 @@ final class BackgroundModel: ObservableObject {
     static let maxDuration: Double = 610
 
     @Published private(set) var estimatedCredits: Double = 1
-    private var duration: Double = 0
+    @Published private(set) var duration: Double = 0
     private var pollTask: Task<Void, Never>?
 
     var points: [SelectionPoint] { selections.flatMap(\.points) }
@@ -387,6 +387,15 @@ struct BackgroundView: View {
         ScrollView {
             VStack(spacing: 0) {
             if let frame = model.frame {
+                EstimateBar(
+                    duration: model.duration,
+                    size: frame.pixelSize,
+                    credits: model.estimatedCredits,
+                    tint: Theme.orange
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+
                 VideoCanvas(
                     frame: frame,
                     selections: model.selections,

@@ -337,6 +337,14 @@ struct HomeView: View {
             .onChange(of: model.mode) { _, _ in Haptics.tick() }
 
             if let frame = model.frame {
+                EstimateBar(
+                    duration: model.duration,
+                    size: frame.pixelSize,
+                    credits: model.estimatedCredits
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+
                 VideoCanvas(
                     frame: frame,
                     selections: model.selections,
