@@ -137,11 +137,48 @@ questionnaire) under Business.
 
 ---
 
+## Status in App Store Connect
+
+Done, verified against the API rather than the page:
+
+- **App Information** — subtitle "Erase objects from your videos", primary
+  category Photo & Video, secondary Graphics & Design, content rights declared
+  as no third-party content, privacy policy URL set.
+- **Age rating** — questionnaire answered, calculated **4+**, no override.
+- **App Privacy** — published. Five data types (Name, Email Address, Photos or
+  Videos, User ID, Purchase History), each App Functionality, each linked to the
+  user, **none** used for tracking.
+- **Pricing** — app is Free in all 175 countries or regions; availability set to
+  all countries or regions.
+- **Version 1.0 listing** — promotional text, description, keywords, support
+  URL, marketing URL, copyright saved.
+- **In-app purchases** — all three consumables carry price, availability in 175
+  regions, localisation, review notes. Starter and Basic also carry a review
+  screenshot. All three read MISSING_METADATA, which is expected: Apple holds
+  the first consumable until it is submitted alongside a new app version.
+- **Build** — 1.0 (1) validated and uploaded (delivery
+  `764fad89-2b0c-4939-b199-71aff4a0788b`). Signed with the team distribution
+  profile, `ITSAppUsesNonExemptEncryption` false so export compliance is
+  answered in the binary, iPhone only.
+- **Server** — `/api/auth/delete-account`, `/api/auth/apple`,
+  `/api/auth/exchange` and `/api/billing/apple/redeem` all answer on Railway, so
+  the native flows the notes describe are live.
+
 ## Still needed before submitting
 
-1. Bank account and tax forms, so the credit packs can be priced.
-2. A screen recording on a physical device, start to finish, covering: launch,
-   sign in, a full removal, a purchase, and account deletion. Apple asked for
-   this explicitly and its absence is what stalled RoomFinderAI.
-3. Screenshots at 6.7 inch and 6.5 inch.
-4. A test account with credits, filled into the notes above.
+1. **A test account for App Review.** Apple will not review an app it cannot
+   sign in to, and the version cannot save its review details without one. It
+   needs an account on markremoverai.com with credits already applied. Fill it
+   into App Review Information, and into the Notes above.
+2. **Screenshots at 6.5 inch.** Everything worth showing sits behind sign-in, so
+   these wait on 1.
+3. **A review screenshot for Pro Pack**, and better ones for Starter and Basic.
+   The current pair shows the paywall's empty state, because StoreKit only
+   populates the packs when the app is launched from Xcode against
+   `Products.storekit`.
+4. **Bank account and the two tax forms** (Canadian GST/HST 506 and the U.S. tax
+   questionnaire) under Business. Until the Paid Apps agreement is active the
+   credit packs cannot go on sale.
+5. **A screen recording on a physical device**, start to finish: launch, sign
+   in, a full removal, a purchase, and account deletion. Apple asked for this
+   explicitly and its absence is what stalled RoomFinderAI.
