@@ -7393,6 +7393,14 @@ def generate_sprite_sheet(video_url, task_id, thumb_width=160, thumb_height=90, 
     Returns:
         dict with sprite_path, vtt_path, duration, or None on error
     """
+    # The Railway web container ships without ffmpeg on purpose: the GPU workers
+    # do the video work. Without this guard the call below runs subprocess.run
+    # with FFPROBE_EXE as None and raises a TypeError on every single upload,
+    # which is what filled the logs with tracebacks. Scrubbing thumbnails are a
+    # nicety, so skip them quietly instead. Same shape as check_video_codec.
+    if not FFPROBE_EXE or not FFMPEG_EXE:
+        return None
+
     try:
         sprite_dir = os.path.join(CACHE_DIR, 'sprites', task_id)
         os.makedirs(sprite_dir, exist_ok=True)
@@ -8197,10 +8205,10 @@ def get_stats():
         }
     """
     try:
-        # Get Celery stats
-        from celery.task.control import inspect
-
-        i = inspect(app=celery)
+        # Get Celery stats. celery.task.control was dropped in Celery 4, so the
+        # old import raised on every call and this endpoint always fell through
+        # to the zeroed fallback below, which is why the queue always read 0.
+        i = celery.control.inspect()
         active = i.active()
         scheduled = i.scheduled()
         reserved = i.reserved()  # Tasks that are reserved but not yet started
