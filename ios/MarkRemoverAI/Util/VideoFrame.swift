@@ -111,10 +111,14 @@ enum VideoFrameExtractor {
         guard let data = scaled.pngData() else { return nil }
 
         let moved = points.map {
+            // objectId has to come along: dropping it here let every click on a
+            // 4K clip collapse into object 0, since only downscaled frames pass
+            // through this branch.
             SelectionPoint(
                 x: Int((Double($0.x) * scale).rounded()),
                 y: Int((Double($0.y) * scale).rounded()),
-                label: $0.label
+                label: $0.label,
+                objectId: $0.objectId
             )
         }
 
