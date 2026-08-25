@@ -40,6 +40,27 @@ struct ProfileView: View {
                     .padding(.vertical, 6)
                 }
 
+                Section("Renders") {
+                    Button { showJobs = true } label: {
+                        HStack {
+                            Label("Your renders", systemImage: "tray.full")
+                            Spacer()
+                            if !JobStore.shared.unfinished.isEmpty {
+                                Text("\(JobStore.shared.unfinished.count) running")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.warning)
+                            } else if !JobStore.shared.collectable.isEmpty {
+                                Text("\(JobStore.shared.collectable.count) ready")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.positive)
+                            }
+                        }
+                    }
+                    Text("Renders keep going if you close the app. Collect them here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Credits") {
                     HStack {
                         Label("Balance", systemImage: "bolt.fill")
@@ -87,27 +108,6 @@ struct ProfileView: View {
                     }
                 }
 
-                Section("Renders") {
-                    Button { showJobs = true } label: {
-                        HStack {
-                            Label("Your renders", systemImage: "tray.full")
-                            Spacer()
-                            if !JobStore.shared.unfinished.isEmpty {
-                                Text("\(JobStore.shared.unfinished.count) running")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.warning)
-                            } else if !JobStore.shared.collectable.isEmpty {
-                                Text("\(JobStore.shared.collectable.count) ready")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.positive)
-                            }
-                        }
-                    }
-                    Text("Renders keep going if you close the app. Collect them here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 Section("Help") {
                     Button {
                         openSupportMail()
@@ -136,6 +136,10 @@ struct ProfileView: View {
                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                // The floating tab bar sits over the final row otherwise.
+                Color.clear.frame(height: 8)
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
