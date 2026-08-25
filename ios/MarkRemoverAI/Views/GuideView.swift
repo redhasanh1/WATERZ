@@ -74,7 +74,7 @@ struct GuideView: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionTitle("Three steps")
 
-            step(1, "Pick a clip", "Anything from your library — phone footage, a screen recording, a download.", "photo.on.rectangle.angled")
+            step(1, "Pick a clip", "Anything from your library: phone footage, a screen recording, a download.", "photo.on.rectangle.angled")
             step(2, "Mark what goes", "Tap something that moves to have it followed, or draw a box over anything that stays put.", "hand.tap")
             step(3, "Let it render", "One credit. A minute or two later you get the clean version back.", "wand.and.stars")
         }
@@ -193,9 +193,9 @@ struct GuideView: View {
         ("Can I use the results commercially?",
          "Yes. Personal and commercial projects both. You own full rights to what comes out."),
         ("What's the difference between the two modes?",
-         "Moves around follows something across the frame. Stays in place holds one area for the whole clip — faster, and it can't drift."),
+         "Moves around follows something across the frame. Stays in place holds one area for the whole clip, which is faster and cannot drift."),
         ("How many credits does a clip cost?",
-         "It scales with length and resolution — 720p for 10 seconds is the baseline. Background replacement costs about a third of a removal. The exact figure is shown on the button before you commit."),
+         "It scales with length and resolution, from a baseline of 720p for 10 seconds. Background replacement costs about a third of a removal. The exact figure is shown on the button before you commit."),
         ("When is a credit taken?",
          "Only when a render finishes. Failed jobs don't charge you.")
     ]

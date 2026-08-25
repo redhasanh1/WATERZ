@@ -39,7 +39,7 @@ extension CreditEstimate {
     /// Abbreviate anything over a thousand.
     static func compact(_ credits: Double) -> String {
         // Promote before formatting: 999,999,604 divided by a million is
-        // 999.99, which prints as "1000M" — not a number anyone writes.
+        // 999.99, which prints as "1000M", which is not a number anyone writes.
         // Comparing against the tier boundary minus half a unit catches that.
         if credits >= 999_500_000 { return trim(credits / 1_000_000_000, "B") }
         if credits >= 999_500     { return trim(credits / 1_000_000, "M") }

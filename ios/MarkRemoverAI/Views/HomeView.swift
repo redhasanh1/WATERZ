@@ -268,7 +268,7 @@ struct HomeView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "bolt.slash.fill")
-                            Text("You're out of credits — top up")
+                            Text("You're out of credits. Top up")
                                 .font(.subheadline.weight(.medium))
                         }
                         .frame(maxWidth: .infinity)
@@ -334,7 +334,11 @@ struct HomeView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.top, 8)
-            .onChange(of: model.mode) { _, _ in Haptics.tick() }
+            .onChange(of: model.mode) { _, _ in
+                // Discard the other mode's marks rather than hiding them.
+                model.clearAll()
+                Haptics.tick()
+            }
 
             if let frame = model.frame {
                 EstimateBar(
@@ -497,7 +501,7 @@ struct HomeView: View {
                         }
                         .disabled(model.activeSelection?.points.isEmpty != false)
                     } else {
-                        Button("Clear mask") { model.maskBuilder.clear() }
+                        Button("Clear mask") { model.clearAll() }
                             .disabled(model.maskBuilder.isEmpty)
                     }
                     Button("New video") { model.reset(); pickerItem = nil }
@@ -517,7 +521,7 @@ struct HomeView: View {
                     Button("Get credits to continue") { showPaywall = true }
                         .buttonStyle(PrimaryButtonStyle())
                 } else {
-                    Button("Remove it — \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
+                    Button("Remove it · \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
                         Task { await model.process(appState: appState) }
                     }
                     .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess))

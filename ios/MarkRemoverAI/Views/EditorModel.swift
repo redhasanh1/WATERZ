@@ -96,7 +96,7 @@ final class EditorModel: ObservableObject {
             guard duration <= Self.maxDuration else {
                 let seconds = Int(duration.rounded())
                 AppLog.error(.editor, "Rejected \(seconds)s clip (removal limit 90s)")
-                stage = .failed("That clip is \(seconds)s. Removal takes up to 90 seconds — trim it, or use the Background tab, which allows 10 minutes.")
+                stage = .failed("That clip is \(seconds)s. Removal takes up to 90 seconds. Trim it, or use the Background tab, which allows 10 minutes.")
                 return
             }
 
@@ -202,11 +202,17 @@ final class EditorModel: ObservableObject {
         if activeSelectionID == id { activeSelectionID = selections.last?.id }
     }
 
+    /// Clears every kind of mark. Used by Clear and when the mode changes:
+    /// a drawn area means nothing to the tracker and points mean nothing to
+    /// the static path, so carrying either across silently leaves stale work
+    /// in the builder that the next Clear cannot reach.
     func clearAll() {
+        previewTask?.cancel(); previewTask = nil
         selections = []
         activeSelectionID = nil
         nextSelectionID = 0
         maskUnavailable = false
+        maskBuilder.clear()
     }
 
     /// Best-effort preview. It needs the interactive SAM2 worker, which isn't
@@ -246,7 +252,7 @@ final class EditorModel: ObservableObject {
                     let m = tinted.size, f = frame.pixelSize
                     let sameAspect = abs(m.width / m.height - f.width / f.height) < 0.01
                     AppLog.info(.editor,
-                        "Mask \(Int(m.width))×\(Int(m.height)) vs frame \(Int(f.width))×\(Int(f.height)) — aspect \(sameAspect ? "matches" : "DIFFERS, stretching to fit")")
+                        "Mask \(Int(m.width))×\(Int(m.height)) vs frame \(Int(f.width))×\(Int(f.height)) aspect \(sameAspect ? "matches" : "DIFFERS, stretching to fit")")
                 }
                 await MainActor.run {
                     guard let self, let index = self.selections.firstIndex(where: { $0.id == id }) else { return }

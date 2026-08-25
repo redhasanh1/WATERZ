@@ -14,7 +14,7 @@ enum APIError: LocalizedError {
         case .http(_, let message): return message
         case .transport: return "Can't reach ObjectRemoverAI. Check your connection."
         case .decoding: return "The server sent something unexpected."
-        case .needsVerification(let email): return "Verify \(email) first — check your inbox."
+        case .needsVerification(let email): return "Verify \(email) first. Check your inbox."
         case .notAuthenticated: return "Sign in to keep going."
         case .outOfCredits: return "You're out of credits."
         case .workerOffline: return "The GPU worker isn't answering. Try again in a moment."

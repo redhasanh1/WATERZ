@@ -546,7 +546,7 @@ struct BackgroundView: View {
             // Pinned: the thing you came here to press should never require
             // scrolling to find.
             Button((model.settings.operation == .keepObject ? "Replace background" : "Remove selection")
-                   + " — \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
+                   + " · \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
                 Task { await model.run(appState: appState) }
             }
             .buttonStyle(PrimaryButtonStyle(enabled: model.canProcess, gradient: Theme.orangeGradient))
@@ -668,7 +668,7 @@ struct BackgroundView: View {
                 .padding(.top, 8)
 
             if model.settings.fill == .transparent {
-                Label("WebM with alpha — MP4 can't carry transparency.", systemImage: "info.circle")
+                Label("WebM with alpha, because MP4 cannot carry transparency.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
