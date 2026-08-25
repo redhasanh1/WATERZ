@@ -179,15 +179,49 @@ final class BackgroundModel: ObservableObject {
             }
             try await APIClient.shared.backgroundTrack(jobId: jobId, modifiedMasks: corrections)
 
+            // Tracking has to finish before export: the masks it produces are
+            // exactly what export consumes. Firing export straight after track
+            // asks the worker to composite masks that do not exist yet.
+            try await waitFor(jobId: jobId, status: "completed", label: "Tracking")
+
             stage = .working("Applying the background…")
+            AppLog.info(.editor, "Background job \(jobId): \(settings.operation.rawValue) / \(settings.fill.rawValue), dilation \(Int(settings.dilation))")
             try await APIClient.shared.backgroundExport(jobId: jobId, settings: settings)
 
-            AppLog.info(.editor, "Background job \(jobId): \(settings.operation.rawValue) / \(settings.fill.rawValue), dilation \(Int(settings.dilation))")
             poll(jobId: jobId, appState: appState)
         } catch {
             AppLog.error(.editor, "Background failed: \(error.localizedDescription)")
             stage = .failed(error.localizedDescription)
         }
+    }
+
+    /// Polls until the job reports the status we're waiting on. Mirrors the
+    /// website's two-phase wait: tracking, then export.
+    private func waitFor(jobId: String, status target: String, label: String) async throws {
+        let deadline = Date().addingTimeInterval(10 * 60)
+
+        while Date() < deadline {
+            try Task.checkCancellation()
+            guard let status = try? await APIClient.shared.backgroundStatus(jobId: jobId) else {
+                try await Task.sleep(for: .seconds(3))
+                continue
+            }
+
+            if status.status == target { 
+                AppLog.info(.editor, "\(label) complete")
+                return
+            }
+            if status.status == "error" || status.status == "failed" {
+                throw APIError.http(500, status.error ?? "\(label) failed on the worker.")
+            }
+
+            await MainActor.run {
+                let percent = status.progress.map { " \($0)%" } ?? ""
+                self.stage = .working("\(label)\(percent)…")
+            }
+            try await Task.sleep(for: .seconds(3))
+        }
+        throw APIError.http(504, "\(label) timed out.")
     }
 
     private func poll(jobId: String, appState: AppState) {
@@ -199,7 +233,7 @@ final class BackgroundModel: ObservableObject {
                 guard let status = try? await APIClient.shared.backgroundStatus(jobId: jobId) else { continue }
 
                 switch status.status {
-                case "export_complete", "completed":
+                case "export_complete":
                     let url = APIClient.shared.backgroundDownloadURL(jobId: jobId)
                     if let local = try? await APIClient.shared.download(url) {
                         await MainActor.run { self?.stage = .done(local) }
