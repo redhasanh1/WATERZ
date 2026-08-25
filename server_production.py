@@ -5524,6 +5524,7 @@ def video_tools_page():
 # ============================================================
 
 @app.route('/api/object-removal/get-upload-url', methods=['POST', 'OPTIONS'])
+@require_auth
 def objrem_get_upload_url():
     """Get presigned B2 upload URL for direct client upload (no Railway ingress)"""
     if request.method == 'OPTIONS':
@@ -5580,6 +5581,7 @@ def objrem_get_upload_url():
 
 
 @app.route('/api/object-removal/upload-complete', methods=['POST', 'OPTIONS'])
+@require_auth
 def objrem_upload_complete():
     """Client notifies B2 upload complete, provides video dimensions"""
     if request.method == 'OPTIONS':
@@ -5602,6 +5604,9 @@ def objrem_upload_complete():
         redis_client = redis.from_url(os.environ.get('REDIS_URL'), decode_responses=True)
         redis_client.hset(f"objrem:{job_id}", mapping={
             'status': 'uploaded',
+            # Recorded here so export can bill the right account even if the
+            # session has rolled over by the time the render finishes.
+            'user_id': str(session.get('user_id') or ''),
             'cdn_url': cdn_url,
             'width': str(width),
             'height': str(height),
@@ -5660,6 +5665,7 @@ def objrem_video(job_id):
 
 
 @app.route('/api/object-removal/select', methods=['POST', 'OPTIONS'])
+@require_auth
 def objrem_select():
     """Store clicked point for SAM2 tracking"""
     if request.method == 'OPTIONS':
@@ -5706,6 +5712,7 @@ def objrem_select():
 
 
 @app.route('/api/object-removal/auto-detect', methods=['POST', 'OPTIONS'])
+@require_auth
 def objrem_auto_detect():
     """Use YOLO to detect objects in first frame - dispatches to wsl_yolo_local"""
     if request.method == 'OPTIONS':
@@ -5755,6 +5762,7 @@ def objrem_auto_detect():
 
 
 @app.route('/api/object-removal/track', methods=['POST', 'OPTIONS'])
+@require_auth
 def objrem_track():
     """Start full video tracking with SAM2 via wsl_sam2_local queue"""
     if request.method == 'OPTIONS':
@@ -5956,6 +5964,8 @@ def objrem_status(job_id):
 
 
 @app.route('/api/object-removal/export', methods=['POST', 'OPTIONS'])
+@require_auth
+@require_credits(min_credits=0.1)
 def objrem_export():
     """Apply simple effects (blur, greenscreen, color) and export video"""
     if request.method == 'OPTIONS':
