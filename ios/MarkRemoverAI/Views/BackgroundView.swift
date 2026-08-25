@@ -382,6 +382,9 @@ struct BackgroundView: View {
                 .padding(.top, 8)
             }
 
+            stepHeader(1, "Mark the subject", "Point at what matters. This only builds a selection.")
+                .padding(.top, 14)
+
             HStack(spacing: 8) {
                 ForEach(BackgroundTool.allCases) { option in
                     Button {
@@ -408,21 +411,35 @@ struct BackgroundView: View {
 
             if tool == .click {
                 VStack(spacing: 5) {
-                    Picker("Tap mode", selection: $markMode) {
-                        Label("Add", systemImage: "plus.circle.fill").tag(1)
-                        Label("Take away", systemImage: "minus.circle.fill").tag(0)
+                    // Plus and minus, not words: this is the same control
+                    // every photo editor uses and it needs no explaining.
+                    HStack(spacing: 10) {
+                        ForEach([1, 0], id: \.self) { mode in
+                            Button {
+                                markMode = mode
+                                Haptics.tick()
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Image(systemName: mode == 1 ? "plus.circle.fill" : "minus.circle.fill")
+                                        .font(.title3)
+                                    Text(mode == 1 ? "this" : "not this")
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                        .fill(markMode == mode
+                                              ? (mode == 1 ? Theme.positive.opacity(0.18) : Color.red.opacity(0.15))
+                                              : Color(.tertiarySystemFill))
+                                )
+                                .foregroundStyle(markMode == mode
+                                                 ? (mode == 1 ? Theme.positive : .red)
+                                                 : .primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .pickerStyle(.segmented)
-
-                    // Both modes refine the same selection; saying so stops
-                    // this reading as a second Keep/Remove choice.
-                    Text(markMode == 1
-                         ? "Tap the subject. Tap again to add more of it."
-                         : "Tap a bit it grabbed by mistake to cut it back out.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
@@ -497,7 +514,13 @@ struct BackgroundView: View {
     /// the two sliders that decide how clean the cut-out looks.
     private var options: some View {
         VStack(spacing: 14) {
+            stepHeader(2, "Choose the result", "What the finished video looks like.")
+
             VStack(spacing: 6) {
+                Text("The thing you marked")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Picker("Operation", selection: $model.settings.operation) {
                     ForEach(BackgroundOperation.allCases) { Text($0.title).tag($0) }
                 }
@@ -540,6 +563,24 @@ struct BackgroundView: View {
             // Dilation grows the mask outward. A pixel or two removes the halo
             // of old background that otherwise clings to the edges.
             slider("Edge grow", value: $model.settings.dilation, range: 0...20)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    /// Numbered so the two groups read as sequential steps rather than two
+    /// interchangeable settings sitting on top of each other.
+    private func stepHeader(_ number: Int, _ title: String, _ subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Text("\(number)")
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Theme.orange))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
     }

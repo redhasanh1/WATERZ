@@ -373,20 +373,39 @@ struct HomeView: View {
             }
 
             if model.mode == .moving {
-                VStack(spacing: 5) {
-                    Picker("Tap mode", selection: $markMode) {
-                        Label("Add", systemImage: "plus.circle.fill").tag(1)
-                        Label("Take away", systemImage: "minus.circle.fill").tag(0)
-                    }
-                    .pickerStyle(.segmented)
-
-                    Text(markMode == 1
-                         ? "Tap what should disappear. Tap again to add more of it."
-                         : "Tap a bit it grabbed by mistake to cut it back out.")
-                        .font(.caption)
+                VStack(spacing: 6) {
+                    Text("Your next tap")
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 10) {
+                        ForEach([1, 0], id: \.self) { mode in
+                            Button {
+                                markMode = mode
+                                Haptics.tick()
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Image(systemName: mode == 1 ? "plus.circle.fill" : "minus.circle.fill")
+                                        .font(.title3)
+                                    Text(mode == 1 ? "this" : "not this")
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                        .fill(markMode == mode
+                                              ? (mode == 1 ? Theme.positive.opacity(0.18) : Color.red.opacity(0.15))
+                                              : Color(.tertiarySystemFill))
+                                )
+                                .foregroundStyle(markMode == mode
+                                                 ? (mode == 1 ? Theme.positive : .red)
+                                                 : .primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
