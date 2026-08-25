@@ -137,49 +137,43 @@ questionnaire) under Business.
 
 ---
 
-## Status in App Store Connect
+## Submitted
 
-Done, verified against the API rather than the page:
+**iOS 1.0 — Waiting for Review.** Four items went in together on 25 August 2026:
+the app version and all three credit packs, which is what Apple requires for a
+first consumable.
 
-- **App Information** — subtitle "Erase objects from your videos", primary
-  category Photo & Video, secondary Graphics & Design, content rights declared
-  as no third-party content, privacy policy URL set.
-- **Age rating** — questionnaire answered, calculated **4+**, no override.
-- **App Privacy** — published. Five data types (Name, Email Address, Photos or
-  Videos, User ID, Purchase History), each App Functionality, each linked to the
-  user, **none** used for tracking.
-- **Pricing** — app is Free in all 175 countries or regions; availability set to
-  all countries or regions.
-- **Version 1.0 listing** — promotional text, description, keywords, support
-  URL, marketing URL, copyright saved.
-- **In-app purchases** — all three consumables carry price, availability in 175
-  regions, localisation, review notes **and a review screenshot**. All three
-  read MISSING_METADATA, which is expected: Apple holds the first consumable
-  until it is submitted alongside a new app version.
-- **Build** — 1.0 (1) uploaded, processed, **state VALID**, and attached to
-  version 1.0. Signed with the team distribution profile,
+- **Build** 1.0 (2), signed with the team distribution profile,
   `ITSAppUsesNonExemptEncryption` false so export compliance is answered in the
   binary, iPhone only.
-- **App Review Information** — contact name, phone and email saved, and the full
-  reviewer notes below saved against the version. Only the demo account name and
-  password are still empty.
-- **Server** — `/api/auth/delete-account`, `/api/auth/apple`,
-  `/api/auth/exchange` and `/api/billing/apple/redeem` all answer on Railway, so
-  the native flows the notes describe are live.
+- **Icon** the wand mark from markremoverai.com, 1024x1024, no alpha.
+- **Screenshots** five at 1284x2778 (iPhone 6.5"): Objects home, the editor with
+  a live mask on a real clip, Guide, Background, Profile.
+- **App Privacy** published. Five data types (Name, Email Address, Photos or
+  Videos, User ID, Purchase History), each App Functionality, each linked to the
+  user, none used for tracking.
+- **Age rating** 4+, no override. **Pricing** free in 175 countries or regions.
+- **In-app purchases** 5 Credits $2.99, 15 Credits $6.99, 60 Credits $24.99,
+  each with price, availability, localisation, review screenshot and notes.
+- **Tests** 31 unit tests over the credit estimate, the API decoding, the mask
+  builder and the job store. All passing.
 
-## Still needed before submitting
+### Why no demo account
 
-1. **A test account for App Review.** Apple will not review an app it cannot
-   sign in to. It needs an account on markremoverai.com with credits already
-   applied. Two fields: App Review Information, Sign-In Information.
-2. **Screenshots at 6.5 inch.** Zero are uploaded. Everything worth showing sits
-   behind sign-in, so these wait on 1.
-3. **Better review screenshots for the three packs.** All three now carry one,
-   but it shows the paywall's empty state, because StoreKit only populates the
-   packs when the app is launched from Xcode against `Products.storekit`.
-4. **Bank account and the two tax forms** (Canadian GST/HST 506 and the U.S. tax
-   questionnaire) under Business. Until the Paid Apps agreement is active the
-   credit packs cannot go on sale.
-5. **A screen recording on a physical device**, start to finish: launch, sign
-   in, a full removal, a purchase, and account deletion. Apple asked for this
-   explicitly and its absence is what stalled RoomFinderAI.
+The reviewer notes tell Apple to use Sign in with Apple. That path creates the
+account immediately, skips email verification, and grants 2 free credits, which
+is enough for two complete removals. `demoAccountRequired` is false for that
+reason. If Apple asks for one anyway, add it under App Review Information.
+
+### Still outstanding
+
+1. **Bank account and the two tax forms** (Canadian GST/HST 506 and the U.S. tax
+   questionnaire) under Business. The app can ship without them; the credit
+   packs cannot go on sale until the Paid Apps agreement is active.
+2. **Better review screenshots for the three packs.** Each carries one, but it
+   shows the paywall's empty state. StoreKit only populates the packs against
+   `Products.storekit` when the app is launched from Xcode, and Apple's sandbox
+   returns an empty product list until the purchases are approved.
+3. **The website's demo videos are Sora clips.** `web/demos/before.mp4` carries a
+   visible Sora watermark and both are a Mister Rogers likeness. They are live on
+   markremoverai.com and should be replaced.
