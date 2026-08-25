@@ -32,7 +32,9 @@ struct HomeView: View {
                 }
             }
             .navigationTitle("ObjectRemoverAI")
-            .navigationBarTitleDisplayMode(.inline)
+            // Large, so the name sits on its own row below the badges rather
+            // than being squeezed between them into "ObjectRemo…".
+            .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }
             .sheet(isPresented: $showPaywall) { PaywallView() }
             .sheet(isPresented: $showConsole) { ConsoleView() }
@@ -55,10 +57,37 @@ struct HomeView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             HStack(spacing: 10) {
-                Circle()
-                    .fill(appState.workerOnline == true ? Theme.positive : Theme.warning)
-                    .frame(width: 9, height: 9)
-                    .accessibilityLabel(appState.workerOnline == true ? "Service online" : "Service unreachable")
+                // A bare dot says nothing and tapping it did nothing. This
+                // labels itself and opens the detail behind it, matching the
+                // "API: online" badge on the website.
+                Menu {
+                    Label(
+                        appState.workerOnline == true
+                            ? "The GPU service is responding"
+                            : "The GPU service isn't responding",
+                        systemImage: appState.workerOnline == true ? "checkmark.circle" : "exclamationmark.triangle"
+                    )
+                    Text(APIClient.currentBaseURL.replacingOccurrences(of: "https://", with: ""))
+                    Divider()
+                    Button {
+                        Task { await appState.refreshHealth() }
+                    } label: {
+                        Label("Check again", systemImage: "arrow.clockwise")
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(appState.workerOnline == true ? Theme.positive : Theme.warning)
+                            .frame(width: 7, height: 7)
+                        Text("API")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color(.tertiarySystemFill)))
+                }
+                .accessibilityLabel(appState.workerOnline == true ? "Service online" : "Service unreachable")
 
                 // Swap clips without backing out to the start screen.
                 if model.frame != nil {

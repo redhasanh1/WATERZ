@@ -30,11 +30,19 @@ extension CreditEstimate {
     /// Balances can run to nine digits, which pushes the title out of the bar.
     /// Abbreviate anything over a thousand.
     static func compact(_ credits: Double) -> String {
-        switch credits {
-        case 1_000_000_000...: return String(format: "%.0fB", credits / 1_000_000_000)
-        case 1_000_000...:  return String(format: "%.0fM", credits / 1_000_000)
-        case 1_000...:      return String(format: "%.0fK", credits / 1_000)
-        default:            return label(credits)
-        }
+        // Promote before formatting: 999,999,604 divided by a million is
+        // 999.99, which prints as "1000M" — not a number anyone writes.
+        // Comparing against the tier boundary minus half a unit catches that.
+        if credits >= 999_500_000 { return trim(credits / 1_000_000_000, "B") }
+        if credits >= 999_500     { return trim(credits / 1_000_000, "M") }
+        if credits >= 999.5       { return trim(credits / 1_000, "K") }
+        return label(credits)
+    }
+
+    private static func trim(_ value: Double, _ suffix: String) -> String {
+        // One decimal below ten, none above: 1.5K, 12K, 999K.
+        value < 10
+            ? String(format: "%.1f%@", value, suffix)
+            : String(format: "%.0f%@", value, suffix)
     }
 }
