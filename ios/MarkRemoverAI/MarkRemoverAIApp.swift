@@ -73,7 +73,7 @@ struct MainTabs: View {
     var body: some View {
         TabView(selection: $selection) {
             HomeView()
-                .tabItem { Label("Create", systemImage: "wand.and.stars") }
+                .tabItem { Label("Objects", systemImage: "wand.and.stars") }
                 .tag(0)
 
             BackgroundView()

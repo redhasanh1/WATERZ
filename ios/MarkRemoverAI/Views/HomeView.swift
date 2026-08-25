@@ -228,7 +228,7 @@ struct HomeView: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "clock").font(.caption2)
-                    Text("Up to 90 seconds · from 0.1 credits")
+                    Text("Up to 90 seconds")
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
@@ -258,52 +258,20 @@ struct HomeView: View {
 
     /// The landing screen carries the whole first impression, so it shows the
     /// before/after idea rather than describing it.
+    /// Real frames from a real render, wipeable. The old version was two
+    /// SF Symbols on a gradient, which showed nothing about what the app does.
     private var heroCard: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Theme.heroGradient)
+        VStack(spacing: 12) {
+            HeroWipe(height: 190)
+                .padding(.horizontal, 16)
 
-            VStack(spacing: 14) {
-                HStack(spacing: 18) {
-                    heroTile(struck: true, label: "Before")
-                    Image(systemName: "arrow.right")
-                        .font(.headline.bold())
-                        .foregroundStyle(.white.opacity(0.9))
-                    heroTile(struck: false, label: "After")
-                }
-
+            VStack(spacing: 3) {
                 Text("Remove anything from a video")
                     .font(.title3.bold())
-                    .foregroundStyle(.white)
                 Text("Original quality preserved")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 24)
-        }
-        .frame(height: 230)
-        .padding(.horizontal, 16)
-    }
-
-    private func heroTile(struck: Bool, label: String) -> some View {
-        VStack(spacing: 7) {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(.white.opacity(0.22))
-                .frame(width: 72, height: 72)
-                .overlay(
-                    Image(systemName: struck ? "person.fill" : "sparkles")
-                        .font(.title2)
-                        .foregroundStyle(.white)
-                        .opacity(struck ? 0.6 : 1)
-                )
-                .overlay(
-                    struck
-                        ? Rectangle().fill(.white).frame(height: 2).rotationEffect(.degrees(-38))
-                        : nil
-                )
-            Text(label)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.white.opacity(0.9))
         }
     }
 

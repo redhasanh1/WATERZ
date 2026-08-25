@@ -374,7 +374,7 @@ struct BackgroundView: View {
                 .buttonStyle(PrimaryButtonStyle(gradient: Theme.orangeGradient))
                 .padding(.horizontal, 16)
 
-                Text("Up to 10 minutes · from 0.1 credits")
+                Text("Up to 10 minutes")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
