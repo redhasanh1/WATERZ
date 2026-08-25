@@ -25,17 +25,14 @@ struct HeroWipe: View {
             ZStack {
                 scene(w: w, h: h, showSubject: showSubject)
 
-                // Video furniture: a play badge and a scrub bar.
-                Circle()
-                    .fill(.black.opacity(0.42))
-                    .frame(width: h * 0.20, height: h * 0.20)
-                    .overlay(
-                        Image(systemName: "play.fill")
-                            .font(.system(size: h * 0.085))
-                            .foregroundStyle(.white)
-                            .offset(x: h * 0.012)
-                    )
-                    .position(x: w * 0.5, y: h * 0.46)
+                // A camera glyph in the corner, not a centred play button —
+                // a play button in the middle of an illustration reads as a
+                // control and invites tapping something that does nothing.
+                Image(systemName: "video.fill")
+                    .font(.system(size: h * 0.10))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.35), radius: 2)
+                    .position(x: w * 0.13, y: h * 0.13)
 
                 VStack(spacing: 0) {
                     Spacer()
@@ -53,7 +50,7 @@ struct HeroWipe: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(.black.opacity(0.4), in: Capsule())
-                    .position(x: w * 0.5, y: h * 0.13)
+                    .position(x: w * 0.68, y: h * 0.13)
             }
             .frame(width: w, height: h)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -96,17 +93,27 @@ struct HeroWipe: View {
                 .position(x: w * 0.5, y: h - h * 0.08)
 
             if showSubject {
+                // A plain lit sphere. The rainbow wheel drew the eye to itself;
+                // the point of the picture is that it is gone on the right, not
+                // what it looked like.
                 ZStack {
                     Circle().fill(
-                        AngularGradient(
-                            colors: [.red, .orange, .yellow, .green, .blue, .purple, .red],
-                            center: .center
+                        RadialGradient(
+                            colors: [Color(red: 1.0, green: 0.45, blue: 0.38),
+                                     Color(red: 0.82, green: 0.18, blue: 0.22)],
+                            center: UnitPoint(x: 0.35, y: 0.30),
+                            startRadius: 0,
+                            endRadius: h * 0.24
                         )
                     )
-                    Circle().stroke(.white.opacity(0.9), lineWidth: 1.5)
+                    Circle()
+                        .fill(.white.opacity(0.5))
+                        .frame(width: h * 0.055, height: h * 0.04)
+                        .offset(x: -h * 0.045, y: -h * 0.055)
+                        .blur(radius: 1.5)
                 }
-                .frame(width: h * 0.26, height: h * 0.26)
-                .shadow(color: .black.opacity(0.3), radius: 5, y: 3)
+                .frame(width: h * 0.24, height: h * 0.24)
+                .shadow(color: .black.opacity(0.28), radius: 5, y: 3)
                 .position(x: w * 0.30, y: h * 0.70)
             }
         }
