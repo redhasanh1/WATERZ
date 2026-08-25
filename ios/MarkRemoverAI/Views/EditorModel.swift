@@ -229,6 +229,12 @@ final class EditorModel: ObservableObject {
                 let tinted = MaskRenderer.tinted(
                     base64: mask, color: SelectionPalette.uiColor(selection.colorIndex)
                 )
+                if let tinted {
+                    let m = tinted.size, f = frame.pixelSize
+                    let sameAspect = abs(m.width / m.height - f.width / f.height) < 0.01
+                    AppLog.info(.editor,
+                        "Mask \(Int(m.width))×\(Int(m.height)) vs frame \(Int(f.width))×\(Int(f.height)) — aspect \(sameAspect ? "matches" : "DIFFERS, stretching to fit")")
+                }
                 await MainActor.run {
                     guard let self, let index = self.selections.firstIndex(where: { $0.id == id }) else { return }
                     self.selections[index].mask = tinted

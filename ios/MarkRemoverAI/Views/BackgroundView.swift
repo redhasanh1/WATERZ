@@ -10,7 +10,8 @@ final class BackgroundModel: ObservableObject {
 
     @Published var stage: Stage = .picking
     @Published var frame: VideoFrame?
-    @Published var points: [SelectionPoint] = []
+    @Published var selections: [Selection] = []
+    @Published var isPreviewingMask = false
     /// The pipeline tracks each object_id separately, so a second subject needs
     /// its own id rather than more points on the first.
     @Published var currentObject = 0
@@ -28,7 +29,10 @@ final class BackgroundModel: ObservableObject {
     private var duration: Double = 0
     private var pollTask: Task<Void, Never>?
 
+    var points: [SelectionPoint] { selections.flatMap(\.points) }
     var canProcess: Bool { frame != nil && !points.isEmpty }
+    var objectCount: Int { selections.count }
+    private var previewTask: Task<Void, Never>?
 
 
     deinit { pollTask?.cancel() }
@@ -61,7 +65,8 @@ final class BackgroundModel: ObservableObject {
         pollTask?.cancel(); pollTask = nil
         stage = .picking
         frame = nil
-        points = []
+        previewTask?.cancel(); previewTask = nil
+        selections = []
         currentObject = 0
         maskBuilder.clear()
         sourceURL = nil
@@ -70,26 +75,77 @@ final class BackgroundModel: ObservableObject {
 
     func addPoint(normalized: CGPoint, label: Int = 1) {
         guard let frame else { return }
-        points.append(SelectionPoint(
+        let point = SelectionPoint(
             x: Int((normalized.x * frame.pixelSize.width).rounded()),
             y: Int((normalized.y * frame.pixelSize.height).rounded()),
             label: label,
             objectId: currentObject
-        ))
+        )
+
+        if let index = selections.firstIndex(where: { $0.id == currentObject }) {
+            selections[index].points.append(point)
+        } else {
+            var selection = Selection(id: currentObject)
+            selection.points = [point]
+            selections.append(selection)
+        }
+        refreshPreview()
     }
 
     func nextObject() {
-        guard points.contains(where: { $0.objectId == currentObject }) else { return }
-        currentObject += 1
+        guard selections.contains(where: { $0.id == currentObject && !$0.points.isEmpty }) else { return }
+        currentObject = (selections.map(\.id).max() ?? 0) + 1
     }
 
     func undo() {
-        guard !points.isEmpty else { return }
-        points.removeLast()
-        currentObject = points.map(\.objectId).max() ?? 0
+        guard let index = selections.firstIndex(where: { $0.id == currentObject })
+                ?? selections.indices.last else { return }
+        selections[index].points.removeLast()
+        if selections[index].points.isEmpty {
+            let removed = selections.remove(at: index).id
+            if currentObject == removed { currentObject = selections.last?.id ?? 0 }
+        } else {
+            refreshPreview()
+        }
     }
 
-    var objectCount: Int { Set(points.map(\.objectId)).count }
+    /// Mirrors the website: only the current object's points are previewed, so
+    /// one object's mask never bleeds into another's.
+    private func refreshPreview() {
+        guard let frame,
+              let selection = selections.first(where: { $0.id == currentObject }),
+              !selection.points.isEmpty else { return }
+
+        previewTask?.cancel()
+        previewTask = Task { [weak self] in
+            await MainActor.run { self?.isPreviewingMask = true }
+            defer { Task { @MainActor in self?.isPreviewingMask = false } }
+
+            guard let payload = VideoFrameExtractor.previewPayload(
+                frame: frame, points: selection.points
+            ) else { return }
+
+            // Swift flattens try? over an optional return, so this is already
+            // a plain String by the time it binds.
+            guard let mask = try? await APIClient.shared.previewMask(
+                frameBase64PNG: payload.base64PNG,
+                frameIndex: frame.frameIndex,
+                points: payload.points,
+                videoWidth: Int(payload.size.width),
+                videoHeight: Int(payload.size.height)
+            ) else { return }
+
+            let tinted = MaskRenderer.tinted(
+                base64: mask, color: SelectionPalette.uiColor(selection.colorIndex)
+            )
+            await MainActor.run {
+                guard let self,
+                      let index = self.selections.firstIndex(where: { $0.id == selection.id })
+                else { return }
+                self.selections[index].mask = tinted
+            }
+        }
+    }
 
     func run(appState: AppState) async {
         guard let sourceURL, let frame else { return }
@@ -271,9 +327,9 @@ struct BackgroundView: View {
             if let frame = model.frame {
                 VideoCanvas(
                     frame: frame,
-                    selections: [],
-                    activeSelectionID: nil,
-                    isBusy: false,
+                    selections: model.selections,
+                    activeSelectionID: model.currentObject,
+                    isBusy: model.isPreviewingMask,
                     drawnMask: model.maskBuilder.preview,
                     isDrawing: tool != .click,
                     onDraw: { from, to in

@@ -51,17 +51,26 @@ struct VideoCanvas: View {
                         Image(uiImage: drawnMask)
                             .resizable()
                             .interpolation(.none)
-                            .aspectRatio(contentMode: .fit)
                             .opacity(maskOpacity)
                             .allowsHitTesting(false)
                     }
 
+                    // Deliberately no aspectRatio: the mask covers the whole
+                    // frame but need not share its aspect — SAM2's own output
+                    // is square. Letting it keep its aspect would letterbox it
+                    // differently from the frame and sit the mask off-target.
+                    // Stretching to the container, which is exactly the
+                    // frame's rect, is what the website does and is correct.
                     ForEach(selections) { selection in
                         if let mask = selection.mask {
                             Image(uiImage: mask)
                                 .resizable()
-                                .interpolation(.none)
-                                .aspectRatio(contentMode: .fit)
+                                // SAM2 returns 256×256 regardless of the source,
+                                // so this is a ~5× upscale. Nearest-neighbour —
+                                // what the website uses — turns the edge into
+                                // visible blocks; smoothing tracks the mask's
+                                // own soft boundary far more honestly.
+                                .interpolation(.medium)
                                 .opacity(maskOpacity)
                                 .allowsHitTesting(false)
                         }
