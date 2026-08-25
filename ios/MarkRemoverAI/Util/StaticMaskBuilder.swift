@@ -34,12 +34,23 @@ final class StaticMaskBuilder: ObservableObject {
     /// precision buys nothing for a region mask and just costs memory.
     private static let maxEdge: CGFloat = 4096
 
+    // The buffer is 8-bit grey. Handing it a UIColor (which carries an RGB
+    // colour space) can silently fail to set the fill, which is what stopped
+    // Clear from clearing. These are built in the matching space.
+    private static let gray = CGColorSpaceCreateDeviceGray()
+    static let black = CGColor(colorSpace: gray, components: [0, 1])!
+    static let white = CGColor(colorSpace: gray, components: [1, 1])!
+
     @Published private(set) var preview: UIImage?
     @Published private(set) var isEmpty = true
     /// Vertices of the polygon being drawn, 0…1 in frame space.
     @Published private(set) var pendingPolygon: [CGPoint] = []
 
     private var context: CGContext?
+    /// Snapshot taken when a shape drag begins. Rectangle and oval preview
+    /// live, so each move must redraw from this instead of stamping another
+    /// shape on top of the last — which is what turned a drag into scribble.
+    private var dragSnapshot: CGImage?
     private(set) var size: CGSize = .zero
     private var videoSize: CGSize = .zero
 
@@ -67,7 +78,7 @@ final class StaticMaskBuilder: ObservableObject {
             space: CGColorSpaceCreateDeviceGray(),
             bitmapInfo: CGImageAlphaInfo.none.rawValue
         )
-        context?.setFillColor(UIColor.black.cgColor)
+        context?.setFillColor(Self.black)
         context?.fill(CGRect(origin: .zero, size: size))
         isEmpty = true
         refresh()
@@ -88,7 +99,7 @@ final class StaticMaskBuilder: ObservableObject {
             pendingPolygon = []
             return
         }
-        context.setFillColor(UIColor.white.cgColor)
+        context.setFillColor(Self.white)
         context.beginPath()
         context.move(to: point(pendingPolygon[0]))
         for vertex in pendingPolygon.dropFirst() {
@@ -103,9 +114,10 @@ final class StaticMaskBuilder: ObservableObject {
     }
 
     func clear() {
+        dragSnapshot = nil
         pendingPolygon = []
         guard let context else { return }
-        context.setFillColor(UIColor.black.cgColor)
+        context.setFillColor(Self.black)
         context.fill(CGRect(origin: .zero, size: size))
         isEmpty = true
         refresh()
@@ -115,10 +127,25 @@ final class StaticMaskBuilder: ObservableObject {
     func stroke(from: CGPoint, to: CGPoint, tool: Tool, brushFraction: CGFloat) {
         guard let context else { return }
 
+        if tool == .rectangle || tool == .ellipse {
+            // Restore, then draw once: the shape follows the finger instead of
+            // accumulating.
+            if dragSnapshot == nil { dragSnapshot = context.makeImage() }
+            if let snap = dragSnapshot {
+                context.saveGState()
+                // .copy, not the default blend: the snapshot must replace what
+                // is there, otherwise each frame of the drag composites over
+                // the last and the shape smears.
+                context.setBlendMode(.copy)
+                context.draw(snap, in: CGRect(origin: .zero, size: size))
+                context.restoreGState()
+            }
+        }
+
         let a = point(from), b = point(to)
-        let white = tool == .eraser ? UIColor.black.cgColor : UIColor.white.cgColor
-        context.setFillColor(white)
-        context.setStrokeColor(white)
+        let ink = tool == .eraser ? Self.black : Self.white
+        context.setFillColor(ink)
+        context.setStrokeColor(ink)
 
         switch tool {
         case .rectangle:
@@ -144,6 +171,11 @@ final class StaticMaskBuilder: ObservableObject {
 
         if tool != .eraser { isEmpty = false }
         refresh()
+    }
+
+    /// Ends a shape drag so the next one snapshots afresh.
+    func endStroke() {
+        dragSnapshot = nil
     }
 
     /// Full-resolution PNG for `/api/process-static-mask`.

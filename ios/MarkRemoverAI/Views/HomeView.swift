@@ -347,6 +347,7 @@ struct HomeView: View {
                             from: from, to: to, tool: tool, brushFraction: brushSize
                         )
                     },
+                    onDrawEnded: { model.maskBuilder.endStroke() },
                     onTap: { location in
                         if model.mode == .fixed {
                             guard tool == .polygon else { return }

@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 @MainActor
@@ -45,6 +46,18 @@ final class EditorModel: ObservableObject {
     private var nextSelectionID = 0
 
     let maskBuilder = StaticMaskBuilder()
+
+    /// SwiftUI only observes the object a view declares. maskBuilder is nested
+    /// inside this one, so its updates never reached the canvas — the drawing
+    /// was correct but the screen stayed stale until something else forced a
+    /// redraw. Forwarding its change events fixes that.
+    private var maskBuilderChanges: AnyCancellable?
+
+    init() {
+        maskBuilderChanges = maskBuilder.objectWillChange.sink { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
 
     var allPoints: [SelectionPoint] { selections.flatMap(\.points) }
 

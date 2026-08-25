@@ -1,5 +1,6 @@
 import AVKit
 import PhotosUI
+import Combine
 import SwiftUI
 
 @MainActor
@@ -18,6 +19,18 @@ final class BackgroundModel: ObservableObject {
     /// Hand-corrections to the SAM2 mask. The worker takes these in place of
     /// what it generated, so a bad edge can be fixed before tracking runs.
     let maskBuilder = StaticMaskBuilder()
+
+    /// SwiftUI only observes the object a view declares. maskBuilder is nested
+    /// inside this one, so its updates never reached the canvas — the drawing
+    /// was correct but the screen stayed stale until something else forced a
+    /// redraw. Forwarding its change events fixes that.
+    private var maskBuilderChanges: AnyCancellable?
+
+    init() {
+        maskBuilderChanges = maskBuilder.objectWillChange.sink { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
     @Published var settings = BackgroundSettings()
     @Published private(set) var sourceURL: URL?
 
@@ -372,6 +385,7 @@ struct BackgroundView: View {
                             from: from, to: to, tool: drawTool, brushFraction: brushSize
                         )
                     },
+                    onDrawEnded: { model.maskBuilder.endStroke() },
                     onTap: { location in
                         guard tool == .click else { return }
                         model.addPoint(normalized: location, label: markMode)
@@ -445,15 +459,16 @@ struct BackgroundView: View {
                 .padding(.top, 10)
             } else {
                 HStack(spacing: 10) {
-                    Image(systemName: "circle.fill").font(.system(size: 7))
+                    Text(tool == .eraser ? "Eraser size" : "Brush size")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 74, alignment: .leading)
                     Slider(value: $brushSize, in: 0.01...0.25).tint(Theme.orange)
-                    Image(systemName: "circle.fill").font(.system(size: 15))
                     Button("Clear") { model.maskBuilder.clear() }
                         .font(.caption)
                         .buttonStyle(.bordered)
                         .disabled(model.maskBuilder.isEmpty)
                 }
-                .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
             }
