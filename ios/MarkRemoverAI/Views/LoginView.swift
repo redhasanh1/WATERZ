@@ -63,6 +63,19 @@ struct LoginView: View {
                 .buttonStyle(PrimaryButtonStyle(enabled: canSubmit))
                 .disabled(!canSubmit)
 
+                // Only on the sign-in side: there is nothing to recover while
+                // you are creating an account.
+                if !isRegistering {
+                    Button {
+                        Task { await sendReset() }
+                    } label: {
+                        Text("Forgot password?")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .disabled(busy || email.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+
                 Button {
                     withAnimation {
                         isRegistering.toggle()
@@ -273,6 +286,31 @@ struct LoginView: View {
             } else {
                 try await appState.signIn(email: email, password: password)
             }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Mails a reset link for whatever is in the email field.
+    ///
+    /// The server answers identically whether or not the address is on file,
+    /// so it cannot be used to discover which addresses have accounts. The
+    /// wording below reflects that: it does not claim the mail was sent.
+    private func sendReset() async {
+        let address = email.trimmingCharacters(in: .whitespaces)
+        guard !address.isEmpty else {
+            error = "Enter your email address first."
+            return
+        }
+
+        busy = true
+        error = nil
+        notice = nil
+        defer { busy = false }
+
+        do {
+            try await appState.requestPasswordReset(email: address)
+            notice = "If \(address) has an account, a reset link is on its way. The link is good for one hour."
         } catch {
             self.error = error.localizedDescription
         }

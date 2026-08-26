@@ -247,6 +247,17 @@ actor APIClient {
         )
     }
 
+    /// Asks the server to mail a reset link. It answers the same way whether or
+    /// not the address is on file, so the caller must not treat success as
+    /// proof the account exists.
+    func requestPasswordReset(email: String) async throws {
+        _ = try await request(
+            "api/auth/forgot-password",
+            method: "POST",
+            json: ["email": email]
+        )
+    }
+
     /// Trades the one-time code from the native Google flow for a real session
     /// cookie on this URLSession.
     func exchangeGoogleCode(_ code: String) async throws -> User {
