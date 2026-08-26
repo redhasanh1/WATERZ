@@ -5490,6 +5490,65 @@ def tunnel_url():
     return "http://localhost:9000", 200, {'Content-Type': 'text/plain'}
 
 
+@app.route('/robots.txt')
+def robots_txt():
+    """Crawl rules, served from the app so they are version controlled.
+
+    The previous robots.txt disallowed every AI crawler, which is the opposite
+    of what we want: those bots are how ChatGPT, Claude, Perplexity and Google's
+    AI Overviews find us and cite us. Blocking them removed a whole channel of
+    referral traffic. Training is a separate question from citation, so the
+    Content-Signal below still says ai-train=no while letting the search and
+    answer bots in.
+
+    It also declares the sitemap, which nothing did before, so crawlers had to
+    discover our pages by luck.
+    """
+    body = """# Crawl rules for markremoverai.com
+# Content-Signal: search=yes,ai-input=yes,ai-train=no
+
+User-agent: *
+Allow: /
+
+# Search and answer engines. These drive citations and referral traffic.
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://markremoverai.com/sitemap.xml
+"""
+    return body, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+
 @app.route('/')
 def index():
     """Serve landing page"""
