@@ -712,7 +712,14 @@ def require_credits(min_credits=1):
                             'error': 'Insufficient credits',
                             'required': min_credits,
                             'available': credits,
-                            'message': f'You need {min_credits} credit(s) but only have {credits}. Please purchase more credits.'
+                            # The app has nothing to sell, so it must never be
+                            # told to go buy something. The website still gets
+                            # the wording that points at its own pricing.
+                            'message': (
+                                f"That's today's free videos used up. Two more tomorrow."
+                                if _is_app_client() else
+                                f'You need {min_credits} credit(s) but only have {credits}. Please purchase more credits.'
+                            )
                         }), 402  # Payment Required
             except Exception as e:
                 print(f"[ERROR] Credit check failed: {e}")
@@ -777,6 +784,102 @@ def deduct_credit_on_completion(task_id):
 
     except Exception as e:
         print(f"[CREDITS] Error during deduction: {e}")
+        return None
+
+
+# ----------------------------------------------------------------------------
+# Daily free tier (iOS app)
+# ----------------------------------------------------------------------------
+# The App Store build ships with no in-app purchases while the Paid Apps
+# agreement is still pending, so app users get an allowance instead: a top-up
+# to DAILY_FREE_CREDITS once per calendar day (server time, UTC on Railway).
+#
+# Deliberately a top-up *to* the cap rather than an addition, which is what
+# stops it accumulating - going away for a week still leaves you with 2, not
+# 14. The same rule is why a balance already above the cap is left completely
+# alone: someone who bought a pack on the website keeps and spends what they
+# paid for, and only drops back onto the free tier once it runs out.
+#
+# Granted to the app only. The website sells these same credits, so handing
+# them out there would undercut it.
+
+DAILY_FREE_CREDITS = float(os.getenv('DAILY_FREE_CREDITS', '2'))
+APP_CLIENT_HEADER = 'X-Client'
+APP_CLIENT_VALUE = 'objectremoverai-ios'
+
+
+def _is_app_client():
+    """True when the request came from the iOS app rather than the website."""
+    try:
+        return request.headers.get(APP_CLIENT_HEADER, '').strip().lower() == APP_CLIENT_VALUE
+    except Exception:
+        # No request context (startup, Celery). Not the app, so no grant.
+        return False
+
+
+def _ensure_daily_credit_table(cur):
+    """One row per user recording the last day their allowance was claimed."""
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_daily_credits (
+            user_id    INTEGER PRIMARY KEY,
+            grant_date DATE NOT NULL,
+            granted    NUMERIC NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+
+def grant_daily_free_credits(cur, user_id):
+    """Tops an app user up to the daily allowance.
+
+    Returns the new balance, or None when nothing was granted (not the app,
+    already claimed today, or already holding more than the cap).
+
+    Claiming the day happens first and atomically: the balance UPDATE only runs
+    for the request that actually moved grant_date forward, so two launches at
+    the same moment cannot both pay out.
+    """
+    if not _is_app_client():
+        return None
+
+    try:
+        _ensure_daily_credit_table(cur)
+
+        cur.execute("""
+            INSERT INTO app_daily_credits (user_id, grant_date, granted)
+            VALUES (%s, CURRENT_DATE, 0)
+            ON CONFLICT (user_id) DO UPDATE
+                SET grant_date = CURRENT_DATE, updated_at = NOW()
+                WHERE app_daily_credits.grant_date < CURRENT_DATE
+            RETURNING user_id
+        """, (user_id,))
+
+        if not cur.fetchone():
+            return None  # someone already claimed today for this user
+
+        # Top up TO the cap, never past it. The `credits <` guard is the whole
+        # reason a web purchase is safe here - without it this would reset a
+        # 60-credit balance down to 2.
+        cur.execute(
+            'UPDATE users SET credits = %s WHERE id = %s AND credits < %s RETURNING credits',
+            (DAILY_FREE_CREDITS, user_id, DAILY_FREE_CREDITS)
+        )
+        row = cur.fetchone()
+        if not row:
+            print(f"[FREE-TIER] User {user_id} already above the cap, nothing granted")
+            return None
+
+        new_balance = float(row[0])
+        cur.execute(
+            'UPDATE app_daily_credits SET granted = %s WHERE user_id = %s',
+            (new_balance, user_id)
+        )
+        print(f"[FREE-TIER] User {user_id} topped up to {new_balance} for today")
+        return new_balance
+
+    except Exception as exc:
+        # A failed grant must never block sign-in.
+        print(f"[FREE-TIER] Grant failed for user {user_id}: {exc}")
         return None
 
 
@@ -1207,6 +1310,12 @@ def auth_login():
             session['name'] = name
             session.permanent = True
 
+            # The app trusts this response and does not re-fetch, so the
+            # allowance has to be applied before the balance is reported.
+            granted = grant_daily_free_credits(cur, user_id)
+            if granted is not None:
+                credits = granted
+
             print(f"[AUTH] User logged in: {email}")
 
             return jsonify({
@@ -1215,7 +1324,7 @@ def auth_login():
                     'id': user_id,
                     'email': email,
                     'name': name,
-                    'credits': credits,
+                    'credits': float(credits or 0),
                     'email_verified': email_verified or False,
                     'created_at': created_at.isoformat() if created_at else None
                 }
@@ -1372,6 +1481,9 @@ def auth_status():
         # Get current user data from database
         with get_db() as conn:
             cur = conn.cursor()
+            # Before reading the balance, not after: the app calls this on every
+            # launch, so this is what actually hands out the daily allowance.
+            grant_daily_free_credits(cur, user_id)
             cur.execute('SELECT email, name, credits, email_verified, created_at FROM users WHERE id = %s', (user_id,))
             user = cur.fetchone()
 
@@ -9034,6 +9146,9 @@ def _mint_native_auth_code(user_id):
 
 def _session_for_user(cur, user_id):
     """Loads a user and installs them into the Flask session."""
+    # Covers the Google and Apple sign-in paths, which return the user object
+    # directly instead of going through /api/auth/status first.
+    grant_daily_free_credits(cur, user_id)
     cur.execute(
         'SELECT email, name, credits, email_verified, created_at FROM users WHERE id = %s',
         (user_id,)
