@@ -1232,7 +1232,7 @@ def auth_verify():
     token = request.args.get('token', '')
 
     if not token:
-        return redirect('/login.html?error=missing_token')
+        return redirect('/login?error=missing_token')
 
     try:
         with get_db() as conn:
@@ -1247,14 +1247,14 @@ def auth_verify():
 
             if not user:
                 print(f"[AUTH] Invalid verification token attempted")
-                return redirect('/login.html?error=invalid_token')
+                return redirect('/login?error=invalid_token')
 
             user_id, email, token_expires = user
 
             # Check if token has expired
             if token_expires and datetime.utcnow() > token_expires:
                 print(f"[AUTH] Expired verification token for {email}")
-                return redirect('/login.html?error=token_expired')
+                return redirect('/login?error=token_expired')
 
             # Mark email as verified and clear the token
             cur.execute(
@@ -1276,7 +1276,7 @@ def auth_verify():
 
     except Exception as e:
         print(f"[ERROR] Email verification failed: {e}")
-        return redirect('/login.html?error=verification_failed')
+        return redirect('/login?error=verification_failed')
 
 
 @app.route('/api/auth/resend-verification', methods=['POST', 'OPTIONS'])
@@ -1506,7 +1506,11 @@ def forgot_password():
 
                 # Generate reset URL and send email
                 base_url = os.getenv('TUNNEL_URL', request.host_url.rstrip('/'))
-                reset_url = f"{base_url}/reset-password.html?token={token}"
+                # Must be the route, not the file name. /reset-password.html
+                # redirects to /reset-password and drops the query string with
+                # it, so the page loaded with no token and just showed the
+                # "request a reset" form again.
+                reset_url = f"{base_url}/reset-password?token={token}"
 
                 try:
                     send_reset_email(email, reset_url)
