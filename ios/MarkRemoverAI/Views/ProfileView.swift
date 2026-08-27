@@ -7,7 +7,6 @@ struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showPaywall = false
     @State private var showConsole = false
     @State private var showJobs = false
     @State private var showDeleteAccount = false
@@ -65,20 +64,15 @@ struct ProfileView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Credits") {
+                Section("Free videos") {
                     HStack {
-                        Label("Balance", systemImage: "bolt.fill")
+                        Label("Left to use", systemImage: "bolt.fill")
                         Spacer()
                         Text("\(Int(appState.credits))")
                             .font(.headline.monospacedDigit())
                             .foregroundStyle(Theme.accent)
                     }
-                    Button {
-                        showPaywall = true
-                    } label: {
-                        Label("Get more credits", systemImage: "plus.circle.fill")
-                    }
-                    Text("One credit removes an object from one video.")
+                    Text("Two free videos a day, topped back up every morning. One video is one removal or one background swap.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -150,7 +144,7 @@ struct ProfileView: View {
                         Label("Delete account", systemImage: "trash")
                     }
                 } footer: {
-                    Text("Removes your account, your uploads and your results. Any remaining credits are lost. This cannot be undone.")
+                    Text("Removes your account, your uploads and your results. This cannot be undone.")
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -166,7 +160,6 @@ struct ProfileView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showPaywall) { PaywallView() }
             .sheet(isPresented: $showConsole) { ConsoleView() }
             .sheet(isPresented: $showJobs) { JobsView() }
             .alert("Delete account?", isPresented: $showDeleteAccount) {

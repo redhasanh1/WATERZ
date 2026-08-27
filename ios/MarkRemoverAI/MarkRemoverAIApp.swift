@@ -3,20 +3,14 @@ import SwiftUI
 @main
 struct MarkRemoverAIApp: App {
     @StateObject private var appState = AppState()
-    @StateObject private var store = Store()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
-                .environmentObject(store)
                 .tint(Theme.accent)
                 .task {
                     APIClient.bootstrap()
-                    // Transactions that land while the app was closed need a
-                    // place to write the new balance.
-                    Store.activeAppState = appState
-                    await store.redeemUnfinished(appState: appState)
                     // A render outlives the app; pick up anything left behind.
                     await JobStore.shared.refreshUnfinished()
                 }
@@ -29,17 +23,7 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            #if DEBUG
-            // `-show_paywall 1` opens the store without a login, so the
-            // StoreKit config can be exercised on a simulator.
-            if UserDefaults.standard.bool(forKey: "show_paywall") {
-                PaywallView(isPresented: false)
-            } else {
-                content
-            }
-            #else
             content
-            #endif
         }
         .animation(.easeInOut(duration: 0.2), value: appState.phase)
         .task { await appState.restoreSession() }
@@ -87,7 +71,7 @@ struct MainTabs: View {
             ProfileView(embedded: true)
                 .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                 .tag(3)
-                .badge(appState.credits < 1 ? "!" : nil)
+                .badge(appState.credits < 1 ? "!" : nil)  // nothing left to render today
         }
         // The selected tab's label follows the tool's colour, so the accent
         // matches whichever screen you're actually on.

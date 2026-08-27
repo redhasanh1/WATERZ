@@ -8,7 +8,6 @@
 
 /* Begin PBXFileReference section */
 		AA0000000000000000000005 /* MarkRemoverAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MarkRemoverAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA0000000000000000000010 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Products.storekit; sourceTree = "<group>"; };
 		AA0000000000000000000020 /* MarkRemoverAITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MarkRemoverAITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -40,7 +39,6 @@
 			children = (
 				AA0000000000000000000006 /* MarkRemoverAI */,
 				AA0000000000000000000021 /* MarkRemoverAITests */,
-				AA0000000000000000000010 /* Products.storekit */,
 				AA0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";

@@ -15,7 +15,6 @@ struct HomeView: View {
     @State private var showCompare = true
     @State private var saveMessage: String?
     @State private var showSignOutConfirm = false
-    @State private var showPaywall = false
     @State private var showConsole = false
     @State private var showProfile = false
 
@@ -36,7 +35,6 @@ struct HomeView: View {
             // than being squeezed between them into "ObjectRemo…".
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }
-            .sheet(isPresented: $showPaywall) { PaywallView() }
             .sheet(isPresented: $showConsole) { ConsoleView() }
             .sheet(isPresented: $showProfile) { ProfileView() }
             .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
@@ -100,17 +98,17 @@ struct HomeView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 10) {
-                Button { showPaywall = true } label: {
-                    // An HStack, not a Label - the toolbar renders Label as
-                    // icon-only and the number vanishes.
-                    HStack(spacing: 3) {
-                        Image(systemName: "bolt.fill").font(.caption)
-                        Text(CreditEstimate.compact(appState.credits))
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                    }
-                    .foregroundStyle(Theme.accent)
+                // Read-only. There is nothing to open from here, so it is
+                // a label rather than a button. An HStack, not a Label - the
+                // toolbar renders Label as icon-only and the number vanishes.
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill").font(.caption)
+                    Text(CreditEstimate.compact(appState.credits))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
                 }
+                .foregroundStyle(Theme.accent)
+                .accessibilityLabel("\(CreditEstimate.label(appState.credits)) renders left")
 
                 Button { showProfile = true } label: {
                     Circle()
@@ -263,20 +261,18 @@ struct HomeView: View {
                 .foregroundStyle(.secondary)
 
                 if appState.credits < 1 {
-                    Button {
-                        showPaywall = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "bolt.slash.fill")
-                            Text("You're out of credits. Top up")
-                                .font(.subheadline.weight(.medium))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .background(Theme.warning.opacity(0.15))
-                        .foregroundStyle(Theme.warning)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    // Says when it comes back rather than offering a way out,
+                    // because waiting is the only way out.
+                    HStack(spacing: 8) {
+                        Image(systemName: "bolt.slash.fill")
+                        Text("That's today's two videos. Two more tomorrow.")
+                            .font(.subheadline.weight(.medium))
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(Theme.warning.opacity(0.15))
+                    .foregroundStyle(Theme.warning)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal, 16)
                 }
             }
@@ -518,8 +514,9 @@ struct HomeView: View {
             // Pinned so the primary action is never scrolled off screen.
             Group {
                 if appState.credits < model.estimatedCredits {
-                    Button("Get credits to continue") { showPaywall = true }
-                        .buttonStyle(PrimaryButtonStyle())
+                    Button("Nothing left for today") {}
+                        .buttonStyle(PrimaryButtonStyle(enabled: false))
+                        .disabled(true)
                 } else {
                     Button("Remove it · \(CreditEstimate.label(model.estimatedCredits)) credit\(model.estimatedCredits == 1 ? "" : "s")") {
                         Task { await model.process(appState: appState) }
@@ -637,25 +634,14 @@ struct HomeView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
-            let outOfCredits = message.localizedCaseInsensitiveContains("credit")
-
-            VStack(spacing: 10) {
-                if outOfCredits {
-                    Button("Get credits") { showPaywall = true }
-                        .buttonStyle(PrimaryButtonStyle())
-                    Button("Start over") {
-                        model.reset()
-                        pickerItem = nil
-                    }
-                    .buttonStyle(.bordered)
-                } else {
-                    Button("Start over") {
-                        model.reset()
-                        pickerItem = nil
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                }
+            // Every failure leads to the same place now: there is no
+            // "top up" branch to offer, and running out is phrased as a
+            // wait rather than an error.
+            Button("Start over") {
+                model.reset()
+                pickerItem = nil
             }
+            .buttonStyle(PrimaryButtonStyle())
             .padding(.horizontal, 32)
             Spacer()
         }

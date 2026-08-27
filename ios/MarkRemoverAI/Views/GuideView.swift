@@ -76,7 +76,7 @@ struct GuideView: View {
 
             step(1, "Pick a clip", "Anything from your library: phone footage, a screen recording, a download.", "photo.on.rectangle.angled")
             step(2, "Mark what goes", "Tap something that moves to have it followed, or draw a box over anything that stays put.", "hand.tap")
-            step(3, "Let it render", "One credit. A minute or two later you get the clean version back.", "wand.and.stars")
+            step(3, "Let it render", "A minute or two later you get the clean version back.", "wand.and.stars")
         }
         .padding(.horizontal, 16)
     }
@@ -194,9 +194,11 @@ struct GuideView: View {
          "Yes. Personal and commercial projects both. You own full rights to what comes out."),
         ("What's the difference between the two modes?",
          "Moves around follows something across the frame. Stays in place holds one area for the whole clip, which is faster and cannot drift."),
-        ("How many credits does a clip cost?",
-         "It scales with length and resolution, from a baseline of 720p for 10 seconds. Background replacement costs about a third of a removal. The exact figure is shown on the button before you commit."),
-        ("When is a credit taken?",
-         "Only when a render finishes. Failed jobs don't charge you.")
+        ("How many videos can I do?",
+         "Two a day. It refills every morning, so there is nothing to keep track of and nothing to buy."),
+        ("Do unused ones stack up?",
+         "No. It tops back up to two each day rather than adding to what you had, so saving them up isn't possible."),
+        ("When does one get used?",
+         "Only when a render finishes. A job that fails costs you nothing.")
     ]
 }

@@ -93,11 +93,4 @@ final class APIModelDecodingTests: XCTestCase {
         XCTAssertEqual(upload.remotePath, "p/v.mp4")
         XCTAssertEqual(upload.cdnURL, "https://cdn/v.mp4")
     }
-
-    func testRedeemResponseMapsSnakeCaseKeys() throws {
-        let redeem = try decode(RedeemResponse.self, #"{"status":"ok","credits":20,"credits_added":15,"already_redeemed":false}"#)
-        XCTAssertEqual(redeem.credits, 20)
-        XCTAssertEqual(redeem.creditsAdded, 15)
-        XCTAssertEqual(redeem.alreadyRedeemed, false)
-    }
 }

@@ -169,17 +169,3 @@ struct JobStatusResponse: Codable {
     }
 }
 
-// MARK: - Purchases
-
-struct RedeemResponse: Codable {
-    let status: String
-    let credits: Double
-    let creditsAdded: Int?
-    let alreadyRedeemed: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case status, credits
-        case creditsAdded = "credits_added"
-        case alreadyRedeemed = "already_redeemed"
-    }
-}

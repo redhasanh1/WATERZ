@@ -16,7 +16,7 @@ enum APIError: LocalizedError {
         case .decoding: return "The server sent something unexpected."
         case .needsVerification(let email): return "Verify \(email) first. Check your inbox."
         case .notAuthenticated: return "Sign in to keep going."
-        case .outOfCredits: return "You're out of credits."
+        case .outOfCredits: return "You've used today's free videos. Two more tomorrow."
         case .workerOffline: return "The GPU worker isn't answering. Try again in a moment."
         }
     }
@@ -47,6 +47,10 @@ actor APIClient {
         config.httpCookieAcceptPolicy = .always
         config.httpShouldSetCookies = true
         config.httpCookieStorage = .shared
+        // Tags every call as coming from the app. The backend hands out the
+        // daily free allowance on this header alone, so the website - which
+        // has its own pricing - is left untouched.
+        config.httpAdditionalHeaders = ["X-Client": "objectremoverai-ios"]
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 600
         // Deliberately false: with it on, an unresolvable host reports
@@ -418,19 +422,6 @@ actor APIClient {
             throw APIError.http(500, result.message ?? "The server didn't return a job id.")
         }
         return jobId
-    }
-
-    // MARK: - Purchases
-
-    /// Hands a StoreKit signed transaction to the backend, which verifies it
-    /// against Apple's roots and moves the credits. Returns the new balance.
-    func redeemApplePurchase(signedTransaction jws: String) async throws -> Double {
-        let data = try await request(
-            "api/billing/apple/redeem",
-            method: "POST",
-            json: ["signed_transaction": jws]
-        )
-        return try decode(RedeemResponse.self, from: data).credits
     }
 
     /// Static path: the drawn area is repeated on every frame
