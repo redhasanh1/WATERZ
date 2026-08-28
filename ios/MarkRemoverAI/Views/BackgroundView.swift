@@ -391,6 +391,7 @@ struct BackgroundView: View {
                     duration: model.duration,
                     size: frame.pixelSize,
                     credits: model.estimatedCredits,
+                    isBackground: true,
                     tint: Theme.orange
                 )
                 .padding(.horizontal, 16)

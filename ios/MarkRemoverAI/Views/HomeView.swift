@@ -552,9 +552,13 @@ struct HomeView: View {
                     .foregroundStyle(Theme.accent)
             }
 
-            Text("Big clips take a few minutes. You can leave this screen open.")
+            // The same estimate shown before the button was pressed, repeated
+            // here so a long render never looks like a stalled one.
+            Text(waitText)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
                 .padding(.top, 6)
 
             Spacer()
@@ -645,6 +649,19 @@ struct HomeView: View {
             .padding(.horizontal, 32)
             Spacer()
         }
+    }
+
+    /// What to tell someone while they wait. Falls back to the vague line only
+    /// when the clip's dimensions were never read.
+    private var waitText: String {
+        guard let frame = model.frame else {
+            return "Big clips take a few minutes. You can leave this screen open."
+        }
+        return CreditEstimate.waitLabel(
+            duration: model.duration,
+            size: frame.pixelSize,
+            isBackground: false
+        ) + " You can leave this screen open."
     }
 
     // MARK: - Picking

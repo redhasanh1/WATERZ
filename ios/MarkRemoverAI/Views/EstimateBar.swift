@@ -7,6 +7,8 @@ struct EstimateBar: View {
     let duration: Double
     let size: CGSize
     let credits: Double
+    /// Background replacement runs a lighter pipeline, so the wait differs.
+    var isBackground: Bool = false
     var tint: Color = Theme.accent
 
     var body: some View {
@@ -14,6 +16,15 @@ struct EstimateBar: View {
             item(String(format: "%.0fs", duration.rounded()), "Duration")
             divider
             item("\(Int(size.width))×\(Int(size.height))", "Resolution")
+            divider
+            // Saying how long it takes up front is what stops a normal render
+            // reading as a hang three minutes in.
+            item(
+                CreditEstimate.timeLabel(
+                    CreditEstimate.seconds(duration: duration, size: size, isBackground: isBackground)
+                ),
+                "Est. time"
+            )
             divider
             item(
                 "\(CreditEstimate.label(credits)) credit\(credits == 1 ? "" : "s")",

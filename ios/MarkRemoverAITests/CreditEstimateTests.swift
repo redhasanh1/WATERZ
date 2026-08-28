@@ -58,4 +58,69 @@ final class CreditEstimateTests: XCTestCase {
         XCTAssertEqual(CreditEstimate.compact(999_600), "1.0M")
         XCTAssertEqual(CreditEstimate.compact(999.6), "1.0K")
     }
+
+    // MARK: - Time estimate
+
+    func testBaselineClipQuotesThePaddedMinute() {
+        // 10s at 720p is the baseline: 60s of work, padded by 1.25.
+        let s = CreditEstimate.seconds(duration: 10, size: CGSize(width: 1280, height: 720),
+                                       isBackground: false)
+        XCTAssertEqual(s, 75, accuracy: 0.01)
+    }
+
+    func testPaddingIsAppliedNotIgnored() {
+        let padded = CreditEstimate.seconds(duration: 10, size: CGSize(width: 1280, height: 720),
+                                            isBackground: false)
+        XCTAssertEqual(padded / CreditEstimate.padding, 60, accuracy: 0.01)
+    }
+
+    func testLongerClipsTakeLongerEvenThoughRemovalIsFlatPriced() {
+        let short = CreditEstimate.seconds(duration: 10, size: CGSize(width: 1280, height: 720),
+                                           isBackground: false)
+        let long = CreditEstimate.seconds(duration: 90, size: CGSize(width: 1280, height: 720),
+                                          isBackground: false)
+        XCTAssertGreaterThan(long, short * 4)
+        // ...while the price stays flat, which is the mismatch being explained.
+        XCTAssertEqual(CreditEstimate.credits(duration: 10, size: CGSize(width: 1280, height: 720),
+                                              isBackground: false),
+                       CreditEstimate.credits(duration: 90, size: CGSize(width: 1280, height: 720),
+                                              isBackground: false))
+    }
+
+    func testHigherResolutionTakesLonger() {
+        let hd = CreditEstimate.seconds(duration: 10, size: CGSize(width: 1280, height: 720),
+                                        isBackground: false)
+        let uhd = CreditEstimate.seconds(duration: 10, size: CGSize(width: 3840, height: 2160),
+                                         isBackground: false)
+        XCTAssertGreaterThan(uhd, hd)
+    }
+
+    func testBackgroundIsQuotedLighterThanRemoval() {
+        let size = CGSize(width: 1280, height: 720)
+        XCTAssertLessThan(CreditEstimate.seconds(duration: 10, size: size, isBackground: true),
+                          CreditEstimate.seconds(duration: 10, size: size, isBackground: false))
+    }
+
+    func testNeverQuotesLessThanFifteenSeconds() {
+        let s = CreditEstimate.seconds(duration: 0.5, size: CGSize(width: 320, height: 240),
+                                       isBackground: true)
+        XCTAssertGreaterThanOrEqual(s, 15)
+    }
+
+    func testZeroSizedClipReturnsNoEstimate() {
+        XCTAssertEqual(CreditEstimate.seconds(duration: 0, size: .zero, isBackground: false), 0)
+    }
+
+    func testTimeLabelReadsNaturally() {
+        XCTAssertEqual(CreditEstimate.timeLabel(45), "45s")
+        XCTAssertEqual(CreditEstimate.timeLabel(75), "1 min")
+        XCTAssertEqual(CreditEstimate.timeLabel(150), "3 min")
+        XCTAssertEqual(CreditEstimate.timeLabel(3600), "1h")
+        XCTAssertEqual(CreditEstimate.timeLabel(3900), "1h 5m")
+    }
+
+    func testWaitLabelFallsBackWhenSizeUnknown() {
+        XCTAssertTrue(CreditEstimate.waitLabel(duration: 0, size: .zero, isBackground: false)
+            .contains("minute or two"))
+    }
 }
