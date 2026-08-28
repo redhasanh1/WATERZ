@@ -1397,16 +1397,17 @@ def auth_resend_verification():
     if not AUTH_ENABLED:
         return jsonify({'error': 'Authentication not enabled'}), 503
 
-    # Support both logged-in users and users who can't log in due to unverified email
-    user_id = session.get('user_id')
-    email_from_request = None
+    # Support both logged-in users and users who can't log in due to unverified
+    # email. An address in the body wins over the session: someone signed in on
+    # one account and trying to verify a second one was being answered about
+    # the account they were signed into, which reported "already verified"
+    # while the account they actually named stayed unverified and locked out.
+    data = request.get_json(silent=True) or {}
+    email_from_request = (data.get('email') or '').strip().lower()
+    user_id = None if email_from_request else session.get('user_id')
 
-    if not user_id:
-        # Try to get email from request body (for users who can't log in)
-        data = request.get_json() or {}
-        email_from_request = data.get('email', '').strip().lower()
-        if not email_from_request:
-            return jsonify({'error': 'Email is required'}), 400
+    if not user_id and not email_from_request:
+        return jsonify({'error': 'Email is required'}), 400
 
     try:
         with get_db() as conn:
@@ -1686,10 +1687,19 @@ def reset_password():
             # Hash new password
             password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-            # Update password
+            # Update password. Verifying the address here is the point: the
+            # token only ever reached them by email, so completing this flow is
+            # proof they control it. Without this, anyone who signed up but
+            # never clicked the original verification link resets their
+            # password successfully and is then still refused at login for
+            # being unverified, with no way out - the verification token has
+            # usually long expired by then.
             cur.execute('''
                 UPDATE users
-                SET password_hash = %s
+                SET password_hash = %s,
+                    email_verified = TRUE,
+                    verification_token = NULL,
+                    verification_token_expires = NULL
                 WHERE id = %s
             ''', (password_hash, reset_token[0]))
 
