@@ -5635,8 +5635,15 @@ def backgroundremover_page():
 
 @app.route('/object-removal')
 def object_removal_page():
-    """Object removal tool - serves main index"""
-    return send_file('web/index.html')
+    """How-to guide for object removal.
+
+    This used to serve index.html, which made the URL a byte-for-byte duplicate
+    of the homepage: it canonicalised to / and Google never indexed it. The
+    homepage already targets the transactional query, so a second page chasing
+    the same words would only compete with it. This one answers the
+    informational query instead and links through to the tool.
+    """
+    return send_file('web/object-removal-guide.html')
 
 
 @app.route('/video-tools')

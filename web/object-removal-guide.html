@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>How to Remove an Object from a Video (Free, No Editing Skills)</title>
+<meta name="description" content="Step-by-step guide to removing an unwanted object, person or logo from a video online. What the AI handles well, where it struggles, and the limits to know before you start.">
+<link rel="canonical" href="https://markremoverai.com/object-removal">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta name="author" content="MarkRemoverAI">
+<meta name="theme-color" content="#667eea">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="MarkRemoverAI">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://markremoverai.com/object-removal">
+<meta property="og:title" content="How to Remove an Object from a Video (Free, No Editing Skills)">
+<meta property="og:description" content="Step-by-step guide to removing an unwanted object, person or logo from a video online, including what the AI struggles with.">
+<meta property="og:image" content="https://markremoverai.com/emblem.png?v=2">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:url" content="https://markremoverai.com/object-removal">
+<meta name="twitter:title" content="How to Remove an Object from a Video">
+<meta name="twitter:description" content="Step-by-step guide to removing an unwanted object from a video online, free.">
+<meta name="twitter:image" content="https://markremoverai.com/emblem.png?v=2">
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"HowTo",
+ "name":"How to remove an object from a video",
+ "description":"Remove an unwanted object, person or logo from a video online using AI, without editing software.",
+ "totalTime":"PT3M",
+ "supply":[{"@type":"HowToSupply","name":"A video clip up to 90 seconds"}],
+ "tool":[{"@type":"HowToTool","name":"MarkRemoverAI object remover"}],
+ "step":[
+  {"@type":"HowToStep","position":1,"name":"Upload the clip","text":"Choose a video up to 90 seconds. MP4, MOV, WebM, MKV and WMV all work, including footage straight from a phone.","url":"https://markremoverai.com/object-removal#step-1"},
+  {"@type":"HowToStep","position":2,"name":"Mark what should go","text":"Click the object you want removed. If it moves through the shot, the AI follows it frame by frame; if it stays put, draw a box over it instead.","url":"https://markremoverai.com/object-removal#step-2"},
+  {"@type":"HowToStep","position":3,"name":"Refine the selection","text":"Add a second click to include more of the object, or mark an area to exclude if the selection spread too far.","url":"https://markremoverai.com/object-removal#step-3"},
+  {"@type":"HowToStep","position":4,"name":"Render and download","text":"The AI reconstructs the background behind the object across every frame and returns the clean video at its original resolution.","url":"https://markremoverai.com/object-removal#step-4"}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+ {"@type":"Question","name":"Do I need video editing software or experience?","acceptedAnswer":{"@type":"Answer","text":"No. Everything runs in the browser. You click the object you want gone and the AI does the frame-by-frame work that would otherwise mean rotoscoping by hand."}},
+ {"@type":"Question","name":"How long does a render take?","acceptedAnswer":{"@type":"Answer","text":"Usually a couple of minutes for a short clip. Longer and higher-resolution footage takes proportionally longer, because every frame is reconstructed individually."}},
+ {"@type":"Question","name":"Can I remove more than one object at once?","acceptedAnswer":{"@type":"Answer","text":"Yes. Each click starts a separate object, and they are all tracked and removed in the same pass."}},
+ {"@type":"Question","name":"What happens if the object is partly hidden during the clip?","acceptedAnswer":{"@type":"Answer","text":"The tracker follows it back out from behind whatever obscured it, so brief occlusion is fine. An object that leaves the frame entirely and returns looking different may need a second click when it reappears."}},
+ {"@type":"Question","name":"Does removing an object reduce the video quality?","acceptedAnswer":{"@type":"Answer","text":"The clip comes back at its original resolution. Only the region behind the removed object is rebuilt; the rest of every frame is untouched."}},
+ {"@type":"Question","name":"What kind of shots does this struggle with?","acceptedAnswer":{"@type":"Answer","text":"Reflections and shadows cast by the removed object, objects covering a large share of the frame, and heavy motion blur are the hardest cases. Static backgrounds and clear separation between subject and background give the cleanest results."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
+ {"@type":"ListItem","position":1,"name":"Home","item":"https://markremoverai.com/"},
+ {"@type":"ListItem","position":2,"name":"How to remove an object from a video","item":"https://markremoverai.com/object-removal"}]}
+</script>
+
+<style>
+:root{--primary:#667eea;--primary-dark:#5a67d8;--text-primary:#2d3748;--text-secondary:#718096;
+--bg-card:#f8fafc;--gradient-primary:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:var(--text-primary);
+font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+line-height:1.7;-webkit-font-smoothing:antialiased}
+.wrap{max-width:820px;margin:0 auto;padding:0 1.25rem}
+header.hero{background:var(--gradient-primary);color:#fff;padding:3.5rem 0 3rem;text-align:center}
+header.hero h1{font-size:2.4rem;line-height:1.2;margin:0 0 .75rem;font-weight:800}
+header.hero p{margin:0 auto;max-width:640px;font-size:1.1rem;opacity:.95}
+.cta{display:inline-block;margin-top:1.75rem;background:#fff;color:var(--primary-dark);
+padding:.9rem 2rem;border-radius:999px;text-decoration:none;font-weight:700}
+h2{font-size:1.7rem;margin:2.75rem 0 .75rem;line-height:1.25}
+h3{font-size:1.15rem;margin:1.75rem 0 .4rem}
+.step{background:var(--bg-card);border-left:4px solid var(--primary);
+border-radius:0 10px 10px 0;padding:1.1rem 1.35rem;margin:1rem 0}
+.step h3{margin:0 0 .35rem;color:var(--primary-dark)}
+.step p{margin:0}
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.97rem}
+th,td{text-align:left;padding:.7rem .6rem;border-bottom:1px solid #e2e8f0;vertical-align:top}
+th{color:var(--text-secondary);font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
+.faq{border-bottom:1px solid #e2e8f0;padding:1rem 0}
+.faq h3{margin:0 0 .3rem}
+.faq p{margin:0;color:var(--text-secondary)}
+.tail{background:var(--bg-card);border-radius:14px;padding:2rem;margin:2.5rem 0;text-align:center}
+.tail a{background:var(--gradient-primary);color:#fff;padding:.9rem 2rem;border-radius:999px;
+text-decoration:none;font-weight:700;display:inline-block;margin-top:.75rem}
+a{color:var(--primary-dark)}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>How to Remove an Object from a Video</h1>
+    <p>Erase a passer-by, a bin, a logo or a whole person from your footage — in a browser, without learning an editor.</p>
+    <a class="cta" href="/">Open the object remover</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <p>Removing something from a video by hand means masking it on every single frame, then painting in
+  whatever should have been behind it. At 30 frames per second, ten seconds of footage is 300 frames of
+  that. This guide covers the automated version: you point at the thing once, and the background is
+  reconstructed across the whole clip.</p>
+
+  <h2>The four steps</h2>
+
+  <div class="step" id="step-1">
+    <h3>1. Upload the clip</h3>
+    <p>Anything up to <strong>90 seconds</strong>. MP4, MOV, WebM, MKV and WMV all work, including
+    footage straight off a phone and screen recordings.</p>
+  </div>
+  <div class="step" id="step-2">
+    <h3>2. Mark what should go</h3>
+    <p>Click the object. If it travels through the shot, the tracker follows it frame by frame. If it
+    stays in one place, draw a box over it instead — that path is faster and cannot drift.</p>
+  </div>
+  <div class="step" id="step-3">
+    <h3>3. Refine the selection</h3>
+    <p>One click is usually enough. If the selection missed part of the object, add another click; if it
+    spread onto something you want to keep, mark that area to exclude it.</p>
+  </div>
+  <div class="step" id="step-4">
+    <h3>4. Render and download</h3>
+    <p>The background behind the object is rebuilt on every frame and the clean video comes back at its
+    original resolution. A short clip typically takes a couple of minutes.</p>
+  </div>
+
+  <h2>What it handles well — and what it doesn't</h2>
+  <p>Being straight about this saves you a wasted render.</p>
+  <table>
+    <tr><th>Works well</th><th>Harder</th></tr>
+    <tr>
+      <td>A person or car crossing a static background</td>
+      <td>Objects casting a strong shadow or reflection — the object goes, its shadow may not</td>
+    </tr>
+    <tr>
+      <td>Logos, watermarks and signage held in one spot</td>
+      <td>Anything filling a large share of the frame, leaving little real background to rebuild from</td>
+    </tr>
+    <tr>
+      <td>Clear separation between the object and what's behind it</td>
+      <td>Heavy motion blur, where the object's edge is genuinely ambiguous</td>
+    </tr>
+    <tr>
+      <td>Brief occlusion — the tracker picks the object back up</td>
+      <td>An object leaving the frame and returning changed; re-click it when it reappears</td>
+    </tr>
+  </table>
+
+  <h2>Before you start</h2>
+  <h3>Trim first</h3>
+  <p>You only need the section containing the object. A shorter clip renders faster and gives the tracker
+  fewer chances to drift.</p>
+  <h3>Pick the right mode</h3>
+  <p>"Moves around" tracks the object across frames. "Stays in place" holds one region for the whole clip.
+  If the thing you're removing never moves, the second is both quicker and more reliable.</p>
+  <h3>Replacing a background instead?</h3>
+  <p>That's a different job — keeping the subject and changing everything behind them. The
+  <a href="/backgroundremover">background remover</a> handles that, and allows longer clips.</p>
+
+  <h2>Questions people ask</h2>
+  <div class="faq"><h3>Do I need editing software or experience?</h3>
+    <p>No. It runs in the browser, and the frame-by-frame work is the part being automated.</p></div>
+  <div class="faq"><h3>How long does a render take?</h3>
+    <p>Usually a couple of minutes for a short clip. Longer and higher-resolution footage takes
+    proportionally longer, because every frame is reconstructed individually.</p></div>
+  <div class="faq"><h3>Can I remove more than one object at once?</h3>
+    <p>Yes. Each click starts a separate object and they are all handled in the same pass.</p></div>
+  <div class="faq"><h3>What if the object is partly hidden during the clip?</h3>
+    <p>Brief occlusion is fine — the tracker follows it back out. If it leaves the frame entirely and
+    returns looking different, click it again when it reappears.</p></div>
+  <div class="faq"><h3>Does it reduce the video quality?</h3>
+    <p>No. The clip returns at its original resolution, and only the region behind the removed object is
+    rebuilt. The rest of every frame is untouched.</p></div>
+  <div class="faq"><h3>Can I use the result commercially?</h3>
+    <p>Yes, for footage you own or have permission to edit. See <a href="/terms">the terms</a>.</p></div>
+
+  <div class="tail">
+    <h2 style="margin-top:0">Try it on your own clip</h2>
+    <p style="color:var(--text-secondary);margin:0">Upload a video, click the thing you want gone, and see
+    the result before you commit to anything.</p>
+    <a href="/">Open the object remover</a>
+  </div>
+
+</main>
+
+<!-- sitewide-nav: every page links to every other page, so none of them are
+     orphans. Google will not re-crawl a URL nothing links to. -->
+<nav aria-label="Site" data-sitewide-nav style="background:#0f172a;padding:2.5rem 1.5rem 1.5rem;border-top:1px solid rgba(148,163,184,.2)">
+  <div style="max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;justify-content:flex-start">
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Tools</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Video object remover</a></li><li style="margin:0 0 .5rem"><a href="/backgroundremover" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Background remover</a></li><li style="margin:0 0 .5rem"><a href="/video-tools" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Video tools</a></li></ul></div>
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Product</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/premium" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Pricing</a></li><li style="margin:0 0 .5rem"><a href="/api" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">API</a></li><li style="margin:0 0 .5rem"><a href="/api-support" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">API support</a></li><li style="margin:0 0 .5rem"><a href="/enterprise" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Enterprise</a></li></ul></div>
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Company</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/contact" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Contact</a></li><li style="margin:0 0 .5rem"><a href="/terms" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Terms</a></li><li style="margin:0 0 .5rem"><a href="/privacy" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Privacy</a></li></ul></div>
+  </div>
+  <p style="max-width:1100px;margin:1rem auto 0;color:#94a3b8;font-size:.85rem">MarkRemoverAI &mdash; remove unwanted objects from video with AI.</p>
+</nav>
+
+</body>
+</html>
