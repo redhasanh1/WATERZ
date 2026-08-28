@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /
+
+# User-supplied and generated media. Not content, and not ours to publish.
+Disallow: /uploads/
+Disallow: /results/
+Disallow: /temp/
+Disallow: /training/
+Disallow: /demo_videos/
+
+# Machinery, not pages. The /api marketing page is a separate URL and stays
+# crawlable; this only excludes the JSON endpoints beneath it.
+Disallow: /api/
+Disallow: /admin/
+
+Sitemap: https://markremoverai.com/sitemap.xml
