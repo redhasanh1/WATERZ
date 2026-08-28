@@ -530,8 +530,8 @@
             </a>
             <div class="nav-links" id="navLinks">
                 <a href="index">Home</a>
-                <a href="api">API</a>
-                <a href="contact">Contact</a>
+                <a href="/api">API</a>
+                <a href="/contact">Contact</a>
                 <button class="btn-nav" onclick="scrollToPricing()">Get Started</button>
                 <button id="themeToggle" onclick="toggleTheme()" style="background: none; border: 2px solid var(--border-color); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; color: var(--text-primary); font-size: 1rem; transition: all 0.3s;" title="Toggle theme">
                     <span id="themeIcon">Light</span>
@@ -549,8 +549,8 @@
     <!-- Mobile Navigation Menu -->
     <div class="mobile-nav" id="mobileNav">
         <a href="index">Home</a>
-        <a href="api">API</a>
-        <a href="contact">Contact</a>
+        <a href="/api">API</a>
+        <a href="/contact">Contact</a>
         <a href="premium#pricing" style="color: var(--primary);">Pricing</a>
         <button onclick="toggleTheme()" style="background: var(--gradient-primary); border: none; border-radius: 8px; padding: 12px 16px; cursor: pointer; color: white; font-weight: 600;">
             <span id="mobileThemeIcon">Toggle Theme</span>
@@ -721,7 +721,7 @@
                         <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> Webhook callbacks for async processing</li>
                         <li style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; color: var(--text-secondary);"><span style="color: var(--accent); font-weight: 700;">✓</span> 99.9% uptime SLA guarantee</li>
                     </ul>
-                    <a href="api" style="display: inline-block; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 30px rgba(102, 126, 234, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">Explore API Documentation</a>
+                    <a href="/api" style="display: inline-block; padding: 1rem 2rem; background: var(--gradient-primary); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 30px rgba(102, 126, 234, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">Explore API Documentation</a>
                 </div>
                 <div class="code-block">
                     <div style="color: #64748b; margin-bottom: 0.5rem;"># Remove object from video</div>
@@ -745,9 +745,9 @@
         <div class="container">
             <p>&copy; 2025 MarkRemoverAI. All rights reserved.</p>
             <p style="margin-top: 0.5rem;">
-                <a href="terms" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Terms</a>
-                <a href="privacy" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Privacy</a>
-                <a href="contact" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Contact</a>
+                <a href="/terms" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Terms</a>
+                <a href="/privacy" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Privacy</a>
+                <a href="/contact" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Contact</a>
             </p>
         </div>
     </footer>
@@ -847,5 +847,16 @@
         // Initialize theme
         loadTheme();
     </script>
+
+<!-- sitewide-nav: every page links to every other page, so none of them are
+     orphans. Google will not re-crawl a URL nothing links to. -->
+<nav aria-label="Site" data-sitewide-nav style="background:#0f172a;padding:2.5rem 1.5rem 1.5rem;border-top:1px solid rgba(148,163,184,.2)">
+  <div style="max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;justify-content:flex-start">
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Tools</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Video object remover</a></li><li style="margin:0 0 .5rem"><a href="/backgroundremover" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Background remover</a></li><li style="margin:0 0 .5rem"><a href="/video-tools" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Video tools</a></li></ul></div>
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Product</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/premium" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Pricing</a></li><li style="margin:0 0 .5rem"><a href="/api" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">API</a></li><li style="margin:0 0 .5rem"><a href="/api-support" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">API support</a></li><li style="margin:0 0 .5rem"><a href="/enterprise" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Enterprise</a></li></ul></div>
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Company</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/contact" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Contact</a></li><li style="margin:0 0 .5rem"><a href="/terms" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Terms</a></li><li style="margin:0 0 .5rem"><a href="/privacy" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Privacy</a></li></ul></div>
+  </div>
+  <p style="max-width:1100px;margin:1rem auto 0;color:#94a3b8;font-size:.85rem">MarkRemoverAI &mdash; remove unwanted objects from video with AI.</p>
+</nav>
 </body>
 </html>

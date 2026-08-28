@@ -488,7 +488,7 @@
                 MarkRemoverAI
             </a>
             <div class="nav-links">
-                <a href="api">API Docs</a>
+                <a href="/api">API Docs</a>
                 <a href="api#pricing">Pricing</a>
                 <a href="index">Main App</a>
                 <a href="login" class="btn-nav">Get Started</a>
@@ -558,7 +558,7 @@
                     </div>
                     <h3>API Documentation</h3>
                     <p>Comprehensive documentation with code examples, endpoint references, and best practices to help you integrate quickly and efficiently.</p>
-                    <a href="api" class="contact-link">
+                    <a href="/api" class="contact-link">
                         View Documentation
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -725,9 +725,9 @@
         <div class="container">
             <p>&copy; 2025 MarkRemoverAI. All rights reserved.</p>
             <p style="margin-top: 0.5rem;">
-                <a href="terms">Terms</a>
-                <a href="privacy">Privacy</a>
-                <a href="api">API Documentation</a>
+                <a href="/terms">Terms</a>
+                <a href="/privacy">Privacy</a>
+                <a href="/api">API Documentation</a>
             </p>
         </div>
     </footer>
@@ -757,5 +757,16 @@
 
         loadTheme();
     </script>
+
+<!-- sitewide-nav: every page links to every other page, so none of them are
+     orphans. Google will not re-crawl a URL nothing links to. -->
+<nav aria-label="Site" data-sitewide-nav style="background:#0f172a;padding:2.5rem 1.5rem 1.5rem;border-top:1px solid rgba(148,163,184,.2)">
+  <div style="max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;justify-content:flex-start">
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Tools</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Video object remover</a></li><li style="margin:0 0 .5rem"><a href="/backgroundremover" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Background remover</a></li><li style="margin:0 0 .5rem"><a href="/video-tools" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Video tools</a></li></ul></div>
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Product</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/premium" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Pricing</a></li><li style="margin:0 0 .5rem"><a href="/api" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">API</a></li><li style="margin:0 0 .5rem"><a href="/api-support" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">API support</a></li><li style="margin:0 0 .5rem"><a href="/enterprise" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Enterprise</a></li></ul></div>
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Company</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/contact" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Contact</a></li><li style="margin:0 0 .5rem"><a href="/terms" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Terms</a></li><li style="margin:0 0 .5rem"><a href="/privacy" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Privacy</a></li></ul></div>
+  </div>
+  <p style="max-width:1100px;margin:1rem auto 0;color:#94a3b8;font-size:.85rem">MarkRemoverAI &mdash; remove unwanted objects from video with AI.</p>
+</nav>
 </body>
 </html>

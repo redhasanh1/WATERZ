@@ -1520,9 +1520,9 @@
                 <ul class="nav-menu" id="navMenu">
                     <li class="mobile-profile-item" style="display: none;"><a href="profile" id="mobileUserName" style="color: var(--primary); font-weight: 700;"></a></li>
                     <li class="mobile-profile-item" style="display: none;"><span id="mobileUserCredits" style="color: var(--text-secondary); font-weight: 600;"></span></li>
-                    <li><a href="backgroundremover">Background Remover</a></li>
+                    <li><a href="/backgroundremover">Background Remover</a></li>
                     <li><a href="premium#pricing">Pricing</a></li>
-                    <li><a href="contact">Contact</a></li>
+                    <li><a href="/contact">Contact</a></li>
                     <li class="mobile-only-menu-item"><button id="mobileThemeToggle" onclick="toggleTheme()" style="background: var(--gradient-primary); border: none; border-radius: 8px; padding: 0.6rem 1.2rem; color: white; font-weight: 600; cursor: pointer; width: 100%;"><span id="mobileThemeIcon">Toggle Theme</span></button></li>
                     <li id="mobileSignInItem" style="display: none;"><a href="login" style="color: var(--primary); font-weight: 600;">Sign In</a></li>
                 </ul>
@@ -2006,10 +2006,10 @@
             MarkRemoverAI - Professional Video Object Removal
         </p>
         <p style="color: var(--text-secondary); font-size: 0.95rem;">
-            <a href="terms" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Terms</a> •
-            <a href="privacy" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Privacy</a> •
-            <a href="premium" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Pricing</a> •
-            <a href="contact" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Contact</a>
+            <a href="/terms" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Terms</a> •
+            <a href="/privacy" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Privacy</a> •
+            <a href="/premium" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Pricing</a> •
+            <a href="/contact" style="color: var(--primary); text-decoration: none; margin: 0 0.75rem;">Contact</a>
         </p>
         <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 1rem;">
             Contact: <a href="mailto:support@markremoverai.com" style="color: var(--primary); text-decoration: none;">support@markremoverai.com</a>
@@ -4790,6 +4790,17 @@ document.querySelectorAll('.faq-question').forEach(btn => {
     });
 });
 </script>
+
+<!-- sitewide-nav: every page links to every other page, so none of them are
+     orphans. Google will not re-crawl a URL nothing links to. -->
+<nav aria-label="Site" data-sitewide-nav style="background:#0f172a;padding:2.5rem 1.5rem 1.5rem;border-top:1px solid rgba(148,163,184,.2)">
+  <div style="max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;justify-content:flex-start">
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Tools</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Video object remover</a></li><li style="margin:0 0 .5rem"><a href="/backgroundremover" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Background remover</a></li><li style="margin:0 0 .5rem"><a href="/video-tools" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Video tools</a></li></ul></div>
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Product</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/premium" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Pricing</a></li><li style="margin:0 0 .5rem"><a href="/api" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">API</a></li><li style="margin:0 0 .5rem"><a href="/api-support" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">API support</a></li><li style="margin:0 0 .5rem"><a href="/enterprise" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Enterprise</a></li></ul></div>
+    <div style="min-width:150px;margin:0 2rem 1.5rem 0"><h2 style="color:#f8fafc;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;margin:0 0 .85rem;font-weight:700">Company</h2><ul style="list-style:none;padding:0;margin:0"><li style="margin:0 0 .5rem"><a href="/contact" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Contact</a></li><li style="margin:0 0 .5rem"><a href="/terms" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Terms</a></li><li style="margin:0 0 .5rem"><a href="/privacy" style="color:#c7d2fe;text-decoration:none;font-size:.95rem">Privacy</a></li></ul></div>
+  </div>
+  <p style="max-width:1100px;margin:1rem auto 0;color:#94a3b8;font-size:.85rem">MarkRemoverAI &mdash; remove unwanted objects from video with AI.</p>
+</nav>
 </body>
 </html>
 
