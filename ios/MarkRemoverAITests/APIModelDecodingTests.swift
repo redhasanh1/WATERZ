@@ -136,4 +136,22 @@ final class APIModelDecodingTests: XCTestCase {
         XCTAssertNil(s.newCredits)
         XCTAssertEqual(s.resultURL, "https://cdn/x.mp4")
     }
+
+    /// The literal bytes /api/sam2/status returned for a real finished render
+    /// on 2026-08-28. If this decodes, the app sees "completed" and collects
+    /// the video instead of spinning until the 20 minute deadline.
+    func testExactLivePayloadFromAFinishedRender() throws {
+        let json = #"{"new_credits":1.0,"result_url":"https://markz.humblewoslayer.workers.dev/results/1787929801_81855dc7-f8ad-4dcc-98c9-5f141e1dfd88_sam2_removed.mp4","status":"completed"}"#
+        let s = try decode(JobStatusResponse.self, json)
+        XCTAssertEqual(s.status, "completed")
+        XCTAssertEqual(s.newCredits, 1.0)
+        XCTAssertNotNil(s.resultURL)
+    }
+
+    /// The same response in the shape that used to ship, so the app stays
+    /// correct even if an old server is redeployed.
+    func testExactLivePayloadInTheOldStringShape() throws {
+        let json = #"{"new_credits":"1.00","result_url":"https://cdn/x.mp4","status":"completed"}"#
+        XCTAssertEqual(try decode(JobStatusResponse.self, json).status, "completed")
+    }
 }
