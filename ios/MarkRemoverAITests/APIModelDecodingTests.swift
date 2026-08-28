@@ -93,4 +93,47 @@ final class APIModelDecodingTests: XCTestCase {
         XCTAssertEqual(upload.remotePath, "p/v.mp4")
         XCTAssertEqual(upload.cdnURL, "https://cdn/v.mp4")
     }
+
+    // MARK: - Job status
+
+    /// The exact payload a finished render returns. `new_credits` is a string
+    /// because it is a Postgres NUMERIC; decoding it as Double used to throw
+    /// and strand finished jobs on the "still running" list.
+    func testCompletedJobWithStringCreditsStillDecodes() throws {
+        let json = #"{"new_credits":"1.00","result_url":"https://cdn/x.mp4","status":"completed"}"#
+        let s = try decode(JobStatusResponse.self, json)
+        XCTAssertEqual(s.status, "completed")
+        XCTAssertEqual(s.resultURL, "https://cdn/x.mp4")
+        XCTAssertEqual(s.newCredits, 1.0)
+    }
+
+    func testCompletedJobWithNumericCreditsStillDecodes() throws {
+        let s = try decode(JobStatusResponse.self,
+                           #"{"new_credits":2.5,"result_url":"https://cdn/x.mp4","status":"completed"}"#)
+        XCTAssertEqual(s.newCredits, 2.5)
+    }
+
+    func testProcessingJobDecodes() throws {
+        let s = try decode(JobStatusResponse.self,
+                           #"{"message":"Waiting in queue...","progress":0,"status":"processing"}"#)
+        XCTAssertEqual(s.status, "processing")
+        XCTAssertEqual(s.progress, 0)
+        XCTAssertNil(s.newCredits)
+    }
+
+    func testFailedJobDecodes() throws {
+        let s = try decode(JobStatusResponse.self, #"{"status":"failed","error":"worker died"}"#)
+        XCTAssertEqual(s.status, "failed")
+        XCTAssertEqual(s.error, "worker died")
+    }
+
+    /// A junk value must not take the whole response down with it - status is
+    /// the field that decides whether a render is finished.
+    func testUnreadableCreditsDoesNotSinkTheResponse() throws {
+        let s = try decode(JobStatusResponse.self,
+                           #"{"new_credits":"not-a-number","status":"completed","result_url":"https://cdn/x.mp4"}"#)
+        XCTAssertEqual(s.status, "completed")
+        XCTAssertNil(s.newCredits)
+        XCTAssertEqual(s.resultURL, "https://cdn/x.mp4")
+    }
 }

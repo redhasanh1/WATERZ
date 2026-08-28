@@ -167,5 +167,32 @@ struct JobStatusResponse: Codable {
         case resultURL = "result_url"
         case newCredits = "new_credits"
     }
+
+    /// Decoded by hand because `new_credits` arrives as a JSON *string*: it
+    /// comes from a Postgres NUMERIC, reaches Flask as a Decimal, and jsonify
+    /// renders Decimal as "1.00" rather than 1.0.
+    ///
+    /// Letting that throw was catastrophic rather than cosmetic. The field is
+    /// only present on the response that reports completion - it is the credit
+    /// deduction - so the whole payload failed to decode at exactly the moment
+    /// a job finished, and never before. Callers use `try?`, so the failure
+    /// surfaced as a nil status, which reads as "still running" and left
+    /// finished renders spinning forever.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        status = try c.decode(String.self, forKey: .status)
+        progress = try? c.decodeIfPresent(Int.self, forKey: .progress)
+        message = try? c.decodeIfPresent(String.self, forKey: .message)
+        resultURL = try? c.decodeIfPresent(String.self, forKey: .resultURL)
+        error = try? c.decodeIfPresent(String.self, forKey: .error)
+
+        if let number = try? c.decodeIfPresent(Double.self, forKey: .newCredits) {
+            newCredits = number
+        } else if let text = try? c.decodeIfPresent(String.self, forKey: .newCredits) {
+            newCredits = Double(text)
+        } else {
+            newCredits = nil
+        }
+    }
 }
 
