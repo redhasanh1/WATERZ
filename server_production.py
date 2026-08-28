@@ -767,7 +767,12 @@ def deduct_credit_on_completion(task_id):
                 )
                 deduct_result = cur.fetchone()
                 if deduct_result:
-                    new_balance = deduct_result[0]
+                    # float(), not the raw Decimal. jsonify renders Decimal as
+                    # a JSON *string* ("1.00"), and clients that type this as a
+                    # number fail to decode the whole response - which happens
+                    # only on the reply that reports completion, so a finished
+                    # job looks like it is still running.
+                    new_balance = float(deduct_result[0])
                     print(f"[CREDITS] Deducted {credits_to_deduct} credit(s) for user {user_id} on task {task_id}. New balance: {new_balance}")
                     return new_balance
                 else:
@@ -780,7 +785,7 @@ def deduct_credit_on_completion(task_id):
                 cur = conn.cursor()
                 cur.execute('SELECT credits FROM users WHERE id = %s', (user_id,))
                 result = cur.fetchone()
-                return result[0] if result else None
+                return float(result[0]) if result else None
 
     except Exception as e:
         print(f"[CREDITS] Error during deduction: {e}")
