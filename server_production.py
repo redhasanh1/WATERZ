@@ -8308,6 +8308,17 @@ def premium_page():
     return send_file(os.path.join(app.static_folder, 'premium.html'))
 
 
+# The API, API support and enterprise pages advertised a programmatic
+# offering that does not exist - no key issuance, no endpoints, no docs.
+# They were near-duplicates of each other and of /contact, so they now fold
+# into the contact page rather than standing alone as thin landing pages.
+@app.route('/api')
+@app.route('/api-support')
+@app.route('/enterprise')
+def business_enquiries_redirect():
+    return redirect('/contact', code=301)
+
+
 @app.route('/<path:filename>')
 def serve_static_files(filename):
     """Serve HTML and other static files from web folder"""
