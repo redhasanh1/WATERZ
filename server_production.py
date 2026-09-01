@@ -1142,13 +1142,18 @@ def auth_google_callback():
                 if user:
                     # Link Google account to existing email user
                     user_id, credits = user
-                    cur.execute('UPDATE users SET google_id = %s, name = %s WHERE id = %s', (google_id, name, user_id))
+                    # COALESCE-style guard: a later sign-in that carries no name
+                    # must not blank out the one already stored.
+                    cur.execute(
+                        'UPDATE users SET google_id = %s, name = COALESCE(NULLIF(%s, %s), name) WHERE id = %s',
+                        (google_id, _display_name(name, email) if name else '', '', user_id)
+                    )
                     print(f"[AUTH] Linked Google account to existing user: {email}")
                 else:
                     # New user - give 2 free credits
                     cur.execute(
                         'INSERT INTO users (google_id, email, name, credits) VALUES (%s, %s, %s, %s) RETURNING id',
-                        (google_id, email, name, 2)
+                        (google_id, email, _display_name(name, email), 2)
                     )
                     user_id = cur.fetchone()[0]
                     credits = 2
@@ -9166,6 +9171,35 @@ def _mint_native_auth_code(user_id):
         return None
 
 
+def _display_name(raw_name, email):
+    """A person's name, or a clean fallback - never an email hash.
+
+    Apple sends the name only on the very first authorization, and with Hide My
+    Email the address is a random string like k2j9x8mn4p@privaterelay.appleid.com.
+    Falling back to the part before the @ therefore printed that random string as
+    the user's name, which is what appeared on the profile screen.
+    """
+    name = " ".join((raw_name or "").split())
+    if name:
+        # First and last only. Apple can hand back a long chain of given,
+        # middle and family names, and the profile screen has one line.
+        parts = name.split()
+        return parts[0] if len(parts) == 1 else f"{parts[0]} {parts[-1]}"
+
+    local = (email or "").split("@")[0]
+    domain = (email or "").split("@")[-1].lower()
+    # A relay local-part carries no information about the person.
+    if not local or "privaterelay.appleid.com" in domain or not any(c.isalpha() for c in local):
+        return "There"
+    # someone.name / someone_name / someone.name123 -> Someone Name
+    cleaned = local.replace(".", " ").replace("_", " ").replace("-", " ")
+    words = [w for w in cleaned.split() if any(c.isalpha() for c in w)]
+    if not words:
+        return "There"
+    words = [w.capitalize() for w in words][:2]
+    return " ".join(words)
+
+
 def _session_for_user(cur, user_id):
     """Loads a user and installs them into the Flask session."""
     # Covers the Google and Apple sign-in paths, which return the user object
@@ -9307,7 +9341,7 @@ def auth_apple():
                     cur.execute(
                         '''INSERT INTO users (apple_id, email, name, credits, email_verified)
                            VALUES (%s, %s, %s, %s, TRUE) RETURNING id''',
-                        (apple_id, email, name or email.split('@')[0], 2)
+                        (apple_id, email, _display_name(name, email), 2)
                     )
                     user_id = cur.fetchone()[0]
                     print(f"[APPLE-SIGNIN] New user {email} (2 free credits)")
