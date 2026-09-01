@@ -34,7 +34,7 @@ struct ProfileView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(appState.user?.name ?? "Signed in")
                                 .font(.headline)
-                            Text(appState.user?.email ?? "")
+                            Text(Self.displayEmail(appState.user?.email))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -207,6 +207,20 @@ struct ProfileView: View {
             }
             .task { await appState.refreshUser() }
         }
+    }
+
+
+    /// What to print under someone's name.
+    ///
+    /// Sign in with Apple's Hide My Email hands back an address like
+    /// 2kgpsd59vw@privaterelay.appleid.com. That is the feature working, not a
+    /// fault, but printing the random half of it under a person's name reads
+    /// like the app got something wrong. Say what it actually is instead.
+    static func displayEmail(_ email: String?) -> String {
+        guard let email, !email.isEmpty else { return "" }
+        return email.lowercased().hasSuffix("@privaterelay.appleid.com")
+            ? "Hidden by Apple"
+            : email
     }
 
     private var initials: String {

@@ -154,4 +154,23 @@ final class APIModelDecodingTests: XCTestCase {
         let json = #"{"new_credits":"1.00","result_url":"https://cdn/x.mp4","status":"completed"}"#
         XCTAssertEqual(try decode(JobStatusResponse.self, json).status, "completed")
     }
+
+    // MARK: - Apple private relay
+
+    /// Hide My Email gives an address whose local part is random. Printing it
+    /// under someone's name looks like a bug in the app.
+    func testPrivateRelayAddressIsNotShownRaw() {
+        XCTAssertEqual(ProfileView.displayEmail("2kgpsd59vw@privaterelay.appleid.com"), "Hidden by Apple")
+        XCTAssertEqual(ProfileView.displayEmail("K2JPSD59VW@PrivateRelay.AppleID.com"), "Hidden by Apple")
+    }
+
+    func testOrdinaryAddressIsShownAsIs() {
+        XCTAssertEqual(ProfileView.displayEmail("hasan@markremoverai.com"), "hasan@markremoverai.com")
+        XCTAssertEqual(ProfileView.displayEmail("chw2017@gmail.com"), "chw2017@gmail.com")
+    }
+
+    func testMissingAddressRendersEmpty() {
+        XCTAssertEqual(ProfileView.displayEmail(nil), "")
+        XCTAssertEqual(ProfileView.displayEmail(""), "")
+    }
 }
