@@ -8341,6 +8341,16 @@ def serve_static_files(filename):
     if os.path.exists(html_path):
         return send_file(html_path)
 
+    # Source and working files sit in the same folder as the pages, so the
+    # fallback below was serving them to anyone who asked - and to crawlers.
+    # Only the few text files that have to be public are allowed through.
+    public_text_files = {'robots.txt', 'ads.txt', 'sitemap.xml'}
+    base = os.path.basename(filename).lower()
+    is_indexnow_key = re.fullmatch(r'[0-9a-f]{32}\.txt', base) is not None
+    if (base.endswith(('.py', '.md', '.txt', '.yml', '.yaml', '.log', '.sh', '.bat'))
+            and base not in public_text_files and not is_indexnow_key):
+        return ('Not Found', 404)
+
     # Otherwise serve as static file (fallback)
     return send_from_directory(app.static_folder, filename)
 
