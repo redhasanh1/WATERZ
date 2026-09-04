@@ -8346,7 +8346,8 @@ def serve_static_files(filename):
     # Only the few text files that have to be public are allowed through.
     public_text_files = {'robots.txt', 'ads.txt', 'sitemap.xml'}
     base = os.path.basename(filename).lower()
-    is_indexnow_key = re.fullmatch(r'[0-9a-f]{32}\.txt', base) is not None
+    key_stem = base[:-4] if base.endswith('.txt') else ''
+    is_indexnow_key = len(key_stem) == 32 and all(c in '0123456789abcdef' for c in key_stem)
     if (base.endswith(('.py', '.md', '.txt', '.yml', '.yaml', '.log', '.sh', '.bat'))
             and base not in public_text_files and not is_indexnow_key):
         return ('Not Found', 404)
