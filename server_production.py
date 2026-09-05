@@ -8501,8 +8501,9 @@ def sam2_select_object():
         print(f"[SAM2] Request data: points={len(points)}, video={video_width}x{video_height}")
         redis_client.lpush('sam2:selection:request', json.dumps(request_data))
 
-        # Wait for response (timeout: 5 seconds)
-        timeout = 5.0
+        # Wait for response. A worker that has just come up needs longer than a
+        # warm one, and returning early here is what makes a click look ignored.
+        timeout = 20.0
         start_time = time.time()
 
         print(f"[SAM2] Waiting for response on: {response_channel}")
@@ -8527,8 +8528,8 @@ def sam2_select_object():
         pubsub.unsubscribe()
         pubsub.close()
         return jsonify({
-            'status': 'error',
-            'message': 'Local worker timeout - is SAM2 worker running?'
+            'status': 'busy',
+            'message': 'The GPU is still starting up. Wait a few seconds and tap again.'
         }), 504
 
     except Exception as e:
